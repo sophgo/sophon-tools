@@ -16,7 +16,7 @@ static void __setFontRecursively(T *inObject, qint64 fontSize=15)
     QString fontSizeStr = env.value("SOPHON_QT_FONT_SIZE");
     fontSize = fontSizeStr.toInt() > 0?fontSizeStr.toInt():fontSize;
     QFont font = inObject->font();
-    font.setPointSize(fontSize);
+    font.setPixelSize(fontSize);
     inObject->setFont(font);
     QObject *object = inObject;
     QList<T *> childObjects = object->findChildren<T *>();
@@ -51,8 +51,8 @@ int main(int argc, char *argv[])
         }else
             qDebug() << "qm file load error";
     }
-    QString fontSizeStr = env.value("SOPHON_QT_CMD_DEBUG");
-    if(fontSizeStr == "1")
+    QString env_info_limit = env.value("SOPHON_QT_CMD_DEBUG");
+    if(env_info_limit == "1")
         infoLimit = QtDebugMsg;
     qSetMessagePattern("%{type}: %{message}");
     qInstallMessageHandler([](QtMsgType type, const QMessageLogContext &, const QString &msg) {
@@ -64,18 +64,25 @@ int main(int argc, char *argv[])
     MainWindow w;
     QString device_name = MainWindow::executeLinuxCmd("awk -F': ' '/model name/{print $2; exit}' /proc/cpuinfo").trimmed();
     qDebug() << device_name;
+    w.fontId = fontId;
+    w.app = &a;
     if (device_name == "bm1688" || device_name == "cv186ah"){
         QScreen *primaryScreen = QGuiApplication::primaryScreen();
         int screenWidth = primaryScreen->size().width();; // 屏幕分辨率
-        int screenHeight= primaryScreen->size().height(); // 屏幕分辨率宽度
+        int screenHeight= primaryScreen->size().height(); // 屏幕分辨率高度
         qDebug() << "Display size" << screenWidth << screenHeight;
+        //change font size according to current dpi
+        qreal dpi = primaryScreen->logicalDotsPerInch();
+        QString fontSizeStr = env.value("SOPHON_QT_FONT_SIZE");
+        qint64 fontSize = fontSizeStr.toInt() > 0 ? fontSizeStr.toInt() : 15;
+        fontSize = fontSize * screenHeight / 1080;
+        qputenv("SOPHON_QT_FONT_SIZE", QString::number(fontSize).toUtf8());
+        //resize before show window
         w.resize(screenWidth, screenHeight);
     }else{
         w.setFixedSize(1920, 1080);
     }
-    w.fontId = fontId;
-    w.app = &a;
-    w.show();
     __setFontRecursively<QWidget>(&w);
+    w.show();
     return a.exec();
 }

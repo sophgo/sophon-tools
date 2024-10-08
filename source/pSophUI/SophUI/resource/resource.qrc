@@ -3,5 +3,6 @@
         <file>bg.png</file>
         <file>en_US.ts</file>
         <file>en_US.qm</file>
+        <file>WhiteOnBlack.colorscheme</file>
     </qresource>
 </RCC>

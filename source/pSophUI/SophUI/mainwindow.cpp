@@ -478,6 +478,7 @@ void MainWindow::on_show_net_button_clicked()
     console->sendText("clear\n");
     console->sendText(QString("echo 'login user: " + login_user + 
                     "'; login " + login_user + "; exit 0;\n"));
+    console->setColorScheme(":/new/prefix1/WhiteOnBlack.colorscheme");
     if (fontId != -1) {
         QStringList fontFamilies = QFontDatabase::applicationFontFamilies(fontId);
         if (!fontFamilies.empty()) {
@@ -485,11 +486,12 @@ void MainWindow::on_show_net_button_clicked()
             int fontSize = 15;
             QString fontSizeStr = env.value("SOPHON_QT_FONT_SIZE");
             fontSize = fontSizeStr.toInt() > 0?fontSizeStr.toInt():fontSize;
-            font.setPointSize(fontSize);
+            font.setPixelSize(fontSize);
             closeButton->setFont(font);
             console->setTerminalFont(font);
         }
     }
+
     QScrollArea *scrollArea = new QScrollArea(&dialog);
     QVBoxLayout *boxLayout = new QVBoxLayout(&dialog);
     scrollArea->setWidget(console);

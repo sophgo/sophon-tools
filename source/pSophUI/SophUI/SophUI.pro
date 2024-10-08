@@ -38,7 +38,8 @@ else: unix:!android: target.path = /opt/$${TARGET}/bin
 
 DISTFILES += \
     font.file \
-    resource/bg.png
+    resource/bg.png \
+    resource/WhiteOnBlack.colorscheme
 
 RESOURCES += \
     font.qrc \
