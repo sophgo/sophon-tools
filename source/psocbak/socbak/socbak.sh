@@ -105,6 +105,7 @@ echo "INFO: The current path is \"/socrepack\"" | tee -a $SOCBAK_LOG_PATH
 FILESYSTEM=$(df -T . | tail -n 1 | awk '{print $2}')
 if [[ "${FILESYSTEM}" != "ext4" ]]; then
 	echo "WARNING: The current directory's file system ${FILESYSTEM} is not ext4, there may be some issues." | tee -a $SOCBAK_LOG_PATH
+	echo "You can format the external storage to ext4 format according to the content at https://developer.sophgo.com/thread/758.html."
 fi
 
 echo "INFO: get chip id ..." | tee -a $SOCBAK_LOG_PATH
