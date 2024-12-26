@@ -54,7 +54,7 @@ function memtest_s() {
 			if [[ "$loop" == "0" ]]; then
 				break
 			fi
-			freeMemMB=$(free -m | grep ^Mem | awk '{print $NF - 100}')
+			freeMemMB=$(free -m | grep ^Mem | awk '{print $NF - 200}')
 			./memtester ${freeMemMB}M 1
 			if [[ "$?" != "0" ]]; then
 				panic "memtester error"
@@ -111,6 +111,7 @@ function memtest_s() {
 	MEMTEST_GDMA_LOG="$work_dir/logs/gdma.log"
 	MEMTEST_A53_LOG="$work_dir/logs/memtester.log"
 	MEMTEST_ERROR_LOG="$work_dir/logs/error.log"
+	MEMTEST_DMESG_LOG="$work_dir/logs/dmesg.log"
 
 	file_validate /proc/cpuinfo
 	# CPU NAME
@@ -133,9 +134,12 @@ function memtest_s() {
 	sleep 30
 	memtester_fun "$inloop" &>$MEMTEST_A53_LOG
 	wall "[MEMTEST INFO] test loop $inloop end!!!, please check log file at $work_dir/logs/"
+	dmesg >$MEMTEST_DMESG_LOG
+	sleep 3
+	dmesg -T >>$MEMTEST_DMESG_LOG
 }
 
-echo "MEMTEST VERSION: V1.2.1"
+echo "MEMTEST VERSION: V1.2.2"
 
 # prepare memtest_gdma
 dir_path="$(dirname "$(readlink -f "$0")")"
