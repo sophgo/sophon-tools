@@ -228,41 +228,160 @@ function jsonq() {
     }'
 }
 
+function logs_path_mode() {
+    # 日志目录最大占用空间
+    DIR_SIZE_MAX_KB=$((10 * 1024))
+    # 单个未压缩的日志文件最大占用空间
+    LOG_FILE_SIZE_MAX_B=$((1 * 1024 * 1024))
+    # 日志目录
+    GET_INFO_LOGS_DIR="${1}"
+    # 临时存储目录
+    TEMP_FILE=/dev/shm/get_info_log.tmp
+    # 日志记录命令
+    LOG_CMD="${2}"
+    # 每次记录间隔时间
+    SLEEP_TIME=${3}
+
+    rm -f ${TEMP_FILE}
+    if [ ! -d $GET_INFO_LOGS_DIR ]; then
+        mkdir -p $GET_INFO_LOGS_DIR
+    fi
+
+    # 获取最后一个文件
+    function get_last_file()
+    {
+        last_num=$(ls *_get_info.lo* 2>/dev/null | cut -d'_' -f1 | sort -n | tail -n1)
+        ls ${last_num}_*_get_info.lo* 2>/dev/null
+    }
+
+    # 获取合适的日志文件路径
+    function get_log_file()
+    {
+        name_date=$(date +%m-%d-%H-%M-%S)
+        last_file=$(get_last_file)
+        if [[ "${last_file}" != "" ]]; then
+            last_id=$(echo $last_file | cut -d'_' -f1)
+        else
+            last_id=0
+            touch ${last_id}_${name_date}_get_info.log &>/dev/null
+            sync
+            last_file="${last_id}_${name_date}_get_info.log"
+        fi
+        if [[ "$last_file" == *".gz" ]]; then
+            # 最后一个日志已经被压缩，新建新的日志文件
+            last_id=$(( ${last_id} + 1 ))
+            touch ${last_id}_${name_date}_get_info.log &>/dev/null
+            sync
+            last_file="${last_id}_${name_date}_get_info.log"
+        else
+            file_size_b=$(stat -c %s ${last_file})
+            if [ ${file_size_b} -gt ${LOG_FILE_SIZE_MAX_B} ]; then
+                # 当前文件大于1M，进行压缩
+                gzip -9 -c ${last_file} > ${last_file}.gz
+                sync
+                rm -f ${last_file} &>/dev/null
+                sync
+                last_id=$(( ${last_id} + 1 ))
+                touch ${last_id}_${name_date}_get_info.log &>/dev/null
+                sync
+                last_file="${last_id}_${name_date}_get_info.log"
+            fi
+        fi
+        echo "${last_file}"
+    }
+
+    # 获取最早的一个文件
+    function get_first_file()
+    {
+        first_num=$(ls *_get_info.lo* 2>/dev/null | cut -d'_' -f1 | sort -n | head -n1)
+        ls ${first_num}_*_get_info.lo* 2>/dev/null
+    }
+
+    # 删除最早的一个文件
+    function rm_first_file()
+    {
+        first_file=$(get_first_file)
+        if [ -f $first_file ]; then
+            rm -f $first_file
+            sync
+            echo "INFO: rm first file [$first_file]"
+        else
+            echo "ERROR: first file [$first_file]"
+        fi
+    }
+
+    pushd $GET_INFO_LOGS_DIR
+    while true; do
+        sleep ${SLEEP_TIME}
+        while true; do
+            # 判断当前目录是否已经大于最大大小，大于的话删除最早的一个文件
+            DIR_SIZE_KB=$(du . -s | awk -F' ' '{print $1}')
+            if [ "$DIR_SIZE_KB" == "" ]; then
+                echo "ERROR: DIR_SIZE_KB: [${DIR_SIZE_KB}]KB"
+            fi
+            if [ ${DIR_SIZE_KB} -gt ${DIR_SIZE_MAX_KB} ]; then
+                echo "INFO: DRI SIZE: [${DIR_SIZE_KB}] > MAX SIZE: [${DIR_SIZE_MAX_KB}]"
+                rm_first_file
+            else
+                break
+            fi
+            sleep 0.5
+        done
+        LOG_FILE_PATH=$(get_log_file)
+        echo "INFO: write info to file [${LOG_FILE_PATH}] at $(date +%m-%d-%H-%M-%S)"
+        eval $LOG_CMD > ${TEMP_FILE}
+        cat ${TEMP_FILE} >> ${LOG_FILE_PATH}
+        sync
+    done
+    popd #GET_INFO_LOGS_DIR
+}
+
 file_validate /proc/cpuinfo
 file_validate /proc/stat
 
 if [[ "$1" == "server" ]] && [[ ! "$2" == "" ]] && [[ ! "$3" == "" ]]; then
-        if [[ "$(cmd_validate systemd-run)" == "0" ]] || [[ "$(cmd_validate systemctl)" == "0" ]]; then
-            echo "cannot find systemd at systemd, cannot run as server mode!!!";
+    if [[ "$(cmd_validate systemd-run)" == "0" ]] || [[ "$(cmd_validate systemctl)" == "0" ]]; then
+        echo "cannot find systemd at systemd, cannot run as server mode!!!";
+        exit -1
+    fi
+    log_file="$(readlink -f "$2")"
+    loop_wait_time="$3"
+    get_info_pwd="$(readlink -f "$0")"
+    echo "log write to file:${log_file}"
+    echo "wait time in loop(s):${loop_wait_time}"
+    echo "get_info pwd:${get_info_pwd}"
+    if [[ "$4" == "y" ]]; then
+            systemctl stop sophon-get-info-server.service
+            systemctl reset-failed sophon-get-info-server.service
+            systemd-run --unit=sophon-get-info-server /usr/bin/bash -c "export GET_INFO_PMBUS_ENABLE=${GET_INFO_PMBUS_ENABLE}; source /etc/profile; ldconfig; while true; do sleep ${loop_wait_time}; bash ${get_info_pwd} 2>/dev/null 1>> ${log_file}; done;"
+            sleep 3
+            systemctl status sophon-get-info-server.service --no-page -l
+            exit 0
+    fi
+    read -p "Do you acknowledge the information above? (y/n) " -n 1 -r
+    echo ""
+    if [[ $REPLY =~ ^[Yy]$ ]]
+    then
+            systemctl stop sophon-get-info-server.service
+            systemctl reset-failed sophon-get-info-server.service
+            systemd-run --unit=sophon-get-info-server /usr/bin/bash -c "export GET_INFO_PMBUS_ENABLE=${GET_INFO_PMBUS_ENABLE}; source /etc/profile; ldconfig; while true; do sleep ${loop_wait_time}; bash ${get_info_pwd} 2>/dev/null 1>> ${log_file}; done;"
+            sleep 3
+            systemctl status sophon-get-info-server.service --no-page -l
+            exit 0
+    else
             exit -1
-        fi
-        log_file="$(readlink -f "$2")"
-        loop_wait_time="$3"
-        get_info_pwd="$(readlink -f "$0")"
-        echo "log write to file:${log_file}"
-        echo "wait time in loop(s):${loop_wait_time}"
-        echo "get_info pwd:${get_info_pwd}"
-        if [[ "$4" == "y" ]]; then
-                systemctl stop sophon-get-info-server.service
-                systemctl reset-failed sophon-get-info-server.service
-                systemd-run --unit=sophon-get-info-server /usr/bin/bash -c "export GET_INFO_PMBUS_ENABLE=${GET_INFO_PMBUS_ENABLE}; source /etc/profile; ldconfig; while true; do sleep ${loop_wait_time}; bash ${get_info_pwd} 2>/dev/null 1>> ${log_file}; done;"
-                sleep 3
-                systemctl status sophon-get-info-server.service --no-page -l
-                exit 0
-        fi
-        read -p "Do you acknowledge the information above? (y/n) " -n 1 -r
-        echo ""
-        if [[ $REPLY =~ ^[Yy]$ ]]
-        then
-                systemctl stop sophon-get-info-server.service
-                systemctl reset-failed sophon-get-info-server.service
-                systemd-run --unit=sophon-get-info-server /usr/bin/bash -c "export GET_INFO_PMBUS_ENABLE=${GET_INFO_PMBUS_ENABLE}; source /etc/profile; ldconfig; while true; do sleep ${loop_wait_time}; bash ${get_info_pwd} 2>/dev/null 1>> ${log_file}; done;"
-                sleep 3
-                systemctl status sophon-get-info-server.service --no-page -l
-                exit 0
-        else
-                exit -1
-        fi
+    fi
+elif [[ "$1" == "server_logs_path" ]] && [[ ! "$2" == "" ]] && [[ ! "$3" == "" ]]; then
+    logs_path="$(readlink -f "$2")"
+    loop_wait_time="$3"
+    get_info_pwd="/usr/bin/bash $(readlink -f "$0")"
+    systemctl stop sophon-get-info-server-logs-path.service
+    systemctl reset-failed sophon-get-info-server-logs-path.service
+    fun_str=$(declare -f logs_path_mode | gzip -c - | base64)
+    systemd-run --unit=sophon-get-info-server-logs-path /usr/bin/bash -c "export GET_INFO_PMBUS_ENABLE=${GET_INFO_PMBUS_ENABLE}; source /etc/profile; ldconfig; source /dev/stdin <<< \$(echo \"$fun_str\" | base64 -d | gzip -d -c -);logs_path_mode \"${logs_path}\" \"${get_info_pwd}\" ${loop_wait_time};"
+    sleep 3
+    systemctl status sophon-get-info-server-logs-path.service --no-page -l
+    exit 0
 fi
 
 # BOOT_TIME(S)
@@ -799,5 +918,3 @@ else
     echo "CPUS_USAGE(%)|${CPUS_USAGE}|"
     echo "SYSTEM_MEM_USAGE(%)|${SYSTEM_MEM_USAGE}|"
 fi
-
-
