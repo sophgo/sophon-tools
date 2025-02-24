@@ -55,6 +55,14 @@ sudo get_info.sh server_logs_path <log path> <loop time>
 
 自动启动一个后台服务，每隔\<loop time\>时间获取一次信息到目录\<log path\>下，每个日志文件超过1M时会自动压缩，整个目录大小超过10M时自动删除旧的记录。这个方案适用于长期记录数据，\<loop time\>推荐给150s，这样10M的空间可以记录4-6个月左右的数据。
 
+可以使用如下命令对多个gz日志文件进行拼接
+
+``` bash
+
+ls *get_info.log.gz | sort -n | xargs -I{} zcat {} 1>>/data/get_info.log
+
+```
+
 #### 特殊环境变量说明
 
 1. get_info默认不会使用pmbus工具记录PMIC相关信息，如果需要，请确保除了get_info之外没有其他任何程序在操作PMIC，然后配置环境变量`GET_INFO_PMBUS_ENABLE=1`后运行get_info即可
