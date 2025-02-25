@@ -117,6 +117,9 @@ function memtest_s() {
 	MEMTEST_ERROR_LOG="$work_dir/logs/error.log"
 	MEMTEST_DMESG_LOG="$work_dir/logs/dmesg.log"
 
+	touch "$MEMTEST_DMESG_LOG"
+	touch "$MEMTEST_A53_LOG"
+
 	file_validate /proc/cpuinfo
 	# CPU NAME
 	CPU_MODEL=$(awk -F': ' '/model name/{print $2; exit}' /proc/cpuinfo)
