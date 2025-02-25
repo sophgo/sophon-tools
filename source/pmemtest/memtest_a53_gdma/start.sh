@@ -70,9 +70,14 @@ function memtest_s() {
 
 	# GDMA进程
 	function gdma_fun() {
+		LOOP_NUM=${1}
+		DEV_ID=0
+		if [[ "${LOOP_NUM}" == "" ]]; then
+			LOOP_NUM=-1
+		fi
 		echo "[MEMTEST INFO] work_dir:$work_dir"
 		pushd "$work_dir/memtest_gdma"
-		t_num=0
+		t_num=4
 		if [[ "${CPU_MODEL}" == "bm1684x" ]] || [[ "${CPU_MODEL}" == "bm1684" ]]; then
 			TPU_MEM_USAGE=$(get_ion_usage "/sys/kernel/debug/ion/bm_npu_heap_dump")
 			VPU_MEM_USAGE=$(get_ion_usage "/sys/kernel/debug/ion/bm_vpu_heap_dump")
@@ -83,24 +88,23 @@ function memtest_s() {
 			VPP_MEM_USAGE=$(get_ion_usage "/sys/kernel/debug/ion/cvi_vpp_heap_dump")
 			VPU_MEM_USAGE="0"
 			t_num=4
+		elif [[ "${WORK_MODE}" == "PCIE" ]]; then
+			t_num=8
+			DEV_ID=${TEST_DEV_ID}
 		fi
-		if [[ "$TPU_MEM_USAGE" != "0" ]] ||
-			[[ "$VPU_MEM_USAGE" != "0" ]] ||
-			[[ "$VPP_MEM_USAGE" != "0" ]]; then
-			panic "device mem usage not 0"
+		if [[ "${WORK_MODE}" == "SOC" ]]; then
+			if [[ "$TPU_MEM_USAGE" != "0" ]] ||
+				[[ "$VPU_MEM_USAGE" != "0" ]] ||
+				[[ "$VPP_MEM_USAGE" != "0" ]]; then
+				panic "device mem usage not 0"
+			fi
 		fi
 		rm -f ./*.txt
 		chmod +x memtest_gdma
-		while true; do
-			./memtest_gdma 0 "[1,16,1024,1024]" -1 ${t_num}
-			if [[ "$?" != "0" ]]; then
-				panic "memtest_gdma error"
-			fi
-			if [ -f /dev/shm/memtest_stop ]; then
-				break
-			fi
-			sleep 0.2
-		done
+		./memtest_gdma ${DEV_ID} "[1,16,1024,1024]" ${LOOP_NUM} ${t_num}
+		if [[ "$?" != "0" ]]; then
+			panic "memtest_gdma error"
+		fi
 		popd
 	}
 
@@ -118,6 +122,12 @@ function memtest_s() {
 	CPU_MODEL=$(awk -F': ' '/model name/{print $2; exit}' /proc/cpuinfo)
 	# WORK MODE
 	SOC_MODE_CPU_MODEL=("bm1684x" "bm1684" "bm1688" "cv186ah")
+	# TEST CORE ID (only for PCIE MODE)
+	if [[ "${PCIE_DEV_ID}" != "" ]]; then
+		TEST_DEV_ID=${PCIE_DEV_ID}
+	else
+		TEST_DEV_ID=0
+	fi
 	WORK_MODE="PCIE"
 	for element in "${SOC_MODE_CPU_MODEL[@]}"; do
 		if [ "$element" == "$CPU_MODEL" ]; then
@@ -126,20 +136,26 @@ function memtest_s() {
 		fi
 	done
 	if [[ "${WORK_MODE}" == "PCIE" ]]; then
-		panic "Get cpu name: $CPU_MODEL, cannot support this soc or PCIe EP mode"
+		echo "[MEMTEST INFO] Get cpu name: $CPU_MODEL, PCIe EP mode"
+		gdma_fun "$inloop" &>$MEMTEST_GDMA_LOG
+		# not run memtester
+		wall "[MEMTEST INFO] test loop $inloop end!!!, please check log file at $work_dir/logs/"
+		dmesg >$MEMTEST_DMESG_LOG
+		sleep 3
+		dmesg -T >>$MEMTEST_DMESG_LOG
+	else
+		gdma_fun &>$MEMTEST_GDMA_LOG &
+		# wait gdma test malloc success
+		sleep 30
+		memtester_fun "$inloop" &>$MEMTEST_A53_LOG
+		wall "[MEMTEST INFO] test loop $inloop end!!!, please check log file at $work_dir/logs/"
+		dmesg >$MEMTEST_DMESG_LOG
+		sleep 3
+		dmesg -T >>$MEMTEST_DMESG_LOG
 	fi
-
-	gdma_fun &>$MEMTEST_GDMA_LOG &
-	# wait gdma test malloc success
-	sleep 30
-	memtester_fun "$inloop" &>$MEMTEST_A53_LOG
-	wall "[MEMTEST INFO] test loop $inloop end!!!, please check log file at $work_dir/logs/"
-	dmesg >$MEMTEST_DMESG_LOG
-	sleep 3
-	dmesg -T >>$MEMTEST_DMESG_LOG
 }
 
-echo "MEMTEST VERSION: V1.2.2"
+echo "MEMTEST VERSION: V1.3.1"
 
 # prepare memtest_gdma
 dir_path="$(dirname "$(readlink -f "$0")")"
@@ -159,8 +175,9 @@ sudo systemctl reset-failed memtest_s.service 2>/dev/null
 sudo rm -f /run/systemd/transient/memtest_s.service 2>/dev/null
 sudo systemctl daemon-reload
 
-sudo systemd-run --unit=memtest_s /usr/bin/bash -c \
-	"source /dev/stdin <<< \$(echo \"$fun_str\" | base64 -d | gzip -d -c -); memtest_s $dir_path $inloop;"
+sudo systemd-run --unit=memtest_s bash -c \
+	"source /dev/stdin <<< \$(echo \"$fun_str\" | base64 -d | gzip -d -c -); export \
+PCIE_DEV_ID=${PCIE_DEV_ID}; memtest_s $dir_path $inloop;"
 sleep 3
 sudo systemctl status memtest_s.service --no-page -l
 if [[ "$(systemctl is-active memtest_s.service)" != "active" ]]; then

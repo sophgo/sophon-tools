@@ -1,4 +1,4 @@
-# SoC模式设备DDR压测工具
+# SoC/PCIe模式设备DDR压测工具
 
 ## 简介
 
@@ -28,6 +28,7 @@
 2. 执行 `start.sh` 脚本，参考命令如下:
     1. `bash start.sh` 启动测试，运行1轮
     2. `bash start.sh 33` 启动测试，运行33轮
+    3. `PCIE_DEV_ID=3 bash start.sh 30` 针对PCIe模式启动测试，测试设备3，运行30轮
 3. 上一个命令执行生效的参考输出如下:
    ``` bash
    linaro@sophon:/data/memtest_a53_gdma$ bash start.sh 
