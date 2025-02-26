@@ -40,6 +40,6 @@ c991471df456d415089594865fda32aa  ./binTools/tune2fs
 5916531887308f0051e80adb9532ee88  ./binTools/unpigz
 c39ef67c8d241527e6eb0c87fc32d0cd  ./binTools/uuidd
 d509238c11723c82c6c060b0ff4a918c  ./binTools/uuidgen
-235968706240acc6e81423e8571416c8  ./script/bm1684/bm_make_package.sh
-3cda77d39ae2f66c8453870004a2fecd  ./script/bm1688/bm_make_package.sh
-9850dec11648169d0990e1428f5260b9  ./socbak.sh
+3db731c13f1d0cae7e129ffff7fe409f  ./script/bm1684/bm_make_package.sh
+189b6882ab9daa5f62f0a83a51b07d17  ./script/bm1688/bm_make_package.sh
+7864745c1a0c7e0b72e2a6c68e7e78f9  ./script/bm1688/raw2cimg_edge.py

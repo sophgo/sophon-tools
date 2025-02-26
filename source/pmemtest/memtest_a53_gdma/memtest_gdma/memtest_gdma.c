@@ -94,9 +94,11 @@ static int test_one_cmp(bm_handle_t bm_handle, bm_device_mem_t* dst,
                         bm_device_mem_t* src, unsigned char* sys_buffer,
                         unsigned char* sys_buffer2, unsigned int id,
                         unsigned char cmp_every) {
-  if (bm_memcpy_d2s(bm_handle, sys_buffer2, *dst) != BM_SUCCESS) {
-    printf("[ERROR %d] bm_memcpy_d2s from 0x%lX, dev %d failed\r\n", id,
-           dst->u.device.device_addr, dev_id);
+  bm_status_t bm_ret = BM_SUCCESS;
+  bm_ret = bm_memcpy_d2s(bm_handle, sys_buffer2, *dst);
+  if (bm_ret != BM_SUCCESS) {
+    printf("[ERROR %d] bm_memcpy_d2s from 0x%lX, dev %d failed, ret: 0x%X\r\n", id,
+           dst->u.device.device_addr, dev_id, bm_ret);
     exit(EXIT_FAILURE);
   }
   if (memcmp(sys_buffer, sys_buffer2, shape_size) == 0) {
@@ -131,21 +133,24 @@ static int test_one_memcp(bm_handle_t bm_handle, bm_device_mem_t* dst,
                           bm_device_mem_t* src, unsigned char* sys_buffer,
                           unsigned char* sys_buffer2, unsigned int id,
                           unsigned char cmp_every) {
+  bm_status_t bm_ret = BM_SUCCESS;
 #if USE_GDMA_WITH_CORE
-  if (bm_memcpy_d2d_byte_with_core(bm_handle, *dst, 0, *src, 0, shape_size,
-                                   id % core_num) != BM_SUCCESS) {
+  bm_ret = bm_memcpy_d2d_byte_with_core(bm_handle, *dst, 0, *src, 0, shape_size,
+                                   id % core_num);
+
 #else
-  if (bm_memcpy_d2d_byte(bm_handle, *dst, 0, *src, 0, shape_size) !=
-      BM_SUCCESS) {
+  bm_ret = bm_memcpy_d2d_byte(bm_handle, *dst, 0, *src, 0, shape_size);
 #endif
-    printf("[ERROR %d] bm_memcpy_d2d_byte 0x%lX -> 0x%lX, dev %d failed\r\n",
-           id, src->u.device.device_addr, dst->u.device.device_addr, dev_id);
+  if (bm_ret != BM_SUCCESS) {
+    printf("[ERROR %d] bm_memcpy_d2d_byte 0x%lX -> 0x%lX, dev %d failed, ret: 0x%X\r\n",
+           id, src->u.device.device_addr, dst->u.device.device_addr, dev_id, bm_ret);
     exit(EXIT_FAILURE);
   }
   if (cmp_every == 1) {
-    if (bm_memcpy_d2s(bm_handle, sys_buffer2, *dst) != BM_SUCCESS) {
-      printf("[ERROR %d] bm_memcpy_d2s from 0x%lX, dev %d failed\r\n", id,
-             dst->u.device.device_addr, dev_id);
+    bm_ret = bm_memcpy_d2s(bm_handle, sys_buffer2, *dst);
+    if (bm_ret != BM_SUCCESS) {
+      printf("[ERROR %d] bm_memcpy_d2s from 0x%lX, dev %d failed, ret: 0x%X\r\n", id,
+             dst->u.device.device_addr, dev_id, bm_ret);
       exit(EXIT_FAILURE);
     }
     if (memcmp(sys_buffer, sys_buffer2, shape_size) != 0) {
@@ -167,6 +172,7 @@ static int test_one_shot(bm_handle_t bm_handle, bm_device_mem_t* dev_mem_p,
                          unsigned int skip, unsigned int step, unsigned int id,
                          unsigned char cmp_every) {
   int temp_index = 0;
+  bm_status_t bm_ret = BM_SUCCESS;
   if (start_index > end_index) {
     temp_index = start_index;
     start_index = end_index;
@@ -184,10 +190,10 @@ static int test_one_shot(bm_handle_t bm_handle, bm_device_mem_t* dev_mem_p,
          id, dev_mem_p[start_index].u.device.device_addr,
          dev_mem_p[end_index].u.device.device_addr, start_index, end_index,
          skip, step);
-  if (bm_memcpy_s2d(bm_handle, dev_mem_p[start_index], sys_buffer) !=
-      BM_SUCCESS) {
-    printf("[ERROR %d] bm_memcpy_s2d to 0x%lX, dev %d failed\r\n", id,
-           dev_mem_p[start_index].u.device.device_addr, dev_id);
+  bm_ret = bm_memcpy_s2d(bm_handle, dev_mem_p[start_index], sys_buffer);
+  if (bm_ret != BM_SUCCESS) {
+    printf("[ERROR %d] bm_memcpy_s2d to 0x%lX, dev %d failed, ret: 0x%X\r\n", id,
+           dev_mem_p[start_index].u.device.device_addr, dev_id, bm_ret);
     exit(EXIT_FAILURE);
   }
   if (0 != test_one_cmp(bm_handle, &dev_mem_p[start_index], NULL, sys_buffer,
@@ -216,6 +222,7 @@ static int test_two_edge(bm_handle_t bm_handle, bm_device_mem_t* dev_mem_p,
                          unsigned int skip, unsigned int step, unsigned int id,
                          unsigned char cmp_every) {
   unsigned int temp_index = 0, end_index = 0;
+  bm_status_t bm_ret = BM_SUCCESS;
   if (start_index1 > end_index1) {
     temp_index = start_index1;
     start_index1 = end_index1;
@@ -258,10 +265,10 @@ static int test_two_edge(bm_handle_t bm_handle, bm_device_mem_t* dev_mem_p,
       dev_mem_p[start_index2].u.device.device_addr,
       dev_mem_p[end_index2].u.device.device_addr, start_index1, end_index1,
       start_index2, end_index2, skip, step);
-  if (bm_memcpy_s2d(bm_handle, dev_mem_p[start_index1], sys_buffer) !=
-      BM_SUCCESS) {
-    printf("[ERROR %d] bm_memcpy_s2d to 0x%lX, dev %d failed\r\n", id,
-           dev_mem_p[start_index1].u.device.device_addr, dev_id);
+  bm_ret = bm_memcpy_s2d(bm_handle, dev_mem_p[start_index1], sys_buffer);
+  if (bm_ret != BM_SUCCESS) {
+    printf("[ERROR %d] bm_memcpy_s2d to 0x%lX, dev %d failed, ret: 0x%X\r\n", id,
+           dev_mem_p[start_index1].u.device.device_addr, dev_id, bm_ret);
     exit(EXIT_FAILURE);
   }
   if (0 != test_one_cmp(bm_handle, &dev_mem_p[start_index1], NULL, sys_buffer,

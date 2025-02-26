@@ -211,6 +211,12 @@ function compress_and_update_partition_script()
 	local hex_size=$(printf "0x%08x" ${size})
 
 	pigz -v ${filename}
+	if [[ $filename == *"usb"* ]]; then
+		echo "raw to cimg: $filename"
+		SCRIPT_DIR=$(cd $(dirname ${BASH_SOURCE[0]}); pwd)
+		python3 $SCRIPT_DIR/raw2cimg_edge.py $filename.gz
+		mv $filename.gz.head $filename.gz
+	fi
 
 	script_update "${LOAD_COMMAND} ${IN_ADDR} ${OTA_PATH}$(basename ${filename}.gz)"
 	script_update "if test \$? -ne 0; then"
@@ -313,6 +319,10 @@ function create_top_script()
 	script_update "led status on"
 	script_update "led error off"
 	script_update "setenv light 1"
+	script_update ""
+	script_update "#for SE9BX direct to ubuntu"
+	script_update "cmp.b 0x05207f82 0x05207f83 1"
+	script_update "if test \$? -eq 1; then setenv consoledev ttyS2; setenv DTS_TYPE config-cv186ah_sm9v1_4G; load mmc 0:1 \${scriptaddr} boot.scr.emmc; source \${scriptaddr}; fi;"
 	script_update ""
 	script_update "if test \"\$reset_after\" = \"1\"; then reset; fi;"
 	script_update ""
@@ -510,6 +520,7 @@ function do_gen_partition_subimg()
 					sudo tar -xzf ${PART_COMPRESS_FILE_NAME[$2]} -C $RECOVERY_DIR/$MOUNT_DIR-$2
 				fi
 				sync
+				sleep 1 # wait for sync
 				sudo umount $RECOVERY_DIR/$MOUNT_DIR-$2
 			else
 				echo $1 may be an empty parition.

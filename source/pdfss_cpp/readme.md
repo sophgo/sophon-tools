@@ -45,3 +45,15 @@
 ## 发布方式
 
 使用当前目录的CPP源码编译出各个架构的运行程序，然后使用dfss_pip目录下的python工程将工具发布到pip上
+
+## 如何使用dfss insall
+
+dfss的install功能可以方便地下载和安装软件包。
+
+使用方式：`python3 -m dfss --install [package]`
+
+例如：`python3 -m dfss --install sail`
+
+目前支持的package：
+
+- sail

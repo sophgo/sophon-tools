@@ -8,11 +8,13 @@ if [[ "$(lsusb | grep -i "1D5C:2000" | wc -l)" != 0 ]]; then
     USB_HDMI_CHIP="FL2000"
 elif [[ "$(lsusb | grep -i "345F:9132" | wc -l)" != 0 ]]; then
     USB_HDMI_CHIP="MS9132"
+elif [[ "$(lsusb | grep -i "345F:9133" | wc -l)" != 0 ]]; then
+    USB_HDMI_CHIP="MS9133"
 fi
 
-if [[ "${USB_HDMI_CHIP}" == "MS9132" ]]; then
+if [ "${USB_HDMI_CHIP}" == "MS9132" ] || [ "${USB_HDMI_CHIP}" == "MS9133" ]; then
     sleep 10
-	echo "hdmi chip is ms9132, start server and exit."
+	echo "hdmi chip is ${USB_HDMI_CHIP}, start server and exit."
 	systemctl start SophonHDMI.service
 	exit 0
 fi

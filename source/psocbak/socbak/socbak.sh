@@ -46,7 +46,7 @@ export PIGZ=-1
 
 chmod +x ${TGZ_FILES_PATH}/binTools
 export PATH="${TGZ_FILES_PATH}/binTools":$PATH
-# find ./ -type f | grep -vE "md5.txt|\.log|output|sparse|\.bin|\.tgz" | xargs md5sum > socbak_md5.txt
+# find ./ -type f | grep -vE "md5.txt|\.log|output|sparse|\.bin|\.tgz|socbak.sh" | xargs md5sum > socbak_md5.txt
 pushd "${TGZ_FILES_PATH}"
 md5sum -c "${TGZ_FILES_PATH}/socbak_md5.txt"
 if [[ "$?" != "0" ]]; then
@@ -536,9 +536,14 @@ function socbak_allinone_pack()
 	fi
 }
 if [[ "${ALL_IN_ONE_FLAG}" != "" ]] && [[ "${ALL_IN_ONE_SCRIPT}" != "" ]]; then
-	socbak_allinone_pack sdcard | tee -a $SOCBAK_LOG_PATH
-	if [[ "$SOC_BAK_ALL_IN_ONE" =~ "tftp" ]]; then
+	if [[ "${SOC_BAK_ALL_IN_ONE}" =~ "sdcard" ]]; then
+		socbak_allinone_pack sdcard | tee -a $SOCBAK_LOG_PATH
+	elif [[ "${SOC_BAK_ALL_IN_ONE}" =~ "tftp" ]]; then
 		socbak_allinone_pack tftp | tee -a $SOCBAK_LOG_PATH
+	elif [[ "${SOC_BAK_ALL_IN_ONE}" =~ "usb" ]]; then
+		socbak_allinone_pack usb | tee -a $SOCBAK_LOG_PATH
+	else
+		socbak_allinone_pack sdcard | tee -a $SOCBAK_LOG_PATH
 	fi
 fi
 

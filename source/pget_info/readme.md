@@ -41,9 +41,27 @@ sudo bash get_info.sh server <log file> <loop time> y
 
 ```
 
-自动启动一个后台服务，每隔\<loop time\>时间获取一次信息到文件<log file>，使用并配置开机自启的实例视频如下
+自动启动一个后台服务，每隔\<loop time\>时间获取一次信息到文件\<log file\>，使用并配置开机自启的实例视频如下
 
 https://github.com/user-attachments/assets/819bf5cd-c619-41b9-9e88-1c4dcba9c70a
+
+#### 服务记录方式-自动压缩日志模式
+
+``` bash
+
+sudo get_info.sh server_logs_path <log path> <loop time>
+
+```
+
+自动启动一个后台服务，每隔\<loop time\>时间获取一次信息到目录\<log path\>下，每个日志文件超过1M时会自动压缩，整个目录大小超过10M时自动删除旧的记录。这个方案适用于长期记录数据，\<loop time\>推荐给150s，这样10M的空间可以记录4-6个月左右的数据。
+
+可以使用如下命令对多个gz日志文件进行拼接
+
+``` bash
+
+ls *get_info.log.gz | sort -n | xargs -I{} zcat {} 1>>/data/get_info.log
+
+```
 
 #### 特殊环境变量说明
 
