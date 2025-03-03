@@ -1,6 +1,6 @@
 #!/bin/bash
 
-GET_INFO_VERSION="1.1.0"
+GET_INFO_VERSION="1.2.0"
 
 shopt -s compat31
 
@@ -65,6 +65,14 @@ function get_i2c_dev_ok() {
     else
         echo "err"
     fi
+}
+
+function get_network_data() {
+    awk '/:/ && $1 != "lo:" {gsub(":", "", $1); print $1, $2, $10}' /proc/net/dev 2>/dev/null
+}
+
+function get_block_devices() {
+    lsblk -dn -o NAME,TYPE | awk '$2=="disk" && !/^mmcblk.*boot.*/ {print $1}'
 }
 
 # [ion path]
@@ -488,12 +496,45 @@ unset CPU_ALL_USAGE
 unset CPUS_USAGE
 CPU_ALL_USAGE=""
 CPUS_USAGE=""
+NET_SPEED_UPLOAD=""
+NET_SPEED_DOWNLOAD=""
+DISK_SPEED_READ=""
+DISK_SPEED_WRITE=""
 function get_cpu_all() {
+    interval=0.5
     cpu_num=$(cat /proc/stat 2>/dev/null | grep "^cpu" 2>/dev/null | wc -l)
     cpu_count=$((cpu_num - 1))
+    net_date1=$(get_network_data)
+    blk_data1=$(cat /proc/diskstats)
     proc_stat1=$(cat /proc/stat)
-    sleep 0.5
+    sleep ${interval}
     proc_stat2=$(cat /proc/stat)
+    net_date2=$(get_network_data)
+    blk_data2=$(cat /proc/diskstats)
+    net_dev_count=$(echo "${net_date1}" | wc -l)
+    local recvc=0
+    local sendc=0
+    for ((i=1; i<=net_dev_count; i++)); do
+        recv1=$(echo "$net_date1" | awk "NR==$i" | awk '{print $2}' 2>/dev/null)
+        send1=$(echo "$net_date1" | awk "NR==$i" | awk '{print $3}' 2>/dev/null)
+        recv2=$(echo "$net_date2" | awk "NR==$i" | awk '{print $2}' 2>/dev/null)
+        send2=$(echo "$net_date2" | awk "NR==$i" | awk '{print $3}' 2>/dev/null)
+        recvc=$(echo "scale=2; (${recv2} - ${recv1}) / 1024 / ${interval} + ${recvc}" | bc 2>/dev/null)
+        sendc=$(echo "scale=2; (${send2} - ${send1}) / 1024 / ${interval} + ${sendc}" | bc 2>/dev/null)
+    done
+    printf "%.2f %.2f " ${recvc} ${sendc}
+    local read_speed=0
+    local write_speed=0
+    for blk_dev in $(get_block_devices); do
+        blk_sector_size=$(blockdev --getss /dev/${blk_dev})
+        blk_read1=$(echo "${blk_data1}" | grep -a "${blk_dev} " | awk -F' ' '{print $6}' 2>/dev/null)
+        blk_read2=$(echo "${blk_data2}" | grep -a "${blk_dev} " | awk -F' ' '{print $6}' 2>/dev/null)
+        blk_write1=$(echo "${blk_data1}" | grep -a "${blk_dev} " | awk -F' ' '{print $10}' 2>/dev/null)
+        blk_write2=$(echo "${blk_data2}" | grep -a "${blk_dev} " | awk -F' ' '{print $10}' 2>/dev/null)
+        read_speed=$(echo "scale=2; ($blk_read2 - $blk_read1) * ${blk_sector_size} / 1024 / ${interval} + ${read_speed}" | bc 2>/dev/null)
+        write_speed=$(echo "scale=2; ($blk_write2 - $blk_write1) * ${blk_sector_size} / 1024 / ${interval} + ${write_speed}" | bc 2>/dev/null)
+    done
+    printf "%.2f %.2f " ${read_speed} ${write_speed}
     awk -v proc_stat1="$(echo "$proc_stat1" | grep '^cpu ')" -v proc_stat2="$(echo "$proc_stat2" | grep '^cpu ')" '
     BEGIN {
         split(proc_stat1, a);
@@ -536,7 +577,7 @@ function get_cpu_all() {
     done
     echo ""
 }
-{ read -r CPU_ALL_USAGE CPUS_USAGE; } <<< "$(get_cpu_all)"
+{ read -r NET_SPEED_UPLOAD NET_SPEED_DOWNLOAD DISK_SPEED_READ DISK_SPEED_WRITE CPU_ALL_USAGE CPUS_USAGE; } <<< "$(get_cpu_all)"
 
 # DTS_NAME
 DTS_NAME=""
@@ -751,8 +792,13 @@ if [[ "$(cmd_validate docker)" == "1" ]]; then
 fi
 
 # MMC0_CID
+MMC0_CID=""
+MMC0_LIFE_TIME=""
+MMC0_PRE_EOL_LIFE=""
 if [[ "${WORK_MODE}" == "SOC" ]]; then
     MMC0_CID=$(cat /sys/class/mmc_host/mmc0/mmc0\:0001/cid 2>/dev/null | sed 's| \\n||g')
+    MMC0_LIFE_TIME=$(cat /sys/class/mmc_host/mmc0/mmc0\:0001/life_time)
+    MMC0_PRE_EOL_LIFE=$(cat /sys/class/mmc_host/mmc0/mmc0\:0001/pre_eol_info)
 fi
 
 # DISK_INFO
@@ -860,6 +906,10 @@ if [[ "${WORK_MODE}" == "SOC" ]]; then
     echo "DEVICE_SN|${DEVICE_SN}|"
     echo "ETH0_MAC|${ETH0_MAC}|"
     echo "ETH1_MAC|${ETH1_MAC}|"
+    echo "NET_SPEED_UPLOAD(KiB/s)|${NET_SPEED_UPLOAD}|"
+    echo "NET_SPEED_DOWNLOAD(KiB/s)|${NET_SPEED_DOWNLOAD}|"
+    echo "DISK_SPEED_READ(KiB/s)|${DISK_SPEED_READ}|"
+    echo "DISK_SPEED_WRITE(KiB/s)|${DISK_SPEED_WRITE}|"
     echo "CHIP_TEMP(degree Celsius)|${CHIP_TEMP}|"
     echo "BOARD_TEMP(degree Celsius)|${BOARD_TEMP}|"
     echo "FAN_FREQUENCY(Hz)|${FAN_FREQUENCY}|"
@@ -878,6 +928,8 @@ if [[ "${WORK_MODE}" == "SOC" ]]; then
     echo "SYSTEM_TYPE|${SYSTEM_TYPE}|"
     echo "DOCKER_VERSION|${DOCKER_VERSION}|"
     echo "MMC0_CID|${MMC0_CID}|"
+    echo "MMC0_LIFE_TIME|${MMC0_LIFE_TIME}|"
+    echo "MMC0_PRE_EOL_LIFE|${MMC0_PRE_EOL_LIFE}|"
     echo "DISK_INFO|${DISK_INFO}|"
     echo "SDK_VERSION|${SDK_VERSION}|"
     echo "LIBSOPHON_VERSION|${LIBSOPHON_VERSION}|"

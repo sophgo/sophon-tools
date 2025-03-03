@@ -139,3 +139,47 @@ info:
   y_name: SYSTEM MEM USAGE(%)
   max: 100
   min: 0
+- name: TPU_MEM_USAGE
+  info_name: TPU_MEM_USAGE
+  sampling_index: [0, 0]
+  y_name: TPU MEM USAGE(%)
+  max: 100
+  min: 0
+- name: VPU_MEM_USAGE
+  info_name: VPU_MEM_USAGE
+  sampling_index: [0, 0]
+  y_name: VPU MEM USAGE(%)
+  max: 100
+  min: 0
+- name: VPP_MEM_USAGE
+  info_name: VPP_MEM_USAGE
+  sampling_index: [0, 0]
+  y_name: VPP MEM USAGE(%)
+  max: 100
+  min: 0
+- name: FAN_RPM
+  info_name: FAN_RPM
+  sampling_index: [0, 0]
+  y_name: FAN RPM(rpm)
+  max: 10000
+  min: 0
+- name: NET_SPEED_UPLOAD
+  info_name: NET_SPEED_UPLOAD
+  sampling_index: [0, 0]
+  y_name: NET UPLOAD(KiB/s)
+  min: 0
+- name: NET_SPEED_DOWNLOAD
+  info_name: NET_SPEED_DOWNLOAD
+  sampling_index: [0, 0]
+  y_name: NET DOWNLOAD(KiB/s)
+  min: 0
+- name: DISK_SPEED_READ
+  info_name: DISK_SPEED_READ
+  sampling_index: [0, 0]
+  y_name: DISK READ(KiB/s)
+  min: 0
+- name: DISK_SPEED_WRITE
+  info_name: DISK_SPEED_WRITE
+  sampling_index: [0, 0]
+  y_name: DISK WRITE(KiB/s)
+  min: 0
