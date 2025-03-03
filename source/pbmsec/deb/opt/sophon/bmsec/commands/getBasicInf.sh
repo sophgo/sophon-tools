@@ -8,7 +8,7 @@ unset seNCtrl_SUB_INFOS
 declare -a seNCtrl_SUB_INFOS
 
 . ${seNCtrl_PWD}/commands/runCmd.sh all "if [ -e /sys/class/bm-tpu/bm-tpu0/device/npu_usage ]; then cat /sys/class/bm-tpu/bm-tpu0/device/npu_usage | grep -oE '[0-9]+' | head -1; else echo "NAN"; fi;\
-mpstat | awk '/all/ {print 100 - \$12}';\
+mpstat -P ALL 1 1 | awk '/Average/ && /all/ {print 100 - \$12}';\
 free -m | awk '/Mem/ {printf \"%.2f\", (1 - (\$4/\$2)) * 100}';echo "";\
 result=\$(sudo cat /sys/kernel/debug/ion/bm_npu_heap_dump/summary 2>/dev/null | sed -n 's/.*rate:\([0-9]*\)%.*/\1/p');if [ -z \"\$result\" ]; then echo NAN; else echo \$result; fi;\
 result=\$(sudo cat /sys/kernel/debug/ion/bm_vpu_heap_dump/summary 2>/dev/null | sed -n 's/.*rate:\([0-9]*\)%.*/\1/p');if [ -z \"\$result\" ]; then echo NAN; else echo \$result; fi;\
