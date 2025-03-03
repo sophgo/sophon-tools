@@ -68,7 +68,15 @@ function get_i2c_dev_ok() {
 }
 
 function get_network_data() {
-    awk '/:/ && $1 != "lo:" {gsub(":", "", $1); print $1, $2, $10}' /proc/net/dev 2>/dev/null
+    old_ifs=${IFS}
+    IFS=$'\n'
+    for net_info in $(awk '/:/ && $1 != "lo:" {gsub(":", "", $1); print $1, $2, $10}' /proc/net/dev 2>/dev/null); do
+        dev_name=$(echo "${net_info}" | awk -F' ' '{print $1}' 2>/dev/null)
+        if [ -d /sys/class/net/${dev_name}/device ]; then
+            echo "${net_info}"
+        fi
+    done
+    IFS=${old_ifs}
 }
 
 function get_block_devices() {
@@ -504,37 +512,46 @@ function get_cpu_all() {
     interval=0.5
     cpu_num=$(cat /proc/stat 2>/dev/null | grep "^cpu" 2>/dev/null | wc -l)
     cpu_count=$((cpu_num - 1))
-    net_date1=$(get_network_data)
+    net_date1=$(get_network_data | sort -k1 -n)
     blk_data1=$(cat /proc/diskstats)
     proc_stat1=$(cat /proc/stat)
     sleep ${interval}
     proc_stat2=$(cat /proc/stat)
-    net_date2=$(get_network_data)
+    net_date2=$(get_network_data | sort -k1 -n)
     blk_data2=$(cat /proc/diskstats)
     net_dev_count=$(echo "${net_date1}" | wc -l)
-    local recvc=0
-    local sendc=0
     for ((i=1; i<=net_dev_count; i++)); do
+        dev=$(echo "$net_date1" | awk "NR==$i" | awk '{print $1}' 2>/dev/null)
         recv1=$(echo "$net_date1" | awk "NR==$i" | awk '{print $2}' 2>/dev/null)
-        send1=$(echo "$net_date1" | awk "NR==$i" | awk '{print $3}' 2>/dev/null)
         recv2=$(echo "$net_date2" | awk "NR==$i" | awk '{print $2}' 2>/dev/null)
-        send2=$(echo "$net_date2" | awk "NR==$i" | awk '{print $3}' 2>/dev/null)
-        recvc=$(echo "scale=2; (${recv2} - ${recv1}) / 1024 / ${interval} + ${recvc}" | bc 2>/dev/null)
-        sendc=$(echo "scale=2; (${send2} - ${send1}) / 1024 / ${interval} + ${sendc}" | bc 2>/dev/null)
+        recvc=$(echo "scale=2; (${recv2} - ${recv1}) / 1024 / ${interval}" | bc 2>/dev/null)
+        printf "%s,%.2f " ${dev} ${recvc}
     done
-    printf "%.2f %.2f " ${recvc} ${sendc}
-    local read_speed=0
-    local write_speed=0
+    printf "|"
+    for ((i=1; i<=net_dev_count; i++)); do
+        dev=$(echo "$net_date1" | awk "NR==$i" | awk '{print $1}' 2>/dev/null)
+        send1=$(echo "$net_date1" | awk "NR==$i" | awk '{print $3}' 2>/dev/null)
+        send2=$(echo "$net_date2" | awk "NR==$i" | awk '{print $3}' 2>/dev/null)
+        sendc=$(echo "scale=2; (${send2} - ${send1}) / 1024 / ${interval}" | bc 2>/dev/null)
+        printf "%s,%.2f " ${dev} ${sendc}
+    done
+    printf "|"
     for blk_dev in $(get_block_devices); do
         blk_sector_size=$(blockdev --getss /dev/${blk_dev})
         blk_read1=$(echo "${blk_data1}" | grep -a "${blk_dev} " | awk -F' ' '{print $6}' 2>/dev/null)
         blk_read2=$(echo "${blk_data2}" | grep -a "${blk_dev} " | awk -F' ' '{print $6}' 2>/dev/null)
+        read_speed=$(echo "scale=2; ($blk_read2 - $blk_read1) * ${blk_sector_size} / 1024 / ${interval}" | bc 2>/dev/null)
+        printf "%s,%.2f " ${blk_dev} ${read_speed}
+    done
+    printf "|"
+    for blk_dev in $(get_block_devices); do
+        blk_sector_size=$(blockdev --getss /dev/${blk_dev})
         blk_write1=$(echo "${blk_data1}" | grep -a "${blk_dev} " | awk -F' ' '{print $10}' 2>/dev/null)
         blk_write2=$(echo "${blk_data2}" | grep -a "${blk_dev} " | awk -F' ' '{print $10}' 2>/dev/null)
-        read_speed=$(echo "scale=2; ($blk_read2 - $blk_read1) * ${blk_sector_size} / 1024 / ${interval} + ${read_speed}" | bc 2>/dev/null)
         write_speed=$(echo "scale=2; ($blk_write2 - $blk_write1) * ${blk_sector_size} / 1024 / ${interval} + ${write_speed}" | bc 2>/dev/null)
+        printf "%s,%.2f " ${blk_dev} ${write_speed}
     done
-    printf "%.2f %.2f " ${read_speed} ${write_speed}
+    printf "|"
     awk -v proc_stat1="$(echo "$proc_stat1" | grep '^cpu ')" -v proc_stat2="$(echo "$proc_stat2" | grep '^cpu ')" '
     BEGIN {
         split(proc_stat1, a);
@@ -552,7 +569,7 @@ function get_cpu_all() {
         ker_u = kernel / total * 100;
         irq_u = irq / total * 100;
         io_u = io_wait / total * 100;
-        printf "%.2f,%.2f,%.2f,%.2f,%.2f ", usage, user_u, ker_u, io_u, irq_u;
+        printf "%.2f,%.2f,%.2f,%.2f,%.2f|", usage, user_u, ker_u, io_u, irq_u;
     }' 2>/dev/null
     for ((i=0; i<cpu_count; i++)); do
         awk -v proc_stat1="$(echo "$proc_stat1" | grep "^cpu$i ")" -v proc_stat2="$(echo "$proc_stat2" | grep "^cpu$i ")" '
@@ -575,9 +592,9 @@ function get_cpu_all() {
             printf "%.2f,%.2f,%.2f,%.2f,%.2f ", usage, user_u, ker_u, io_u, irq_u;
         }' 2>/dev/null
     done
-    echo ""
+    echo "|"
 }
-{ read -r NET_SPEED_UPLOAD NET_SPEED_DOWNLOAD DISK_SPEED_READ DISK_SPEED_WRITE CPU_ALL_USAGE CPUS_USAGE; } <<< "$(get_cpu_all)"
+{ IFS='|' read -r NET_SPEED_UPLOAD NET_SPEED_DOWNLOAD DISK_SPEED_READ DISK_SPEED_WRITE CPU_ALL_USAGE CPUS_USAGE; } <<< "$(get_cpu_all)"
 
 # DTS_NAME
 DTS_NAME=""

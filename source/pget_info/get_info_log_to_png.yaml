@@ -163,23 +163,33 @@ info:
   y_name: FAN RPM(rpm)
   max: 10000
   min: 0
-- name: NET_SPEED_UPLOAD
+- name: NET_SPEED_UPLOAD-eth0
   info_name: NET_SPEED_UPLOAD
-  sampling_index: [0, 0]
-  y_name: NET UPLOAD(KiB/s)
+  sampling_index: [0, 1]
+  y_name: NET UPLOAD ETH0(KiB/s)
   min: 0
-- name: NET_SPEED_DOWNLOAD
+- name: NET_SPEED_DOWNLOAD-eth0
   info_name: NET_SPEED_DOWNLOAD
-  sampling_index: [0, 0]
-  y_name: NET DOWNLOAD(KiB/s)
+  sampling_index: [0, 1]
+  y_name: NET DOWNLOAD ETH0(KiB/s)
   min: 0
-- name: DISK_SPEED_READ
+- name: NET_SPEED_UPLOAD-eth1
+  info_name: NET_SPEED_UPLOAD
+  sampling_index: [1, 1]
+  y_name: NET UPLOAD ETH1(KiB/s)
+  min: 0
+- name: NET_SPEED_DOWNLOAD-eth1
+  info_name: NET_SPEED_DOWNLOAD
+  sampling_index: [1, 1]
+  y_name: NET DOWNLOAD ETH1(KiB/s)
+  min: 0
+- name: DISK_SPEED_READ-mmc0
   info_name: DISK_SPEED_READ
-  sampling_index: [0, 0]
-  y_name: DISK READ(KiB/s)
+  sampling_index: [0, 1]
+  y_name: DISK READ MMC0(KiB/s)
   min: 0
-- name: DISK_SPEED_WRITE
+- name: DISK_SPEED_WRITE-mmc0
   info_name: DISK_SPEED_WRITE
-  sampling_index: [0, 0]
-  y_name: DISK WRITE(KiB/s)
+  sampling_index: [0, 1]
+  y_name: DISK WRITE MMC0(KiB/s)
   min: 0
