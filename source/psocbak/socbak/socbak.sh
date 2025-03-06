@@ -449,7 +449,7 @@ done
 echo partition table size : $TGZ_ALL_SIZE KB | tee -a $SOCBAK_LOG_PATH
 
 if [ $TGZ_ALL_SIZE -gt $EMMC_ALL_SIZE ]; then
-		echo "INFO: need to expand default partition table size from $EMMC_ALL_SIZE KB to $TGZ_ALL_SIZE KB" | tee -a $SOCBAK_LOG_PATH
+		echo "INFO: partition table size changed, from $EMMC_ALL_SIZE KB to $TGZ_ALL_SIZE KB" | tee -a $SOCBAK_LOG_PATH
 		EMMC_ALL_SIZE=$TGZ_ALL_SIZE
 fi
 
