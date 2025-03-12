@@ -804,6 +804,9 @@ struct ServerInfo* get_available_server(
 bool get_file_open(string re_path) {
   log_info("get file from %s", re_path.c_str());
   ServerInfo* max_index = get_available_server(true, sdk_server_info);
+  if (NULL == max_index) {
+    return false;
+  }
   if (http_open_get_enable) {
     if (http_get_file(max_index, re_path) > 0) return true;
   } else {
