@@ -20,7 +20,7 @@ INCLUDE = -I. -I$(BUILD_PATH)/libs/$(LIBS_TYPE)/include
 LIBS = -L. -L$(BUILD_PATH)/libs/$(LIBS_TYPE)/lib -L$(BUILD_PATH)/libs/$(LIBS_TYPE)/lib64 $(EXT_LIB_FLAG_STATIC) $(EXT_LIB_FLAG_DYNAMIC)
 
 CFLAGS = $(EXT_FLAG) -I. $(INCLUDE) $(LIBS) -std=gnu99 -Wall -O3
-CXXFLAGS = $(EXT_FLAG) -DGIT_COMMIT_HASH="\"$(GIT_COMMIT_HASH)\"" -DGIT_COMMIT_DATE="\"$(GIT_COMMIT_DATE)\"" -I. $(INCLUDE) $(LIBS) -Wall -O3 -std=c++17 
+CXXFLAGS = $(EXT_FLAG) -DGIT_COMMIT_HASH="\"$(GIT_COMMIT_HASH)\"" -DGIT_COMMIT_DATE="\"$(GIT_COMMIT_DATE)\"" -I. $(INCLUDE) $(LIBS) -Wall -O3 -std=c++17
 
 SRCS = $(wildcard *.c)
 SRCPPS = $(wildcard *.cpp)

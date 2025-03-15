@@ -25,8 +25,9 @@
 #include "cxxopts.hpp"
 #include "httplib.h"
 #include "json.hpp"
-#include "libssh2.h"
-#include "libssh2_sftp.h"
+#define LIBSSH_STATIC 1
+#include <libssh/libssh.h>
+#include <libssh/sftp.h>
 
 #ifdef WIN32
 #include <windows.h>
@@ -60,11 +61,16 @@ namespace fs = std::experimental::filesystem;
 namespace fs = std::filesystem;
 #endif
 
+/* 数据传输缓存区 */
 static char buffer[1024 * 128];
+/* 是否启用HTTP协议 */
 static bool http_open_get_enable = false;
-static uint64_t connect_timeout = 5;
-static int ret_flag = 0;
+/* 链接超时 */
+static long connect_timeout = 5;
+/* LIBSSH日志等级 */
+int verbosity = SSH_LOG_WARNING;
 
+/* 多线程检测服务阶段线程共享变量 */
 std::mutex mtx;
 std::mutex mtx_get_server;
 std::condition_variable cv;
@@ -77,6 +83,7 @@ void Lk_mux(bool lock, void*) {
     mtx.unlock();
 }
 
+/* SFTP服务器信息 */
 struct ServerInfo {
   string host;
   int port;
@@ -88,10 +95,11 @@ struct ServerInfo {
 
 struct ServerInfo* fast_server = NULL;
 
+/* 默认的SFTP链路 */
 static std::vector<struct ServerInfo> sdk_server_info = {
     {"172.26.175.10", 32022, "oponIn", "oponIn", false, 0.0},
     {"172.26.13.184", 32022, "oponIn", "oponIn", false, 0.0},
-    {"172.26.166.66", 32022, "oponIn", "oponIn", false, 0.0},
+
     {"106.38.208.114", 32022, "open", "open", false, 0.0},
     {"103.68.183.114", 32022, "open", "open", false, 0.0},
 };
@@ -101,6 +109,7 @@ static std::vector<struct ServerInfo> hdk_server_info = {
     {"172.29.128.15", 8822, "", "", false, 0.0},
 };
 
+/* 从路径获取文件名 */
 static std::string getFileNameFromPath(string path) {
   fs::path filePath = path;
   std::string fileName = filePath.filename().string();
@@ -113,6 +122,7 @@ static std::string to_string_with_precision(double value, int precision = 2) {
   return out.str();
 }
 
+/* 数据大小可读化 */
 static std::string file_size_h(uint64_t size_byte) {
   if (size_byte < 1024)
     return to_string_with_precision(size_byte) + " " + std::string("Byte");
@@ -128,6 +138,7 @@ static std::string file_size_h(uint64_t size_byte) {
            " " + std::string("GiB");
 }
 
+/* 时间格式规整 */
 std::string format_duration(int total_seconds) {
   total_seconds = total_seconds < 1 ? 0 : total_seconds;
   const int seconds_in_minute = 60;
@@ -152,6 +163,7 @@ std::string format_duration(int total_seconds) {
   return result;
 }
 
+/* 下载进度条 */
 void print_progress(long long total_downloaded, long long file_size,
                     double elapsed_ms) {
   int bar_width = 20;
@@ -177,6 +189,7 @@ void print_progress(long long total_downloaded, long long file_size,
   fflush(stdout);
 }
 
+/* 配置socket的超时 */
 void config_socket_timeout(int sockfd, int timeout_ms) {
 #ifdef _WIN32
   setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout_ms,
@@ -192,6 +205,7 @@ void config_socket_timeout(int sockfd, int timeout_ms) {
 #endif
 }
 
+/* HTTP模式测速 */
 void http_test_speed(struct ServerInfo* server) {
   log_info("start test server %s speed...", server->host.c_str());
   if (server->is_ok == false) {
@@ -226,6 +240,7 @@ void http_test_speed(struct ServerInfo* server) {
   server->speed = speed;
 }
 
+/* HTTP模式下载文件 */
 int64_t http_get_file(struct ServerInfo* server, const std::string& path,
                       std::string* file_buf = NULL) {
   string url = string("http://") + server->host + string(":") +
@@ -294,6 +309,7 @@ int64_t http_get_file(struct ServerInfo* server, const std::string& path,
   }
 }
 
+/* SFTP模式下载文件 */
 int64_t sftp_get_file(struct ServerInfo* server, string path) {
   const string hostname = server->host;
   const string username = server->user;
@@ -301,121 +317,129 @@ int64_t sftp_get_file(struct ServerInfo* server, string path) {
   const int port = server->port;
   int rc;
   int sock;
+  bool ssh_options_file = false;
   struct sockaddr_in sin;
   string file_name = getFileNameFromPath(path.c_str());
-  LIBSSH2_SESSION* session;
-  LIBSSH2_SFTP* sftp_session;
-  LIBSSH2_SFTP_HANDLE* sftp_handle;
 
   log_info("sftp get file from sftp://%s:%d -> %s", server->host.c_str(),
            server->port, file_name.c_str());
+  ssh_session ssh_session = ssh_new();
+  if (ssh_session == NULL) {
+    log_error("Failed to creat ssh_session!");
+    return -1;
+  }
 
   sock = socket(AF_INET, SOCK_STREAM, 0);
   sin.sin_family = AF_INET;
   sin.sin_port = htons(port);
   sin.sin_addr.s_addr = inet_addr(hostname.c_str());
   config_socket_timeout(sock, connect_timeout * 1000);
-  if (connect(sock, (struct sockaddr*)(&sin), sizeof(sin)) != 0) {
-    log_error("Failed to connect!");
+  rc = connect(sock, (struct sockaddr*)(&sin), sizeof(sin));
 #ifdef WIN32
-    closesocket(sock);
+  closesocket(sock);
 #else
-    close(sock);
+  close(sock);
 #endif
-    return -1;
-  }
-
-  session = libssh2_session_init();
-  libssh2_session_set_timeout(session, connect_timeout * 1000);
-  if (libssh2_session_handshake(session, sock)) {
-    log_error("Failure establishing SSH session");
-    libssh2_session_free(session);
-#ifdef WIN32
-    closesocket(sock);
-#else
-    close(sock);
-#endif
-    return -1;
-  }
-
-  if (libssh2_userauth_password(session, username.c_str(), password.c_str())) {
-    log_error("Authentication by password failed.");
-    libssh2_session_disconnect(session, "Normal Shutdown");
-    libssh2_session_free(session);
-#ifdef WIN32
-    closesocket(sock);
-#else
-    close(sock);
-#endif
-    return -1;
-  }
-
-  sftp_session = libssh2_sftp_init(session);
-  if (!sftp_session) {
-    log_error("Unable to init SFTP session");
-    libssh2_sftp_shutdown(sftp_session);
-    libssh2_session_disconnect(session, "Normal Shutdown");
-    libssh2_session_free(session);
-#ifdef WIN32
-    closesocket(sock);
-#else
-    close(sock);
-#endif
-    return -1;
-  }
-
-  sftp_handle =
-      libssh2_sftp_open(sftp_session, path.c_str(), LIBSSH2_FXF_READ, 0);
-  if (!sftp_handle) {
-    log_error("Unable to open file with SFTP");
-    libssh2_sftp_close(sftp_handle);
-    libssh2_sftp_shutdown(sftp_session);
-    libssh2_session_disconnect(session, "Normal Shutdown");
-    libssh2_session_free(session);
-#ifdef WIN32
-    closesocket(sock);
-#else
-    close(sock);
-#endif
-    return -1;
-  }
-
-  LIBSSH2_SFTP_ATTRIBUTES attributes;
-  rc = libssh2_sftp_stat(sftp_session, path.c_str(), &attributes);
   if (rc != 0) {
-    log_error("Failed to get file attributes: %d", rc);
-    libssh2_sftp_close(sftp_handle);
-    libssh2_sftp_shutdown(sftp_session);
-    libssh2_session_disconnect(session, "Normal Shutdown");
-    libssh2_session_free(session);
-#ifdef WIN32
-    closesocket(sock);
-#else
-    close(sock);
-#endif
+    log_error("Failed to connect!");
+    ssh_free(ssh_session);
     return -1;
   }
-  uint64_t file_size = attributes.filesize;
+
+  ssh_options_set(ssh_session, SSH_OPTIONS_HOST, server->host.c_str());
+  ssh_options_set(ssh_session, SSH_OPTIONS_LOG_VERBOSITY, &verbosity);
+  ssh_options_set(ssh_session, SSH_OPTIONS_PORT, &port);
+  ssh_options_set(ssh_session, SSH_OPTIONS_TIMEOUT, &connect_timeout);
+  ssh_options_set(ssh_session, SSH_OPTIONS_PROCESS_CONFIG, &ssh_options_file);
+  if (ssh_connect(ssh_session) != SSH_OK) {
+    log_error("Error connecting to server: %s\n", ssh_get_error(ssh_session));
+    ssh_free(ssh_session);
+    return -1;
+  }
+
+  if (ssh_userauth_password(ssh_session, username.c_str(), password.c_str()) !=
+      SSH_AUTH_SUCCESS) {
+    log_error("Error authenticating with password [%s:%s]: %s\n",
+              username.c_str(), password.c_str(), ssh_get_error(ssh_session));
+    ssh_disconnect(ssh_session);
+    ssh_free(ssh_session);
+    return -1;
+  }
+
+  char* banner = ssh_get_issue_banner(ssh_session);
+  if (ssh_session) {
+    log_info(
+        "sftp server "
+        "banner:\n------------------------------\n%s\n-------------------------"
+        "-----",
+        banner);
+    SSH_STRING_FREE_CHAR(banner);
+    banner = NULL;
+  }
+
+  sftp_session sftp_session = sftp_new(ssh_session);
+  if (sftp_session == NULL) {
+    log_error("Failed to creat sftp_session: %s", ssh_get_error(ssh_session));
+    ssh_disconnect(ssh_session);
+    ssh_free(ssh_session);
+    return -1;
+  }
+
+  if (sftp_init(sftp_session) != SSH_OK) {
+    log_error("Error initializing SFTP session: code %d.\n",
+              sftp_get_error(sftp_session));
+    sftp_free(sftp_session);
+    ssh_disconnect(ssh_session);
+    ssh_free(ssh_session);
+    return -1;
+  }
+
+  sftp_attributes file_attr = sftp_stat(sftp_session, path.c_str());
+  if (file_attr == NULL) {
+    log_error("Can't get file stat: %s\n", ssh_get_error(ssh_session));
+    sftp_free(sftp_session);
+    ssh_disconnect(ssh_session);
+    ssh_free(ssh_session);
+    return -1;
+  }
+
+  sftp_file sfile;
+  sfile = sftp_open(sftp_session, path.c_str(), O_RDONLY, 0);
+  if (sfile == NULL) {
+    log_error("Can't open file for reading: %s\n", ssh_get_error(ssh_session));
+    sftp_free(sftp_session);
+    ssh_disconnect(ssh_session);
+    ssh_free(ssh_session);
+    return -1;
+  }
+  uint64_t file_size = file_attr->size;
+  sftp_attributes_free(file_attr);
 
   struct timespec start_time, current_time;
   clock_gettime(CLOCK_MONOTONIC, &start_time);
   std::ofstream local_file(file_name, std::ios::binary);
   if (!local_file.is_open()) {
     log_error("Failed to open file for writing: %s", file_name.c_str());
-    libssh2_sftp_close(sftp_handle);
-    libssh2_sftp_shutdown(sftp_session);
-    libssh2_session_disconnect(session, "Normal Shutdown");
-    libssh2_session_free(session);
-#ifdef WIN32
-    closesocket(sock);
-#else
-    close(sock);
-#endif
+    sftp_close(sfile);
+    sftp_free(sftp_session);
+    ssh_disconnect(ssh_session);
+    ssh_free(ssh_session);
     return -1;
   }
   ssize_t n;
-  int64_t total_downloaded = 0;
-  while ((n = libssh2_sftp_read(sftp_handle, buffer, sizeof(buffer))) > 0) {
+  uint64_t total_downloaded = 0;
+  for (;;) {
+    n = sftp_read(sfile, buffer, sizeof(buffer));
+    if (n == 0) {
+      break;  // EOF
+    } else if (n < 0) {
+      log_error("Error to get sftp file: %s", ssh_get_error(ssh_session));
+      sftp_close(sfile);
+      sftp_free(sftp_session);
+      ssh_disconnect(ssh_session);
+      ssh_free(ssh_session);
+      return -1;
+    }
     local_file.write(buffer, n);
     total_downloaded += n;
     clock_gettime(CLOCK_MONOTONIC, &current_time);
@@ -430,15 +454,10 @@ int64_t sftp_get_file(struct ServerInfo* server, string path) {
   cout << "" << endl;
   log_info("Download completed.");
 
-  libssh2_sftp_close(sftp_handle);
-  libssh2_sftp_shutdown(sftp_session);
-  libssh2_session_disconnect(session, "Normal Shutdown");
-  libssh2_session_free(session);
-#ifdef WIN32
-  closesocket(sock);
-#else
-  close(sock);
-#endif
+  sftp_close(sfile);
+  sftp_free(sftp_session);
+  ssh_disconnect(ssh_session);
+  ssh_free(ssh_session);
   if (file_size == total_downloaded) {
     log_debug("get file %s ok", path.c_str());
     return total_downloaded;
@@ -448,6 +467,7 @@ int64_t sftp_get_file(struct ServerInfo* server, string path) {
   }
 }
 
+/* 获取文件大小 */
 std::streamsize get_file_size(const std::string& file_path) {
   std::ifstream file_stream(file_path, std::ios::binary | std::ios::ate);
   if (!file_stream.is_open()) {
@@ -460,6 +480,7 @@ std::streamsize get_file_size(const std::string& file_path) {
   return file_size;
 }
 
+/* 获取当前时间 */
 std::string get_current_time() {
   std::time_t t = std::time(nullptr);
   std::tm* tm_ptr = std::localtime(&t);
@@ -468,95 +489,102 @@ std::string get_current_time() {
   return oss.str();
 }
 
+/* SFTP模式上传文件 */
 int64_t sftp_put_file(struct ServerInfo* server, string local_path,
                       string re_path) {
   const string hostname = server->host;
   const string username = server->user;
   const string password = server->pass;
   const int port = server->port;
-  int sock;
+  int sock, rc;
+
+  bool ssh_options_file = false;
   struct sockaddr_in sin;
   string file_name = getFileNameFromPath(local_path.c_str());
   string cur_time = get_current_time();
   string remote_path =
       re_path + string("/") + cur_time + string("_") + file_name;
-  LIBSSH2_SESSION* session;
-  LIBSSH2_SFTP* sftp_session;
-  LIBSSH2_SFTP_HANDLE* sftp_handle;
-
   log_info("sftp put file from %s -> sftp://%s:%d/%s", file_name.c_str(),
            server->host.c_str(), server->port, remote_path.c_str());
+  ssh_session ssh_session = ssh_new();
+  if (ssh_session == NULL) {
+    log_error("Failed to creat ssh_session!");
+    return -1;
+  }
 
   sock = socket(AF_INET, SOCK_STREAM, 0);
   sin.sin_family = AF_INET;
   sin.sin_port = htons(port);
   sin.sin_addr.s_addr = inet_addr(hostname.c_str());
   config_socket_timeout(sock, connect_timeout * 1000);
-  if (connect(sock, (struct sockaddr*)(&sin), sizeof(sin)) != 0) {
+  rc = connect(sock, (struct sockaddr*)(&sin), sizeof(sin));
+#ifdef WIN32
+  closesocket(sock);
+#else
+  close(sock);
+#endif
+  if (rc != 0) {
     log_error("Failed to connect!");
-#ifdef WIN32
-    closesocket(sock);
-#else
-    close(sock);
-#endif
+    ssh_free(ssh_session);
     return -1;
   }
 
-  session = libssh2_session_init();
-  libssh2_session_set_timeout(session, connect_timeout * 1000);
-  if (libssh2_session_handshake(session, sock)) {
-    log_error("Failure establishing SSH session");
-    libssh2_session_free(session);
-#ifdef WIN32
-    closesocket(sock);
-#else
-    close(sock);
-#endif
+  ssh_options_set(ssh_session, SSH_OPTIONS_HOST, server->host.c_str());
+  ssh_options_set(ssh_session, SSH_OPTIONS_LOG_VERBOSITY, &verbosity);
+  ssh_options_set(ssh_session, SSH_OPTIONS_PORT, &port);
+  ssh_options_set(ssh_session, SSH_OPTIONS_TIMEOUT, &connect_timeout);
+  ssh_options_set(ssh_session, SSH_OPTIONS_PROCESS_CONFIG, &ssh_options_file);
+  if (ssh_connect(ssh_session) != SSH_OK) {
+    log_error("Error connecting to server: %s\n", ssh_get_error(ssh_session));
+    ssh_free(ssh_session);
     return -1;
   }
 
-  if (libssh2_userauth_password(session, username.c_str(), password.c_str())) {
-    log_error("Authentication by password failed.");
-    libssh2_session_disconnect(session, "Normal Shutdown");
-    libssh2_session_free(session);
-#ifdef WIN32
-    closesocket(sock);
-#else
-    close(sock);
-#endif
+  if (ssh_userauth_password(ssh_session, username.c_str(), password.c_str()) !=
+      SSH_AUTH_SUCCESS) {
+    log_error("Error authenticating with password [%s:%s]: %s\n",
+              username.c_str(), password.c_str(), ssh_get_error(ssh_session));
+    ssh_disconnect(ssh_session);
+    ssh_free(ssh_session);
     return -1;
   }
 
-  sftp_session = libssh2_sftp_init(session);
-  if (!sftp_session) {
-    log_error("Unable to init SFTP session");
-    libssh2_sftp_shutdown(sftp_session);
-    libssh2_session_disconnect(session, "Normal Shutdown");
-    libssh2_session_free(session);
-#ifdef WIN32
-    closesocket(sock);
-#else
-    close(sock);
-#endif
+  char* banner = ssh_get_issue_banner(ssh_session);
+  if (ssh_session) {
+    log_info(
+        "sftp server "
+        "banner:\n------------------------------\n%s\n-------------------------"
+        "-----",
+        banner);
+    SSH_STRING_FREE_CHAR(banner);
+    banner = NULL;
+  }
+
+  sftp_session sftp_session = sftp_new(ssh_session);
+  if (sftp_session == NULL) {
+    log_error("Failed to creat sftp_session: %s", ssh_get_error(ssh_session));
+    ssh_disconnect(ssh_session);
+    ssh_free(ssh_session);
     return -1;
   }
 
-  sftp_handle = libssh2_sftp_open(
-      sftp_session, (remote_path).c_str(),
-      LIBSSH2_FXF_WRITE | LIBSSH2_FXF_CREAT | LIBSSH2_FXF_TRUNC,
-      LIBSSH2_SFTP_S_IRUSR | LIBSSH2_SFTP_S_IWUSR | LIBSSH2_SFTP_S_IRGRP |
-          LIBSSH2_SFTP_S_IROTH);
-  if (!sftp_handle) {
-    log_error("Unable to open file with SFTP: %s", remote_path);
-    libssh2_sftp_close(sftp_handle);
-    libssh2_sftp_shutdown(sftp_session);
-    libssh2_session_disconnect(session, "Normal Shutdown");
-    libssh2_session_free(session);
-#ifdef WIN32
-    closesocket(sock);
-#else
-    close(sock);
-#endif
+  if (sftp_init(sftp_session) != SSH_OK) {
+    log_error("Error initializing SFTP session: code %d.\n",
+              sftp_get_error(sftp_session));
+    sftp_free(sftp_session);
+    ssh_disconnect(ssh_session);
+    ssh_free(ssh_session);
+    return -1;
+  }
+
+  sftp_file sfile;
+  sfile = sftp_open(sftp_session, (remote_path).c_str(),
+                    O_WRONLY | O_CREAT | O_TRUNC, S_IRWXU);
+  if (sfile == NULL) {
+    log_error("Can't open file for writing: %s\n", ssh_get_error(ssh_session));
+    sftp_free(sftp_session);
+    ssh_disconnect(ssh_session);
+    ssh_free(ssh_session);
     return -1;
   }
 
@@ -566,15 +594,10 @@ int64_t sftp_put_file(struct ServerInfo* server, string local_path,
   std::ifstream local_file(local_path, std::ios::binary);
   if (!local_file.is_open() || file_size < 0) {
     log_error("Failed to open local file for reading: %s", local_path.c_str());
-    libssh2_sftp_close(sftp_handle);
-    libssh2_sftp_shutdown(sftp_session);
-    libssh2_session_disconnect(session, "Normal Shutdown");
-    libssh2_session_free(session);
-#ifdef WIN32
-    closesocket(sock);
-#else
-    close(sock);
-#endif
+    sftp_close(sfile);
+    sftp_free(sftp_session);
+    ssh_disconnect(ssh_session);
+    ssh_free(ssh_session);
     return -1;
   }
   int64_t total_upload = 0;
@@ -593,36 +616,26 @@ int64_t sftp_put_file(struct ServerInfo* server, string local_path,
       ef = true;
     }
     if (ef) {
-      libssh2_sftp_close(sftp_handle);
-      libssh2_sftp_shutdown(sftp_session);
-      libssh2_session_disconnect(session, "Normal Shutdown");
-      libssh2_session_free(session);
-#ifdef WIN32
-      closesocket(sock);
-#else
-      close(sock);
-#endif
+      sftp_close(sfile);
+      sftp_free(sftp_session);
+      ssh_disconnect(ssh_session);
+      ssh_free(ssh_session);
     }
     local_file.read(buffer, sizeof(buffer));
     bytes_read = local_file.gcount();
     bytes_written = 0;
     while (bytes_written != bytes_read) {
-      bytes_written += libssh2_sftp_write(sftp_handle, buffer + bytes_written,
-                                          bytes_read - bytes_written);
+      bytes_written +=
+          sftp_write(sfile, buffer + bytes_written, bytes_read - bytes_written);
     }
     if (bytes_written != bytes_read) {
       log_error(
           "Failed to write to remote file, bytes_written:%d,bytes_read:%d",
           bytes_written, bytes_read);
-      libssh2_sftp_close(sftp_handle);
-      libssh2_sftp_shutdown(sftp_session);
-      libssh2_session_disconnect(session, "Normal Shutdown");
-      libssh2_session_free(session);
-#ifdef WIN32
-      closesocket(sock);
-#else
-      close(sock);
-#endif
+      sftp_close(sfile);
+      sftp_free(sftp_session);
+      ssh_disconnect(ssh_session);
+      ssh_free(ssh_session);
       return -1;
     }
     total_upload += bytes_written;
@@ -638,16 +651,10 @@ int64_t sftp_put_file(struct ServerInfo* server, string local_path,
   cout << "" << endl;
   log_info("Upload completed.");
 
-  libssh2_sftp_close(sftp_handle);
-  libssh2_sftp_shutdown(sftp_session);
-  libssh2_session_disconnect(session, "Normal Shutdown");
-  libssh2_session_free(session);
-#ifdef WIN32
-  closesocket(sock);
-#else
-  close(sock);
-#endif
-  return total_upload;
+  sftp_close(sfile);
+  sftp_free(sftp_session);
+  ssh_disconnect(ssh_session);
+  ssh_free(ssh_session);
   if (file_size == total_upload) {
     log_debug("put file %s ok", local_path.c_str());
     return total_upload;
@@ -657,9 +664,17 @@ int64_t sftp_put_file(struct ServerInfo* server, string local_path,
   }
 }
 
-bool is_sftp_service(ServerInfo* server_in) {
+/* 判断是否是SFTP服务器 */
+bool is_sftp_service(bool test_speed, ServerInfo* server_in) {
+  int rc = 0, verbosity = SSH_LOG_NOLOG;
   log_debug("[%s] Determine if service is SFTP...", server_in->host.c_str());
   server_in->is_ok = false;
+  ssh_session ssh_session = ssh_new();
+  if (ssh_session == NULL) {
+    log_error("Failed to creat ssh_session!");
+    return false;
+  }
+
   int sock = socket(AF_INET, SOCK_STREAM, 0);
   if (sock == -1) {
     log_debug("[%s] Error creating socket.", server_in->host.c_str());
@@ -672,45 +687,65 @@ bool is_sftp_service(ServerInfo* server_in) {
   serv_addr.sin_addr.s_addr = inet_addr(server_in->host.c_str());
   serv_addr.sin_port = htons(server_in->port);
   config_socket_timeout(sock, connect_timeout * 1000);
-  if (connect(sock, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) != 0) {
+  rc = connect(sock, (struct sockaddr*)&serv_addr, sizeof(serv_addr));
+#ifdef WIN32
+  closesocket(sock);
+#else
+  close(sock);
+#endif
+  if (rc != 0) {
     log_debug("[%s] Error connecting on port %d", server_in->host.c_str(),
               server_in->port);
-#ifdef WIN32
-    closesocket(sock);
-#else
-    close(sock);
-#endif
     return false;
   }
-  LIBSSH2_SESSION* session = libssh2_session_init();
-  if (!session) {
-    log_debug("[%s] Error creating session", server_in->host.c_str());
-#ifdef WIN32
-    closesocket(sock);
-#else
-    close(sock);
-#endif
+
+  ssh_options_set(ssh_session, SSH_OPTIONS_HOST, server_in->host.c_str());
+  ssh_options_set(ssh_session, SSH_OPTIONS_LOG_VERBOSITY, &verbosity);
+  ssh_options_set(ssh_session, SSH_OPTIONS_PORT, &server_in->port);
+  ssh_options_set(ssh_session, SSH_OPTIONS_TIMEOUT, &connect_timeout);
+  if (ssh_connect(ssh_session) != SSH_OK) {
+    log_error("Error connecting to server: %s\n", ssh_get_error(ssh_session));
+    ssh_free(ssh_session);
     return false;
   }
-  libssh2_session_set_timeout(session, connect_timeout * 1000);
-  if (libssh2_session_handshake(session, sock)) {
-    log_debug("[%s] Failure establishing SSH session", server_in->host.c_str());
-    libssh2_session_free(session);
-#ifdef WIN32
-    closesocket(sock);
-#else
-    close(sock);
-#endif
-    return false;
+
+  /* 考虑到需要兼容HDK的SFTP服务器 */
+  if (test_speed) {
+    if (ssh_userauth_password(ssh_session, server_in->user.c_str(),
+                              server_in->pass.c_str()) != SSH_AUTH_SUCCESS) {
+      log_error("Error authenticating with password [%s:%s]: %s\n",
+                server_in->user.c_str(), server_in->pass.c_str(),
+                ssh_get_error(ssh_session));
+      ssh_disconnect(ssh_session);
+      ssh_free(ssh_session);
+      return -1;
+    }
+
+    sftp_session sftp_session = sftp_new(ssh_session);
+    if (sftp_session == NULL) {
+      log_error("Failed to creat sftp_session: %s", ssh_get_error(ssh_session));
+      ssh_free(ssh_session);
+      return false;
+    }
+
+    if (sftp_init(sftp_session) != SSH_OK) {
+      log_error("Error initializing SFTP session: code %d.\n",
+                sftp_get_error(sftp_session));
+      sftp_free(sftp_session);
+      ssh_disconnect(ssh_session);
+      ssh_free(ssh_session);
+      return -1;
+    }
+
+    sftp_free(sftp_session);
   }
-  libssh2_session_disconnect(session, "Normal Shutdown");
-  libssh2_session_free(session);
-  close(sock);
+  ssh_free(ssh_session);
   log_info("[%s] find sftp server", server_in->host.c_str());
   server_in->is_ok = true;
   return true;
 }
 
+/* 确定是否SFTP，并且测速 */
 void sftp_server_and_speed(bool test_speed, ServerInfo* server_in,
                            std::vector<std::thread>* ths) {
   std::thread::id self_id = std::this_thread::get_id();
@@ -720,7 +755,7 @@ void sftp_server_and_speed(bool test_speed, ServerInfo* server_in,
     cv.wait(lk, [&] { return cv_ready; });
   }
   log_debug("sftp_server_and_speed thread id:0x%X start", self_id);
-  if (is_sftp_service(server_in) == false) return;
+  if (is_sftp_service(test_speed, server_in) == false) return;
   mtx_get_server.lock();
   if (test_speed) {
     if (fast_server == NULL) {
@@ -750,6 +785,7 @@ void sftp_server_and_speed(bool test_speed, ServerInfo* server_in,
   mtx_get_server.unlock();
 }
 
+/* 查找最快的服务器 */
 struct ServerInfo* get_available_server(
     bool test_speed, std::vector<struct ServerInfo>& servers) {
   log_info(
@@ -846,6 +882,7 @@ void sftp_login(string username) {
   }
 }
 
+/* 获取gflag文件并解析 */
 bool get_file_dflag(string dflag) {
   log_debug("start to get file by dfalg: %s", dflag.c_str());
   string file_path;
@@ -876,35 +913,37 @@ bool get_file_dflag(string dflag) {
   return false;
 }
 
+bool is_base64(unsigned char c) {
+  return (isalnum(c) || (c == '+') || (c == '/'));
+}
+
 std::string base64_decode(const std::string& encoded_string) {
-  static const std::string base64_chars =
-      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-  std::string decoded;
+  int in_len = encoded_string.size();
   int i = 0;
   int j = 0;
   int in_ = 0;
   unsigned char char_array_4[4], char_array_3[3];
+  static const std::string base64_chars =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+      "abcdefghijklmnopqrstuvwxyz"
+      "0123456789+/";
+  std::string decoded_string;
 
-  for (const auto& ch : encoded_string) {
-    if (ch == '=') break;
+  while (in_len-- && (encoded_string[in_] != '=') &&
+         is_base64(encoded_string[in_])) {
+    char_array_4[i++] = encoded_string[in_];
     in_++;
-  }
-
-  for (const auto& ch : encoded_string) {
-    if (ch == '=') break;
-
-    int value = base64_chars.find(ch);
-    if (value == (int)std::string::npos) continue;
-
-    char_array_4[i++] = value;
     if (i == 4) {
+      for (i = 0; i < 4; i++)
+        char_array_4[i] = base64_chars.find(char_array_4[i]);
+
       char_array_3[0] =
           (char_array_4[0] << 2) + ((char_array_4[1] & 0x30) >> 4);
       char_array_3[1] =
           ((char_array_4[1] & 0xf) << 4) + ((char_array_4[2] & 0x3c) >> 2);
       char_array_3[2] = ((char_array_4[2] & 0x3) << 6) + char_array_4[3];
 
-      for (i = 0; i < 3; i++) decoded += char_array_3[i];
+      for (i = 0; (i < 3); i++) decoded_string += char_array_3[i];
       i = 0;
     }
   }
@@ -912,16 +951,21 @@ std::string base64_decode(const std::string& encoded_string) {
   if (i) {
     for (j = i; j < 4; j++) char_array_4[j] = 0;
 
+    for (j = 0; j < 4; j++)
+      char_array_4[j] = base64_chars.find(char_array_4[j]);
+
     char_array_3[0] = (char_array_4[0] << 2) + ((char_array_4[1] & 0x30) >> 4);
     char_array_3[1] =
         ((char_array_4[1] & 0xf) << 4) + ((char_array_4[2] & 0x3c) >> 2);
+    char_array_3[2] = ((char_array_4[2] & 0x3) << 6) + char_array_4[3];
 
-    for (j = 0; j < in_ - 1; j++) decoded += char_array_3[j];
+    for (j = 0; (j < i - 1); j++) decoded_string += char_array_3[j];
   }
 
-  return std::string(decoded.c_str());
+  return decoded_string;
 }
 
+/* sftp上传文件 */
 bool sftp_upfile(std::string upflag, std::string upfile) {
   log_info("upfile %s -> upflag %s (%s)", upfile.c_str(), upflag.c_str(),
            base64_decode(upflag).c_str());
@@ -995,6 +1039,7 @@ void config_json_read() {
 }
 
 int main(int argc, char* argv[]) {
+  int ret_flag = 0;
 #ifdef WIN32
   WSADATA wsadata;
   int err;
@@ -1006,7 +1051,6 @@ int main(int argc, char* argv[]) {
 #endif
   log_info("dfss cpp tool, version: (%s)[%s]", GIT_COMMIT_HASH,
            GIT_COMMIT_DATE);
-  libssh2_init(0);
   cxxopts::Options options(
       "dfss-cpp", "About: a tool can download file from sophgo sftp server");
   options.add_options("url get file")("url", "url to get sftp file",
@@ -1036,6 +1080,7 @@ int main(int argc, char* argv[]) {
   log_set_lock(Lk_mux, NULL);
   if (parser.count("debug")) {
     log_set_level(LOG_TRACE);
+    verbosity = SSH_LOG_PACKET;
     log_info("DEBUG MODE OPEN");
   } else {
     log_set_level(LOG_INFO);
@@ -1051,7 +1096,6 @@ int main(int argc, char* argv[]) {
     connect_timeout = parser["connect_timeout"].as<uint64_t>();
     log_info("config http connect timeout %ld s", connect_timeout);
   }
-  ret_flag = 0;
   do {
     if (parser.count("url")) {
       std::string url = parser["url"].as<std::string>();
@@ -1109,7 +1153,6 @@ int main(int argc, char* argv[]) {
       break;
     }
   } while (0);
-  libssh2_exit();
 #ifdef WIN32
   WSACleanup();
 #endif
