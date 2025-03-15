@@ -6,7 +6,7 @@ if [[ "$2" == "lib" ]]; then
 	pushd libs
 	bash build_libs.sh "$1"
 	popd
-fi	
+fi
 
 mkdir -p output
 cp ${build_shell}/src/*.json ${build_shell}/output/

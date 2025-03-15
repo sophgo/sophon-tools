@@ -294,7 +294,7 @@ int64_t http_get_file(struct ServerInfo* server, const std::string& path,
   }
 }
 
-int64_t sftp_get_file(struct ServerInfo* server, string path) {
+uint64_t sftp_get_file(struct ServerInfo* server, string path) {
   const string hostname = server->host;
   const string username = server->user;
   const string password = server->pass;
@@ -322,7 +322,7 @@ int64_t sftp_get_file(struct ServerInfo* server, string path) {
 #else
     close(sock);
 #endif
-    return -1;
+    return 0;
   }
 
   session = libssh2_session_init();
@@ -335,7 +335,13 @@ int64_t sftp_get_file(struct ServerInfo* server, string path) {
 #else
     close(sock);
 #endif
-    return -1;
+    return 0;
+  }
+
+  char* support_auth =
+      libssh2_userauth_list(session, username.c_str(), username.length());
+  if (support_auth != NULL) {
+    log_info("server support auth list: %s", support_auth);
   }
 
   if (libssh2_userauth_password(session, username.c_str(), password.c_str())) {
@@ -347,7 +353,15 @@ int64_t sftp_get_file(struct ServerInfo* server, string path) {
 #else
     close(sock);
 #endif
-    return -1;
+    return 0;
+  }
+
+  char* banner_s = (char*)calloc(0, 1024 * 512);
+  rc = libssh2_userauth_banner(session, &banner_s);
+  if (rc == LIBSSH2_ERROR_NONE) {
+    log_info(
+        "SFTP server banner:\n--------------------\n%s\n--------------------",
+        banner_s);
   }
 
   sftp_session = libssh2_sftp_init(session);
@@ -361,7 +375,7 @@ int64_t sftp_get_file(struct ServerInfo* server, string path) {
 #else
     close(sock);
 #endif
-    return -1;
+    return 0;
   }
 
   sftp_handle =
@@ -377,7 +391,7 @@ int64_t sftp_get_file(struct ServerInfo* server, string path) {
 #else
     close(sock);
 #endif
-    return -1;
+    return 0;
   }
 
   LIBSSH2_SFTP_ATTRIBUTES attributes;
@@ -393,7 +407,7 @@ int64_t sftp_get_file(struct ServerInfo* server, string path) {
 #else
     close(sock);
 #endif
-    return -1;
+    return 0;
   }
   uint64_t file_size = attributes.filesize;
 
@@ -411,10 +425,10 @@ int64_t sftp_get_file(struct ServerInfo* server, string path) {
 #else
     close(sock);
 #endif
-    return -1;
+    return 0;
   }
   ssize_t n;
-  int64_t total_downloaded = 0;
+  uint64_t total_downloaded = 0;
   while ((n = libssh2_sftp_read(sftp_handle, buffer, sizeof(buffer))) > 0) {
     local_file.write(buffer, n);
     total_downloaded += n;
@@ -444,7 +458,7 @@ int64_t sftp_get_file(struct ServerInfo* server, string path) {
     return total_downloaded;
   } else {
     log_error("Failed to download file: %s", path.c_str());
-    return -1;
+    return 0;
   }
 }
 
@@ -474,7 +488,7 @@ int64_t sftp_put_file(struct ServerInfo* server, string local_path,
   const string username = server->user;
   const string password = server->pass;
   const int port = server->port;
-  int sock;
+  int sock, rc;
   struct sockaddr_in sin;
   string file_name = getFileNameFromPath(local_path.c_str());
   string cur_time = get_current_time();
@@ -515,6 +529,12 @@ int64_t sftp_put_file(struct ServerInfo* server, string local_path,
     return -1;
   }
 
+  char* support_auth =
+      libssh2_userauth_list(session, username.c_str(), username.length());
+  if (support_auth != NULL) {
+    log_info("server support auth list: %s", support_auth);
+  }
+
   if (libssh2_userauth_password(session, username.c_str(), password.c_str())) {
     log_error("Authentication by password failed.");
     libssh2_session_disconnect(session, "Normal Shutdown");
@@ -525,6 +545,14 @@ int64_t sftp_put_file(struct ServerInfo* server, string local_path,
     close(sock);
 #endif
     return -1;
+  }
+
+  char* banner_s = (char*)calloc(0, 1024 * 512);
+  rc = libssh2_userauth_banner(session, &banner_s);
+  if (rc == LIBSSH2_ERROR_NONE) {
+    log_info(
+        "SFTP server banner:\n--------------------\n%s\n--------------------",
+        banner_s);
   }
 
   sftp_session = libssh2_sftp_init(session);
@@ -876,35 +904,37 @@ bool get_file_dflag(string dflag) {
   return false;
 }
 
+bool is_base64(unsigned char c) {
+  return (isalnum(c) || (c == '+') || (c == '/'));
+}
+
 std::string base64_decode(const std::string& encoded_string) {
-  static const std::string base64_chars =
-      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-  std::string decoded;
+  int in_len = encoded_string.size();
   int i = 0;
   int j = 0;
   int in_ = 0;
   unsigned char char_array_4[4], char_array_3[3];
+  static const std::string base64_chars =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+      "abcdefghijklmnopqrstuvwxyz"
+      "0123456789+/";
+  std::string decoded_string;
 
-  for (const auto& ch : encoded_string) {
-    if (ch == '=') break;
+  while (in_len-- && (encoded_string[in_] != '=') &&
+         is_base64(encoded_string[in_])) {
+    char_array_4[i++] = encoded_string[in_];
     in_++;
-  }
-
-  for (const auto& ch : encoded_string) {
-    if (ch == '=') break;
-
-    int value = base64_chars.find(ch);
-    if (value == (int)std::string::npos) continue;
-
-    char_array_4[i++] = value;
     if (i == 4) {
+      for (i = 0; i < 4; i++)
+        char_array_4[i] = base64_chars.find(char_array_4[i]);
+
       char_array_3[0] =
           (char_array_4[0] << 2) + ((char_array_4[1] & 0x30) >> 4);
       char_array_3[1] =
           ((char_array_4[1] & 0xf) << 4) + ((char_array_4[2] & 0x3c) >> 2);
       char_array_3[2] = ((char_array_4[2] & 0x3) << 6) + char_array_4[3];
 
-      for (i = 0; i < 3; i++) decoded += char_array_3[i];
+      for (i = 0; (i < 3); i++) decoded_string += char_array_3[i];
       i = 0;
     }
   }
@@ -912,14 +942,18 @@ std::string base64_decode(const std::string& encoded_string) {
   if (i) {
     for (j = i; j < 4; j++) char_array_4[j] = 0;
 
+    for (j = 0; j < 4; j++)
+      char_array_4[j] = base64_chars.find(char_array_4[j]);
+
     char_array_3[0] = (char_array_4[0] << 2) + ((char_array_4[1] & 0x30) >> 4);
     char_array_3[1] =
         ((char_array_4[1] & 0xf) << 4) + ((char_array_4[2] & 0x3c) >> 2);
+    char_array_3[2] = ((char_array_4[2] & 0x3) << 6) + char_array_4[3];
 
-    for (j = 0; j < in_ - 1; j++) decoded += char_array_3[j];
+    for (j = 0; (j < i - 1); j++) decoded_string += char_array_3[j];
   }
 
-  return std::string(decoded.c_str());
+  return decoded_string;
 }
 
 bool sftp_upfile(std::string upflag, std::string upfile) {
@@ -1076,7 +1110,7 @@ int main(int argc, char* argv[]) {
       }
     } else if (parser.count("user")) {
       string username = parser["user"].as<std::string>();
-      std::cout << "user: " << username << std::endl;
+      log_info("use user: %s", username);
       sftp_login(username);
     } else if (parser.count("dflag")) {
       std::string dflag = parser["dflag"].as<std::string>();
