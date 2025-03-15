@@ -143,10 +143,10 @@ if __name__ == '__main__':
     parser.add_argument('--dflag', help='using download flag to get file')
     parser.add_argument('--upflag', help='flag of need upload file, need upfile')
     parser.add_argument('--upfile', help='need to upload file, need upflag')
-    parser.add_argument('--enable_http', help='url or dfss get file by http enable')
+    parser.add_argument('--enable_http', action='store_true', help='url or dfss get file by http enable')
     parser.add_argument('--connect_timeout', help='config timeout on http connect')
-    parser.add_argument('--debug', help='open debug info print mode')
-    parser.add_argument('--no_json', help='do not use json config')
+    parser.add_argument('--debug', action='store_true', help='open debug info print mode')
+    parser.add_argument('--no_json', action='store_true', help='do not use json config')
 
     parser.add_argument('--install', help='install package')
 
