@@ -44,7 +44,7 @@ if [[ "$1" == "host" ]]; then
 
 	## libssh2 static
 	pushd "${build_shell}/libssh2"
-	./configure --disable-examples-build --disable-sshd-tests --disable-docker-tests --disable-tests --with-sysroot="${build_shell}/host_build" --enable-static=yes --enable-shared=no --with-libssl-prefix="${build_shell}/host_build" --prefix="${build_shell}/host_build" --with-crypto=openssl --without-libz
+	./configure --disable-examples-build --disable-sshd-tests --disable-docker-tests --with-sysroot="${build_shell}/host_build" --enable-static=yes --enable-shared=no --with-libssl-prefix="${build_shell}/host_build" --prefix="${build_shell}/host_build" --with-crypto=openssl --without-libz
 	make clean
 	make -j$(nproc)
 	make install -j$(nproc)
@@ -74,7 +74,7 @@ elif [[ "$1" == "aarch64" ]]; then
 	pushd "${build_shell}/libssh2"
 	make clean
 	
-	./configure --disable-examples-build --disable-sshd-tests --disable-docker-tests --disable-tests --host=aarch64-linux-gnu --with-sysroot="${build_shell}/aarch64_build" --enable-static=yes --enable-shared=no --with-libssl-prefix="${build_shell}/aarch64_build" --prefix="${build_shell}/aarch64_build" --with-crypto=openssl
+	./configure --disable-examples-build --disable-sshd-tests --disable-docker-tests --host=aarch64-linux-gnu --with-sysroot="${build_shell}/aarch64_build" --enable-static=yes --enable-shared=no --with-libssl-prefix="${build_shell}/aarch64_build" --prefix="${build_shell}/aarch64_build" --with-crypto=openssl
 	unset CC
 	unset CXX
 	unset LD
@@ -112,7 +112,7 @@ elif [[ "$1" == "mingw64" ]]; then
 	pushd "${build_shell}/libssh2"
 	make clean
 	
-	./configure --host=x86_64-pc-mingw64 --disable-examples-build --disable-sshd-tests --disable-docker-tests --disable-tests --with-sysroot="${build_shell}/win64_build" --enable-static=yes --enable-shared=no --with-libssl-prefix="${build_shell}/win64_build" --prefix="${build_shell}/win64_build" --with-crypto=openssl
+	./configure --host=x86_64-pc-mingw64 --disable-examples-build --disable-sshd-tests --disable-docker-tests --with-sysroot="${build_shell}/win64_build" --enable-static=yes --enable-shared=no --with-libssl-prefix="${build_shell}/win64_build" --prefix="${build_shell}/win64_build" --with-crypto=openssl
 	unset CC
 	unset CXX
 	unset LD
@@ -151,7 +151,7 @@ elif [[ "$1" == "mingw" ]]; then
 	pushd "${build_shell}/libssh2"
 	make clean
 	
-	./configure --host=i686-pc-mingw32 --disable-examples-build --disable-sshd-tests --disable-docker-tests --disable-tests --with-sysroot="${build_shell}/win32_build" --enable-static=yes --enable-shared=no --with-libssl-prefix="${build_shell}/win32_build" --prefix="${build_shell}/win32_build" --with-crypto=openssl
+	./configure --host=i686-pc-mingw32 --disable-examples-build --disable-sshd-tests --disable-docker-tests --with-sysroot="${build_shell}/win32_build" --enable-static=yes --enable-shared=no --with-libssl-prefix="${build_shell}/win32_build" --prefix="${build_shell}/win32_build" --with-crypto=openssl
 	unset CC
 	unset CXX
 	unset LD
@@ -190,7 +190,7 @@ elif [[ "$1" == "loongarch64" ]]; then
 	pushd "${build_shell}/libssh2"
 	make clean
 	
-	./configure --host=loongarch64-pc-linux --disable-examples-build --disable-sshd-tests --disable-docker-tests --disable-tests --with-sysroot="${build_shell}/loongarch64_build" --enable-static=yes --enable-shared=no --with-libssl-prefix="${build_shell}/loongarch64_build" --prefix="${build_shell}/loongarch64_build" --with-crypto=openssl
+	./configure --host=loongarch64-pc-linux --disable-examples-build --disable-sshd-tests --disable-docker-tests --with-sysroot="${build_shell}/loongarch64_build" --enable-static=yes --enable-shared=no --with-libssl-prefix="${build_shell}/loongarch64_build" --prefix="${build_shell}/loongarch64_build" --with-crypto=openssl
 	unset CC
 	unset CXX
 	unset LD
@@ -229,7 +229,7 @@ elif [[ "$1" == "riscv64" ]]; then
 	pushd "${build_shell}/libssh2"
 	make clean
 	
-	./configure --host=riscv64-pc-linux --disable-examples-build --disable-sshd-tests --disable-docker-tests --disable-tests --with-sysroot="${build_shell}/riscv64_build" --enable-static=yes --enable-shared=no --with-libssl-prefix="${build_shell}/riscv64_build" --prefix="${build_shell}/riscv64_build" --with-crypto=openssl
+	./configure --host=riscv64-pc-linux --disable-examples-build --disable-sshd-tests --disable-docker-tests --with-sysroot="${build_shell}/riscv64_build" --enable-static=yes --enable-shared=no --with-libssl-prefix="${build_shell}/riscv64_build" --prefix="${build_shell}/riscv64_build" --with-crypto=openssl
 	unset CC
 	unset CXX
 	unset LD
@@ -268,7 +268,7 @@ elif [[ "$1" == "armbi" ]]; then
 	pushd "${build_shell}/libssh2"
 	make clean
 	
-	./configure --host=arm-pc-linux --disable-examples-build --disable-sshd-tests --disable-docker-tests --disable-tests --with-sysroot="${build_shell}/armbi_build" --enable-static=yes --enable-shared=no --with-libssl-prefix="${build_shell}/armbi_build" --prefix="${build_shell}/armbi_build" --with-crypto=openssl
+	./configure --host=arm-pc-linux --disable-examples-build --disable-sshd-tests --disable-docker-tests --with-sysroot="${build_shell}/armbi_build" --enable-static=yes --enable-shared=no --with-libssl-prefix="${build_shell}/armbi_build" --prefix="${build_shell}/armbi_build" --with-crypto=openssl
 	unset CC
 	unset CXX
 	unset LD
@@ -308,7 +308,7 @@ elif [[ "$1" == "sw_64" ]]; then
 	pushd "${build_shell}/libssh2"
 	make clean
 	
-	./configure --host=alpha-pc-linux --disable-examples-build --disable-sshd-tests --disable-docker-tests --disable-tests --with-sysroot="${build_shell}/sw_64_build" --enable-static=yes --enable-shared=no --with-libssl-prefix="${build_shell}/sw_64_build" --prefix="${build_shell}/sw_64_build" --with-crypto=openssl
+	./configure --host=alpha-pc-linux --disable-examples-build --disable-sshd-tests --disable-docker-tests --with-sysroot="${build_shell}/sw_64_build" --enable-static=yes --enable-shared=no --with-libssl-prefix="${build_shell}/sw_64_build" --prefix="${build_shell}/sw_64_build" --with-crypto=openssl
 	unset CC
 	unset CXX
 	unset LD
