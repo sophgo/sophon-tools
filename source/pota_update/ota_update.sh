@@ -529,6 +529,7 @@ echo Program fip.bin done
 " >>$OTA_UPDATE_SCRIPT_FILE
 elif [[ "${CPU_MODEL}" == "bm1688" ]] || [[ "${CPU_MODEL}" == "cv186ah" ]]; then
     echo "
+cmp.b 0x05207f82 0x05207f83 1; if test \$? -eq 1; then setenv consoledev ttyS2; fi
 echo Program $OTA_FIP_FILE start
 mmc dev 0
 mmc read \${ramdisk_addr_r} ${OTA_FIP_WRITE_OFFSET} ${OTA_FIP_WRITE_SIZE}
