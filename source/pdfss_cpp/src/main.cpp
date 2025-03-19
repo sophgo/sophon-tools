@@ -1110,7 +1110,7 @@ int main(int argc, char* argv[]) {
       }
     } else if (parser.count("user")) {
       string username = parser["user"].as<std::string>();
-      log_info("use user: %s", username);
+      log_info("use user: %s", username.c_str());
       sftp_login(username);
     } else if (parser.count("dflag")) {
       std::string dflag = parser["dflag"].as<std::string>();
