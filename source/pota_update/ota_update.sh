@@ -325,7 +325,7 @@ echo "[INFO] Check fip file and chip type success"
 # 缩小最后一个分区，空出刷机包大小的空间
 echo "[INFO] resize last part to write update pack start"
 set >>"$LOGFILE"
-OTA_LAST_DEVICE=/dev/$(lsblk -o NAME /dev/mmcblk0 | tail -n1 | sed 's|└─||g')
+OTA_LAST_DEVICE=/dev/$(lsblk -l -o NAME /dev/mmcblk0 | tail -n1)
 OTA_LAST_DEVICE_MOUNT_POINT=$(df | grep "${OTA_LAST_DEVICE}" | awk -F' ' '{print $6}')
 OTA_LAST_DEVICE_SIZE_KB=$(echo "$(lsblk -b ${OTA_LAST_DEVICE} | tail -n1 | awk -F' ' '{print $4}') \
 / 1024" | bc)
