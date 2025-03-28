@@ -327,6 +327,9 @@ uint64_t sftp_get_file(struct ServerInfo* server, string path) {
 
   session = libssh2_session_init();
   libssh2_session_set_timeout(session, connect_timeout * 1000);
+  libssh2_session_flag(session, LIBSSH2_FLAG_COMPRESS, 1);
+  libssh2_session_method_pref(session, LIBSSH2_METHOD_COMP_CS, "zlib,none");
+  libssh2_session_method_pref(session, LIBSSH2_METHOD_COMP_SC, "zlib,none");
   if (libssh2_session_handshake(session, sock)) {
     log_error("Failure establishing SSH session");
     libssh2_session_free(session);
@@ -363,6 +366,9 @@ uint64_t sftp_get_file(struct ServerInfo* server, string path) {
         "SFTP server banner:\n--------------------\n%s\n--------------------",
         banner_s);
   }
+
+  const char *comp = libssh2_session_methods(session, LIBSSH2_METHOD_COMP_CS);
+  log_info("Compression algorithm: %s", comp);
 
   sftp_session = libssh2_sftp_init(session);
   if (!sftp_session) {
@@ -518,6 +524,9 @@ int64_t sftp_put_file(struct ServerInfo* server, string local_path,
 
   session = libssh2_session_init();
   libssh2_session_set_timeout(session, connect_timeout * 1000);
+  libssh2_session_flag(session, LIBSSH2_FLAG_COMPRESS, 1);
+  libssh2_session_method_pref(session, LIBSSH2_METHOD_COMP_CS, "zlib,none");
+  libssh2_session_method_pref(session, LIBSSH2_METHOD_COMP_SC, "zlib,none");
   if (libssh2_session_handshake(session, sock)) {
     log_error("Failure establishing SSH session");
     libssh2_session_free(session);
@@ -554,6 +563,9 @@ int64_t sftp_put_file(struct ServerInfo* server, string local_path,
         "SFTP server banner:\n--------------------\n%s\n--------------------",
         banner_s);
   }
+
+  const char *comp = libssh2_session_methods(session, LIBSSH2_METHOD_COMP_CS);
+  log_info("Compression algorithm: %s", comp);
 
   sftp_session = libssh2_sftp_init(session);
   if (!sftp_session) {

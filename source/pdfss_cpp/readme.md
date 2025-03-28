@@ -40,7 +40,7 @@
 * loongarch64 linux gcc14.2(arch linux) static
 * riscv64 linux gcc14.2(arch linux) static
 * armbi linux gcc7.5(ubuntu18)
-* sw_64 linux gcc10.3(ubuntu18)
+* sw_64 linux gcc10.3(ubuntu18) static
 
 ## 发布方式
 

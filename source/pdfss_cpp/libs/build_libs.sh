@@ -35,6 +35,15 @@ if [[ "$1" == "host" ]]; then
 	# host gcc
 	rm -rf host_build
 	mkdir -p host_build
+	unset CROSS_COMPILE
+
+	## zlib static
+	pushd "${build_shell}/zlib"
+	CC=${CROSS_COMPILE}gcc ./configure --prefix="${build_target}" --static
+	make clean
+	make -j$(nproc)
+	make install -j$(nproc)
+	popd #zlib
 
 	## mbedtls static
 	pushd "${build_shell}/mbedtls"
@@ -48,7 +57,7 @@ if [[ "$1" == "host" ]]; then
 
 	## libssh2 static
 	pushd "${build_shell}/libssh2"
-	./configure --disable-examples-build --disable-sshd-tests --disable-docker-tests --with-sysroot="${build_target}" --enable-static=yes --enable-shared=no --with-libssl-prefix="${build_target}" --prefix="${build_target}" --with-crypto=mbedtls --without-libz
+	./configure --disable-examples-build --disable-sshd-tests --disable-docker-tests --with-sysroot="${build_target}" --enable-static=yes --enable-shared=no --with-libssl-prefix="${build_target}" --prefix="${build_target}" --with-crypto=mbedtls --with-libz --with-libz-prefix="${build_target}"
 	make clean
 	make -j$(nproc)
 	make install -j$(nproc)
@@ -59,6 +68,14 @@ elif [[ "$1" == "aarch64" ]]; then
 	rm -rf aarch64_build
 	mkdir -p aarch64_build
 	export CROSS_COMPILE=aarch64-linux-gnu-
+
+	## zlib static
+	pushd "${build_shell}/zlib"
+	CC=${CROSS_COMPILE}gcc CC=${CROSS_COMPILE}gcc ./configure --prefix="${build_target}" --static
+	make clean
+	make -j$(nproc)
+	make install -j$(nproc)
+	popd #zlib
 
 	## mbedtls static
 	pushd "${build_shell}/mbedtls"
@@ -84,7 +101,7 @@ elif [[ "$1" == "aarch64" ]]; then
 	pushd "${build_shell}/libssh2"
 	make clean
 
-	./configure --disable-examples-build --disable-sshd-tests --disable-docker-tests --host=aarch64-linux-gnu --with-sysroot="${build_target}" --enable-static=yes --enable-shared=no --with-libmbedcrypto-prefix="${build_target}" --prefix="${build_target}" --with-crypto=mbedtls --without-libz
+	./configure --disable-examples-build --disable-sshd-tests --disable-docker-tests --host=aarch64-linux-gnu --with-sysroot="${build_target}" --enable-static=yes --enable-shared=no --with-libmbedcrypto-prefix="${build_target}" --prefix="${build_target}" --with-crypto=mbedtls --with-libz --with-libz-prefix="${build_target}"
 	unset CC
 	unset CXX
 	unset LD
@@ -99,6 +116,14 @@ elif [[ "$1" == "mingw64" ]]; then
 	rm -rf win64_build
 	mkdir -p win64_build
 	export CROSS_COMPILE=x86_64-w64-mingw32-
+
+	## zlib static
+	pushd "${build_shell}/zlib"
+	CC=${CROSS_COMPILE}gcc ./configure --prefix="${build_target}" --static
+	make clean
+	make -j$(nproc)
+	make install -j$(nproc)
+	popd #zlib
 
 	## mbedtls static
 	pushd "${build_shell}/mbedtls"
@@ -124,7 +149,7 @@ elif [[ "$1" == "mingw64" ]]; then
 	pushd "${build_shell}/libssh2"
 	make clean
 
-	./configure --host=x86_64-pc-mingw64 --disable-examples-build --disable-sshd-tests --disable-docker-tests --with-sysroot="${build_target}" --enable-static=yes --enable-shared=no --with-libmbedcrypto-prefix="${build_target}" --prefix="${build_target}" --with-crypto=mbedtls --without-libz
+	./configure --host=x86_64-pc-mingw64 --disable-examples-build --disable-sshd-tests --disable-docker-tests --with-sysroot="${build_target}" --enable-static=yes --enable-shared=no --with-libmbedcrypto-prefix="${build_target}" --prefix="${build_target}" --with-crypto=mbedtls --with-libz --with-libz-prefix="${build_target}"
 	unset CC
 	unset CXX
 	unset LD
@@ -140,6 +165,14 @@ elif [[ "$1" == "mingw" ]]; then
 	rm -rf win32_build
 	mkdir -p win32_build
 	export CROSS_COMPILE=i686-w64-mingw32-
+
+	## zlib static
+	pushd "${build_shell}/zlib"
+	CC=${CROSS_COMPILE}gcc ./configure --prefix="${build_target}" --static
+	make clean
+	make -j$(nproc)
+	make install -j$(nproc)
+	popd #zlib
 
 	## mbedtls static
 	pushd "${build_shell}/mbedtls"
@@ -165,7 +198,7 @@ elif [[ "$1" == "mingw" ]]; then
 	pushd "${build_shell}/libssh2"
 	make clean
 
-	./configure --host=i686-pc-mingw32 --disable-examples-build --disable-sshd-tests --disable-docker-tests --with-sysroot="${build_target}" --enable-static=yes --enable-shared=no --with-libmbedcrypto-prefix="${build_target}" --prefix="${build_target}" --with-crypto=mbedtls --without-libz
+	./configure --host=i686-pc-mingw32 --disable-examples-build --disable-sshd-tests --disable-docker-tests --with-sysroot="${build_target}" --enable-static=yes --enable-shared=no --with-libmbedcrypto-prefix="${build_target}" --prefix="${build_target}" --with-crypto=mbedtls --with-libz --with-libz-prefix="${build_target}"
 	unset CC
 	unset CXX
 	unset LD
@@ -181,6 +214,14 @@ elif [[ "$1" == "loongarch64" ]]; then
 	rm -rf loongarch64_build
 	mkdir -p loongarch64_build
 	export CROSS_COMPILE=loongarch64-unknown-linux-gnu-
+
+	## zlib static
+	pushd "${build_shell}/zlib"
+	CC=${CROSS_COMPILE}gcc ./configure --prefix="${build_target}" --static
+	make clean
+	make -j$(nproc)
+	make install -j$(nproc)
+	popd #zlib
 
 	## mbedtls static
 	pushd "${build_shell}/mbedtls"
@@ -206,7 +247,7 @@ elif [[ "$1" == "loongarch64" ]]; then
 	pushd "${build_shell}/libssh2"
 	make clean
 
-	./configure --host=loongarch64-pc-linux --disable-examples-build --disable-sshd-tests --disable-docker-tests --with-sysroot="${build_target}" --enable-static=yes --enable-shared=no --with-libmbedcrypto-prefix="${build_target}" --prefix="${build_target}" --with-crypto=mbedtls --without-libz
+	./configure --host=loongarch64-pc-linux --disable-examples-build --disable-sshd-tests --disable-docker-tests --with-sysroot="${build_target}" --enable-static=yes --enable-shared=no --with-libmbedcrypto-prefix="${build_target}" --prefix="${build_target}" --with-crypto=mbedtls --with-libz --with-libz-prefix="${build_target}"
 	unset CC
 	unset CXX
 	unset LD
@@ -222,6 +263,14 @@ elif [[ "$1" == "riscv64" ]]; then
 	rm -rf riscv64_build
 	mkdir -p riscv64_build
 	export CROSS_COMPILE=riscv64-linux-gnu-
+
+	## zlib static
+	pushd "${build_shell}/zlib"
+	CC=${CROSS_COMPILE}gcc ./configure --prefix="${build_target}" --static
+	make clean
+	make -j$(nproc)
+	make install -j$(nproc)
+	popd #zlib
 
 	## mbedtls static
 	pushd "${build_shell}/mbedtls"
@@ -247,7 +296,7 @@ elif [[ "$1" == "riscv64" ]]; then
 	pushd "${build_shell}/libssh2"
 	make clean
 
-	./configure --host=riscv64-pc-linux --disable-examples-build --disable-sshd-tests --disable-docker-tests --with-sysroot="${build_target}" --enable-static=yes --enable-shared=no --with-libmbedcrypto-prefix="${build_target}" --prefix="${build_target}" --with-crypto=mbedtls
+	./configure --host=riscv64-pc-linux --disable-examples-build --disable-sshd-tests --disable-docker-tests --with-sysroot="${build_target}" --enable-static=yes --enable-shared=no --with-libmbedcrypto-prefix="${build_target}" --prefix="${build_target}" --with-crypto=mbedtls --with-libz --with-libz-prefix="${build_target}"
 	unset CC
 	unset CXX
 	unset LD
@@ -263,6 +312,14 @@ elif [[ "$1" == "armbi" ]]; then
 	rm -rf armbi_build
 	mkdir -p armbi_build
 	export CROSS_COMPILE=arm-linux-gnueabi-
+
+	## zlib static
+	pushd "${build_shell}/zlib"
+	CC=${CROSS_COMPILE}gcc ./configure --prefix="${build_target}" --static
+	make clean
+	make -j$(nproc)
+	make install -j$(nproc)
+	popd #zlib
 
 	## mbedtls static
 	pushd "${build_shell}/mbedtls"
@@ -284,7 +341,7 @@ elif [[ "$1" == "armbi" ]]; then
 	pushd "${build_shell}/libssh2"
 	make clean
 
-	./configure --host=arm-pc-linux --disable-examples-build --disable-sshd-tests --disable-docker-tests --with-sysroot="${build_target}" --enable-static=yes --enable-shared=no --with-libmbedcrypto-prefix="${build_target}" --prefix="${build_target}" --with-crypto=mbedtls
+	./configure --host=arm-pc-linux --disable-examples-build --disable-sshd-tests --disable-docker-tests --with-sysroot="${build_target}" --enable-static=yes --enable-shared=no --with-libmbedcrypto-prefix="${build_target}" --prefix="${build_target}" --with-crypto=mbedtls --with-libz --with-libz-prefix="${build_target}"
 	unset CC
 	unset CXX
 	unset LD
@@ -301,6 +358,14 @@ elif [[ "$1" == "sw_64" ]]; then
 	rm -rf sw_64_build
 	mkdir -p sw_64_build
 	export CROSS_COMPILE=sw_64-sunway-linux-gnu-
+
+	## zlib static
+	pushd "${build_shell}/zlib"
+	CC=${CROSS_COMPILE}gcc ./configure --prefix="${build_target}" --static
+	make clean
+	make -j$(nproc)
+	make install -j$(nproc)
+	popd #zlib
 
 	## mbedtls static
 	pushd "${build_shell}/mbedtls"
@@ -326,7 +391,7 @@ elif [[ "$1" == "sw_64" ]]; then
 	pushd "${build_shell}/libssh2"
 	make clean
 
-	./configure --host=alpha-pc-linux --disable-examples-build --disable-sshd-tests --disable-docker-tests --with-sysroot="${build_target}" --enable-static=yes --enable-shared=no --with-libmbedcrypto-prefix="${build_target}" --prefix="${build_target}" --with-crypto=mbedtls
+	./configure --host=alpha-pc-linux --disable-examples-build --disable-sshd-tests --disable-docker-tests --with-sysroot="${build_target}" --enable-static=yes --enable-shared=no --with-libmbedcrypto-prefix="${build_target}" --prefix="${build_target}" --with-crypto=mbedtls --with-libz --with-libz-prefix="${build_target}"
 	unset CC
 	unset CXX
 	unset LD
