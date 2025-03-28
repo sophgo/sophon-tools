@@ -33,12 +33,12 @@
 
 ## 默认编译器版本
 
-* amd64 linux gcc5.4(ubuntu16)
-* amd64 win gcc13.1(arch linux)
-* i686 win gcc13.1(arch linux)
-* arm64 linux gcc6.3(ubuntu18)
-* loongarch64 linux gcc8.3(ubuntu18)
-* riscv64 linux gcc7.5(ubuntu18)
+* amd64 linux gcc14.2(arch linux) static
+* amd64 win gcc14.2(arch linux) static
+* i686 win gcc14.2(arch linux) static
+* arm64 linux gcc14.2(arch linux) static
+* loongarch64 linux gcc14.2(arch linux) static
+* riscv64 linux gcc14.2(arch linux) static
 * armbi linux gcc7.5(ubuntu18)
 * sw_64 linux gcc10.3(ubuntu18)
 

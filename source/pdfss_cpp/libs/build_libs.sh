@@ -9,12 +9,9 @@ unset CXX
 unset ARCH
 unset CROSS_COMPILE
 
-sudo rm -rf openss*
 sudo rm -rf libssh*
 sudo rm -rf zlib*
-
-tar -xaf "$(find ${build_shell}/zips/ -name "openssl*")" -C ./
-mv openssl* openssl
+sudo rm -rf mbedtls*
 
 tar -xaf "$(find ${build_shell}/zips/ -name "libssh2*")" -C ./
 mv libssh2* libssh2
@@ -22,29 +19,36 @@ mv libssh2* libssh2
 tar -xaf "$(find ${build_shell}/zips/ -name "zlib*")" -C ./
 mv zlib* zlib
 
+tar -xaf "$(find ${build_shell}/zips/ -name "mbedtls*")" -C ./
+mv mbedtls* mbedtls
+
 unset CC
 unset CXX
 unset LD
 unset AR
 unset CROSS_COMPILE
 
+build_target="${build_shell}/${1}_build"
+sudo rm -rf "${build_target}"
+
 if [[ "$1" == "host" ]]; then
 	# host gcc
 	rm -rf host_build
 	mkdir -p host_build
 
-	## openssl static
-	pushd "${build_shell}/openssl"
-	
-	./config no-shared no-asm --prefix="${build_shell}/host_build"
-	make clean
+	## mbedtls static
+	pushd "${build_shell}/mbedtls"
+	mkdir build
+	cd build
+	SHARED=0 cmake -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTING=OFF -DUSE_STATIC_MBEDTLS_LIBRARY=ON -DUSE_SHARED_MBEDTLS_LIBRARY=OFF -DINSTALL_MBEDTLS_HEADERS=ON  -DCMAKE_INSTALL_PREFIX="${build_target}" ..
 	make -j$(nproc)
 	make install -j$(nproc)
-	popd #openssl
+	cd ..
+	popd
 
 	## libssh2 static
 	pushd "${build_shell}/libssh2"
-	./configure --disable-examples-build --disable-sshd-tests --disable-docker-tests --with-sysroot="${build_shell}/host_build" --enable-static=yes --enable-shared=no --with-libssl-prefix="${build_shell}/host_build" --prefix="${build_shell}/host_build" --with-crypto=openssl --without-libz
+	./configure --disable-examples-build --disable-sshd-tests --disable-docker-tests --with-sysroot="${build_target}" --enable-static=yes --enable-shared=no --with-libssl-prefix="${build_target}" --prefix="${build_target}" --with-crypto=mbedtls --without-libz
 	make clean
 	make -j$(nproc)
 	make install -j$(nproc)
@@ -55,14 +59,20 @@ elif [[ "$1" == "aarch64" ]]; then
 	rm -rf aarch64_build
 	mkdir -p aarch64_build
 	export CROSS_COMPILE=aarch64-linux-gnu-
-	## openssl static
-	pushd "${build_shell}/openssl"
-	make clean
-	./config no-shared no-asm --prefix="${build_shell}/aarch64_build" linux-aarch64
-	make clean
-	make -j$(nproc) VERBOSE=1 || exit 1
+
+	## mbedtls static
+	pushd "${build_shell}/mbedtls"
+	mkdir build
+	cd build
+	CFLAGS="-Wno-error=array-bounds" CC=${CROSS_COMPILE}gcc SHARED=0 cmake -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTING=OFF -DUSE_STATIC_MBEDTLS_LIBRARY=ON -DUSE_SHARED_MBEDTLS_LIBRARY=OFF -DINSTALL_MBEDTLS_HEADERS=ON -DCMAKE_INSTALL_PREFIX="${build_target}" ..
+	make -j$(nproc)
 	make install -j$(nproc)
-	popd #openssl
+	cd ..
+	popd
+
+	pushd "${build_target}"
+	ln -s lib lib64
+	popd
 
 	export CC=aarch64-linux-gnu-gcc
 	export CXX=aarch64-linux-gnu-g++
@@ -73,8 +83,8 @@ elif [[ "$1" == "aarch64" ]]; then
 	## libssh2 static
 	pushd "${build_shell}/libssh2"
 	make clean
-	
-	./configure --disable-examples-build --disable-sshd-tests --disable-docker-tests --host=aarch64-linux-gnu --with-sysroot="${build_shell}/aarch64_build" --enable-static=yes --enable-shared=no --with-libssl-prefix="${build_shell}/aarch64_build" --prefix="${build_shell}/aarch64_build" --with-crypto=openssl
+
+	./configure --disable-examples-build --disable-sshd-tests --disable-docker-tests --host=aarch64-linux-gnu --with-sysroot="${build_target}" --enable-static=yes --enable-shared=no --with-libmbedcrypto-prefix="${build_target}" --prefix="${build_target}" --with-crypto=mbedtls --without-libz
 	unset CC
 	unset CXX
 	unset LD
@@ -89,17 +99,19 @@ elif [[ "$1" == "mingw64" ]]; then
 	rm -rf win64_build
 	mkdir -p win64_build
 	export CROSS_COMPILE=x86_64-w64-mingw32-
-	## openssl static
-	pushd "${build_shell}/openssl"
-	make clean
-	./config no-shared no-asm --prefix="${build_shell}/win64_build" mingw64
-	make clean
-	make -j$(nproc) VERBOSE=1 || exit 1
-	make install -j$(nproc)
-	popd #openssl
 
-	pushd "${build_shell}/win64_build"
-	ln -s lib64 lib
+	## mbedtls static
+	pushd "${build_shell}/mbedtls"
+	mkdir build
+	cd build
+	WINDOWS=1 CC=${CROSS_COMPILE}gcc SHARED=0 cmake -DCMAKE_INSTALL_LIBDIR=lib -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=x86_64 -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTING=OFF -DUSE_STATIC_MBEDTLS_LIBRARY=ON -DUSE_SHARED_MBEDTLS_LIBRARY=OFF -DINSTALL_MBEDTLS_HEADERS=ON  -DCMAKE_INSTALL_PREFIX="${build_target}" ..
+	WINDOWS=1 make -j$(nproc) CC=${CROSS_COMPILE}gcc
+	WINDOWS=1 make install -j$(nproc) CC=${CROSS_COMPILE}gcc
+	cd ..
+	popd
+
+	pushd "${build_target}"
+	ln -s lib lib64
 	popd
 
 	export CC=x86_64-w64-mingw32-gcc
@@ -111,8 +123,8 @@ elif [[ "$1" == "mingw64" ]]; then
 	## libssh2 static
 	pushd "${build_shell}/libssh2"
 	make clean
-	
-	./configure --host=x86_64-pc-mingw64 --disable-examples-build --disable-sshd-tests --disable-docker-tests --with-sysroot="${build_shell}/win64_build" --enable-static=yes --enable-shared=no --with-libssl-prefix="${build_shell}/win64_build" --prefix="${build_shell}/win64_build" --with-crypto=openssl
+
+	./configure --host=x86_64-pc-mingw64 --disable-examples-build --disable-sshd-tests --disable-docker-tests --with-sysroot="${build_target}" --enable-static=yes --enable-shared=no --with-libmbedcrypto-prefix="${build_target}" --prefix="${build_target}" --with-crypto=mbedtls --without-libz
 	unset CC
 	unset CXX
 	unset LD
@@ -128,17 +140,19 @@ elif [[ "$1" == "mingw" ]]; then
 	rm -rf win32_build
 	mkdir -p win32_build
 	export CROSS_COMPILE=i686-w64-mingw32-
-	## openssl static
-	pushd "${build_shell}/openssl"
-	make clean
-	./config no-shared no-asm --prefix="${build_shell}/win32_build" mingw
-	make clean
-	make -j$(nproc) VERBOSE=1 || exit 1
-	make install -j$(nproc)
-	popd #openssl
 
-	pushd "${build_shell}/win32_build"
-	ln -s lib64 lib
+	## mbedtls static
+	pushd "${build_shell}/mbedtls"
+	mkdir build
+	cd build
+	WINDOWS=1 CC=${CROSS_COMPILE}gcc SHARED=0 cmake -DCMAKE_INSTALL_LIBDIR=lib -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=i686 -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTING=OFF -DUSE_STATIC_MBEDTLS_LIBRARY=ON -DUSE_SHARED_MBEDTLS_LIBRARY=OFF -DINSTALL_MBEDTLS_HEADERS=ON  -DCMAKE_INSTALL_PREFIX="${build_target}" ..
+	WINDOWS=1 CC=${CROSS_COMPILE}gcc make -j$(nproc)
+	WINDOWS=1 CC=${CROSS_COMPILE}gcc make install -j$(nproc)
+	cd ..
+	popd
+
+	pushd "${build_target}"
+	ln -s lib lib64
 	popd
 
 	export CC=i686-w64-mingw32-gcc
@@ -150,8 +164,8 @@ elif [[ "$1" == "mingw" ]]; then
 	## libssh2 static
 	pushd "${build_shell}/libssh2"
 	make clean
-	
-	./configure --host=i686-pc-mingw32 --disable-examples-build --disable-sshd-tests --disable-docker-tests --with-sysroot="${build_shell}/win32_build" --enable-static=yes --enable-shared=no --with-libssl-prefix="${build_shell}/win32_build" --prefix="${build_shell}/win32_build" --with-crypto=openssl
+
+	./configure --host=i686-pc-mingw32 --disable-examples-build --disable-sshd-tests --disable-docker-tests --with-sysroot="${build_target}" --enable-static=yes --enable-shared=no --with-libmbedcrypto-prefix="${build_target}" --prefix="${build_target}" --with-crypto=mbedtls --without-libz
 	unset CC
 	unset CXX
 	unset LD
@@ -162,35 +176,37 @@ elif [[ "$1" == "mingw" ]]; then
 	make install -j$(nproc)
 	popd #libssh2
 elif [[ "$1" == "loongarch64" ]]; then
-	loongarch64-linux-gnu-gcc -v || exit 1
-	# mingw gcc
+	loongarch64-unknown-linux-gnu-gcc -v || exit 1
+
 	rm -rf loongarch64_build
 	mkdir -p loongarch64_build
-	export CROSS_COMPILE=loongarch64-linux-gnu-
-	## openssl static
-	pushd "${build_shell}/openssl"
-	make clean
-	./config no-shared no-asm --prefix="${build_shell}/loongarch64_build" linux64-loongarch64
-	make clean
-	make -j$(nproc) VERBOSE=1 || exit 1
-	make install -j$(nproc)
-	popd #openssl
+	export CROSS_COMPILE=loongarch64-unknown-linux-gnu-
 
-	pushd "${build_shell}/loongarch64_build"
-	ln -s lib64 lib
+	## mbedtls static
+	pushd "${build_shell}/mbedtls"
+	mkdir build
+	cd build
+	CC=${CROSS_COMPILE}gcc SHARED=1 cmake -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTING=OFF -DUSE_STATIC_MBEDTLS_LIBRARY=ON -DUSE_SHARED_MBEDTLS_LIBRARY=OFF -DINSTALL_MBEDTLS_HEADERS=ON  -DCMAKE_INSTALL_PREFIX="${build_target}" ..
+	make -j$(nproc)
+	make install -j$(nproc)
+	cd ..
 	popd
 
-	export CC=loongarch64-linux-gnu-gcc
-	export CXX=loongarch64-linux-gnu-g++
-	export LD=loongarch64-linux-gnu-ld
-	export AR=loongarch64-linux-gnu-ar
-	export CROSS_COMPILE=loongarch64-linux-gnu-
+	pushd "${build_target}"
+	ln -s lib lib64
+	popd
+
+	export CC=loongarch64-unknown-linux-gnu-gcc
+	export CXX=loongarch64-unknown-linux-gnu-g++
+	export LD=loongarch64-unknown-linux-gnu-ld
+	export AR=loongarch64-unknown-linux-gnu-ar
+	export CROSS_COMPILE=loongarch64-unknown-linux-gnu-
 
 	## libssh2 static
 	pushd "${build_shell}/libssh2"
 	make clean
-	
-	./configure --host=loongarch64-pc-linux --disable-examples-build --disable-sshd-tests --disable-docker-tests --with-sysroot="${build_shell}/loongarch64_build" --enable-static=yes --enable-shared=no --with-libssl-prefix="${build_shell}/loongarch64_build" --prefix="${build_shell}/loongarch64_build" --with-crypto=openssl
+
+	./configure --host=loongarch64-pc-linux --disable-examples-build --disable-sshd-tests --disable-docker-tests --with-sysroot="${build_target}" --enable-static=yes --enable-shared=no --with-libmbedcrypto-prefix="${build_target}" --prefix="${build_target}" --with-crypto=mbedtls --without-libz
 	unset CC
 	unset CXX
 	unset LD
@@ -202,21 +218,23 @@ elif [[ "$1" == "loongarch64" ]]; then
 	popd #libssh2
 elif [[ "$1" == "riscv64" ]]; then
 	riscv64-linux-gnu-gcc -v || exit 1
-	# mingw gcc
+
 	rm -rf riscv64_build
 	mkdir -p riscv64_build
 	export CROSS_COMPILE=riscv64-linux-gnu-
-	## openssl static
-	pushd "${build_shell}/openssl"
-	make clean
-	./config no-shared no-asm --prefix="${build_shell}/riscv64_build" linux64-riscv64
-	make clean
-	make -j$(nproc) VERBOSE=1 || exit 1
-	make install -j$(nproc)
-	popd #openssl
 
-	pushd "${build_shell}/riscv64_build"
-	ln -s lib64 lib
+	## mbedtls static
+	pushd "${build_shell}/mbedtls"
+	mkdir build
+	cd build
+	CC=${CROSS_COMPILE}gcc SHARED=0 cmake -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTING=OFF -DUSE_STATIC_MBEDTLS_LIBRARY=ON -DUSE_SHARED_MBEDTLS_LIBRARY=OFF -DINSTALL_MBEDTLS_HEADERS=ON  -DCMAKE_INSTALL_PREFIX="${build_target}" ..
+	make -j$(nproc)
+	make install -j$(nproc)
+	cd ..
+	popd
+
+	pushd "${build_target}"
+	ln -s lib lib64
 	popd
 
 	export CC=riscv64-linux-gnu-gcc
@@ -228,8 +246,8 @@ elif [[ "$1" == "riscv64" ]]; then
 	## libssh2 static
 	pushd "${build_shell}/libssh2"
 	make clean
-	
-	./configure --host=riscv64-pc-linux --disable-examples-build --disable-sshd-tests --disable-docker-tests --with-sysroot="${build_shell}/riscv64_build" --enable-static=yes --enable-shared=no --with-libssl-prefix="${build_shell}/riscv64_build" --prefix="${build_shell}/riscv64_build" --with-crypto=openssl
+
+	./configure --host=riscv64-pc-linux --disable-examples-build --disable-sshd-tests --disable-docker-tests --with-sysroot="${build_target}" --enable-static=yes --enable-shared=no --with-libmbedcrypto-prefix="${build_target}" --prefix="${build_target}" --with-crypto=mbedtls
 	unset CC
 	unset CXX
 	unset LD
@@ -241,21 +259,19 @@ elif [[ "$1" == "riscv64" ]]; then
 	popd #libssh2
 elif [[ "$1" == "armbi" ]]; then
 	arm-linux-gnueabi-gcc -v || exit 1
-	# mingw gcc
+
 	rm -rf armbi_build
 	mkdir -p armbi_build
 	export CROSS_COMPILE=arm-linux-gnueabi-
-	## openssl static
-	pushd "${build_shell}/openssl"
-	make clean
-	./config no-shared no-asm --prefix="${build_shell}/armbi_build" linux-armv4
-	make clean
-	make -j$(nproc) VERBOSE=1 || exit 1
-	make install -j$(nproc)
-	popd #openssl
 
-	pushd "${build_shell}/armbi_build"
-	ln -s lib64 lib
+	## mbedtls static
+	pushd "${build_shell}/mbedtls"
+	mkdir build
+	cd build
+	CC=${CROSS_COMPILE}gcc SHARED=1 cmake -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTING=OFF -DUSE_STATIC_MBEDTLS_LIBRARY=ON -DUSE_SHARED_MBEDTLS_LIBRARY=OFF -DINSTALL_MBEDTLS_HEADERS=ON  -DCMAKE_INSTALL_PREFIX="${build_target}" ..
+	make -j$(nproc)
+	make install -j$(nproc)
+	cd ..
 	popd
 
 	export CC=arm-linux-gnueabi-gcc
@@ -267,8 +283,8 @@ elif [[ "$1" == "armbi" ]]; then
 	## libssh2 static
 	pushd "${build_shell}/libssh2"
 	make clean
-	
-	./configure --host=arm-pc-linux --disable-examples-build --disable-sshd-tests --disable-docker-tests --with-sysroot="${build_shell}/armbi_build" --enable-static=yes --enable-shared=no --with-libssl-prefix="${build_shell}/armbi_build" --prefix="${build_shell}/armbi_build" --with-crypto=openssl
+
+	./configure --host=arm-pc-linux --disable-examples-build --disable-sshd-tests --disable-docker-tests --with-sysroot="${build_target}" --enable-static=yes --enable-shared=no --with-libmbedcrypto-prefix="${build_target}" --prefix="${build_target}" --with-crypto=mbedtls
 	unset CC
 	unset CXX
 	unset LD
@@ -281,21 +297,23 @@ elif [[ "$1" == "armbi" ]]; then
 elif [[ "$1" == "sw_64" ]]; then
 	## sw_64 cross tools must at /usr/sw/
 	sw_64-sunway-linux-gnu-gcc -v || exit 1
-	# mingw gcc
+
 	rm -rf sw_64_build
 	mkdir -p sw_64_build
 	export CROSS_COMPILE=sw_64-sunway-linux-gnu-
-	## openssl static
-	pushd "${build_shell}/openssl"
-	make clean
-	./config no-shared no-asm --prefix="${build_shell}/sw_64_build" linux-alpha-gcc
-	make clean
-	make -j$(nproc) VERBOSE=1 || exit 1
-	make install -j$(nproc)
-	popd #openssl
 
-	pushd "${build_shell}/sw_64_build"
-	ln -s lib64 lib
+	## mbedtls static
+	pushd "${build_shell}/mbedtls"
+	mkdir build
+	cd build
+	CC=${CROSS_COMPILE}gcc SHARED=1 cmake -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTING=OFF -DUSE_STATIC_MBEDTLS_LIBRARY=ON -DUSE_SHARED_MBEDTLS_LIBRARY=OFF -DINSTALL_MBEDTLS_HEADERS=ON  -DCMAKE_INSTALL_PREFIX="${build_target}" ..
+	make -j$(nproc)
+	make install -j$(nproc)
+	cd ..
+	popd
+
+	pushd "${build_target}"
+	ln -s lib lib64
 	popd
 
 	export CC=sw_64-sunway-linux-gnu-gcc
@@ -307,8 +325,8 @@ elif [[ "$1" == "sw_64" ]]; then
 	## libssh2 static
 	pushd "${build_shell}/libssh2"
 	make clean
-	
-	./configure --host=alpha-pc-linux --disable-examples-build --disable-sshd-tests --disable-docker-tests --with-sysroot="${build_shell}/sw_64_build" --enable-static=yes --enable-shared=no --with-libssl-prefix="${build_shell}/sw_64_build" --prefix="${build_shell}/sw_64_build" --with-crypto=openssl
+
+	./configure --host=alpha-pc-linux --disable-examples-build --disable-sshd-tests --disable-docker-tests --with-sysroot="${build_target}" --enable-static=yes --enable-shared=no --with-libmbedcrypto-prefix="${build_target}" --prefix="${build_target}" --with-crypto=mbedtls
 	unset CC
 	unset CXX
 	unset LD
