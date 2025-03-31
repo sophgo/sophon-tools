@@ -352,6 +352,67 @@ function logs_path_mode() {
     popd #GET_INFO_LOGS_DIR
 }
 
+function get_ddr_info() {
+    echo 1 > /sys/bus/iio/devices/iio:device0/in_voltage3_raw
+    adc_val_ddr=$(cat /sys/bus/iio/devices/iio:device0/in_voltage3_raw)
+    chip_value=$(busybox devmem 0x27102014)
+    vol_val_ddr=$(($adc_val_ddr*1500/4096))
+    gpio117_val=$(busybox devmem 0x27013050)
+    if [ "$chip_value" = "0x00000011" ];then
+        if [ "$((gpio117_val & 1))" -eq 0 ]; then
+            if [ $vol_val_ddr -ge 0 ] && [ $vol_val_ddr -le 105 ];then
+                echo "LP4 2R 1S"
+            elif [ $vol_val_ddr -ge 195 ] && [ $vol_val_ddr -le 405 ];then
+                echo "LP4 1R 2S"
+            elif [ $vol_val_ddr -ge 495 ] && [ $vol_val_ddr -le 705 ];then
+                echo "LP4 2R 2S"
+            elif [ $vol_val_ddr -ge 795 ] && [ $vol_val_ddr -le 1005 ];then
+                echo "LP4 1R 1S"
+            elif [ $vol_val_ddr -ge 1095 ] && [ $vol_val_ddr -le 1305 ];then
+                echo "LP4X 2R 2S"
+            elif [ $vol_val_ddr -ge 1395 ] && [ $vol_val_ddr -le 1500 ];then
+                echo "LP4X 1R 2S"
+            fi
+        else
+            if [ $vol_val_ddr -ge 0 ] && [ $vol_val_ddr -le 105 ];then
+                echo "DDR4 1R 2S"
+            elif [ $vol_val_ddr -ge 195 ] && [ $vol_val_ddr -le 405 ];then
+                echo "LP4X 1R 1S"
+            elif [ $vol_val_ddr -ge 495 ] && [ $vol_val_ddr -le 705 ];then
+                echo "DDR4 1R 1S"
+            elif [ $vol_val_ddr -ge 795 ] && [ $vol_val_ddr -le 1005 ];then
+                echo "LP4X 2R 1S"
+            fi
+        fi
+    else
+        if [ "$((gpio117_val & 1))" -eq 0 ];then
+            if [ $vol_val_ddr -ge 0 ] && [ $vol_val_ddr -le 105 ];then
+                echo "LP4 2R 2S"
+            elif [ $vol_val_ddr -ge 195 ] && [ $vol_val_ddr -le 405 ];then
+                echo "LP4 1R 2S"
+            elif [ $vol_val_ddr -ge 495 ] && [ $vol_val_ddr -le 705 ];then
+                echo "LP4 2R 1S"
+            elif [ $vol_val_ddr -ge 795 ] && [ $vol_val_ddr -le 1005 ];then
+                echo "LP4 1R 1S"
+            elif [ $vol_val_ddr -ge 1095 ] && [ $vol_val_ddr -le 1305 ];then
+                echo "LP4X 2R 2S"
+            elif [ $vol_val_ddr -ge 1395 ] && [ $vol_val_ddr -le 1500 ];then
+                echo "LP4X 1R 2S"
+            fi
+        else
+            if [ $vol_val_ddr -ge 0 ] && [ $vol_val_ddr -le 105 ];then
+                echo "DDR4 1R 2S"
+            elif [ $vol_val_ddr -ge 195 ] && [ $vol_val_ddr -le 405 ];then
+                echo "LP4X 1R 1S"
+            elif [ $vol_val_ddr -ge 495 ] && [ $vol_val_ddr -le 705 ];then
+                echo "DDR4 1R 1S"
+            elif [ $vol_val_ddr -ge 795 ] && [ $vol_val_ddr -le 1005 ];then
+                echo "LP4X 2R 1S"
+            fi
+        fi
+    fi
+}
+
 file_validate /proc/cpuinfo
 file_validate /proc/stat
 
@@ -450,11 +511,13 @@ fi
 
 # DDR INFO
 DDR_SIZE=0
+DDR_TYPE=""
 if [[ "${WORK_MODE}" == "SOC" ]]; then
     if [[ "${CPU_MODEL}" == "bm1684x" ]] || [[ "${CPU_MODEL}" == "bm1684" ]]; then
         DTS_MEM_FILE="/proc/device-tree/memory/reg"
     elif [[ "${CPU_MODEL}" == "bm1688" ]] || [[ "${CPU_MODEL}" == "cv186ah" ]]; then
         DTS_MEM_FILE="/proc/device-tree/memory*/reg"
+        DDR_TYPE=$(get_ddr_info 2>/dev/null)
     fi
     DDR_SIZE=0
     IFS=$'\n'
@@ -901,6 +964,7 @@ if [[ "${WORK_MODE}" == "SOC" ]]; then
     echo "CPU_MODEL|${CPU_MODEL}|"
     echo "SHUTDOWN_REASON|${SHUTDOWN_REASON}|"
     echo "DDR_SIZE(MiB)|${DDR_SIZE}|"
+    echo "DDR_TYPE|${DDR_TYPE}|"
     echo "EMMC_SIZE(MiB)|${EMMC_SIZE}|"
     echo "SYSTEM_MEM(MiB)|${SYSTEM_MEM}|"
     echo "TPU_MEM(MiB)|${TPU_MEM}|"
