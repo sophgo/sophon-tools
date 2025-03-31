@@ -1,5 +1,6 @@
 #include <errno.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13,7 +14,6 @@
 #include <iostream>
 #include <mutex>
 #include <string>
-#include <thread>
 #if defined(__GNUC__) && !defined(__clang__)
 #if (__GNUC__ > 4) && (__GNUC__ < 8)
 #include <experimental/filesystem>
@@ -64,19 +64,6 @@ static char buffer[1024 * 128];
 static bool http_open_get_enable = false;
 static uint64_t connect_timeout = 5;
 static int ret_flag = 0;
-
-std::mutex mtx;
-std::mutex mtx_get_server;
-std::condition_variable cv;
-std::mutex cv_m;
-bool cv_ready = false;
-void Lk_mux(bool lock, void*) {
-  if (lock)
-    mtx.lock();
-  else
-    mtx.unlock();
-}
-
 struct ServerInfo {
   string host;
   int port;
@@ -87,6 +74,24 @@ struct ServerInfo {
 };
 
 struct ServerInfo* fast_server = NULL;
+struct ThreadArgs {
+  bool test_speed;
+  ServerInfo* server_in;
+  pthread_t* threads;
+  size_t num_threads;
+};
+
+pthread_mutex_t log_mtx = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t mtx_get_server = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t cv_m = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t cv = PTHREAD_COND_INITIALIZER;
+bool cv_ready = false;
+void Lk_mux(bool lock, void*) {
+  if (lock)
+    pthread_mutex_lock(&log_mtx);
+  else
+    pthread_mutex_unlock(&log_mtx);
+}
 
 static std::vector<struct ServerInfo> sdk_server_info = {
     {"172.26.175.10", 32022, "oponIn", "oponIn", false, 0.0},
@@ -367,7 +372,7 @@ uint64_t sftp_get_file(struct ServerInfo* server, string path) {
         banner_s);
   }
 
-  const char *comp = libssh2_session_methods(session, LIBSSH2_METHOD_COMP_CS);
+  const char* comp = libssh2_session_methods(session, LIBSSH2_METHOD_COMP_CS);
   log_info("Compression algorithm: %s", comp);
 
   sftp_session = libssh2_sftp_init(session);
@@ -564,7 +569,7 @@ int64_t sftp_put_file(struct ServerInfo* server, string local_path,
         banner_s);
   }
 
-  const char *comp = libssh2_session_methods(session, LIBSSH2_METHOD_COMP_CS);
+  const char* comp = libssh2_session_methods(session, LIBSSH2_METHOD_COMP_CS);
   log_info("Compression algorithm: %s", comp);
 
   sftp_session = libssh2_sftp_init(session);
@@ -751,43 +756,51 @@ bool is_sftp_service(ServerInfo* server_in) {
   return true;
 }
 
-void sftp_server_and_speed(bool test_speed, ServerInfo* server_in,
-                           std::vector<std::thread>* ths) {
-  std::thread::id self_id = std::this_thread::get_id();
+void* sftp_server_and_speed(void* arg) {
+  struct ThreadArgs* args = (struct ThreadArgs*)arg;
+  pthread_t self_id = pthread_self();
   {
-    std::unique_lock<std::mutex> lk(cv_m);
-    log_debug("sftp_server_and_speed thread id:0x%X is wait ready", self_id);
-    cv.wait(lk, [&] { return cv_ready; });
+    pthread_mutex_lock(&cv_m);
+    log_debug("sftp_server_and_speed thread id:0x%X is wait ready",
+              (unsigned long)self_id);
+    while (!cv_ready) {
+      pthread_cond_wait(&cv, &cv_m);
+    }
+    pthread_mutex_unlock(&cv_m);
   }
-  log_debug("sftp_server_and_speed thread id:0x%X start", self_id);
-  if (is_sftp_service(server_in) == false) return;
-  mtx_get_server.lock();
-  if (test_speed) {
+  log_debug("sftp_server_and_speed thread id:0x%X start",
+            (unsigned long)self_id);
+  if (is_sftp_service(args->server_in) == false) {
+    delete args;
+    return NULL;
+  }
+  pthread_mutex_lock(&mtx_get_server);
+  if (args->test_speed) {
     if (fast_server == NULL) {
-      http_test_speed(server_in);
-      if (server_in->speed > (1024 * 1024 * 4)) {
-        fast_server = server_in;
+      http_test_speed(args->server_in);
+      if (args->server_in->speed > (1024 * 1024 * 4)) {
+        fast_server = args->server_in;
         log_debug("find 4MB/s server: %s:%d, kill other thread.",
                   fast_server->host.c_str(), fast_server->port);
-        for (std::thread& th : *ths) {
-          if (self_id != th.get_id())
-            if (th.joinable()) {
-              pthread_cancel(th.native_handle());
-            }
+        for (size_t i = 0; i < args->num_threads; ++i) {
+          if (!pthread_equal(self_id, args->threads[i])) {
+            pthread_cancel(args->threads[i]);
+          }
         }
       }
     }
   } else {
     log_debug("find server no speed test: %s:%d, kill other thread.",
-              server_in->host.c_str(), server_in->port);
-    for (std::thread& th : *ths) {
-      if (self_id != th.get_id())
-        if (th.joinable()) {
-          pthread_cancel(th.native_handle());
-        }
+              args->server_in->host.c_str(), args->server_in->port);
+    for (size_t i = 0; i < args->num_threads; ++i) {
+      if (!pthread_equal(self_id, args->threads[i])) {
+        pthread_cancel(args->threads[i]);
+      }
     }
   }
-  mtx_get_server.unlock();
+  pthread_mutex_unlock(&mtx_get_server);
+  delete args;
+  return NULL;
 }
 
 struct ServerInfo* get_available_server(
@@ -798,21 +811,32 @@ struct ServerInfo* get_available_server(
       test_speed);
   fast_server = NULL;
   {
-    std::vector<std::thread> threads;
-    for (ServerInfo& server : servers) {
-      threads.emplace_back(sftp_server_and_speed, test_speed, &server,
-                           &threads);
-    }
-    std::this_thread::sleep_for(std::chrono::seconds(1));
-    {
-      std::lock_guard<std::mutex> lk(cv_m);
-      cv_ready = true;
-    }
-    cv.notify_all();
+    pthread_t* threads = new pthread_t[servers.size()];
+    size_t num_threads = servers.size();
 
-    for (auto& t : threads) {
-      if (t.joinable()) t.join();
+    for (size_t i = 0; i < num_threads; ++i) {
+      struct ThreadArgs* args =
+          new ThreadArgs{test_speed, &servers[i], threads, num_threads};
+      if (pthread_create(&threads[i], NULL, sftp_server_and_speed, args) != 0) {
+        log_error("Failed to create thread");
+        delete args;
+        threads[i] = 0;
+      }
     }
+    sleep(1);
+    {
+      pthread_mutex_lock(&cv_m);
+      cv_ready = true;
+      pthread_mutex_unlock(&cv_m);
+    }
+    pthread_cond_broadcast(&cv);
+
+    for (size_t i = 0; i < num_threads; ++i) {
+      if (threads[i] != 0) {
+        pthread_join(threads[i], NULL);
+      }
+    }
+    delete[] threads;
   }
   if (test_speed == 1) {
     if (fast_server != NULL) return fast_server;

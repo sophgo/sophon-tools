@@ -19,8 +19,16 @@ GIT_COMMIT_DATE = $(shell git show -s --format=%ci HEAD)
 INCLUDE = -I. -I$(BUILD_PATH)/libs/$(LIBS_TYPE)/include
 LIBS = -L. -L$(BUILD_PATH)/libs/$(LIBS_TYPE)/lib -L$(BUILD_PATH)/libs/$(LIBS_TYPE)/lib64 $(EXT_LIB_FLAG_STATIC) $(EXT_LIB_FLAG_DYNAMIC)
 
-CFLAGS = $(EXT_FLAG) -I. $(INCLUDE) $(LIBS) -std=gnu99 -Wall -O3
-CXXFLAGS = $(EXT_FLAG) -DGIT_COMMIT_HASH="\"$(GIT_COMMIT_HASH)\"" -DGIT_COMMIT_DATE="\"$(GIT_COMMIT_DATE)\"" -I. $(INCLUDE) $(LIBS) -Wall -O3 -std=c++17
+ifeq ($(NEED_DEBUG),1)
+    BUILD_TYPE_FLAG := -g -O0
+	STRIP_CMD := @echo "Skip stripping in debug mode"
+else
+    BUILD_TYPE_FLAG := -O3
+	STRIP_CMD := $(STRIP) -v --strip-debug --strip-unneeded
+endif
+
+CFLAGS = $(EXT_FLAG) -I. $(INCLUDE) $(LIBS) -std=gnu99 -Wall ${BUILD_TYPE_FLAG}
+CXXFLAGS = $(EXT_FLAG) -DGIT_COMMIT_HASH="\"$(GIT_COMMIT_HASH)\"" -DGIT_COMMIT_DATE="\"$(GIT_COMMIT_DATE)\"" -I. $(INCLUDE) $(LIBS) -Wall ${BUILD_TYPE_FLAG} -std=c++17
 
 SRCS = $(wildcard *.c)
 SRCPPS = $(wildcard *.cpp)
@@ -32,7 +40,7 @@ all: $(TARGET)
 
 $(TARGET): $(OBJS)
 	$(CXX) $(CXXFLAGS) $(OBJS) -o $@ $(INCLUDE) $(LIBS)
-	$(STRIP) -v --strip-debug --strip-unneeded $@*
+	$(STRIP_CMD) $@*
 
 .PHONY: clean install
 clean:

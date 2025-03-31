@@ -57,7 +57,7 @@ if [[ "$1" == "host" ]]; then
 
 	## libssh2 static
 	pushd "${build_shell}/libssh2"
-	./configure --disable-examples-build --disable-sshd-tests --disable-docker-tests --with-sysroot="${build_target}" --enable-static=yes --enable-shared=no --with-libssl-prefix="${build_target}" --prefix="${build_target}" --with-crypto=mbedtls --with-libz --with-libz-prefix="${build_target}"
+	./configure --disable-examples-build --disable-sshd-tests --disable-docker-tests --with-sysroot="${build_target}" --enable-static=yes --enable-shared=no --with-libmbedcrypto-prefix="${build_target}" --prefix="${build_target}" --with-crypto=mbedtls --with-libz --with-libz-prefix="${build_target}"
 	make clean
 	make -j$(nproc)
 	make install -j$(nproc)
