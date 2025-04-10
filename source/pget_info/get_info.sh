@@ -560,7 +560,7 @@ if [[ "${WORK_MODE}" == "SOC" ]]; then
 fi
 
 # SYSTEM_MEM_USAGE
-SYSTEM_MEM_USAGE=$(free -k | grep '^Mem: ' | awk '{free=$7; total=$2; printf "%.2f\n", ((total-free)/total)*100}' 2>/dev/null)
+SYSTEM_MEM_USAGE=$(free -k | head -n2 | tail -n1 | awk '{free=$7; total=$2; printf "%.2f\n", ((total-free)/total)*100}' 2>/dev/null)
 
 # CPU_ALL_USAGE
 unset CPU_ALL_USAGE
