@@ -1,5 +1,7 @@
 #!/bin/bash
 
+echo "VERSION: v1.0.0"
+
 # env SOC_BAK_ALL_IN_ONE=1 for socbak allinone
 # env SOC_BAK_FIXED_SIZE=1 for socbak fixed size mode
 
@@ -26,10 +28,13 @@ TGZ_FILES=(boot data opt system recovery rootfs)
 declare -A -g TGZ_FILES_SIZE
 TGZ_FILES_SIZE=(["boot"]=131072 ["recovery"]=3145728 ["rootfs"]=2621440 ["opt"]=2097152 ["system"]=2097152 ["data"]=4194304)
 # The increased size of each partition compared to the original partition table
+ROOTFS_RW_SIZE=$((6291456))
+# for bm1688 or cv186ah
+ROOTFS_RW_SIZE_BM1688=$((9291456))
+RECOVERY_SIZE_BM1688=$((131072))
 TGZ_ALL_SIZE=$((100*1024))
 EMMC_ALL_SIZE=20971520
 EMMC_MAX_SIZE=30000000
-ROOTFS_RW_SIZE=$((6291456))
 TAR_SIZE=0
 PWD="$(dirname "$(readlink -f "\$0")")"
 TGZ_FILES_PATH=${PWD}
@@ -167,8 +172,8 @@ if [[ "$SOC_NAME" == "bm1684x" ]] || [[ "$SOC_NAME" == "bm1684" ]]; then
 	fi
 elif [[ "$SOC_NAME" == "bm1688" ]]; then
 	NEED_BAK_FLASH=1
-	ROOTFS_RW_SIZE=$((9291456 + 0))
-	TGZ_FILES_SIZE["recovery"]=131072
+	ROOTFS_RW_SIZE=${ROOTFS_RW_SIZE_BM1688}
+	TGZ_FILES_SIZE["recovery"]=${RECOVERY_SIZE_BM1688}
 	ALL_IN_ONE_SCRIPT="${TGZ_FILES_PATH}/script/bm1688/"
 fi
 
