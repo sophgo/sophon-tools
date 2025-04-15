@@ -33,3 +33,4 @@
 
 1. 本工具基于QT5.12开发
 2. 本工具的嵌入式终端来源于 `lxqt` 的 `qtermwidget` 方案，仓库默认自带arm64的库文件，如果需要在非arm64架构编译，需要自行准备库文件
+3. 交叉编译工具链可以使用命令`python3 -m pip install dfss --upgrade; python3 -m dfss --dflag=sophgo-bsp-qt5-toolchain'下载，版本为5.14
