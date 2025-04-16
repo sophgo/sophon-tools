@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo "VERSION: v1.0.0"
+echo "VERSION: v1.0.1"
 
 # env SOC_BAK_ALL_IN_ONE=1 for socbak allinone
 # env SOC_BAK_FIXED_SIZE=1 for socbak fixed size mode
@@ -218,7 +218,7 @@ if [ "$NEED_BAK_FLASH" -eq 1 ]; then
 			else
 				rm -rf spi_flash_bm1684.bin
 				dd if=spi_flash.bin of=spi_flash_bm1684.bin skip=1 bs=4194304 count=1
-			fi	
+			fi
 			cp spi_flash.bin /boot/spi_flash.bin.socBakNew
 		fi
 	elif [[ "$SOC_NAME" == "bm1688" ]]; then
@@ -382,6 +382,11 @@ if [[ "${ALL_IN_ONE_FLAG}" != "" ]] && [[ "${ALL_IN_ONE_SCRIPT}" != "" ]]; then
 				part_size_max=$(($part_size_max * 2))
 			;;
 		esac
+		part_use=$(df -B1 -l /${TGZ_FILE} | grep "${TGZ_FILE}\$" | awk -F' ' '{print $3}')
+		part_use=$(($part_use * 3))
+		if [ $part_size_max -gt $part_use ]; then
+			part_size_max=${part_use}
+		fi
 		fixsize=$(( ${TGZ_FILES_SIZE[$TGZ_FILE]} * 1024))
 		if [ $part_size_max -lt $fixsize ]; then
 			part_size_max=${fixsize}
