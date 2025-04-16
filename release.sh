@@ -6,7 +6,7 @@ export CMD_BASH=$(command -v bash)
 
 echo "release start ..."
 pushd "$script_path"
-	rm output/* -rf
+	sudo rm output/* -rf
 	for dir in source/*/
 	do
 		echo "release $dir ..."
