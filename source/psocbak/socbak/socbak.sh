@@ -369,10 +369,12 @@ if [[ "${ALL_IN_ONE_FLAG}" != "" ]] && [[ "${ALL_IN_ONE_SCRIPT}" != "" ]]; then
 				ext_part=$(echo "${ROOTFS_EXCLUDE_FLAGS}" | sed 's|=./|=/|g')
 				part_size_max="$(du -sb / ${ext_part} | awk '{print $1}')"
 				part_size_max=$(($part_size_max * 2))
+				part_use=$(df -B1 -l / | grep " /\$" | awk -F' ' '{print $3}')
 			;;
 			"boot")
 				part_size_max=$((${TGZ_FILES_SIZE["${TGZ_FILE}"]} * 1024))
 				partition_format="fat"
+				part_use=$(df -B1 -l /${TGZ_FILE} | grep " /${TGZ_FILE}\$" | awk -F' ' '{print $3}')
 			;;
 			*)
 				set +u
@@ -380,9 +382,9 @@ if [[ "${ALL_IN_ONE_FLAG}" != "" ]] && [[ "${ALL_IN_ONE_SCRIPT}" != "" ]]; then
 				set -u
 				part_size_max="$(du -sb /${TGZ_FILE} ${ext_part} | awk '{print $1}')"
 				part_size_max=$(($part_size_max * 2))
+				part_use=$(df -B1 -l /${TGZ_FILE} | grep " /${TGZ_FILE}\$" | awk -F' ' '{print $3}')
 			;;
 		esac
-		part_use=$(df -B1 -l /${TGZ_FILE} | grep "${TGZ_FILE}\$" | awk -F' ' '{print $3}')
 		part_use=$(($part_use * 3))
 		if [ $part_size_max -gt $part_use ]; then
 			part_size_max=${part_use}
