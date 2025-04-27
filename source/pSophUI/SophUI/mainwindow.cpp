@@ -11,7 +11,7 @@ static void __setFontRecursively(T *inObject, qint64 fontSize=15)
     QString fontSizeStr = env.value("SOPHON_QT_FONT_SIZE");
     fontSize = fontSizeStr.toInt() > 0?fontSizeStr.toInt():fontSize;
     QFont font = inObject->font();
-    font.setPointSize(fontSize);
+    font.setPixelSize(fontSize);
     inObject->setFont(font);
     QObject *object = inObject;
     QList<T *> childObjects = object->findChildren<T *>();

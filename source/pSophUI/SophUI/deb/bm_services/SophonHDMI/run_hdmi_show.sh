@@ -54,7 +54,7 @@ if [ "$CPU_MODEL" == "bm1688" ] || [ "$CPU_MODEL" == "cv186ah" ];then
                 echo "CPU(%):$cpuU";
         }
         export -f SOPHON_QT_1
-        
+
         get_edid=$(sudo get-edid -b 11 2>/dev/null | parse-edid 2>/dev/null | awk '/DisplaySize/ {if ($2 == 0 || $3 == 0) {print ""} else{print "get-edid"}}')
         if [ "$get_edid" == ""  ]; then
                 export QT_QPA_EGLFS_PHYSICAL_WIDTH=487
@@ -65,14 +65,14 @@ if [ "$CPU_MODEL" == "bm1688" ] || [ "$CPU_MODEL" == "cv186ah" ];then
         export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/lib/aarch64-linux-gnu/qt5/lib
         export QT_QPA_FB_DRM=1
         export QT_QPA_PLATFORM=linuxfb:fb=/dev/dri/card0
-        
-        
+
+
         #specify connector index if not specify,use the first connected connector
         #export QT_QPA_EGLFS_KMS_CONNECTOR_INDEX=1
 
         #使用该环境变量配置程序默认字体大小
         export SOPHON_QT_FONT_SIZE=20
-        
+
         # hdmi status file
         status_file="/sys/class/drm/card0-HDMI-A-1/status"
 
@@ -92,8 +92,8 @@ if [ "$CPU_MODEL" == "bm1688" ] || [ "$CPU_MODEL" == "cv186ah" ];then
                                 # hdmi connected
                                 echo "HDMI connected and card0 not in use. Starting SophUI."
                                 # start SophUI
-                                ./SophUI 1>/dev/null 2>&1 & 
-                        else 
+                                ./SophUI 1>/dev/null 2>&1 &
+                        else
                                 echo "HDMI connected.However card0 is in use,can't start SophUI"
                         fi
                 else
@@ -102,8 +102,8 @@ if [ "$CPU_MODEL" == "bm1688" ] || [ "$CPU_MODEL" == "cv186ah" ];then
                         pkill -f "SophUI"
                 fi
         fi
-        # sleep 
-        sleep 1 
+        # sleep
+        sleep 1
         done
 else
         # QT程序左上角内容函数
@@ -126,7 +126,7 @@ else
                 echo "CPU: $cpuU%";
         }
         export -f SOPHON_QT_1
-        
+
         fl2000=$(lsmod | grep fl2000 | awk '{print $1}')
 
         echo $fl2000
@@ -138,15 +138,15 @@ else
 
         export PATH=$PATH:/opt/bin:/bm_bin
         export QTDIR=/usr/lib/aarch64-linux-gnu #qtsdk在系统上的路径
-        export QT_QPA_FONTDIR=$QTDIR/fonts 
-        export QT_QPA_PLATFORM_PLUGIN_PATH=$QTDIR/qt5/plugins/ 
-        export LD_LIBRARY_PATH=/opt/lib:$LD_LIBRARY_PATH 
+        export QT_QPA_FONTDIR=$QTDIR/fonts
+        export QT_QPA_PLATFORM_PLUGIN_PATH=$QTDIR/qt5/plugins/
+        export LD_LIBRARY_PATH=/opt/lib:$LD_LIBRARY_PATH
         export QT_QPA_PLATFORM=linuxfb:fb=/dev/fl2000-0 #framebuffer驱动
         # for ms91xx
         # export QT_QPA_PLATFORM=linuxfb:ms91xxmode=2
-        export SOPHON_QT_FONT_SIZE=70 #使用该环境变量配置程序默认字体大小
+        export SOPHON_QT_FONT_SIZE=20 #使用该环境变量配置程序默认字体大小
         SophUI_path=/bm_services/SophonHDMI/
-        SophUIDEMO_path=${SophUI_path}/SophUIDEMO.sh 
+        SophUIDEMO_path=${SophUI_path}/SophUIDEMO.sh
 
         mkdir -p /dev/input/
 

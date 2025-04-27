@@ -4,7 +4,7 @@ if [ "$CPU_MODEL" == "bm1688" ] || [ "$CPU_MODEL" == "cv186ah" ];then
     sudo rm /etc/systemd/system/SophonHDMIStatus.service /etc/systemd/system/multi-user.target.wants/SophonHDMIStatus.service | true
     sudo systemctl daemon-reload > /dev/null | true
     sudo systemctl enable SophonHDMI > /dev/null
-    sudo systemctl restart SophonHDMI > /dev/null & 
+    sudo systemctl restart SophonHDMI > /dev/null &
     exit 0
 fi
 sudo systemctl daemon-reload > /dev/null | true
