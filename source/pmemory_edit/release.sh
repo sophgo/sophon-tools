@@ -7,8 +7,8 @@ export CMD_DPKG_DEB=$(command -v dpkg-deb)
 
 echo "build memory_edit ..."
 
-rm -rf memory_edit*.tar.xz 2>/dev/null
-rm -rf output 2>/dev/null
+sudo  rm -rf memory_edit*.tar.xz 2>/dev/null
+sudo  rm -rf output 2>/dev/null
 mkdir output
 if [ -f "$CMD_DPKG_DEB" ]; then
 	rm -rf *.deb

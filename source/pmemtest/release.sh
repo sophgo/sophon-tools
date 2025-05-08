@@ -10,7 +10,7 @@ VERSION=$(grep -r "MEMTEST VERSION:" memtest_a53_gdma/start.sh | awk '{print $(N
 echo "build memtest_a53_gdma ${VERSION} ..."
 
 
-rm -rf output
+sudo rm -rf output
 
 mkdir -p output
 cp -r memtest_a53_gdma output/memtest_a53_gdma_${VERSION}

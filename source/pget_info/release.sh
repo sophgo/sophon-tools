@@ -8,7 +8,7 @@ export CMD_ZIP=$(command -v zip)
 echo "build get_info ..."
 
 
-rm -rf output
+sudo rm -rf output
 
 mkdir -p output/get_info
 cp get_info.sh output/get_info/
