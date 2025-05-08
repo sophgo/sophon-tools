@@ -369,7 +369,9 @@ if [[ "${ALL_IN_ONE_FLAG}" != "" ]] && [[ "${ALL_IN_ONE_SCRIPT}" != "" ]]; then
 				ext_part=$(echo "${ROOTFS_EXCLUDE_FLAGS}" | sed 's|=./|=/|g')
 				part_size_max="$(du -sb / ${ext_part} | awk '{print $1}')"
 				part_size_max=$(($part_size_max * 2))
-				part_use=$(df -B1 -l / | grep " /\$" | awk -F' ' '{print $3}')
+				part_use_rw=$(df -B1 -l /media/root-rw | grep " /media/root-rw\$" | awk -F' ' '{print $3}')
+				part_use_ro=$(df -B1 -l /media/root-ro | grep " /media/root-ro\$" | awk -F' ' '{print $3}')
+				part_use=$(($part_use_rw + $part_use_ro))
 			;;
 			"boot")
 				part_size_max=$((${TGZ_FILES_SIZE["${TGZ_FILE}"]} * 1024))
