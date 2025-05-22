@@ -31,7 +31,7 @@ a4a043cdf37c64bca157a0403856f868  ./binTools/logsave
 012cff9e562552d280621bc290b5f387  ./binTools/mkfs.ext3
 012cff9e562552d280621bc290b5f387  ./binTools/mkfs.ext4
 bf5ddacca6e12d6516294a6161f861b6  ./binTools/mkfs.fat
-720621be201e1adddb72418cc4bfb607  ./binTools/mkimage
+680c8fca6bc35a28863fd4e8b18a0fe1  ./binTools/mkimage
 077af8beaddf963755d79c566057b971  ./binTools/mklost+found
 5916531887308f0051e80adb9532ee88  ./binTools/pigz
 b6045ae3166f743c5d4375c583938d81  ./binTools/resize2fs
