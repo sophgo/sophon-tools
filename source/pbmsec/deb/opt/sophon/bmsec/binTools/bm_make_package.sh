@@ -479,6 +479,9 @@ function do_gen_partition_subimg()
 				# edit by bmsec end
 				sync
 				sudo umount $RECOVERY_DIR/$MOUNT_DIR-$2
+    				if mountpoint -q $RECOVERY_DIR/$MOUNT_DIR-$2; then
+					sudo umount -f $RECOVERY_DIR/$MOUNT_DIR-$2
+     				fi
 			else
 				echo $1 may be an empty parition.
 			fi
