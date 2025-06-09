@@ -64,13 +64,17 @@ static char buffer[1024 * 128];
 static bool http_open_get_enable = false;
 static uint64_t connect_timeout = 5;
 static int ret_flag = 0;
+/* 匹配服务器链路信息 */
+static bool remove_if_match = 0;
 struct ServerInfo {
+  int id;
   string host;
   int port;
   string user;
   string pass;
   bool is_ok;
   double speed;
+  bool only_open;
 };
 
 struct ServerInfo* fast_server = NULL;
@@ -94,17 +98,47 @@ void Lk_mux(bool lock, void*) {
 }
 
 static std::vector<struct ServerInfo> sdk_server_info = {
-    {"172.26.175.10", 32022, "oponIn", "oponIn", false, 0.0},
-    {"172.26.13.184", 32022, "oponIn", "oponIn", false, 0.0},
-    {"172.26.166.66", 32022, "oponIn", "oponIn", false, 0.0},
-    {"106.38.208.114", 32022, "open", "open", false, 0.0},
-    {"103.68.183.114", 32022, "open", "open", false, 0.0},
+    {0, "172.26.175.10", 32022, "oponIn", "oponIn", false, 0.0, false},
+    {1, "172.24.12.77", 32022, "open", "open", false, 0.0, true},
+    {2, "172.26.13.184", 32022, "oponIn", "oponIn", false, 0.0, false},
+    {3, "172.26.166.66", 32022, "oponIn", "oponIn", false, 0.0, false},
+    {4, "106.38.208.114", 32022, "open", "open", false, 0.0, false},
+    {5, "103.68.183.114", 32022, "open", "open", false, 0.0, false},
 };
 
 static std::vector<struct ServerInfo> hdk_server_info = {
-    {"219.142.246.77", 18822, "", "", false, 0.0},
-    {"172.29.128.15", 8822, "", "", false, 0.0},
+    {100, "219.142.246.77", 18822, "", "", false, 0.0},
+    {101, "172.29.128.15", 8822, "", "", false, 0.0},
 };
+
+/* 删除服务器信息 */
+static void remove_some_server_info(
+    std::vector<struct ServerInfo>& server_infos, bool match_to_rm,
+    int match_id) {
+  log_debug("remove server info, match id: %d, match to rm: %d", match_id,
+            match_to_rm);
+  if (match_to_rm == true) {
+    server_infos.erase(
+        std::remove_if(
+            server_infos.begin(), server_infos.end(),
+            [&](const ServerInfo& info) { return info.id == match_id; }),
+        server_infos.end());
+  } else {
+    server_infos.erase(
+        std::remove_if(
+            server_infos.begin(), server_infos.end(),
+            [&](const ServerInfo& info) { return info.id != match_id; }),
+        server_infos.end());
+  }
+}
+
+static void print_server_info(std::vector<struct ServerInfo> server_infos) {
+  log_info("ID IP PORT");
+  for (auto it = server_infos.begin(); it != server_infos.end();) {
+    log_info("%d %s %d", it->id, it->host.c_str(), it->port);
+    it += 1;
+  }
+}
 
 static std::string getFileNameFromPath(string path) {
   fs::path filePath = path;
@@ -1037,20 +1071,22 @@ void config_json_read() {
     sdk_server_info.clear();
     hdk_server_info.clear();
     for (const auto& sdk : jsonData["sdk"]) {
+      int id = sdk["id"];
       std::string host = sdk["host"];
       int port = sdk["port"];
       std::string user = sdk["user"];
       std::string pass = sdk["pass"];
       sdk_server_info.push_back(
-          ServerInfo({host, port, user, pass, false, 0.0}));
+          ServerInfo({id, host, port, user, pass, false, 0.0}));
     }
     for (const auto& sdk : jsonData["hdk"]) {
+      int id = sdk["id"];
       std::string host = sdk["host"];
       int port = sdk["port"];
       std::string user = sdk["user"];
       std::string pass = sdk["pass"];
       hdk_server_info.push_back(
-          ServerInfo({host, port, user, pass, false, 0.0}));
+          ServerInfo({id, host, port, user, pass, false, 0.0}));
     }
     connect_timeout = jsonData["connect_timeout"];
   }
@@ -1097,6 +1133,11 @@ int main(int argc, char* argv[]) {
       cxxopts::value<uint64_t>());
   options.add_options("debug info mode")("debug", "open debug info print mode");
   options.add_options("config json")("no_json", "do not use json config");
+  options.add_options("list server info")("list", "list server info");
+  options.add_options("force specify a server link")(
+      "force_server", "force specify a server link",
+      cxxopts::value<uint64_t>());
+  options.add_options("help info")("help", "print help info");
   auto parser = options.parse(argc, argv);
 
   if (parser.count("help")) {
@@ -1122,6 +1163,11 @@ int main(int argc, char* argv[]) {
     log_info("config http connect timeout %ld s", connect_timeout);
   }
   ret_flag = 0;
+  if (parser.count("force_server")) {
+    uint64_t force_server_id = parser["force_server"].as<uint64_t>();
+    remove_some_server_info(sdk_server_info, false, force_server_id);
+    remove_some_server_info(hdk_server_info, false, force_server_id);
+  }
   do {
     if (parser.count("url")) {
       std::string url = parser["url"].as<std::string>();
@@ -1163,7 +1209,7 @@ int main(int argc, char* argv[]) {
     } else if (parser.count("upflag") && parser.count("upfile")) {
       std::string upflag = parser["upflag"].as<std::string>();
       std::string upfile = parser["upfile"].as<std::string>();
-      std::cout << "upflag: " << upflag << "upfile: " << upfile << std::endl;
+      log_info("upflag: %s, upfile: %s", upflag.c_str(), upfile.c_str());
       ret_flag = -1;
       for (int i = 0; i < 3; i++) {
         if (true == sftp_upfile(upflag, upfile)) {
@@ -1172,6 +1218,12 @@ int main(int argc, char* argv[]) {
         }
       }
       if (ret_flag != 0) log_error("upflag error");
+      break;
+    } else if (parser.count("list")) {
+      log_info("SDK server: ");
+      print_server_info(sdk_server_info);
+      log_info("HDK server: ");
+      print_server_info(hdk_server_info);
       break;
     } else {
       std::cout << options.help() << std::endl;

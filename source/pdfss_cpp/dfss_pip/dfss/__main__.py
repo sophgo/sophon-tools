@@ -147,6 +147,8 @@ if __name__ == '__main__':
     parser.add_argument('--connect_timeout', help='config timeout on http connect')
     parser.add_argument('--debug', action='store_true', help='open debug info print mode')
     parser.add_argument('--no_json', action='store_true', help='do not use json config')
+    parser.add_argument('--force_server', action='store_true', help='force specify a server link')
+    parser.add_argument('--list', action='store_true', help='list server info')
 
     parser.add_argument('--install', help='install package')
 
