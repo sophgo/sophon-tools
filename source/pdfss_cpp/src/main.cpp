@@ -64,17 +64,15 @@ static char buffer[1024 * 128];
 static bool http_open_get_enable = false;
 static uint64_t connect_timeout = 5;
 static int ret_flag = 0;
-/* 匹配服务器链路信息 */
-static bool remove_if_match = 0;
 struct ServerInfo {
   int id;
   string host;
   int port;
   string user;
   string pass;
+  bool only_open;
   bool is_ok;
   double speed;
-  bool only_open;
 };
 
 struct ServerInfo* fast_server = NULL;
@@ -98,17 +96,17 @@ void Lk_mux(bool lock, void*) {
 }
 
 static std::vector<struct ServerInfo> sdk_server_info = {
-    {0, "172.26.175.10", 32022, "oponIn", "oponIn", false, 0.0, false},
-    {1, "172.24.12.77", 32022, "open", "open", false, 0.0, true},
-    {2, "172.26.13.184", 32022, "oponIn", "oponIn", false, 0.0, false},
-    {3, "172.26.166.66", 32022, "oponIn", "oponIn", false, 0.0, false},
-    {4, "106.38.208.114", 32022, "open", "open", false, 0.0, false},
-    {5, "103.68.183.114", 32022, "open", "open", false, 0.0, false},
+    {0, "172.26.175.10", 32022, "oponIn", "oponIn", false, false, 0.0},
+    {1, "172.24.12.77", 32022, "open", "open", true, false, 0.0},
+    {2, "172.26.13.184", 32022, "oponIn", "oponIn", false, false, 0.0},
+    {3, "172.26.166.66", 32022, "oponIn", "oponIn", false, false, 0.0},
+    {4, "106.38.208.114", 32022, "open", "open", false, false, 0.0},
+    {5, "103.68.183.114", 32022, "open", "open", false, false, 0.0},
 };
 
 static std::vector<struct ServerInfo> hdk_server_info = {
-    {100, "219.142.246.77", 18822, "", "", false, 0.0},
-    {101, "172.29.128.15", 8822, "", "", false, 0.0},
+    {100, "219.142.246.77", 18822, "", "", false, false, 0.0},
+    {101, "172.29.128.15", 8822, "", "", false, false, 0.0},
 };
 
 /* 删除服务器信息 */
@@ -118,17 +116,17 @@ static void remove_some_server_info(
   log_debug("remove server info, match id: %d, match to rm: %d", match_id,
             match_to_rm);
   if (match_to_rm == true) {
-    server_infos.erase(
-        std::remove_if(
-            server_infos.begin(), server_infos.end(),
-            [&](const ServerInfo& info) { return info.id == match_id; }),
-        server_infos.end());
+    server_infos.erase(std::remove_if(server_infos.begin(), server_infos.end(),
+                                      [&](const ServerInfo& info) {
+                                        return info.id == match_id;
+                                      }),
+                       server_infos.end());
   } else {
-    server_infos.erase(
-        std::remove_if(
-            server_infos.begin(), server_infos.end(),
-            [&](const ServerInfo& info) { return info.id != match_id; }),
-        server_infos.end());
+    server_infos.erase(std::remove_if(server_infos.begin(), server_infos.end(),
+                                      [&](const ServerInfo& info) {
+                                        return info.id != match_id;
+                                      }),
+                       server_infos.end());
   }
 }
 
@@ -922,9 +920,19 @@ void sftp_login(string username) {
   struct ServerInfo* login_info;
   if (starts_with(username, "sophgo") || starts_with(username, "h_s")) {
     log_info("%s sftp login hdk server", username.c_str());
+    hdk_server_info.erase(
+        std::remove_if(
+            hdk_server_info.begin(), hdk_server_info.end(),
+            [&](const ServerInfo& info) { return info.only_open == true; }),
+        hdk_server_info.end());
     login_info = get_available_server(false, hdk_server_info);
   } else {
     log_info("%s sftp login sdk server", username.c_str());
+    sdk_server_info.erase(
+        std::remove_if(
+            sdk_server_info.begin(), sdk_server_info.end(),
+            [&](const ServerInfo& info) { return info.only_open == true; }),
+        sdk_server_info.end());
     login_info = get_available_server(true, sdk_server_info);
   }
   if (NULL == login_info) {
@@ -940,7 +948,7 @@ void sftp_login(string username) {
                            username + "@" + login_info->host;
 #endif
     log_debug("login cmd: %s", command.c_str());
-    system(command.c_str());
+    (void)system(command.c_str());
   }
 }
 
@@ -1029,6 +1037,11 @@ std::string base64_decode(const std::string& encoded_string) {
 bool sftp_upfile(std::string upflag, std::string upfile) {
   log_info("upfile %s -> upflag %s (%s)", upfile.c_str(), upflag.c_str(),
            base64_decode(upflag).c_str());
+  sdk_server_info.erase(
+      std::remove_if(
+          sdk_server_info.begin(), sdk_server_info.end(),
+          [&](const ServerInfo& info) { return info.only_open == true; }),
+      sdk_server_info.end());
   ServerInfo* server = get_available_server(true, sdk_server_info);
   if (server == NULL) {
     return false;
@@ -1076,8 +1089,9 @@ void config_json_read() {
       int port = sdk["port"];
       std::string user = sdk["user"];
       std::string pass = sdk["pass"];
+      bool only_open = sdk["only_open"];
       sdk_server_info.push_back(
-          ServerInfo({id, host, port, user, pass, false, 0.0}));
+          ServerInfo({id, host, port, user, pass, only_open, false, 0.0}));
     }
     for (const auto& sdk : jsonData["hdk"]) {
       int id = sdk["id"];
@@ -1085,8 +1099,9 @@ void config_json_read() {
       int port = sdk["port"];
       std::string user = sdk["user"];
       std::string pass = sdk["pass"];
+      bool only_open = sdk["only_open"];
       hdk_server_info.push_back(
-          ServerInfo({id, host, port, user, pass, false, 0.0}));
+          ServerInfo({id, host, port, user, pass, only_open, false, 0.0}));
     }
     connect_timeout = jsonData["connect_timeout"];
   }

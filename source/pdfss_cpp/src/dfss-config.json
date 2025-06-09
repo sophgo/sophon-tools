@@ -6,42 +6,48 @@
 			"host": "172.26.175.10",
 			"port": 32022,
 			"user": "oponIn",
-			"pass": "oponIn"
+			"pass": "oponIn",
+			"only_open" : false
 		},
 		{
 			"id"  : 1,
 			"host": "172.24.12.77",
 			"port": 32022,
 			"user": "open",
-			"pass": "open"
+			"pass": "open",
+			"only_open" : true
 		},
 		{
 			"id"  : 2,
 			"host": "172.26.13.184",
 			"port": 32022,
 			"user": "oponIn",
-			"pass": "oponIn"
+			"pass": "oponIn",
+			"only_open" : false
 		},
 		{
 			"id"  : 3,
 			"host": "172.26.166.66",
 			"port": 32022,
 			"user": "oponIn",
-			"pass": "oponIn"
+			"pass": "oponIn",
+			"only_open" : false
 		},
 		{
 			"id"  : 4,
 			"host": "106.38.208.114",
 			"port": 32022,
 			"user": "open",
-			"pass": "open"
+			"pass": "open",
+			"only_open" : false
 		},
 		{
 			"id"  : 5,
 			"host": "103.68.183.114",
 			"port": 32022,
 			"user": "open",
-			"pass": "open"
+			"pass": "open",
+			"only_open" : false
 		}
 	],
 	"hdk": [
@@ -50,14 +56,16 @@
 			"host": "219.142.246.77",
 			"port": 18822,
 			"user": "",
-			"pass": ""
+			"pass": "",
+			"only_open" : false
 		},
 		{
 			"id"  : 101,
 			"host": "172.29.128.15",
 			"port": 8822,
 			"user": "",
-			"pass": ""
+			"pass": "",
+			"only_open" : false
 		}
 	]
 }
