@@ -1,0 +1,17 @@
+[Unit]
+Description=Auto dial service
+After=bmrt_setup.service
+
+[Service]
+User=root
+ExecStart=/usr/bin/python3 -u /usr/local/bin/autotelecomm/mobile_communications.py
+ExecReload=/bin/kill -HUP $MAINPID
+WorkingDirectory=/usr/local/bin/autotelecomm
+KillMode=control-group
+Restart=always
+RestartPreventExitStatus=200
+Type=simple
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

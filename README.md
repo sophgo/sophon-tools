@@ -24,6 +24,7 @@
 | [SophUI](./source/pSophUI) | source/pSophUI | 否 | HDMI配网页面工程 |
 | [ota_update](./source/pota_update) | source/pota_update | 是 | OTA远程刷机工具 |
 | [memtest](./source/pmemtest) | source/pmemtest | 是 | SoC模式DDR压测工具 |
+| [autotelecomm](./source/pautotelecomm) | source/pautotelecomm | 是 | 4G/5G自动拨号工具 |
 
 ## 编译方式
 

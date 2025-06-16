@@ -1,0 +1,74 @@
+# 忽略生成的二进制文件
+*.exe
+*.out
+*.app
+*.dll
+*.so
+*.dylib
+
+# 忽略编译中间文件和输出文件
+*.o
+*.obj
+*.gch
+*.pch
+*.a
+*.lib
+
+# 忽略临时文件
+*.tmp
+*.log
+*.swp
+*~
+
+# 忽略生成的文档文件
+*.pdf
+*.doc
+*.docx
+
+# 忽略 IDE 配置文件和目录
+.vscode/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# 忽略构建系统文件
+CMakeFiles/
+CMakeCache.txt
+# Makefile
+cmake_install.cmake
+compile_commands.json
+
+# 忽略构建输出目录
+bin/
+build/
+Debug/
+Release/
+
+# 忽略包管理工具文件
+.vcpkg/
+conanbuildinfo.txt
+conaninfo.txt
+.graph_info
+.lock
+
+# 忽略自动生成的文件
+*.generated.*
+
+# 忽略测试结果文件
+*.gcno
+*.gcda
+*.gcov
+
+# 忽略覆盖率报告文件
+coverage/
+*.lcov
+*.gcov
+
+# 忽略缓存文件
+.cache/
+
+!quectel-CM
+!bin/
+output

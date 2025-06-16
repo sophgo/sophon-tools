@@ -1,0 +1,15 @@
+[Unit]
+Description=Quectel networking service
+Before=network.target
+Wants=network.target
+BindsTo=dev-ttyUSB1.device
+After=dev-ttyUSB1.device
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/autotelecomm_scripts/quectel-CM -f /tmp/quectel-CM_log
+Restart=on-failure
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target

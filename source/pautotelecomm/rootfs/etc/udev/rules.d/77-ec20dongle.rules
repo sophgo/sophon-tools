@@ -1,0 +1,19 @@
+ACTION=="add|change", SUBSYSTEM=="tty", KERNEL=="ttyUSB*", GOTO="quectel_dongle_usb_rules"
+GOTO="quectel_dongle_rules_end"
+
+LABEL="quectel_dongle_usb_rules"
+
+ENV{ID_VENDOR_ID}=="2c7c", ENV{ID_MODEL_ID}=="0125", GOTO="quectel_dialing_start"
+ENV{ID_VENDOR_ID}=="2c7c", ENV{ID_MODEL_ID}=="0121", GOTO="quectel_dialing_start"
+ENV{ID_VENDOR_ID}=="2c7c", ENV{ID_MODEL_ID}=="0800", GOTO="quectel_dialing_start"
+ENV{ID_VENDOR_ID}=="2c7c", ENV{ID_MODEL_ID}=="6005", GOTO="quectel_dialing_start"
+ENV{ID_VENDOR_ID}=="05c6", ENV{ID_MODEL_ID}=="9215", GOTO="quectel_dialing_start"
+ENV{ID_VENDOR_ID}=="05c6", ENV{ID_MODEL_ID}=="9090", GOTO="quectel_dialing_start"
+ENV{ID_VENDOR_ID}=="05c6", ENV{ID_MODEL_ID}=="9003", GOTO="quectel_dialing_start"
+GOTO="quectel_dongle_rules_end"
+
+LABEL="quectel_dialing_start"
+TAG+="systemd", ENV{SYSTEMD_WANTS}="ec20.service", SYMLINK+="Quectel_modem"
+GOTO="quectel_dongle_rules_end"
+
+LABEL="quectel_dongle_rules_end"
