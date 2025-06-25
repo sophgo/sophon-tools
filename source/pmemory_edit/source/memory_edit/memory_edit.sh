@@ -314,7 +314,7 @@ ddr1_size=0
 ddr2_size=0
 ddr3_size=0
 ddr4_size=0
-echo "INFO: version: 2.10"
+echo "INFO: version: 2.11"
 if ( [ $# -eq 1 ] || [ $# -eq 2 ] ) && [ "$1" == "-p" ]; then
 	# 仅打印信息
 	print_info=1
@@ -368,6 +368,7 @@ if [[ "$MEMORY_EDIT_ITB_FILE" == "" ]] || [[ "$MEMORY_EDIT_CHPI_TYPE" == "" ]]; 
 	cp /boot/$runtime_info_boot_file ${memory_edit_PWD}/
 	cp /boot/multi.its ${memory_edit_PWD}/
 fi
+de_emmcfile >> $log_file_path
 # 获取当前使用设备树信息
 if [ $# -eq 8 ]; then
 	dts_file_name=$8
@@ -388,7 +389,6 @@ if [[ "$dts_file_name" == "" ]]; then
 	echo "Error: cannot find used dts file on ${runtime_info_target}"
 	exit -1
 fi
-de_emmcfile >> $log_file_path
 if [ "$?" != "0" ]; then echo "Error: de_emmcfile" | tee -a $log_file_path; exit -1; fi
 converted_dts_file_name="${dts_file_name%.dtb}"
 if [[ $converted_dts_file_name != *.dts ]]; then

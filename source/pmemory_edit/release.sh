@@ -2,7 +2,7 @@
 
 BUILD_RET=0
 
-MEMORY_EDIT_VERSION="2.10"
+MEMORY_EDIT_VERSION=$(grep "INFO: version: " source/memory_edit/memory_edit.sh | awk -F' ' '{print $(NF)}' | tr -d '"')
 export CMD_DPKG_DEB=$(command -v dpkg-deb)
 
 echo "build memory_edit ..."
