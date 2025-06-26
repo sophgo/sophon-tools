@@ -25,7 +25,7 @@
 | [ota_update](./source/pota_update) | source/pota_update | 是 | OTA远程刷机工具 |
 | [memtest](./source/pmemtest) | source/pmemtest | 是 | SoC模式DDR压测工具 |
 | [autotelecomm](./source/pautotelecomm) | source/pautotelecomm | 是 | 4G/5G自动拨号工具 |
-| [multi_video_qt](./source/pmulti_video_qt) | source/pmulti_video_qt | 是 | QT多路视频解码播放器 |
+| [multi_video_qt](./source/pmulti_video_qt) | source/pmulti_video_qt | 否 | QT多路视频解码播放器 |
 
 ## 编译方式
 
