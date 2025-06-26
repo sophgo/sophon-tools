@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo "VERSION: v1.0.2"
+echo "VERSION: v1.0.3"
 
 # env SOC_BAK_ALL_IN_ONE=1 for socbak allinone
 # env SOC_BAK_FIXED_SIZE=1 for socbak fixed size mode
