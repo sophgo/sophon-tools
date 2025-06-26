@@ -1,0 +1,24 @@
+{
+    "decoder":{
+		"dev_id": 0,
+        "urls":[
+		"../test.mp4",
+        "../test.mp4",
+        "../test.mp4",
+        "../test.mp4",
+        "../test.mp4",
+        "../test.mp4",
+        "../test.mp4",
+        "../test.mp4",
+        "../test.mp4",
+        "../test.mp4",
+        "../test.mp4",
+        "../test.mp4",
+        "../test.mp4",
+        "../test.mp4",
+        "../test.mp4",
+        "../test.mp4"
+        ],
+		"fpss":[25,25,25,25,25,25,25,25,25,25,25,25,25,25,25,25]
+    }
+}
