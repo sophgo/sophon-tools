@@ -51,12 +51,12 @@ function de_emmcfile(){
 	get_info_from_its ${memory_edit_PWD}/multi.its "cvitek kernel|sophon kernel|bitmain kernel" "data" >> $log_file_path
 	image_file_name=$(echo "$get_info_from_its_data" | awk -F'"' '{print $2}' | awk -F'/' '{print $2}')
 	echo Info: dump Image $image_file_name ...
-	${memory_edit_PWD}/bintools/dumpimage -i ${memory_edit_PWD}/$runtime_info_boot_file -T flat_dt -p 0 -o ${OUTPUT_DIR}/$image_file_name ${memory_edit_PWD}/multi.its
+	${memory_edit_PWD}/bintools/dumpimage -T flat_dt -p 0 -o ${OUTPUT_DIR}/$image_file_name ${memory_edit_PWD}/$runtime_info_boot_file
 	if [ "$?" != "0" ]; then echo "Error: de_emmcfile"; return -1; fi
 	get_info_from_its ${memory_edit_PWD}/multi.its "cvitek ramdisk|sophon ramdisk|bitmain ramdisk" "data" >> $log_file_path
 	image_file_name=$(echo "$get_info_from_its_data" | awk -F'"' '{print $2}' | awk -F'/' '{print $2}')
 	echo Info: dump ramdisk $image_file_name ...
-	${memory_edit_PWD}/bintools/dumpimage -i ${memory_edit_PWD}/$runtime_info_boot_file -T flat_dt -p 1 -o ${OUTPUT_DIR}/$image_file_name ${memory_edit_PWD}/multi.its
+	${memory_edit_PWD}/bintools/dumpimage -T flat_dt -p 1 -o ${OUTPUT_DIR}/$image_file_name ${memory_edit_PWD}/$runtime_info_boot_file
 	if [ "$?" != "0" ]; then echo "Error: de_emmcfile"; return -1; fi
 	if [[ "$MEMORY_EDIT_RAMDISK" == "1" ]]; then
 		echo Info: cpio dump ramdisk $image_file_name ...
@@ -92,7 +92,7 @@ function de_emmcfile(){
 	for DTB_FILE in $DTB_FILES
 	do
 			echo Info: dump ${dtb_index} : ${DTB_FILE} ...
-			${memory_edit_PWD}/bintools/dumpimage -i ${memory_edit_PWD}/$runtime_info_boot_file -T flat_dt -p ${dtb_index} -o ${OUTPUT_DIR}/${DTB_FILE} ${memory_edit_PWD}/multi.its
+			${memory_edit_PWD}/bintools/dumpimage -T flat_dt -p ${dtb_index} -o ${OUTPUT_DIR}/${DTB_FILE} ${memory_edit_PWD}/$runtime_info_boot_file
 			if [ "$?" != "0" ]; then echo "Error: de_emmcfile"; return -1; fi
 			${memory_edit_PWD}/bintools/dtc -I dtb -O dts ${OUTPUT_DIR}/${DTB_FILE} > ${OUTPUT_DIR}/$(echo ${DTB_FILE} | sed 's/.dtb/.dts/g') ${DTC_FLAGS}
 			if [ "$?" != "0" ]; then echo "Error: de_emmcfile"; return -1; fi
@@ -148,10 +148,9 @@ function en_emmcfile(){
 	cp ${memory_edit_PWD}/multi.its .
 	if grep -q "cvitek kernel" ./multi.its; then
 		echo "Info: make image added key ..."
-		# ../bintools/mkimage -D "-q -I dts -O dtb -p 500" -f ./multi.its	-k ${memory_edit_PWD}/bintools/keys -r $runtime_info_boot_file
-		../bintools/mkimage -D "-q -I dts -O dtb -p 500" -f ./multi.its $runtime_info_boot_file
+		../bintools/mkimage -p 0x2000 -D "-q -I dts -O dtb -p 500" -f ./multi.its $runtime_info_boot_file
 	else
-		../bintools/mkimage -D "-q -I dts -O dtb -p 500" -f ./multi.its $runtime_info_boot_file
+		../bintools/mkimage -p 0x2000 -D "-q -I dts -O dtb -p 500" -f ./multi.its $runtime_info_boot_file
 	fi
 	if [ "$?" != "0" ]; then echo "Error: en_emmcfile"; return -1; fi
 	popd
@@ -314,7 +313,7 @@ ddr1_size=0
 ddr2_size=0
 ddr3_size=0
 ddr4_size=0
-echo "INFO: version: 2.11"
+echo "INFO: version: 2.12"
 if ( [ $# -eq 1 ] || [ $# -eq 2 ] ) && [ "$1" == "-p" ]; then
 	# 仅打印信息
 	print_info=1
@@ -849,9 +848,9 @@ elif [[ $runtime_info_target == "bm1688" ]]; then
 		exit -1
 	fi
 fi
-en_emmcfile >> $log_file_path
+en_emmcfile >> $log_file_path 2>&1
 if [ "$?" != "0" ]; then echo "Error: en_emmcfile" | tee -a $log_file_path; exit -1; fi
-echo -e "Info: en_emmcfile ok\nsudo cp ${memory_edit_PWD}/$runtime_info_boot_file /boot/$runtime_info_boot_file && sync" | tee -a $log_file_path
+echo -e "Info: en_emmcfile ok\nPlease reboot the device after running this command for the changes to take effect:\nsudo cp ${memory_edit_PWD}/$runtime_info_boot_file /boot/$runtime_info_boot_file && sync" | tee -a $log_file_path
 cp ${memory_edit_PWD}/output/$runtime_info_boot_file ${memory_edit_PWD}/
 sudo cp /boot/$runtime_info_boot_file /boot/$runtime_info_boot_file.memeditBak 2> /dev/null
 sync
