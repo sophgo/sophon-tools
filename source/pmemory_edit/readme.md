@@ -64,8 +64,6 @@ for bm1688, please use "memory_edit.sh -c -npu 2048 -vpu 0 -vpp 2048"
 
 https://github.com/user-attachments/assets/8b484c7f-2018-4049-ab6a-eecbed162f76
 
-[演示视频](videos/memory_edit-video.mp4)
-
 ### ramdisk编辑功能说明
 
 在执行`-d`前，使用`export MEMORY_EDIT_RAMDISK=1`配置环境变量，此时会在`output/ramdisk`下生成`ramdisk`中的文件
