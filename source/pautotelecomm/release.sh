@@ -1,6 +1,6 @@
 #!/bin/bash
 
-VERSION=1.1.3
+VERSION=1.2.0
 rm -rf output
 mkdir -p output
 

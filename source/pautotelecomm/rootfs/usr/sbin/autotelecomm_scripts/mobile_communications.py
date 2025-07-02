@@ -3,12 +3,14 @@ import subprocess
 
 import fibocom_base
 import redcap_base
+import simcom_bash
 
 # 这里以字典的方式记录适配设备的VID与PID，用于开机后检查设备是否成功链接
 # 在使用过程中如果有新适配的设备，可以将其添加到该字典中
 model_dict = {"NL668": ["1508:1001"],
               "FM650": ["2cb7:0a05", "2cb7:0a06", "2cb7:0a07"],
-              "redcap": ["3466:3301"]}
+              "redcap": ["3466:3301"],
+              "simcom": ["1e0e:9011"]}
 
 # 对字典中存放的设备进行遍历，查看当前适配的是哪一个模组，如果检查到对应的设备，则启动对应设备的拨号流程
 # 在完成设备查找前，会每3s对设备进行一次检查，运行300s未检查到设备时，进程退出，需要检查模组与设备链接是否正常
@@ -50,6 +52,9 @@ def choose_model():
         sc.run()
     elif idx == 2:
         sc = redcap_base.serialCom_redcap("auto", "auto", "1.1.1.1")
+        sc.run()
+    elif idx == 3:
+        sc = simcom_bash.serialCom_simcom("auto", "auto", "1.1.1.1")
         sc.run()
 
 

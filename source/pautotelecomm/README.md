@@ -12,6 +12,7 @@
 1. NL668
 2. FM650
 3. EC20
+4. A7600
 
 ## 安装方式
 
@@ -28,3 +29,10 @@
     1. SIM卡是否识别，可以通过模组的AT指令手册查询
     2. 天线是否插牢，是否有信号，通常信号大于21以上才能正常使用，可以通过模组的AT指令手册查询信号强度
     3. 使用的SIM卡是否是特殊的APN，如果是请参考第一项
+
+## 适配新设备流程
+
+1. 确定新设备USB ID
+2. 修改文件 `rootfs/etc/udev/rules.d/77-autotelecomm.rules` 增加新设备自启动拨号服务
+3. 新建文件 `rootfs/usr/sbin/autotelecomm_scripts/xxx.py` 内容参考 `fibocom_base.py` 即可
+4. 修改文件 `rootfs/usr/sbin/autotelecomm_scripts/mobile_communications.py` 增加新设备的拨号类

@@ -8,6 +8,7 @@ ENV{ID_VENDOR_ID}=="2c7c", ENV{ID_MODEL_ID}=="0a06", GOTO="autotelecomm_dialing_
 ENV{ID_VENDOR_ID}=="2c7c", ENV{ID_MODEL_ID}=="0a07", GOTO="autotelecomm_dialing_start"
 ENV{ID_VENDOR_ID}=="1508", ENV{ID_MODEL_ID}=="1001", GOTO="autotelecomm_dialing_start"
 ENV{ID_VENDOR_ID}=="3466", ENV{ID_MODEL_ID}=="3301", GOTO="autotelecomm_dialing_start"
+ENV{ID_VENDOR_ID}=="1e0e", ENV{ID_MODEL_ID}=="9011", GOTO="autotelecomm_dialing_start"
 GOTO="autotelecomm_dongle_rules_end"
 
 LABEL="autotelecomm_dialing_start"

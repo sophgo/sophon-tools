@@ -4,9 +4,9 @@ After=bmrt_setup.service
 
 [Service]
 User=root
-ExecStart=/usr/bin/python3 -u /usr/local/bin/autotelecomm/mobile_communications.py
+ExecStart=/usr/bin/python3 -u /usr/sbin/autotelecomm_scripts/mobile_communications.py
 ExecReload=/bin/kill -HUP $MAINPID
-WorkingDirectory=/usr/local/bin/autotelecomm
+WorkingDirectory=/usr/sbin/autotelecomm_scripts/
 KillMode=control-group
 Restart=always
 RestartPreventExitStatus=200

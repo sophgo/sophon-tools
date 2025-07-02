@@ -1,41 +1,34 @@
 import model_base
 import time
 
-class serialCom_fibocom(model_base.serialCom):
+class serialCom_simcom(model_base.serialCom):
     # 获取当前设备的usb mode信息
     def get_usbmode(self):
-        cmd = "AT+GTUSBMODE? \r"
+        cmd = "AT$MYCONFIG? \r"
         self.send_msg(cmd)
         time.sleep(3)
         ret = self.recive_msg().decode("utf-8")
-        res = ret.splitlines()[1].split(':')[1].strip()
-        return res
+        res = ret.splitlines()[1].split(':')[1].split(',')[1].strip()
+        if res == "0":
+            return "RNDIS"
+        elif res == "1":
+            return "ECM"
+        elif res == "2":
+            return "AUTO"
+        else:
+            print("usbmode none: " + res)
+            return "None"
 
     # 修改当前设备usb mode为ECM
     def switch_to_ecm(self):
-        cmd = "AT+GTUSBMODE=18 \r"
+        cmd = "AT$MYCONFIG=\"USBNETMODE\",1,1 \r"
         self.send_msg(cmd)
-        time.sleep(3)
-        ret = self.recive_msg().decode("utf-8")
-        print("Change GTUSBMODE to ECM")
+        print("Change USBNETMODE to ECM")
+        print("Wait model reset...")
+        self.serial = "auto"
+        time.sleep(10)
+        self.serial_open()
         return 0
-
-    def start_dial(self):
-        msg = "AT+CGDCONT=1,\"IP\",\"" + self.apn + "\" \r"
-        self.send_msg(msg)
-        time.sleep(5)
-        ret = self.recive_msg().decode("utf-8")
-        if "OK" in ret.strip().split():
-            msg_2 = "AT+GTRNDIS=1,1 \r"
-            self.send_msg(msg_2)
-            time.sleep(10)
-            ret_2 = self.recive_msg().decode("utf-8")
-            if "OK" in ret_2.strip().split():
-                return 0
-            else:
-                self.start_dial()
-        else:
-            return -1
 
     # 初始化串口连接，判断串口是否成功连接
     def serial_open(self):
@@ -62,7 +55,7 @@ class serialCom_fibocom(model_base.serialCom):
     def check_ecm_mode(self):
         ret_1 = self.get_usbmode()
         print("now status:", ret_1)
-        if ret_1 != "18":
+        if ret_1 != "ECM":
             print("to ecm mode")
             ret_2 = self.switch_to_ecm()
             if ret_2 == 0:
@@ -113,6 +106,10 @@ class serialCom_fibocom(model_base.serialCom):
         self.parseAPN(self.apn)
         print("\nAPN:", self.apn)
         print("\nStart dialing")
+        cmd = "AT+DIALMODE=0 \r\n"
+        self.send_msg(cmd)
+        time.sleep(1)
+        _ = self.recive_msg().decode("utf-8")
         ret_1 = self.start_dial()
         if ret_1 == 0:
             print("\nDialing Success")
@@ -133,7 +130,6 @@ class serialCom_fibocom(model_base.serialCom):
         ret_1 = self.monitor()
         if ret_1 == -1:
             self.simcard_check()
-
 
     def run(self):
         self.serial_open()

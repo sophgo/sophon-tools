@@ -1,4 +1,4 @@
-import serial,time
+import serial
 import os
 import glob
 import subprocess
@@ -16,13 +16,14 @@ class serialCom:
     # 例如，移动常用apn为cmnet，联通常用apn为3gnet，电信常用apn为ctnet，此外，物联网卡/白卡通常会有自己独特的apn，需要在使用前与运营商进行沟通
     # monitor_target为检测连接是否正常的目标，使用者可以指定自己需要使用的访问对象
     def __init__(self, serial="auto", apn="auto", monitor_target="www.baidu.com"):
+        self.ethname = ""
         self.serial = serial
         self.apn = apn
         self.monitor_target = monitor_target
         self.isp = ""
-        self.apn_list = {"3gnet": ["CHN-CU", "CHN-UN", "CHINA UNICOM", "CHN-UNICOM"],
-                         "ctnet": ["CHN-TE", "CHINA Te", "CHN-CT"],
-                         "cmnet": ["CHN-CM", "CHINA MO", "CHINA MOBILE"]}
+        self.apn_list = {"3gnet": ["CHN-CU", "CHN-UN", "CHINA UNICOM", "CHN-UNICOM", "UNICOM", "46001"],
+                         "ctnet": ["CHN-TE", "CHINA Te", "CHN-CT", "CT", "46011"],
+                         "cmnet": ["CHN-CM", "CHINA MO", "CHINA MOBILE", "CMCC", "46000"]}
 
     # 当serial设置为auto的时候，会通过该函数自行查找可以通信的设备文件名
     def search_serial(self):
@@ -117,20 +118,6 @@ class serialCom:
         else:
             return -1
 
-    # def check_ECM(self):
-    #     msg_1 = "AT+GTUSBMODE? \r"
-    #     self.send_msg(msg_1)
-    #     ret_1 = self.recive_msg().decode("utf-8")
-    #     print(ret_1.strip().split())
-    #     if "18" in ret_1.strip().split():
-    #         return 0
-    #     else:
-    #         print("Current mode is not ECM, adjust the device mode to ECM")
-    #         msg_2 = "AT+GTUSBMODE=18 \r"
-    #         self.send_msg(msg_2)
-    #         time.sleep(10)
-    #         self.init_serial()
-
     # 检查SIM卡插入状态
     # 当插入状态正确时返回0
     # 正确插入后依然无法检测到卡，返回-1
@@ -169,15 +156,6 @@ class serialCom:
         else:
             return -1
 
-    # 检查当前设备入网状态
-    # def check_dataservice(self):
-    #     print("\nstart check data service")
-    #     msg = "AT+CGREG? \r"
-    #     self.send_msg(msg)
-    #     time.sleep(1)
-    #     ret = self.recive_msg().decode("utf-8")
-    #     print(ret)
-
     # 检查设备运营商信息与入网网段
     # sim卡入网正常的情况下返回当前入网网段
     # 未入网等不正常情况下返回-1
@@ -203,14 +181,7 @@ class serialCom:
         time.sleep(5)
         ret = self.recive_msg().decode("utf-8")
         if "OK" in ret.strip().split():
-            msg_2 = "AT+GTRNDIS=1,1 \r"
-            self.send_msg(msg_2)
-            time.sleep(10)
-            ret_2 = self.recive_msg().decode("utf-8")
-            if "OK" in ret_2.strip().split():
-                return 0
-            else:
-                self.start_dial()
+            return 0
         else:
             return -1
 
@@ -218,33 +189,23 @@ class serialCom:
     def DHCP(self):
         ret = self.NetworkTools()
         if ret == 0:
-            with open("/etc/netplan/01-netcfg.yaml", "r") as fs:
-                data = yaml.safe_load(fs)
-
-            msg = 'ifconfig -a | grep enx'
-            status, output = subprocess.getstatusoutput(msg)
-            ethname = output.split(":")[0]
-            if len(ethname) <= 0:
-                msg_2 = "ifconfig -a | grep usb0"
-                status_2, output_2 = subprocess.getstatusoutput(msg_2)
-                if status_2 != 0:
+            msg = 'ip a | grep enx'
+            _, output = subprocess.getstatusoutput(msg)
+            self.ethname = output.split(":")[1].strip()
+            if len(self.ethname) <= 0:
+                msg = "ip a | grep usb0"
+                status, output = subprocess.getstatusoutput(msg)
+                if status != 0:
                     print("Network port query failed")
                     exit(1)
-                ethname = "usb0"
+                self.ethname = output.split(":")[1].strip()
+            if len(self.ethname) <= 0:
+                print("Network port query failed")
+                exit(1)
 
-            tmp = data["network"]["ethernets"]["eth0"]
-            tmp["dhcp4"] = True
-            tmp["addresses"] = []
-            tmp["nameservers"] = {}
-            tmp["nameservers"]["addresses"] = ["8.8.8.8", "114.114.114.114"]
-            data["network"]["ethernets"].clear()
-            data["network"]["ethernets"][ethname] = tmp
-
-            with open("/etc/netplan/02-netcfg.yaml", "w") as fs:
-                yaml.dump(data,fs, default_flow_style=False)
-
-            cmd = "sudo netplan apply"
-
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            script_path = os.path.join(script_dir, 'dhclient-script')
+            cmd = "dhclient -sf " + script_path + " " + self.ethname
             try:
                 os.system(cmd)
             except Exception as e:
@@ -260,7 +221,7 @@ class serialCom:
         cnt = 0
         time.sleep(30)
         while(True):
-            msg = "sudo ping -c4 " + host
+            msg = "sudo ping -c4 -I " + self.ethname + " " + host
             status, output = subprocess.getstatusoutput(msg)
             time.sleep(30)
             print(msg, status)
@@ -309,34 +270,20 @@ class serialCom:
     # 判断当前使用的网络管理工具是netplan还是networkmanager
     # 都存在的情况下会以netplan优先
     def NetworkTools(self):
-        cmd1 = "netplan --help"
-        cmd2 = "nmcli --help"
-        status1, ret1 = subprocess.getstatusoutput(cmd1)
-        status2, ret2 = subprocess.getstatusoutput(cmd2)
+        cmd1 = "$(which dhclient) --help"
+        cmd2 = "$(which ip) a"
+        status1, _ = subprocess.getstatusoutput(cmd1)
+        status2, _ = subprocess.getstatusoutput(cmd2)
         if status1 == 0 and status2 == 0:
             return 0
-        elif status1 != 0 and status2 == 0:
-            return 1
-        elif status1 == 0 and status2 != 0:
-            return 0
         else:
-            print("please check network manager tool")
+            print("please check network manager tool: dhclient, ip")
             exit(1)
 
     # 获取当前设备的usb mode信息
     def get_usbmode(self):
-        cmd = "AT+GTUSBMODE? \r"
-        self.send_msg(cmd)
-        time.sleep(3)
-        ret = self.recive_msg().decode("utf-8")
-        res = ret.splitlines()[1].split(':')[1].strip()
-        return res
+        return "BASE MODEL, NO THIS INFO"
 
     # 修改当前设备usb mode为ECM
     def switch_to_ecm(self):
-        cmd = "AT+GTUSBMODE=18 \r"
-        self.send_msg(cmd)
-        time.sleep(3)
-        ret = self.recive_msg().decode("utf-8")
-        print("Change GTUSBMODE to ECM")
-        return 0
+        return "BASE MODEL, NO THIS INFO"
