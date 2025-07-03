@@ -229,11 +229,11 @@ class serialCom:
             status, output = subprocess.getstatusoutput(msg)
             time.sleep(30)
             print(msg, status)
-            if status == 2:
+            if status != 0:
                 cnt += 1
             else:
                 cnt = 0
-            if cnt == 6:
+            if cnt == 3:
                 break
         return -1
 
