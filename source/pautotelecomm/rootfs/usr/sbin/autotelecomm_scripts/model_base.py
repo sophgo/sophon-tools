@@ -176,6 +176,10 @@ class serialCom:
     # 发送ECM拨号指令
     # 指令被成功接收返回0，失败返回-1
     def start_dial(self):
+        cmd = "AT\r"
+        self.send_msg(cmd)
+        time.sleep(1)
+        _ = self.recive_msg().decode("utf-8")
         msg = "AT+CGDCONT=1,\"IP\",\"" + self.apn + "\" \r"
         self.send_msg(msg)
         time.sleep(5)

@@ -4,7 +4,7 @@ import time
 class serialCom_simcom(model_base.serialCom):
     # 获取当前设备的usb mode信息
     def get_usbmode(self):
-        cmd = "AT$MYCONFIG? \r"
+        cmd = "AT$MYCONFIG?\r"
         self.send_msg(cmd)
         time.sleep(3)
         ret = self.recive_msg().decode("utf-8")
@@ -21,7 +21,7 @@ class serialCom_simcom(model_base.serialCom):
 
     # 修改当前设备usb mode为ECM
     def switch_to_ecm(self):
-        cmd = "AT$MYCONFIG=\"USBNETMODE\",1,1 \r"
+        cmd = "AT$MYCONFIG=\"USBNETMODE\",1,1\r"
         self.send_msg(cmd)
         print("Change USBNETMODE to ECM")
         print("Wait model reset...")
@@ -106,7 +106,11 @@ class serialCom_simcom(model_base.serialCom):
         self.parseAPN(self.apn)
         print("\nAPN:", self.apn)
         print("\nStart dialing")
-        cmd = "AT+DIALMODE=0 \r\n"
+        cmd = "AT \r"
+        self.send_msg(cmd)
+        time.sleep(1)
+        _ = self.recive_msg().decode("utf-8")
+        cmd = "AT+DIALMODE=0\r"
         self.send_msg(cmd)
         time.sleep(1)
         _ = self.recive_msg().decode("utf-8")
