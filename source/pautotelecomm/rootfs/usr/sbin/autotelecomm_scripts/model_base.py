@@ -21,6 +21,7 @@ class serialCom:
         self.apn = apn
         self.monitor_target = monitor_target
         self.isp = ""
+        self.dhclient_path = ""
         self.apn_list = {"3gnet": ["CHN-CU", "CHN-UN", "CHINA UNICOM", "CHN-UNICOM", "UNICOM", "46001"],
                          "ctnet": ["CHN-TE", "CHINA Te", "CHN-CT", "CT", "46011"],
                          "cmnet": ["CHN-CM", "CHINA MO", "CHINA MOBILE", "CMCC", "46000"]}
@@ -39,7 +40,8 @@ class serialCom:
                 try:
                     self.ser = serial.Serial(ser_name, 115200, timeout=1)
                 except Exception as e:
-                    # print(e)
+                    print("try uart error: ")
+                    print(e)
                     continue
                 msg = "AT \r"
                 self.send_msg(msg)
@@ -209,7 +211,10 @@ class serialCom:
 
             script_dir = os.path.dirname(os.path.abspath(__file__))
             script_path = os.path.join(script_dir, 'dhclient-script')
-            cmd = "dhclient -sf " + script_path + " " + self.ethname
+            if self.dhclient_path == "":
+                cmd = "dhclient -sf " + script_path + " " + self.ethname
+            else:
+                cmd = self.dhclient_path + " -sf " + script_path + " " + self.ethname
             try:
                 os.system(cmd)
             except Exception as e:
@@ -279,6 +284,11 @@ class serialCom:
         status1, _ = subprocess.getstatusoutput(cmd1)
         status2, _ = subprocess.getstatusoutput(cmd2)
         if status1 == 0 and status2 == 0:
+            return 0
+        elif status1 != 0 and status2 == 0:
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            self.dhclient_path = os.path.join(script_dir, 'dhclient')
+            print("cannot find dhclient, use " + self.dhclient_path)
             return 0
         else:
             print("please check network manager tool: dhclient, ip")

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-VERSION=1.2.2
+VERSION=1.2.3
 rm -rf output
 mkdir -p output
 
@@ -25,6 +25,10 @@ offset=$(grep -an "__ARCHIVE_BELOW__" "$0" | tail -n1 | cut -d: -f1)
 tail -n +$offset "$0" > "$TMP_DIR/packages.tgz"
 tar -xavf "$TMP_DIR/packages.tgz" -C "$TMP_DIR" || exit
 
+systemctl daemon-reload
+systemctl stop autotelecomm
+systemctl stop ec20
+
 echo "[install rootfs] start ..."
 pushd "${TMP_DIR}/rootfs" || exit
 cp -r ./* / || exit
@@ -37,6 +41,12 @@ bash install.sh || exit
 popd || exit
 sync
 
+if [[ "$(pip list | grep pyserial | wc -l)" == "0" ]]; then
+    echo "not find pyserial by python, need install ..."
+    python3 -m pip install -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple pyserial
+fi
+
+systemctl daemon-reload
 systemctl stop lteModemManager
 systemctl disable lteModemManager
 sync
