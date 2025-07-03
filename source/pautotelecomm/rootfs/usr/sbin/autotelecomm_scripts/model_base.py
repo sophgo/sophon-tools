@@ -230,7 +230,7 @@ class serialCom:
         cnt = 0
         time.sleep(30)
         while(True):
-            msg = "sudo ping -c4 -I " + self.ethname + " " + host
+            msg = "ping -c4 -I " + self.ethname + " " + host
             status, output = subprocess.getstatusoutput(msg)
             time.sleep(30)
             print(msg, status)
