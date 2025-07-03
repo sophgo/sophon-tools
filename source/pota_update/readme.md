@@ -69,6 +69,7 @@
 7. 如果文件`/dev/shm/ota_success_flag`被创建，则手动重启设备即可开始刷机，刷机完成后设备会自动重启。
 8. 如果文件`/dev/shm/ota_error_flag`被创建，需要检查emmc上分区表和最后一个分区的数据是否完整。然后检查`/dev/shm/ota_shell.sh.log`文件中的报错信息。
 9. 刷机期间会ota程序会尝试驱动bootloader阶段注册的led灯，功能如下：
+
     1. 正常刷机状态下为status灯灭，error灯亮
     2. 正常刷机状态下每烧录一个包，error灯会快速地连续闪烁3次
     3. 刷机过程全部完成后status灯亮，error灯灭
@@ -86,6 +87,10 @@
 > 1. 需要确保新旧分区表关于最后一个分区的起始扇区完全一致
 > 2. 在上述操作的第5步前，执行`export LAST_PART_NOT_FLASH=LAST_PART_NOT_FLASH`
 > 3. 按照上述操作继续执行，等到OTA升级完成，第一次启动后如果发现emmc上最后一个分区挂载失败则需要执行一次`mount -a`
+
+## 自动重启配置方式
+
+修改脚本末尾几行，将注释掉的 `reboot -f` 取消注释即可
 
 ## 准备阶段常见报错处理方式
 

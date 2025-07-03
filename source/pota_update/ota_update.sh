@@ -140,7 +140,7 @@ LOGFILE="$(readlink -f "${BASH_SOURCE[0]}").log"
 rm -f $LOGFILE*
 exec > >(tee -a "$LOGFILE") 2>&1
 
-echo "[INFO] ota update tool, version: v1.2.0"
+echo "[INFO] ota update tool, version: v1.2.1"
 
 WORK_DIR="$1"
 echo "[INFO] work dir: $WORK_DIR"
@@ -350,7 +350,7 @@ fuser -mk "${OTA_LAST_DEVICE}"
 sleep 5
 fuser -mk "${OTA_LAST_DEVICE}"
 echo "[INFO] kill process of ${OTA_LAST_DEVICE_MOUNT_POINT} success"
-umount -f ${OTA_LAST_DEVICE}
+umount -l ${OTA_LAST_DEVICE}
 if [[ "$(df | grep ${OTA_LAST_DEVICE} | wc -l)" != "0" ]]; then
     panic "umount ${OTA_LAST_DEVICE} error!!!"
 fi
