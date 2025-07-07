@@ -54,7 +54,8 @@ function memtest_s() {
 			if [[ "$loop" == "0" ]]; then
 				break
 			fi
-			freeMemMB=$(free -m | grep ^Mem | awk '{print $NF - 200}')
+			# 预留300M的空间
+			freeMemMB=$(free -m | grep ^Mem | awk '{print $NF - 300}')
 			./memtester ${freeMemMB}M 1
 			if [[ "$?" != "0" ]]; then
 				panic "memtester error"
@@ -158,7 +159,7 @@ function memtest_s() {
 	fi
 }
 
-echo "MEMTEST VERSION: V1.3.1"
+echo "MEMTEST VERSION: V1.3.2"
 
 # prepare memtest_gdma
 dir_path="$(dirname "$(readlink -f "$0")")"
