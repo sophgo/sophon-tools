@@ -4,6 +4,9 @@
 
 #export SOPHON_QT_CMD_DEBUG=1 # 是否开启debug
 
+#判断是否为麒麟操作系统
+is_kylinos=$(cat /etc/os-release | grep kylinos |wc -l)
+
 # 英文模式
 export SOPHON_QT_EN_ENABLE=0
 
@@ -136,14 +139,25 @@ else
                 echo "fl2000 already insmod"
         fi
 
-        export PATH=$PATH:/opt/bin:/bm_bin
-        export QTDIR=/usr/lib/aarch64-linux-gnu #qtsdk在系统上的路径
-        export QT_QPA_FONTDIR=$QTDIR/fonts
-        export QT_QPA_PLATFORM_PLUGIN_PATH=$QTDIR/qt5/plugins/
-        export LD_LIBRARY_PATH=/opt/lib:$LD_LIBRARY_PATH
-        export QT_QPA_PLATFORM=linuxfb:fb=/dev/fl2000-0 #framebuffer驱动
-        # for ms91xx
-        # export QT_QPA_PLATFORM=linuxfb:ms91xxmode=2
+        if [ $is_kylinos -gt 1 ]; then
+                function SOPHON_QT_4() {
+                        systemctl stop NetworkManager
+                        rm -rf /etc/NetworkManager/system-connections/*
+                        systemctl start NetworkManager
+                        /usr/sbin/bm_set_ip eth1 192.168.150.1 255.255.255.0 '' ''
+                        /usr/sbin/bm_set_ip_auto eth0
+                }
+                export -f SOPHON_QT_4
+        else
+                export PATH=$PATH:/opt/bin:/bm_bin
+                export QTDIR=/usr/lib/aarch64-linux-gnu #qtsdk在系统上的路径
+                export QT_QPA_FONTDIR=$QTDIR/fonts
+                export QT_QPA_PLATFORM_PLUGIN_PATH=$QTDIR/qt5/plugins/
+                export LD_LIBRARY_PATH=/opt/lib:$LD_LIBRARY_PATH
+                export QT_QPA_PLATFORM=linuxfb:fb=/dev/fl2000-0 #framebuffer驱动
+                # for ms91xx
+                # export QT_QPA_PLATFORM=linuxfb:ms91xxmode=2
+        fi
         export SOPHON_QT_FONT_SIZE=20 #使用该环境变量配置程序默认字体大小
         SophUI_path=/bm_services/SophonHDMI/
         SophUIDEMO_path=${SophUI_path}/SophUIDEMO.sh
@@ -152,7 +166,11 @@ else
 
         while true; do
                 rm -f $SophUIDEMO_path
-                ${SophUI_path}/SophUI
+                if [ $is_kylinos -gt 1 ]; then
+                        /usr/bin/xinit ${SophUI_path}/SophUI
+                else
+                        ${SophUI_path}/SophUI
+                fi
                 ret=$?
                 if [ $ret -ne 0 ]; then
                 echo "SophUI exited with error code: $ret"
