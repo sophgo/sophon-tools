@@ -104,6 +104,16 @@ otaenvsetup_str="setenv otaenvset  ';'
 "
 fi
 
+# 检查参数
+for arg in "$@"; do
+    case $arg in
+        LAST_PART_NOT_FLASH=*)
+            LAST_PART_NOT_FLASH="${arg#*=}"
+            shift
+            ;;
+    esac
+done
+
 # 启动后台服务，依赖systemd
 DDR_SHELL_FILE="/dev/shm/ota_shell.sh"
 SHELL_FILE="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -140,18 +150,19 @@ LOGFILE="$(readlink -f "${BASH_SOURCE[0]}").log"
 rm -f $LOGFILE*
 exec > >(tee -a "$LOGFILE") 2>&1
 
-echo "[INFO] ota update tool, version: v1.2.1"
+echo "[INFO] ota update tool, version: v1.3.0"
 
 WORK_DIR="$1"
 echo "[INFO] work dir: $WORK_DIR"
 cd $WORK_DIR
 
-if [[ "$2" == "LAST_PART_NOT_FLASH" ]]; then
-    LAST_PART_NOT_FLASH="1"
-    echo "[INFO] LAST_PART_NOT_FLASH mode enable"
-else
+LAST_PART_NOT_FLASH="1"
+if [[ "$2" == "0" ]]; then
     LAST_PART_NOT_FLASH="0"
     echo "[INFO] LAST_PART_NOT_FLASH mode disable"
+else
+    LAST_PART_NOT_FLASH="1"
+    echo "[INFO] LAST_PART_NOT_FLASH mode enable"
 fi
 
 function file_validate() {
