@@ -47,7 +47,7 @@
     boot_emmc-opt.cmd   data.11-of-58.gz         data.24-of-58.gz  data.37-of-58.gz  data.5-of-58.gz   fip.bin           rootfs.11-of-32.gz  rootfs.24-of-32.gz  rootfs.8-of-32.gz
     ```
 4. 尽可能得关闭业务，尤其是占用最后一个分区的业务或服务。
-5. 以root账户身份执行ota_update.sh脚本，比如命令`sudo bash ota_update.sh`
+5. 以root账户身份执行ota_update.sh脚本，比如命令`sudo -E bash ota_update.sh`
 
     ```bash
     linaro@bm1684:/xxxxx$ sudo bash ota_update.sh 
