@@ -60,6 +60,12 @@ function panic() {
     exit 1
 }
 
+function file_validate() {
+    local file
+    file=$(eval echo \$1)
+    [ -r ${file} ] || panic "$i \"$file\" is not readable"
+}
+
 # 必须是root账户
 if [ ! "$(id -u)" -eq 0 ]; then
     panic "must use root"
@@ -153,6 +159,12 @@ exec > >(tee -a "$LOGFILE") 2>&1
 echo "[INFO] ota update tool, version: v1.3.0"
 
 WORK_DIR="$1"
+if [ ! -d $WORK_DIR/sdcard ]; then
+    echo "[INFO] cannot find sdcard, maybe in sdcard"
+    md5file=$(find . -type f -name "*md5*")
+    file_validate ${md5file}
+    WORK_DIR=$(realpath $WORK_DIR/../)
+fi
 echo "[INFO] work dir: $WORK_DIR"
 cd $WORK_DIR
 
@@ -164,12 +176,6 @@ else
     LAST_PART_NOT_FLASH="1"
     echo "[INFO] LAST_PART_NOT_FLASH mode enable"
 fi
-
-function file_validate() {
-    local file
-    file=$(eval echo \$1)
-    [ -r ${file} ] || panic "$i \"$file\" is not readable"
-}
 
 # 记录系统信息
 echo "-----------------------------------------------------------"

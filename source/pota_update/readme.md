@@ -51,7 +51,7 @@
     [WARRNING] ota server will resize last partition on emmc, if error, please check emmc partitions
     [WARRNING] ota server will stop docker server and all program on last partition
     ```
-6. 等待文件`/dev/shm/ota_success_flag`或`/dev/shm/ota_error_flag`的创建，或者等待全局终端的广播`[OTA] Upgrade preparation is complete. Please restart the device to begin the upgrade.`。
+6. 第五步执行完毕后会直接退出，此时后台会自动启动OTA准备服务。需要等待文件`/dev/shm/ota_success_flag`或`/dev/shm/ota_error_flag`的创建，或者等待相关的全局终端的广播`[OTA] Upgrade preparation is complete. Please restart the device to begin the upgrade.`。
 
     1. OTA服务的日志会存放到`/dev/shm/ota_shell.sh.log`中，日志文件会有所有的log，可以用命令`sudo tail -f /dev/shm/ota_shell.sh.log`监控该文件的最新变更
     2. OTA服务会停止docker服务
