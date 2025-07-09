@@ -90,6 +90,13 @@
    3. 修改后的总大小不得大于emmc大小，工具会自动检测，如果遇到`ERROR: bakpack size(XXX) > emmc size(XXX), please del some file and rework.`的报错，请检查文件是否太多了，或者自定义修改的分区期望大小太大了
 5. 保存`socbak.sh`文件，继续执行`bash socbak.sh`命令，开始打包
 
+### 固定分区大小功能
+
+> 注意：此功能会固定预分配的分区大小，可能会导致打包失败。
+
+1. 参考上一小节 `修改emmc分区布局功能` ，修改 `socbak.sh` 脚本文件，指定各个分区的大小
+2. 在执行 `bash socbak.sh` 前。执行 `export SOC_BAK_FIXED_SIZE=1` 。
+
 ## 示例视频
 
 ### 完整打包做包功能
