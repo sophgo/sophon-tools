@@ -37,7 +37,7 @@
     ...
     ```
 4. 尽可能得关闭业务，尤其是占用最后一个分区的业务或服务。
-5. 以root账户身份执行ota_update.sh脚本，比如命令`sudo bash ota_update.sh`，默认情况下OTA服务会保留最后一个分区（data分区）不烧录，如果当前设备和刷机包不满足这个条件，会报错 `[OTA PANIC] LAST_PART_NOT_FLASH mode, check last part start XXX != XXX`。如果需要烧录data分区,需要增加一个参数，示例：`sudo bash ota_update.sh LAST_PART_NOT_FLASH=0`
+5. 以root账户身份执行ota_update.sh脚本，比如命令`sudo bash ota_update.sh`，默认情况下OTA服务会保留最后一个分区（data分区）不烧录，如果当前设备和刷机包不满足这个条件，会报错 `[OTA PANIC] LAST_PART_NOT_FLASH mode, check last part start XXX != XXX`。如果需要烧录data分区，需要增加一个参数说明不需要保留最后一个分区：`sudo bash ota_update.sh LAST_PART_NOT_FLASH=0`
 
     ```bash
     linaro@bm1684:/xxxxx$ sudo bash ota_update.sh 
@@ -88,6 +88,10 @@
 ### \[PANIC\] umount /dev/mmcblk0px error!!!
 
 没有自动关闭掉占用最后一个分区的进程，需要手动使用 `sudo fuser -m mmc0最后一个分区的挂载点` 看一下哪个进程在一直占用这个分区。mmc0最后一个分区通常会挂载到 `/data`
+
+### \[OTA PANIC\] LAST_PART_NOT_FLASH mode, check last part start XXX != XXX
+
+当前刷机包中最后一个分区的偏移和当前设备最后一个分区的偏移不一致。如果需要保留最后一个分区的内容，需要校对刷机包是否正确;如果不需要保留最后一个分区的内容，执行时增加`LAST_PART_NOT_FLASH=0`参数即可
 
 ## ota准备过程资源消耗
 
