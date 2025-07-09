@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo "VERSION: v1.0.3"
+echo "VERSION: v1.0.4"
 
 # env SOC_BAK_ALL_IN_ONE=1 for socbak allinone
 # env SOC_BAK_FIXED_SIZE=1 for socbak fixed size mode
@@ -10,7 +10,7 @@ echo "VERSION: v1.0.3"
 # Users can add custom irrelevant files and directories
 # in the format of ROOTFS_EXCLUDE_FLAGS_INT to the
 # ROOTFS_EXCLUDE_FLAGS_USER parameter.
-ROOTFS_EXCLUDE_FLAGS_INT=' --exclude=./var/log/* --exclude=./media/* --exclude=./sys/* --exclude=./proc/* --exclude=./dev/* --exclude=./factory/* --exclude=./run/udev/* --exclude=./run/user/* --exclude=./socrepack '
+ROOTFS_EXCLUDE_FLAGS_INT=' --exclude=./var/log/* --exclude=./media/* --exclude=./sys/* --exclude=./proc/* --exclude=./dev/* --exclude=./factory/* --exclude=./run/udev/* --exclude=./run/user/* --exclude=./socrepack --exclude=./root/.boot/*'
 ROOTFS_EXCLUDE_FLAGS_USER='  '
 ROOTFS_EXCLUDE_FLAGS_RUN=" ${ROOTFS_EXCLUDE_FLAGS_INT} ${ROOTFS_EXCLUDE_FLAGS_USER} "
 ROOTFS_EXCLUDE_FLAGS=' '
