@@ -89,6 +89,17 @@
 
 当前刷机包中最后一个分区的偏移和当前设备最后一个分区的偏移不一致。如果需要保留最后一个分区的内容，需要校对刷机包是否正确;如果不需要保留最后一个分区的内容，执行时增加`LAST_PART_NOT_FLASH=0`参数即可
 
+### \[OTA PANIC\] resize2fs /dev/mmcblk0p7 -> 10820655K, please check if your eMMC partition is healthy
+
+缩小最后一个分区大小失败，执行如下操作做检查：
+
+1. `mount -a` 然后查看最后一个分区是否挂载完毕
+2. 使用 `fsck` 工具尝试修复最后一个分区
+3. `resize-helper` 整理最后一个分区
+4. 清理mmc0最后一个分区的的内容
+
+然后再尝试
+
 ## ota准备过程资源消耗
 
 ![屏幕截图_20241220_115824](https://github.com/user-attachments/assets/79346334-6e4a-4104-806f-26eee6b5b89e)
