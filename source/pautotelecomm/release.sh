@@ -1,6 +1,6 @@
 #!/bin/bash
 
-VERSION=1.2.3
+VERSION=1.2.4
 rm -rf output
 mkdir -p output
 
@@ -10,11 +10,6 @@ cat <<'EOF' > output/autotelecomm_install_${VERSION}.sh
 if [ "$(id -u)" != "0" ]; then
     echo "need root run"
     exit 1
-fi
-
-if [[ "$(grep chip /sys/class/i2c-dev/i2c-1/device/1-0017/information | awk -F'"' '{print $(NF-1)}')" != "BM1684X" ]]; then
-    echo "cannot support this device"
-    exit -1
 fi
 
 TMP_DIR=$(mktemp -d)
