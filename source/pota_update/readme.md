@@ -23,18 +23,16 @@
 
 ## 使用方式
 
-1. 将sd卡卡刷包拷贝到设备上并解压到sdcard文件夹下
-2. 将ota_update.sh脚本cp到sdcard文件夹外，与sdcard文件夹同目录
+1. 将sd卡卡刷包拷贝到设备上并解压
+2. 将ota_update.sh脚本cp到刷机包内，与BOOT文件同目录
 3. 检查目录格式是否类似这个
 
     ```bash
     linaro@bm1684:/xxxxx$ ls
-    ota_update.sh  sdcard
-    linaro@bm1684:/xxxxx$ ls sdcard/
     BOOT                boot_emmc-opt.scr        data.12-of-58.gz  data.25-of-58.gz  data.38-of-58.gz  data.50-of-58.gz  gpt.gz              rootfs.12-of-32.gz  rootfs.25-of-32.gz  rootfs.9-of-32.gz
     boot.1-of-2.gz      boot_emmc-recovery.cmd   data.13-of-58.gz  data.26-of-58.gz  data.39-of-58.gz  data.51-of-58.gz  md5.txt             rootfs.13-of-32.gz  rootfs.26-of-32.gz  rootfs_rw.1-of-2.gz
     boot.2-of-2.gz      boot_emmc-recovery.scr   data.14-of-58.gz  data.27-of-58.gz  data.4-of-58.gz   data.52-of-58.gz  misc.1-of-1.gz      rootfs.14-of-32.gz  rootfs.27-of-32.gz  rootfs_rw.2-of-2.gz
-    ...
+    ota_update.sh       ...
     ```
 4. 尽可能得关闭业务，尤其是占用最后一个分区的业务或服务。并保存工作文件，OTA服务准备完成后会自动重启设备。
 5. 以root账户身份执行ota_update.sh脚本，比如命令`sudo bash ota_update.sh`，默认情况下OTA服务会保留最后一个分区（data分区）不烧录，如果当前设备和刷机包不满足这个条件，会报错 `[OTA PANIC] LAST_PART_NOT_FLASH mode, check last part start XXX != XXX`。如果**需要烧录data分区**，需要增加**一个参数说明不需要保留最后一个分区**：`sudo bash ota_update.sh LAST_PART_NOT_FLASH=0`
