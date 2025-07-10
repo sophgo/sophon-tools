@@ -788,7 +788,7 @@ echo "[INFO] Upgrade preparation is complete. Please restart the device to begin
 touch /dev/shm/ota_success_flag
 sync
 # You can uncomment the line below to automatically reboot after the OTA preparation is complete.
-# reboot -f
+reboot -f
 while true; do
     wall "[OTA] Upgrade preparation is complete. Please restart the device to begin the upgrade."
     sleep 5
