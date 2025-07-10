@@ -167,9 +167,9 @@ else
         while true; do
                 rm -f $SophUIDEMO_path
                 if [ $is_kylinos -gt 1 ]; then
-                        /usr/bin/xinit ${SophUI_path}/SophUI
+                        /usr/bin/xinit ${SophUI_path}/SophUI 2>/dev/null
                 else
-                        ${SophUI_path}/SophUI
+                        ${SophUI_path}/SophUI 2>/dev/null
                 fi
                 ret=$?
                 if [ $ret -ne 0 ]; then

@@ -35,14 +35,14 @@ else
 fi
 
 sleep 3
-status=$(find /sys -name "hdmi_status")
+status=$(find /sys -name "hdmi_status" 2>/dev/null)
 path1="$status/status"
 while true; do
 	if [ "$status" = "" ]; then
 		status=$(find /sys -name "hdmi_status" 2>/dev/null)
 		path1="$status/status"
 	fi
-	STATUS=$(cat $path1)
+	STATUS=$(cat $path1 2>/dev/null)
 	if [ $? -eq 1 ]; then
 		STATUS="0"
 	fi
@@ -60,7 +60,7 @@ while true; do
 			count=0
 			if [ $service_state != "active" ]; then
 				echo "start hdmi service"
-				systemctl start SophonHDMI.service
+				systemctl restart SophonHDMI.service
 				service_state="active"
 			fi
 		fi
