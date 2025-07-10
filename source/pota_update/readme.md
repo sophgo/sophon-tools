@@ -106,4 +106,24 @@
 
 ## 使用视频
 
-TODO
+### 不烧录最后一个分区（默认）
+
+https://github.com/user-attachments/assets/9362c671-0a5e-4be2-aaec-6411704c39b4
+
+1. 拷贝刷机包到/data分区
+2. 不带参数直接执行刷机包中的 `ota_update.sh`
+3. ssh终端由于在/data下，所以被kill掉了。重新连接，查看OTA准备服务的日志
+4. 准备完成后设备自动重启，查看串口log
+5. 刷机到root-ro分区的第13个包时设备断电然后重新上电，模拟OTA刷机时电压不稳。设备重新上电后基于之前的刷机进度继续刷机
+6. 刷机完成后自动重启（文件大小原因这部分跳过）
+7. 启动后查看/data分区，发现该分区文件被保留
+
+### 烧录最后一个分区
+
+https://github.com/user-attachments/assets/ea21d468-b1d3-4b13-bd3e-d2fbd4852d46
+
+1. 拷贝刷机包到家目录
+2. 带 `LAST_PART_NOT_FLASH=0` 参数直接执行刷机包中的 `ota_update.sh`，查看OTA准备服务的日志，期间在/data分区创建了文件testfile
+3. 准备完成后设备自动重启，查看串口log
+5. 刷机完成后自动重启
+6. 启动后查看/data分区，发现创建的testfile文件被删除
