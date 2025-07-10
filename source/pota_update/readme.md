@@ -36,8 +36,8 @@
     boot.2-of-2.gz      boot_emmc-recovery.scr   data.14-of-58.gz  data.27-of-58.gz  data.4-of-58.gz   data.52-of-58.gz  misc.1-of-1.gz      rootfs.14-of-32.gz  rootfs.27-of-32.gz  rootfs_rw.2-of-2.gz
     ...
     ```
-4. 尽可能得关闭业务，尤其是占用最后一个分区的业务或服务。
-5. 以root账户身份执行ota_update.sh脚本，比如命令`sudo bash ota_update.sh`，默认情况下OTA服务会保留最后一个分区（data分区）不烧录，如果当前设备和刷机包不满足这个条件，会报错 `[OTA PANIC] LAST_PART_NOT_FLASH mode, check last part start XXX != XXX`。如果需要烧录data分区，需要增加一个参数说明不需要保留最后一个分区：`sudo bash ota_update.sh LAST_PART_NOT_FLASH=0`
+4. 尽可能得关闭业务，尤其是占用最后一个分区的业务或服务。并保存工作文件，OTA服务准备完成后会自动重启设备。
+5. 以root账户身份执行ota_update.sh脚本，比如命令`sudo bash ota_update.sh`，默认情况下OTA服务会保留最后一个分区（data分区）不烧录，如果当前设备和刷机包不满足这个条件，会报错 `[OTA PANIC] LAST_PART_NOT_FLASH mode, check last part start XXX != XXX`。如果**需要烧录data分区**，需要增加**一个参数说明不需要保留最后一个分区**：`sudo bash ota_update.sh LAST_PART_NOT_FLASH=0`
 
     ```bash
     linaro@bm1684:/xxxxx$ sudo bash ota_update.sh 
@@ -51,15 +51,16 @@
     [WARRNING] ota server will resize last partition on emmc, if error, please check emmc partitions
     [WARRNING] ota server will stop docker server and all program on last partition
     ```
-6. 第五步执行完毕后会直接退出，此时后台会自动启动OTA准备服务。需要等待文件`/dev/shm/ota_success_flag`或`/dev/shm/ota_error_flag`的创建，或者等待相关的全局终端的广播`[OTA] Upgrade preparation is complete. Please restart the device to begin the upgrade.`。
+6. 第五步执行完毕后会直接退出，此时后台会自动启动OTA准备服务。如果OTA准备服务完成，则设备会自动重启。如果文件 `/dev/shm/ota_error_flag` 被创建或者有 `[OTA PANIC]` 相关的全局广播，则代表发生错误。如下是OTA服务准备过程中的一些信息：
 
     1. OTA服务的日志会存放到`/dev/shm/ota_shell.sh.log`中，日志文件会有所有的log，可以用命令`sudo tail -f /dev/shm/ota_shell.sh.log`监控该文件的最新变更
     2. OTA服务会停止docker服务
     3. OTA服务会杀死所有依赖最后一个分区的进程，所以当前终端被杀死是有概率发生的
+    4. 如果文件`/dev/shm/ota_error_flag`被创建或者有 `[OTA PANIC]` 相关的全局广播，需要检查emmc上分区表和最后一个分区的数据是否完整。然后检查`/dev/shm/ota_shell.sh.log`文件中的报错信息。
+    5. 如果想要中断OTA准备服务，需要执行 `sudo systemctl stop sophon-ota-update.service`
+    6. OTA准备服务可能会修改刷机包中的 `gpt.gz` 文件，用于与设备对齐末尾分区偏移和大小，服务在准备完毕后会自动恢复该文件
 
-7. 如果文件`/dev/shm/ota_success_flag`被创建，则手动重启设备即可开始刷机，刷机完成后设备会自动重启。
-8. 如果文件`/dev/shm/ota_error_flag`被创建，需要检查emmc上分区表和最后一个分区的数据是否完整。然后检查`/dev/shm/ota_shell.sh.log`文件中的报错信息。
-9. 刷机期间会ota程序会尝试驱动bootloader阶段注册的led灯，功能如下：
+7. 设备重启后会开始OTA刷机过程，刷机期间会ota程序会尝试驱动bootloader阶段注册的led灯，功能如下：
 
     1. 正常刷机状态下为status灯灭，error灯亮
     2. 正常刷机状态下每烧录一个包，error灯会快速地连续闪烁3次
@@ -72,16 +73,11 @@
         5. n=5 将数据包解压错误
         6. n=6 将解压后的数据写入emmc中错误
 
-> 注：如果需要保留最后一个分区，操作如下：
->
-> 0. 警告：此方案依赖刷机前后分区表中对于最后一个分区的描述完全一致。风险较大，使用前请测试完毕并备份数据。
-> 1. 需要确保新旧分区表关于最后一个分区的起始扇区完全一致
-> 2. 在上述操作的第5步前，执行`export LAST_PART_NOT_FLASH=LAST_PART_NOT_FLASH`
-> 3. 按照上述操作继续执行，等到OTA升级完成，第一次启动后如果发现emmc上最后一个分区挂载失败则需要执行一次`mount -a`
+8. 刷机完成后设备会再次自动重启，重启后即进入刷机后第一次正常启动的状态。
 
-## 自动重启配置方式
+## 禁止OTA准备服务自动重启配置方式
 
-修改脚本末尾几行，将注释掉的 `reboot -f` 取消注释即可
+修改脚本末尾几行，注释掉的 `reboot -f` 即可
 
 ## 准备阶段常见报错处理方式
 

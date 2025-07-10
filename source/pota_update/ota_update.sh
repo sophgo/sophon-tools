@@ -50,8 +50,8 @@ function panic() {
     fi
     if [[ "$LAST_PART_NOT_FLASH" == "1" ]] || [[ "$LAST_PART_NOT_FLASH" == "LAST_PART_NOT_FLASH" \
 ]]; then
-        if [ -f $WORK_DIR/sdcard/gpt.gz.bak ]; then
-            mv $WORK_DIR/sdcard/gpt.gz.bak $WORK_DIR/sdcard/gpt.gz
+        if [ -f $WORK_DIR/gpt.gz.ota_update_bak ]; then
+            mv $WORK_DIR/gpt.gz.ota_update_bak $WORK_DIR/gpt.gz
         fi
     fi
     popd &>/dev/null
@@ -158,15 +158,19 @@ exec > >(tee -a "$LOGFILE") 2>&1
 
 echo "[INFO] ota update tool, version: v1.3.0"
 
-WORK_DIR="$1"
-if [ ! -d $WORK_DIR/sdcard ]; then
-    echo "[INFO] cannot find sdcard, maybe in sdcard"
-    md5file=$(find . -type f -name "*md5*")
+WORK_DIR=""
+if [ ! -d ${1}/sdcard ]; then
+    echo "[INFO] cannot find sdcard, maybe in sdcard ..."
+    md5file=$(find ${1} -type f -name "*md5*")
     file_validate ${md5file}
-    WORK_DIR=$(realpath $WORK_DIR/../)
+    file_validate ${1}/BOOT
+    file_validate ${1}/boot.scr
+    WORK_DIR=$(realpath ${1})
+else
+    WORK_DIR="$1"/sdcard
 fi
 echo "[INFO] work dir: $WORK_DIR"
-cd $WORK_DIR
+pushd $WORK_DIR || panic "cannot pushd $WORK_DIR, please check files healthy"
 
 LAST_PART_NOT_FLASH="1"
 if [[ "$2" == "0" ]]; then
@@ -190,17 +194,24 @@ lsusb >>"$LOGFILE"
 lspci >>"$LOGFILE"
 top -n1 >>"$LOGFILE"
 
-pushd sdcard
-if [[ "$?" != "0" ]]; then
-    panic "cannot pushd $WORK_DIR/sdcard, please check files healthy"
-fi
-
 # 使用MD5文件进行刷机包校验
 echo "[INFO] md5 check start"
 md5file=$(find . -type f -name "*md5*")
 file_validate ${md5file}
 md5sum -c ${md5file} &>>"$LOGFILE" || panic "md5 check error!!!"
 echo "[INFO] md5 check success"
+
+ota_cleanup() {
+    wall "[OTA INFO] clean ..."
+    echo "[INFO] clean ..."
+	if [[ "$LAST_PART_NOT_FLASH" == "1" ]]; then
+        if [ -f $WORK_DIR/gpt.gz.ota_update_bak ]; then
+            mv $WORK_DIR/gpt.gz.ota_update_bak $WORK_DIR/gpt.gz
+        fi
+    fi
+	exit 0
+}
+trap ota_cleanup EXIT SIGHUP SIGINT SIGQUIT SIGTERM
 
 # 确定刷机包大小和刷机后占空空间
 echo "[INFO] check update size check start"
@@ -378,9 +389,9 @@ if [[ "$?" != "0" ]]; then
 eMMC partition is healthy"
 fi
 mount -a
-cd $WORK_DIR/sdcard
+cd $WORK_DIR
 if [[ "$?" != "0" ]]; then
-    panic "cannot cd $WORK_DIR/sdcard, please check files healthy"
+    panic "cannot cd $WORK_DIR, please check files healthy"
 fi
 echo "[INFO] resize last part to write update pack success"
 
@@ -400,7 +411,7 @@ RT_END}\n0700\nw\nY\n" | gdisk ${OTA_GPT_TEMP_DISK_FILE}
     gdisk -l ${OTA_GPT_TEMP_DISK_FILE}
     dd if=${OTA_GPT_TEMP_DISK_FILE} of=${OTA_GPT_TEMP_FILE} bs=1 count=17408 || panic "dd sparse \
 file new info ${OTA_GPT_TEMP_DISK_FILE} to gpt file ${OTA_GPT_TEMP_FILE} error"
-    mv gpt.gz gpt.gz.bak
+    mv gpt.gz gpt.gz.ota_update_bak
     gzip -c ${OTA_GPT_TEMP_FILE} >gpt.gz || panic "gzip file ${OTA_GPT_TEMP_FILE} to gpt.gz error"
     sync
 fi
@@ -767,8 +778,8 @@ echo "[INFO] chack pack md5sum on emmc success"
 
 set >>"$LOGFILE"
 if [[ "$LAST_PART_NOT_FLASH" == "1" ]]; then
-    if [ -f gpt.gz.bak ]; then
-        mv gpt.gz.bak gpt.gz
+    if [ -f gpt.gz.ota_update_bak ]; then
+        mv gpt.gz.ota_update_bak gpt.gz
     fi
 fi
 popd #sdcard
