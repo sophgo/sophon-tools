@@ -17,7 +17,7 @@ ROOTFS_EXCLUDE_FLAGS=' '
 ROOTFS_INCLUDE_PATHS=' ./var/log/nginx ./var/log/redis ./var/log/mosquitto ./var/log/mysql'
 
 declare -A -g PART_EXCLUDE_FLAGS
-PART_EXCLUDE_FLAGS["boot"]=' --exclude=./spi_flash.bin.socBakNew '
+PART_EXCLUDE_FLAGS["boot"]=' --exclude=./spi_flash.bin.socBakNew --exclude=./u-boot.env '
 PART_EXCLUDE_FLAGS["data"]=' '
 
 # These parameters define several generated files and
