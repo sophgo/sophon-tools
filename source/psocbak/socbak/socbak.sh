@@ -1,9 +1,22 @@
 #!/bin/bash
 
-echo "VERSION: v1.0.4"
+echo "VERSION: v1.1.0"
 
 # env SOC_BAK_ALL_IN_ONE=1 for socbak allinone
 # env SOC_BAK_FIXED_SIZE=1 for socbak fixed size mode
+
+for arg in "$@"; do
+    case $arg in
+        SOC_BAK_ALL_IN_ONE=*)
+            SOC_BAK_ALL_IN_ONE="${arg#*=}"
+            shift
+            ;;
+		SOC_BAK_FIXED_SIZE=*)
+            SOC_BAK_FIXED_SIZE="${arg#*=}"
+            shift
+            ;;
+    esac
+done
 
 # These parameters are used to exclude irrelevant files
 # and directories in the context of repackaging mode.

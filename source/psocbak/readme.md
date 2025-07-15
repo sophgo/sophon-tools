@@ -35,8 +35,7 @@
    ``` bash
    unzip socbak.zip
    cd socbak
-   export SOC_BAK_ALL_IN_ONE=1
-   bash socbak.sh
+   bash socbak.sh SOC_BAK_ALL_IN_ONE=1
    ```
 6. 等待一段时间，执行成功后会生成如下文件
    ``` bash
@@ -95,7 +94,7 @@
 > 注意：此功能会固定预分配的分区大小，可能会导致打包失败。
 
 1. 参考上一小节 `修改emmc分区布局功能` ，修改 `socbak.sh` 脚本文件，指定各个分区的大小
-2. 在执行 `bash socbak.sh` 前。执行 `export SOC_BAK_FIXED_SIZE=1` 。
+2. 在执行 `bash socbak.sh` 时，增加 `SOC_BAK_FIXED_SIZE=1` 参数，例如: `bash socbak.sh SOC_BAK_ALL_IN_ONE=1 SOC_BAK_FIXED_SIZE=1`。
 
 ## 示例视频
 
