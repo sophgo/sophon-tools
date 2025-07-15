@@ -216,6 +216,9 @@ trap ota_cleanup EXIT SIGHUP SIGINT SIGQUIT SIGTERM
 # 确定刷机包大小和刷机后占空空间
 echo "[INFO] check update size check start"
 set >>"$LOGFILE"
+if [[ "$(find . -type f -name "partition*xml" | wc -l)" != "1" ]]; then
+    panic "Unable to find one and only one partition.xml file."
+fi
 xmlfile=$(find . -type f -name "partition*xml")
 file_validate ${xmlfile}
 OTA_NEW_PACKAGE_GPT_PART_SIZE_KB=$(cat ${xmlfile} | grep "<physical_partition " | awk -F'"' '{print \
