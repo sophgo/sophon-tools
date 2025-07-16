@@ -58,12 +58,13 @@
     5. 如果想要中断OTA准备服务，需要执行 `sudo systemctl stop sophon-ota-update.service`
     6. OTA准备服务可能会修改刷机包中的 `gpt.gz` 文件，用于与设备对齐末尾分区偏移和大小，服务在准备完毕后会自动恢复该文件
 
-7. 设备重启后会开始OTA刷机过程，刷机期间会ota程序会尝试驱动bootloader阶段注册的led灯，功能如下：
+7. 设备重启后会开始OTA刷机过程，刷机期间会ota程序会尝试驱动bootloader阶段注册的led灯（status灯和error灯），功能如下：
 
-    1. 正常刷机状态下为status灯灭，error灯亮
-    2. 正常刷机状态下每烧录一个包，error灯会快速地连续闪烁3次
-    3. 刷机过程全部完成后status灯亮，error灯灭
-    4. 刷机出现错误后会按照如下顺序报错：两个灯都灭2s，status灯闪烁一次，error灯闪烁n次，status灯闪烁一次。如果error灯闪烁n次，则对应了如下的错误：
+    1. 在SE5/7上，status灯大多数情况是绿色的，error灯则是其他颜色。并且系统正常启动后长亮的那个是status灯，可以根据这个确定灯的名称
+    2. 正常刷机状态下为status灯灭，error灯亮
+    3. 正常刷机状态下每烧录一个包，error灯会快速地连续闪烁3次
+    4. 刷机过程全部完成后status灯亮，error灯灭
+    5. 刷机出现错误后会按照如下顺序报错：两个灯都灭2s，status灯闪烁一次，error灯闪烁n次，status灯闪烁一次。如果error灯闪烁n次，则对应了如下的错误：
         1. n=1 从emmc加载刷机脚本错误
         2. n=2 从emmc加载刷机脚本的格式校验错误
         3. n=3 fip文件烧录错误
