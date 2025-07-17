@@ -23,7 +23,7 @@ find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets)
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets)
 
 # edit by user
-set(MY_PROJECT_VERSION "V2.10.0")
+set(MY_PROJECT_VERSION "V2.12.0")
 configure_file(
   "${CMAKE_SOURCE_DIR}/version.h.in"
   "${CMAKE_BINARY_DIR}/version.h"
