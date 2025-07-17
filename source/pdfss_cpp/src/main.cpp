@@ -97,7 +97,7 @@ void Lk_mux(bool lock, void*) {
 
 static std::vector<struct ServerInfo> sdk_server_info = {
     {0, "172.26.175.10", 32022, "oponIn", "oponIn", false, false, 0.0},
-    {1, "172.24.12.77", 32022, "open", "open", true, false, 0.0},
+    {1, "172.24.12.75", 32022, "open", "open", true, false, 0.0},
     {2, "172.26.13.184", 32022, "oponIn", "oponIn", false, false, 0.0},
     {3, "172.26.166.66", 32022, "oponIn", "oponIn", false, false, 0.0},
     {4, "106.38.208.114", 32022, "open", "open", false, false, 0.0},
