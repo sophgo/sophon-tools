@@ -1,9 +1,10 @@
 use clap::Parser;
 use serde_yaml;
+use serde_yaml::{Mapping, Value};
 use std::env;
 use std::fs;
-use std::process::Command;
 use std::process::exit;
+use std::process::Command;
 use which::which;
 
 /// 命令行参数定义
@@ -181,33 +182,44 @@ fn main() {
     }
 }
 
+/// 获取netplan配置文件中的ethernets
+fn get_or_create_mapping<'a>(map: &'a mut Mapping, key: &str) -> &'a mut Mapping {
+    let entry = map
+        .entry(Value::String(key.to_string()))
+        .or_insert_with(|| Value::Mapping(Mapping::new()));
+    if !entry.is_mapping() {
+        *entry = Value::Mapping(Mapping::new());
+    }
+    entry
+        .as_mapping_mut()
+        .expect(&format!("[ERROR] '{}' is not a mapping", key))
+}
+
 /// 配置 netplan
 fn configure_with_netplan(args: &Args, is_dhcp: bool, is_dhcp6: bool) {
     let file_path = "/etc/netplan/01-netcfg.yaml";
     if fs::File::open(file_path).is_err() {
-        eprintln!("[ERROR] Error: Cannot read {}", file_path);
+        eprintln!("[ERROR] Cannot read {}", file_path);
         std::process::exit(1);
     }
-    let content = fs::read_to_string(file_path)
-        .unwrap_or_else(|_| String::from("network:\n  version: 2\n  ethernets: {}\n"));
+    let content =
+        fs::read_to_string(file_path).expect("[ERROR] Error: Cannot read netplan config file");
     let mut doc: serde_yaml::Value = match serde_yaml::from_str(&content) {
         Ok(doc) => doc,
         Err(e) => {
             eprintln!(
-                "YAML parsing failed: {}\nError location: {:?}",
+                "[ERROR] YAML parsing failed: {}\nError location: {:?}",
                 e,
                 e.location()
             );
-            panic!("YAML parsing aborted"); // or return Err(e.into());
+            panic!("[ERROR] YAML parsing aborted"); // or return Err(e.into());
         }
     };
 
     // network -> ethernets -> <dev>
-    let ethernets = doc
-        .get_mut("network")
-        .and_then(|n| n.get_mut("ethernets"))
-        .and_then(|e| e.as_mapping_mut())
-        .expect("Could not find 'ethernets' section in netplan config");
+    let network_map = doc.as_mapping_mut().unwrap();
+    let ethernets_map = get_or_create_mapping(network_map, "network");
+    let ethernets = get_or_create_mapping(ethernets_map, "ethernets");
 
     let dev = args.net_device.clone();
     let mut dev_cfg = serde_yaml::Mapping::new();
