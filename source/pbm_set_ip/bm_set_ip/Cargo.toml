@@ -1,0 +1,10 @@
+[package]
+name = "bm_set_ip"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+which = "5"
+serde_yaml = "0.9"
+libc = "0.2"

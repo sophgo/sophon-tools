@@ -26,6 +26,7 @@
 | [memtest](./source/pmemtest) | source/pmemtest | 是 | SoC模式DDR压测工具 |
 | [autotelecomm](./source/pautotelecomm) | source/pautotelecomm | 是 | 4G/5G自动拨号工具 |
 | [multi_video_qt](./source/pmulti_video_qt) | source/pmulti_video_qt | 否 | QT多路视频解码播放器 |
+| [bm_set_ip](./source/pbm_set_ip) | source/pbm_set_ip | 否 | 配网工具 |
 
 ## 编译方式
 
