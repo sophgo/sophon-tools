@@ -4,7 +4,13 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-clap = { version = "4", features = ["derive"] }
-which = "5"
 serde_yaml = "0.9"
-libc = "0.2"
+lexopt = { version = "0.3", default-features = false }  # 禁用默认特性
+libc = { version = "0.2", default-features = false }    # 禁用 POSIX 扩展
+
+[profile.release]
+opt-level = "z"  # 最小体积优化（比 "s" 更激进）
+lto = true       # 链接时优化（Link-Time Optimization）
+codegen-units = 1  # 减少并行编译，提高优化效果
+panic = "abort"   # 替换 panic 展开为直接 abort，减少异常处理代码
+strip = true      # 移除调试符号（或手动 `strip target/release/binary`）
