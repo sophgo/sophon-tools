@@ -8,7 +8,9 @@ import shutil
 current_folder = os.path.dirname(os.path.abspath(__file__))
 filehandle = open(os.path.join(current_folder,"../git_version"),"r")
 version_info = filehandle.readline().rstrip("\n").rstrip("\r")
+
 shutil.copy(os.path.join(current_folder,"../git_version"), os.path.join(current_folder,"dfss/output"))
+shutil.copytree(os.path.join(current_folder,"../output"), os.path.join(current_folder,"dfss/output"), dirs_exist_ok=True)
 
 setup(
     name='dfss',

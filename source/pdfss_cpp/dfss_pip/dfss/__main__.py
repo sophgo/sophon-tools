@@ -84,9 +84,9 @@ def main():
         print("Failed to execute binary for architecture " + binary_arch + " : " + str(e))
         return 1
 
-def install_package(package_name: str) -> int:
+def install_package(package_name: str, extra_args: list) -> int:
     print("Install package: " + package_name)
-    supported_packages = ['sail','performance'] # TODO(wang.zhang): move supported list to FTP
+    supported_packages = ['sail','performance','libsophon'] # TODO(wang.zhang): move supported list to FTP
     if package_name not in supported_packages:
         print("\033[31minstall target '{}' not supported\033[0m".format(package_name))
         return 1
@@ -126,12 +126,13 @@ def install_package(package_name: str) -> int:
         os.chdir(original_dir)
         return 1
     # execute package-defined install script
-    result = subprocess.run(["bash", install_script_name])
+    result = subprocess.run(["bash", install_script_name] + extra_args)
     if (result.returncode != 0):
         print("\033[31mdfss failed to install package {}, ret = {}\033[0m".format(package_name, result.returncode))
         os.chdir(original_dir)
         return 1
     os.chdir(original_dir)
+    shutil.rmtree(dfss_cache_dir)
     return 0
 
 if __name__ == '__main__':
@@ -152,12 +153,12 @@ if __name__ == '__main__':
 
     parser.add_argument('--install', help='install package')
 
-    args = parser.parse_args()
+    args, parse_known_args = parser.parse_known_args()
     if args.install is None:
         ret = main()
         exit(ret)
     else:
-        ret = install_package(args.install)
+        ret = install_package(args.install, parse_known_args)
         if ret != 0:
             print("\033[31mFailed to install package: " + args.install + "\033[0m")
             exit(1)
