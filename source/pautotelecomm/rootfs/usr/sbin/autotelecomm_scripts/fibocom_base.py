@@ -4,7 +4,7 @@ import time
 class serialCom_fibocom(model_base.serialCom):
     # 获取当前设备的usb mode信息
     def get_usbmode(self):
-        cmd = "AT+GTUSBMODE? \r"
+        cmd = "AT+GTUSBMODE?\r"
         self.send_msg(cmd)
         time.sleep(3)
         ret = self.recive_msg().decode("utf-8")
@@ -13,7 +13,7 @@ class serialCom_fibocom(model_base.serialCom):
 
     # 修改当前设备usb mode为ECM
     def switch_to_ecm(self):
-        cmd = "AT+GTUSBMODE=18 \r"
+        cmd = "AT+GTUSBMODE=18\r"
         self.send_msg(cmd)
         time.sleep(3)
         ret = self.recive_msg().decode("utf-8")
@@ -21,12 +21,12 @@ class serialCom_fibocom(model_base.serialCom):
         return 0
 
     def start_dial(self):
-        msg = "AT+CGDCONT=1,\"IP\",\"" + self.apn + "\" \r"
+        msg = "AT+CGDCONT=1,\"IP\",\"" + self.apn + "\"\r"
         self.send_msg(msg)
         time.sleep(5)
         ret = self.recive_msg().decode("utf-8")
         if "OK" in ret.strip().split():
-            msg_2 = "AT+GTRNDIS=1,1 \r"
+            msg_2 = "AT+GTRNDIS=1,1\r"
             self.send_msg(msg_2)
             time.sleep(10)
             ret_2 = self.recive_msg().decode("utf-8")

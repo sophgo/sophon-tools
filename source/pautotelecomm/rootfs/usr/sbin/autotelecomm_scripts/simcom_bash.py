@@ -106,7 +106,7 @@ class serialCom_simcom(model_base.serialCom):
         self.parseAPN(self.apn)
         print("\nAPN:", self.apn)
         print("\nStart dialing")
-        cmd = "AT \r"
+        cmd = "AT\r"
         self.send_msg(cmd)
         time.sleep(1)
         _ = self.recive_msg().decode("utf-8")

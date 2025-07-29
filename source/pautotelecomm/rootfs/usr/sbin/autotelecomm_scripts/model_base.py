@@ -43,7 +43,7 @@ class serialCom:
                     print("try uart error: ")
                     print(e)
                     continue
-                msg = "AT \r"
+                msg = "AT\r"
                 self.send_msg(msg)
                 time.sleep(1)
                 ret = self.recive_msg().decode("utf-8")
@@ -110,7 +110,7 @@ class serialCom:
     # 串口可以正常使用且回显关闭成功返回0，不成功返回-1
     def check_serial(self):
         print("\ncheck serial is ready or not")
-        msg = "ATE0 \r"
+        msg = "ATE0\r"
         self.send_msg(msg)
         time.sleep(1)
         ret = self.recive_msg().decode("utf-8")
@@ -127,7 +127,7 @@ class serialCom:
     # 其他状态返回-2，需要进一步判断
     def check_simcard_insert(self):
         print("\nstart check sim card")
-        msg_1 = "AT+CPIN? \r"
+        msg_1 = "AT+CPIN?\r"
         self.send_msg(msg_1)
         time.sleep(1)
         ret_1 = self.recive_msg().decode("utf-8")
@@ -148,7 +148,7 @@ class serialCom:
     # 当信号质量为99时，返回-1
     def check_signal(self):
         print("\nstart check signal")
-        msg = "AT+CSQ \r"
+        msg = "AT+CSQ\r"
         self.send_msg(msg)
         time.sleep(1)
         ret = self.recive_msg().decode("utf-8")
@@ -163,7 +163,7 @@ class serialCom:
     # 未入网等不正常情况下返回-1
     def check_isp(self):
         print("\nstart checking isp")
-        msg = "AT+COPS? \r"
+        msg = "AT+COPS?\r"
         self.send_msg(msg)
         time.sleep(1)
         ret = self.recive_msg().decode("utf-8")
@@ -182,7 +182,7 @@ class serialCom:
         self.send_msg(cmd)
         time.sleep(1)
         _ = self.recive_msg().decode("utf-8")
-        msg = "AT+CGDCONT=1,\"IP\",\"" + self.apn + "\" \r"
+        msg = "AT+CGDCONT=1,\"IP\",\"" + self.apn + "\"\r"
         self.send_msg(msg)
         time.sleep(5)
         ret = self.recive_msg().decode("utf-8")
@@ -244,11 +244,11 @@ class serialCom:
 
     # 获取基站定位信息
     def LBS(self, apikey="default"):
-        cmd = "AT+MIPCALL=1,\"" + self.apn+ "\" \r"
+        cmd = "AT+MIPCALL=1,\"" + self.apn+ "\"\r"
         self.send_msg(cmd)
         time.sleep(3)
         ret = self.recive_msg().decode("utf-8")
-        cmd_2 = "AT+GTGIS=6 \r"
+        cmd_2 = "AT+GTGIS=6\r"
         self.send_msg(cmd_2)
         ret2 = self.recive_msg(128).decode("gbk")
         print(ret2)
@@ -271,7 +271,7 @@ class serialCom:
     # 重置模组
     def reset_module(self):
         self.ser = serial.Serial(self.serial, 115200, timeout=1)
-        cmd = "AT+RESET=1 \r"
+        cmd = "AT+RESET=1\r"
         self.send_msg(cmd)
         self.ser.close()
         print("send reset")
