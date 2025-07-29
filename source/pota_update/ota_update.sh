@@ -156,7 +156,7 @@ LOGFILE="$(readlink -f "${BASH_SOURCE[0]}").log"
 rm -f $LOGFILE*
 exec > >(tee -a "$LOGFILE") 2>&1
 
-echo "[INFO] ota update tool, version: v1.3.1"
+echo "[INFO] ota update tool, version: v1.3.2"
 
 WORK_DIR=""
 if [ ! -d ${1}/sdcard ]; then
@@ -388,7 +388,7 @@ if [[ "$(df | grep ${OTA_LAST_DEVICE} | wc -l)" != "0" ]]; then
     panic "umount ${OTA_LAST_DEVICE} error!!!"
 fi
 e2fsck -yf ${OTA_LAST_DEVICE}
-resize2fs ${OTA_LAST_DEVICE} ${OTA_LAST_DEVICE_NEW_SIZE_KB}K -f
+resize2fs -f ${OTA_LAST_DEVICE} ${OTA_LAST_DEVICE_NEW_SIZE_KB}K
 if [[ "$?" != "0" ]]; then
     panic "resize2fs ${OTA_LAST_DEVICE} -> ${OTA_LAST_DEVICE_NEW_SIZE_KB}K, please check if your \
 eMMC partition is healthy"
