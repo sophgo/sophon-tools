@@ -156,7 +156,7 @@ LOGFILE="$(readlink -f "${BASH_SOURCE[0]}").log"
 rm -f $LOGFILE*
 exec > >(tee -a "$LOGFILE") 2>&1
 
-echo "[INFO] ota update tool, version: v1.3.2"
+echo "[INFO] ota update tool, version: v1.3.3"
 
 WORK_DIR=""
 if [ ! -d ${1}/sdcard ]; then
@@ -209,6 +209,7 @@ ota_cleanup() {
             mv $WORK_DIR/gpt.gz.ota_update_bak $WORK_DIR/gpt.gz
         fi
     fi
+    mount -a
 	exit 0
 }
 trap ota_cleanup EXIT SIGHUP SIGINT SIGQUIT SIGTERM
