@@ -1,6 +1,14 @@
 # 配网工具
 
+## 简介
+
+简易的配网工具,支持的后端(顺序为工具尝试顺序): netplan network-manager systemd-networkd ip
+
+配置netplan时需要确保文件`/etc/netplan/01-netcfg.yaml`存在并且格式正确
+
 ## 编译方式
+
+需要准备rust交叉编译环境和upx工具,然后执行如下命令即可在target目录下生成编译后的二进制文件
 
 ``` bash
 bash build.sh
