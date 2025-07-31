@@ -305,7 +305,7 @@ function create_top_script()
 	script_update "led error off"
 	script_update "set light 1"
 	script_update ""
-	script_update "if test \"\$reset_after\" = \"1\"; then reset; fi;"
+	script_update "if test \"\$reset_after\" = \"1\"; then sleep 30; reset; fi;"
 	script_update ""
 	script_update "while true; do;"
 	script_update "if test \$light = \"0\"; then led status off; set light 1; else led status on; set light 0; fi;"
@@ -347,7 +347,7 @@ function create_spif_script()
 		script_update "fi"
 		script_update ""
 		script_update "echo SPI flash update done"
-		script_update "if test \"\$update_all\" != \"1\" -a \"\$reset_after\" = \"1\"; then reset; fi;"
+		script_update "if test \"\$update_all\" != \"1\" -a \"\$reset_after\" = \"1\"; then sleep 30; reset; fi;"
 		script_update "if test \"\$update_all\" != \"1\"; then while true; do; echo \"Please remove the installation medium, then reboot\"; sleep 0.5; done; fi;"
 	fi
 
@@ -499,7 +499,7 @@ function make_partition_imgs()
 		split_and_compress_img $i ${LABELS[$i]}
 	) done
 
-	wait
+	# wait
 }
 
 function make_gpt_img()
@@ -523,7 +523,7 @@ function emmc_done()
 
 	script_update "echo eMMC update done"
 	script_update "bm_savelog mmc 0:1 end.log"
-	script_update "if test \"\$update_all\" != \"1\" -a \"\$reset_after\" = \"1\"; then reset; fi;"
+	script_update "if test \"\$update_all\" != \"1\" -a \"\$reset_after\" = \"1\"; then sleep 30; reset; fi;"
 	script_update "if test \"\$update_all\" != \"1\"; then while true; do; echo \"Please remove the installation medium, then reboot\"; sleep 0.5; done; fi;"
 	compile_script $(basename ${CURRENT_SCRIPT} .cmd)
 

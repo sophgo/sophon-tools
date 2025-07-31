@@ -97,13 +97,25 @@
 1. 参考上一小节 `修改emmc分区布局功能` ，修改 `socbak.sh` 脚本文件，指定各个分区的大小
 2. 在执行 `bash socbak.sh` 时，增加 `SOC_BAK_FIXED_SIZE=1` 参数，例如: `bash socbak.sh SOC_BAK_ALL_IN_ONE=1 SOC_BAK_FIXED_SIZE=1`。
 
-### 支持后续多次OTA的方案
+### 对ota_update工具的兼容性说明
 
-1. 由于socbak默认会自动判断所需要的分区大小，导致多次打包的分区表布局不同，极大可能导致 `ota_update` 工具无法在保留最后一个分区的前提下完成刷机。
-2. 如果需要socbak做升级刷机包，且需要 `ota_update` 去做ota升级并且还需要保留最后一个分区。则可以参考如下操作：
-   1. socbak配置为固定分区大小，并且修改RO分区的大小，预留出日后更新的所需空间，比如3GB左右。
-   2. 保存这个配置，后续所有出包均需要按照这个固定分区的模式出。
-   3. 所有发到现场的设备都需要预先刷好这个配置出的刷机包，以确保 `ota_update` 可以保留最后一个分区的前提下完成刷机
+#### OTA时不需要保留最后一个分区
+
+在不需要保留最后一个分区的情况下，配置 `SOC_BAK_ALL_IN_ONE=1` 即可。
+
+#### OTA时需要保留最后一个分区（V1.2.0开始支持）
+
+需要额外配置 `SOC_BAK_FIXED_DATA_START=1` 示例： `bash socbak.sh SOC_BAK_ALL_IN_ONE=1 SOC_BAK_FIXED_DATA_START=1` ，这样可以固定最后一个分区的起始位置。
+
+原理说明：socbak打包时会自动用ROOTFS_RW的空间去弥补其他分区扩大的空间，确保最后一个分区的起始点不动。从而确保二次打包后的刷机包在使用ota_update做OTA升级时可以保留最后一个分区。
+
+注意事项：
+
+1. `SOC_BAK_FIXED_DATA_START`模式会确保如下两个配置相同，所以在配置不变的情况下，只要顺利打包成功，则生成的所有刷机包DATA分区起始点都一致：
+   1. socbak脚本中配置的分区参数所生成的DATA分区起始点
+   2. socbak脚本更具当前设备内容重新生成的刷机包的DATA分区起始点
+2. 工具会在新的刷机包完整分区表生成后检查其与当前设备的DATA分区起始点是否相同，如果不同，会报警`WARRNING: SOC_BAK_FIXED_DATA_START mode, check last part start [NEW: XXX] != [DEV: XXX]`，但是不会中断打包过程。如果看到这个报警，代表当前生成的刷机包无法通过ota_update做OTA升级时保留最后一个分区。请使用者重点关注一下打包的设备是否与socbak脚本中设置的分区参数对齐。
+
 
 ## 示例视频
 

@@ -1,22 +1,47 @@
 #!/bin/bash
 
-echo "VERSION: v1.1.0"
+# env SOC_BAK_ALL_IN_ONE!="" for socbak allinone
+# env SOC_BAK_FIXED_SIZE!="" for socbak fixed size mode
+# env SOC_BAK_FIXED_DATA_START!="" for socbak fixed data partition start mode
 
-# env SOC_BAK_ALL_IN_ONE=1 for socbak allinone
-# env SOC_BAK_FIXED_SIZE=1 for socbak fixed size mode
+# 配置日志能力
+PWD="$(dirname "$(readlink -f "\$0")")"
+TGZ_FILES_PATH=${PWD}
+LOGFILE="$(readlink -f "${BASH_SOURCE[0]}").log"
+rm -f $LOGFILE*
+exec > >(while IFS= read -r line; do echo "[$(date '+%Y-%m-%d %H:%M:%S')] $line"; done | tee -a "$LOGFILE") 2>&1
+
+echo "VERSION: v1.2.1"
+
+export SOC_BAK_ALL_IN_ONE=${SOC_BAK_ALL_IN_ONE:-}
+export SOC_BAK_FIXED_SIZE=${SOC_BAK_FIXED_SIZE:-}
+export SOC_BAK_FIXED_DATA_START=${SOC_BAK_FIXED_DATA_START:-}
 
 for arg in "$@"; do
     case $arg in
         SOC_BAK_ALL_IN_ONE=*)
-            SOC_BAK_ALL_IN_ONE="${arg#*=}"
+            export SOC_BAK_ALL_IN_ONE="${arg#*=}"
             shift
             ;;
 		SOC_BAK_FIXED_SIZE=*)
-            SOC_BAK_FIXED_SIZE="${arg#*=}"
+            export SOC_BAK_FIXED_SIZE="${arg#*=}"
+            shift
+            ;;
+		SOC_BAK_FIXED_DATA_START=*)
+            export SOC_BAK_FIXED_DATA_START="${arg#*=}"
             shift
             ;;
     esac
 done
+
+if [[ "${SOC_BAK_FIXED_SIZE}" != "" ]] && [[ "${SOC_BAK_FIXED_DATA_START}" != "" ]]; then
+	echo "ERROR: SOC_BAK_FIXED_SIZE and SOC_BAK_FIXED_DATA_START cannot be enabled at the same time"
+	exit 1
+fi
+if [[ "${SOC_BAK_ALL_IN_ONE}" == "" ]] && [[ "${SOC_BAK_FIXED_DATA_START}" != "" ]]; then
+	echo "ERROR: SOC_BAK_ALL_IN_ONE cannot be closed after SOC_BAK_FIXED_DATA_START is opened"
+	exit 1
+fi
 
 # These parameters are used to exclude irrelevant files
 # and directories in the context of repackaging mode.
@@ -31,7 +56,7 @@ ROOTFS_INCLUDE_PATHS=' ./var/log/nginx ./var/log/redis ./var/log/mosquitto ./var
 
 declare -A -g PART_EXCLUDE_FLAGS
 PART_EXCLUDE_FLAGS["boot"]=' --exclude=./spi_flash.bin.socBakNew --exclude=./u-boot.env '
-PART_EXCLUDE_FLAGS["data"]=' '
+PART_EXCLUDE_FLAGS["data"]='  '
 
 # These parameters define several generated files and
 # their default sizes for repackaging. Users can modify
@@ -49,18 +74,18 @@ TGZ_ALL_SIZE=$((100*1024))
 EMMC_ALL_SIZE=20971520
 EMMC_MAX_SIZE=30000000
 TAR_SIZE=0
-PWD="$(dirname "$(readlink -f "\$0")")"
-TGZ_FILES_PATH=${PWD}
-SOCBAK_LOG_PATH="${TGZ_FILES_PATH}/socbak_log.log"
 SOCBAK_PARTITION_FILE=partition32G.xml
 BM1684_SOC_VERSION=0
 NEED_BAK_FLASH=1
 SOC_NAME=""
 PIGZ_GZIP_COM=""
-export SOC_BAK_ALL_IN_ONE=${SOC_BAK_ALL_IN_ONE:-}
-export SOC_BAK_FIXED_SIZE=${SOC_BAK_FIXED_SIZE:-}
 export GZIP=-1
 export PIGZ=-1
+PARTITIONS_SIZE_NO_DATA_KB=$((0))
+
+if [[ "${SOC_BAK_FIXED_DATA_START}" != "" ]]; then
+	echo "INFO: SOC_BAK_FIXED_DATA_START open, some ROOTFS_RW space will be automatically allocated to ROOTFS_RO"
+fi
 
 chmod +x ${TGZ_FILES_PATH}/binTools
 export PATH="${TGZ_FILES_PATH}/binTools":$PATH
@@ -68,37 +93,33 @@ export PATH="${TGZ_FILES_PATH}/binTools":$PATH
 pushd "${TGZ_FILES_PATH}"
 md5sum -c "${TGZ_FILES_PATH}/socbak_md5.txt"
 if [[ "$?" != "0" ]]; then
-	echo "ERROR: file md5 check error!" | tee -a $SOCBAK_LOG_PATH
+	echo "ERROR: file md5 check error!"
 	exit -1
 fi
-rm -rf ./*.xml ./*.bin ./*.log ./*.tar ./*.tgz ./*.gz output sparse-*
+rm -rf ./*.xml ./*.bin ./*.tar ./*.tgz ./*.gz output sparse-*
 popd
 
 ALL_IN_ONE_FLAG=""
 ALL_IN_ONE_SCRIPT=""
 if [[ "$SOC_BAK_ALL_IN_ONE" != "" ]]; then
 	ALL_IN_ONE_FLAG="1"
-	echo "INFO: open all in one mode for ${ALL_IN_ONE_FLAG}" | tee -a $SOCBAK_LOG_PATH
+	echo "INFO: open all in one mode for ${ALL_IN_ONE_FLAG}"
 fi
 
 rm /home/*/.bash_history
 rm /root/.bash_history
 
-echo "" >> $SOCBAK_LOG_PATH
-printenv > $SOCBAK_LOG_PATH
-echo "" >> $SOCBAK_LOG_PATH
-
 if type pigz >/dev/null 2>&1 ; then
 	PIGZ_GZIP_COM="pigz"
-	echo "INFO: find pigz" | tee -a $SOCBAK_LOG_PATH
+	echo "INFO: find pigz"
 else
 	PIGZ_GZIP_COM="gzip"
-	echo "INFO: not find pigz, multi-thread acceleration cannot be used, please install pigz and try again or continue to use gzip" | tee -a $SOCBAK_LOG_PATH
+	echo "INFO: not find pigz, multi-thread acceleration cannot be used, please install pigz and try again or continue to use gzip"
 fi
-echo "INFO: PIGZ_GZIP_COM:${PIGZ_GZIP_COM}" | tee -a $SOCBAK_LOG_PATH
+echo "INFO: PIGZ_GZIP_COM:${PIGZ_GZIP_COM}"
 
 socbak_cleanup() {
-	echo -e "\nINFO: Received a kill signal. Cleaning up..." | tee -a $SOCBAK_LOG_PATH
+	echo -e "\nINFO: Received a kill signal. Cleaning up..."
 	systemctl disable resize-helper.service
 	umount ${TGZ_FILES_PATH}/sparse-path* &>/dev/null
 	exit 0
@@ -107,31 +128,31 @@ trap socbak_cleanup EXIT ERR SIGHUP SIGINT SIGQUIT SIGTERM
 
 SOCBAK_GET_TAR_SIZE_KB=0
 socbak_get_tar_size() {
-	echo "INFO: get tar $1 files size..." | tee -a $SOCBAK_LOG_PATH
+	echo "INFO: get tar $1 files size..."
 	pushd ${TGZ_FILES_PATH}
 	SOCBAK_GET_TAR_SIZE_KB=$(tar -I ${PIGZ_GZIP_COM} -tvf $1 --totals 2>&1 | tail -n 1 | awk -F':' '{printf $2}' | awk -F' ' '{printf "%.0f\n", $1/1024}')
-	echo "WARNING: $1 files size is ${SOCBAK_GET_TAR_SIZE_KB}" | tee -a $SOCBAK_LOG_PATH
+	echo "WARNING: $1 files size is ${SOCBAK_GET_TAR_SIZE_KB}"
 	popd
 }
 
 if ! [[ "$TGZ_FILES_PATH" =~ "/socrepack" ]]; then
-	echo "ERROR: The current path($TGZ_FILES_PATH) is not \"/socrepack\", please check it" | tee -a $SOCBAK_LOG_PATH
+	echo "ERROR: The current path($TGZ_FILES_PATH) is not \"/socrepack\", please check it"
 	exit 1
 fi
-echo "INFO: The current path is \"/socrepack\"" | tee -a $SOCBAK_LOG_PATH
+echo "INFO: The current path is \"/socrepack\""
 
 FILESYSTEM=$(df -T . | tail -n 1 | awk '{print $2}')
 if [[ "${FILESYSTEM}" != "ext4" ]]; then
-	echo "WARNING: The current directory's file system ${FILESYSTEM} is not ext4, there may be some issues." | tee -a $SOCBAK_LOG_PATH
+	echo "WARNING: The current directory's file system ${FILESYSTEM} is not ext4, there may be some issues."
 	echo "You can format the external storage to ext4 format according to the content at https://developer.sophgo.com/thread/758.html."
 fi
 
 if [[ "${FILESYSTEM}" == "vfat" ]] || [[ "${FILESYSTEM}" == "fat" ]]; then
-    echo "ERROR: filesystem ${FILESYSTEM} is not supported to use socbak, please look at infomation above!" | tee -a $SOCBAK_LOG_PATH
+    echo "ERROR: filesystem ${FILESYSTEM} is not supported to use socbak, please look at infomation above!"
     exit -1
 fi
 
-echo "INFO: get chip id ..." | tee -a $SOCBAK_LOG_PATH
+echo "INFO: get chip id ..."
 if [[ "$(busybox devmem 0x50010000 2>/dev/null)" == "0x16860000" ]]; then
 	SOC_NAME="bm1684x"
 elif [[ "$(busybox devmem 0x50010000 2>/dev/null)" == "0x16840000" ]]; then
@@ -145,26 +166,22 @@ if [[ "${SOC_NAME}" == "" ]]; then
 	fi
 fi
 if [[ "${SOC_NAME}" == "" ]]; then
-	echo "ERROR: cannot get chip id!" | tee -a $SOCBAK_LOG_PATH
+	echo "ERROR: cannot get chip id!"
 	exit -1
 else
-	echo "INFO: get chip id success!" | tee -a $SOCBAK_LOG_PATH
+	echo "INFO: get chip id success!"
 fi
-
-echo "" >> $SOCBAK_LOG_PATH
-printenv >> $SOCBAK_LOG_PATH
-echo "" >> $SOCBAK_LOG_PATH
 
 ROOTFS_EXCLUDE_FLAGS="${ROOTFS_EXCLUDE_FLAGS_RUN}"
 for TGZ_FILE in "${TGZ_FILES[@]}"
 do
 	if [[ "$(lsblk | grep mmcblk0p | grep ${TGZ_FILE} | wc -l)" != "0" ]]; then
-		echo "INFO: find ${TGZ_FILE} on emmc." | tee -a $SOCBAK_LOG_PATH
+		echo "INFO: find ${TGZ_FILE} on emmc."
 		ROOTFS_EXCLUDE_FLAGS="${ROOTFS_EXCLUDE_FLAGS} --exclude=./${TGZ_FILE}/* "
 	elif [[ "${TGZ_FILE}" == "rootfs" ]] || [[ "${TGZ_FILE}" == "rootfs_rw" ]]; then
-		echo "INFO: must bak ${TGZ_FILE} on emmc." | tee -a $SOCBAK_LOG_PATH
+		echo "INFO: must bak ${TGZ_FILE} on emmc."
 	else
-		echo "INFO: not find ${TGZ_FILE} on emmc." | tee -a $SOCBAK_LOG_PATH
+		echo "INFO: not find ${TGZ_FILE} on emmc."
 		unset TGZ_FILES_SIZE["${TGZ_FILE}"]
 		TGZ_FILES=( ${TGZ_FILES[@]/${TGZ_FILE}} )
 	fi
@@ -176,12 +193,15 @@ if [[ "$SOC_NAME" == "bm1684x" ]] || [[ "$SOC_NAME" == "bm1684" ]]; then
 		NEED_BAK_FLASH=0
 		ALL_IN_ONE_FLAG=""
 		ALL_IN_ONE_SCRIPT=""
-		echo "INFO: find /system dir, the version is 3.0.0 or lower, cannot suppot bakpack spi_flash and all in one mode" | tee -a $SOCBAK_LOG_PATH
+		echo "INFO: find /system dir, the version is 3.0.0 or lower, cannot suppot bakpack spi_flash and all in one mode"
+		if [[ "${SOC_BAK_FIXED_DATA_START}" != "" ]]; then
+			echo "ERROR: SOC_BAK_FIXED_DATA_START mode not support 3.0.0 or lower"
+		fi
 	elif [ -d "/opt" ]; then
 		BM1684_SOC_VERSION=1
 		NEED_BAK_FLASH=1
 		ALL_IN_ONE_SCRIPT="${TGZ_FILES_PATH}/script/bm1684/"
-		echo "INFO: find /opt dir, the version is V22.09.02 or higher" | tee -a $SOCBAK_LOG_PATH
+		echo "INFO: find /opt dir, the version is V22.09.02 or higher"
 	fi
 elif [[ "$SOC_NAME" == "bm1688" ]]; then
 	NEED_BAK_FLASH=1
@@ -190,28 +210,35 @@ elif [[ "$SOC_NAME" == "bm1688" ]]; then
 	ALL_IN_ONE_SCRIPT="${TGZ_FILES_PATH}/script/bm1688/"
 fi
 
-echo "" >> $SOCBAK_LOG_PATH
-printenv >> $SOCBAK_LOG_PATH
-echo "" >> $SOCBAK_LOG_PATH
+if [[ "${SOC_BAK_FIXED_DATA_START}" != "" ]]; then
+	for TGZ_FILE in "${TGZ_FILES[@]}"
+	do
+		if [[ "${TGZ_FILE}" != "data" ]]; then
+			PARTITIONS_SIZE_NO_DATA_KB=$((${PARTITIONS_SIZE_NO_DATA_KB} + ${TGZ_FILES_SIZE["${TGZ_FILE}"]}))
+		fi
+	done
+	PARTITIONS_SIZE_NO_DATA_KB=$((${PARTITIONS_SIZE_NO_DATA_KB} + ${ROOTFS_RW_SIZE}))
+	echo "INFO: PARTITIONS_SIZE_NO_DATA_KB: ${PARTITIONS_SIZE_NO_DATA_KB} KiB"
+fi
 
 if [ "$NEED_BAK_FLASH" -eq 1 ]; then
-	echo "INFO: bakpack spi_flash start" | tee -a $SOCBAK_LOG_PATH
+	echo "INFO: bakpack spi_flash start"
 	if [[ "$SOC_NAME" == "bm1684x" ]] || [[ "$SOC_NAME" == "bm1684" ]] || [ -f /boot/spi_flash.bin ]; then
 		cp /boot/spi_flash.bin spi_flash.bin
 		rm -rf fip.bin
 		FLASH_OFFSET=0
 		if [[ "$SOC_NAME" == "bm1684x" ]]; then
-			echo "INFO: soc is bm1684x" | tee -a $SOCBAK_LOG_PATH
+			echo "INFO: soc is bm1684x"
 			FLASH_OFFSET=0
 			if [[ "$(flash_update -d fip.bin -b 0x6000000 -o 0x30000 -l 0x170000 | grep "^read" | wc -l)" == "0" ]]; then
-				echo "WARNING: bak fip.bin cannot read data" | tee -a $SOCBAK_LOG_PATH
+				echo "WARNING: bak fip.bin cannot read data"
 				rm -rf fip.bin
 			fi
 		elif [[ "$SOC_NAME" == "bm1684" ]]; then
-			echo "INFO: soc is bm1684" | tee -a $SOCBAK_LOG_PATH
+			echo "INFO: soc is bm1684"
 			FLASH_OFFSET=1
 			if [[ "$(flash_update -d fip.bin -b 0x6000000 -o 0x40000 -l 0x160000 | grep "^read" | wc -l)" == "0" ]]; then
-				echo "WARNING: bak fip.bin cannot read data" | tee -a $SOCBAK_LOG_PATH
+				echo "WARNING: bak fip.bin cannot read data"
 				rm -rf fip.bin
 			fi
 		else
@@ -220,7 +247,7 @@ if [ "$NEED_BAK_FLASH" -eq 1 ]; then
 		fi
 		rm -rf spi_flash_$SOC_NAME.bin
 		if [[ "$(flash_update -d spi_flash_$SOC_NAME.bin -b 0x6000000 -o 0 -l 0x200000 | grep "^read" | wc -l)" == "0" ]]; then
-			echo "WARNING: bak spi_flash_$SOC_NAME.bin cannot read data" | tee -a $SOCBAK_LOG_PATH
+			echo "WARNING: bak spi_flash_$SOC_NAME.bin cannot read data"
 			rm -rf spi_flash_$SOC_NAME.bin
 			rm -rf spi_flash.bin
 		else
@@ -237,29 +264,24 @@ if [ "$NEED_BAK_FLASH" -eq 1 ]; then
 	elif [[ "$SOC_NAME" == "bm1688" ]]; then
 		dd if=/dev/mmcblk0boot0 of=${TGZ_FILES_PATH}/fip.bin bs=512 count=2048
 		if [[ "$?" != "0" ]]; then
-			echo "WARNING: bak fip.bin cannot read data" | tee -a $SOCBAK_LOG_PATH
+			echo "WARNING: bak fip.bin cannot read data"
 			rm -rf fip.bin
 		fi
 	fi
-	echo "INFO: bakpack spi_flash end" | tee -a $SOCBAK_LOG_PATH
+	echo "INFO: bakpack spi_flash end"
 fi
-
-echo "" >> $SOCBAK_LOG_PATH
-printenv >> $SOCBAK_LOG_PATH
-declare >> $SOCBAK_LOG_PATH
-echo "" >> $SOCBAK_LOG_PATH
 
 socbak_resize_min_size_kb="0"
 function resize_min_size()
 {
 	declare -g socbak_resize_min_size_kb
-	echo "INFO: resize img file($1) start at ${2}M, step is ${3}M, max count is $4" | tee -a $SOCBAK_LOG_PATH
+	echo "INFO: resize img file($1) start at ${2}M, step is ${3}M, max count is $4"
 	part_size_M=$(($2))
 	count=0
 	while true
 	do
 		part_size_M=$(($part_size_M + $3))
-		echo "INFO: attempt partition($1) size ${part_size_M}M ..." | tee -a $SOCBAK_LOG_PATH
+		echo "INFO: attempt partition($1) size ${part_size_M}M ..."
 		run_log=$(resize2fs $1 "${part_size_M}M" -f &>/dev/stdout)
 		e2fsck -fy $1 1>/dev/null
 		if [[ "$(echo $run_log | grep -E "No space left on device|Not enough space to build proposed filesystem" | wc -l)" == "0" ]]; then
@@ -267,70 +289,67 @@ function resize_min_size()
 		fi
 		count=$(($count + 1))
 		if [ $count -gt $4 ]; then
-			echo "ERROR: cannot find min size, count($count). resize2fs ret: " | tee -a $SOCBAK_LOG_PATH
-			echo "$run_log" | tee -a $SOCBAK_LOG_PATH
+			echo "ERROR: cannot find min size, count($count). resize2fs ret: "
+			echo "$run_log"
 			socbak_cleanup
 		fi
 	done
-	echo "INFO: partition($1) size ${part_size_M} M" | tee -a $SOCBAK_LOG_PATH
+	echo "INFO: partition($1) size ${part_size_M} M"
 	socbak_resize_min_size_kb=$(($part_size_M * 1024))
-	echo "INFO: partition $1 size $socbak_resize_min_size_kb KB" | tee -a $SOCBAK_LOG_PATH
+	echo "INFO: partition $1 size $socbak_resize_min_size_kb KB"
 }
 
 function socbak_gen_partition_subimg()
 {
 	declare -g partition_subimg_size_kb
-	echo "INFO: gen partition($1) to img file" | tee -a $SOCBAK_LOG_PATH
+	echo "INFO: gen partition($1) to img file"
 	umount ./sparse-path* &>/dev/null
 	rm ./sparse-file* &>/dev/null
 	rm ./sparse-path* -rf &>/dev/null
-	echo "INFO: creat partition($1) size: $((${2})) B ..." | tee -a $SOCBAK_LOG_PATH
+	echo "INFO: creat partition($1) size: $((${2})) B ..."
 	dd if=/dev/zero of="sparse-file-$1" bs=$((1024 * 4)) count=$(($2 / 1024 / 4)) conv=notrunc status=progress
-	if [[ "$?" != "0" ]]; then echo "ERROR: dd $1 error, exit." | tee -a $SOCBAK_LOG_PATH; socbak_cleanup; fi
+	if [[ "$?" != "0" ]]; then echo "ERROR: dd $1 error, exit."; socbak_cleanup; fi
 	if [[ "$3" == "fat" ]]; then
 		mkfs.fat "sparse-file-$1"
-		if [[ "$?" != "0" ]]; then echo "ERROR: mkfs.fat $1 error, exit." | tee -a $SOCBAK_LOG_PATH; socbak_cleanup; fi
+		if [[ "$?" != "0" ]]; then echo "ERROR: mkfs.fat $1 error, exit."; socbak_cleanup; fi
 	else
 		mkfs.ext4 -b 4096 -i 16384 "sparse-file-$1"
-		if [[ "$?" != "0" ]]; then echo "ERROR: mkfs.ext4 $1 error, exit." | tee -a $SOCBAK_LOG_PATH; socbak_cleanup; fi
+		if [[ "$?" != "0" ]]; then echo "ERROR: mkfs.ext4 $1 error, exit."; socbak_cleanup; fi
 	fi
 	mkdir "sparse-path-$1"
 	mount "sparse-file-$1" "sparse-path-$1"
-	if [[ "$?" != "0" ]]; then echo "ERROR: mount(1) $1 error, exit." | tee -a $SOCBAK_LOG_PATH; socbak_cleanup; fi
+	if [[ "$?" != "0" ]]; then echo "ERROR: mount(1) $1 error, exit."; socbak_cleanup; fi
 	case $1 in
 		"rootfs")
 			pushd /
 			systemctl enable resize-helper.service
-			#ROOTFS_EXCLUDE_FLAGS_IN=$(echo "${ROOTFS_EXCLUDE_FLAGS}" | sed 's|=./|=|g')
-			#rsync -aAWXESlHh --info=progress2 --partial $ROOTFS_EXCLUDE_FLAGS_IN / "$TGZ_FILES_PATH/sparse-path-$1"
 			tar --checkpoint=500 --checkpoint-action=ttyout='[%d sec]: C%u, %T%*\r' --ignore-failed-read --numeric-owner -cpSf - ${ROOTFS_EXCLUDE_FLAGS} "./" | tar -xpSf - -C "$TGZ_FILES_PATH/sparse-path-$1"
-			if [[ "$?" != "0" ]]; then echo "ERROR: cp files $1 error, exit." | tee -a $SOCBAK_LOG_PATH; socbak_cleanup; fi
-			echo "INFO: add ext include files to rootfs..." | tee -a $SOCBAK_LOG_PATH
+			if [[ "$?" != "0" ]]; then echo "ERROR: cp files $1 error, exit."; socbak_cleanup; fi
+			echo "INFO: add ext include files to rootfs..."
 			tar --ignore-failed-read --numeric-owner -cvpSf - ${ROOTFS_INCLUDE_PATHS} | tar -xpSf - -C "$TGZ_FILES_PATH/sparse-path-$1"
 			systemctl disable resize-helper.service
 			popd
 		;;
 		*)
-			# rsync -aAWXESlHh --info=progress2 --partial "/$1/" "$TGZ_FILES_PATH/sparse-path-$1"
 			pushd /$1
 			set +u
 			EXT_FLAG="${PART_EXCLUDE_FLAGS["$1"]}"
 			set -u
 			tar --checkpoint=500 --checkpoint-action=ttyout='[%d sec]: C%u, %T%*\r' --ignore-failed-read --numeric-owner -cpSf - ${EXT_FLAG} "./" | tar -xpSf - -C "$TGZ_FILES_PATH/sparse-path-$1"
-			if [[ "$?" != "0" ]]; then echo "ERROR: cp files $1 error, exit." | tee -a $SOCBAK_LOG_PATH; socbak_cleanup; fi
+			if [[ "$?" != "0" ]]; then echo "ERROR: cp files $1 error, exit."; socbak_cleanup; fi
 			popd
 		;;
 	esac
 	#e4defrag "sparse-path-$1"
-	#if [[ "$?" != "0" ]]; then echo "ERROR: e4defrag $1 error, exit." | tee -a $SOCBAK_LOG_PATH; socbak_cleanup; fi
+	#if [[ "$?" != "0" ]]; then echo "ERROR: e4defrag $1 error, exit."; socbak_cleanup; fi
 	umount "sparse-path-$1"
-	if [[ "$?" != "0" ]]; then echo "ERROR: umount $1 error, exit." | tee -a $SOCBAK_LOG_PATH; socbak_cleanup; fi
+	if [[ "$?" != "0" ]]; then echo "ERROR: umount $1 error, exit."; socbak_cleanup; fi
 	size_kb="0"
 	if [[ "$3" == "ext4" ]]; then
 		e2fsck -fy "sparse-file-$1"
-		if [[ "$?" != "0" ]]; then echo "ERROR: e2fsck $1 error, exit." | tee -a $SOCBAK_LOG_PATH; socbak_cleanup; fi
+		if [[ "$?" != "0" ]]; then echo "ERROR: e2fsck $1 error, exit."; socbak_cleanup; fi
 		resize2fs "sparse-file-$1"
-		if [[ "$?" != "0" ]]; then echo "ERROR: resize2fs $1 error, exit." | tee -a $SOCBAK_LOG_PATH; socbak_cleanup; fi
+		if [[ "$?" != "0" ]]; then echo "ERROR: resize2fs $1 error, exit."; socbak_cleanup; fi
 		size_step=$(($2 / 1024 / 1024 / 20))
 		step_num=20
 		if [ $size_step -lt 10 ]; then
@@ -341,7 +360,7 @@ function socbak_gen_partition_subimg()
 			step_num=$(($2 / 1024 / 1024 / $size_step))
 		fi
 		if [[ "$SOC_BAK_FIXED_SIZE" != "" ]]; then
-			echo "INFO: fixed size" | tee -a $SOCBAK_LOG_PATH
+			echo "INFO: fixed size"
 			size_step=0
 			step_num=0
 		fi
@@ -350,12 +369,12 @@ function socbak_gen_partition_subimg()
 	elif [[ "$3" == "fat" ]]; then
 		TGZ_FILES_SIZE["${1}"]=$(( $2 / 1024 ))
 	fi
-	echo "INFO: partition $1 size is : ${TGZ_FILES_SIZE["${1}"]} KB" | tee -a $SOCBAK_LOG_PATH
-	tune2fs -l "sparse-file-$1" | tee -a $SOCBAK_LOG_PATH
+	echo "INFO: partition $1 size is : ${TGZ_FILES_SIZE["${1}"]} KB"
+	tune2fs -l "sparse-file-$1"
 	mount "sparse-file-$1" "sparse-path-$1"
-	if [[ "$?" != "0" ]]; then echo "ERROR: mount(2) $1 error, exit." | tee -a $SOCBAK_LOG_PATH; socbak_cleanup; fi
-	echo "INFO: print sparse-file-$1 files:" | tee -a $SOCBAK_LOG_PATH
-	ls "sparse-path-$1" -lah | tee -a $SOCBAK_LOG_PATH
+	if [[ "$?" != "0" ]]; then echo "ERROR: mount(2) $1 error, exit."; socbak_cleanup; fi
+	echo "INFO: print sparse-file-$1 files:"
+	ls "sparse-path-$1" -lah
 	umount "sparse-path-$1"
 	if [[ "$3" == "ext4" ]]; then
 		e2fsck -fy "sparse-file-$1"
@@ -369,7 +388,7 @@ fi
 
 if [[ "${ALL_IN_ONE_FLAG}" != "" ]] && [[ "${ALL_IN_ONE_SCRIPT}" != "" ]]; then
 	pushd $TGZ_FILES_PATH
-	echo "INFO: start all in one, use script path: ${ALL_IN_ONE_SCRIPT}" | tee -a $SOCBAK_LOG_PATH
+	echo "INFO: start all in one, use script path: ${ALL_IN_ONE_SCRIPT}"
 	rm output -rf &>/dev/null
 	mkdir output
 	for TGZ_FILE in "${TGZ_FILES[@]}"
@@ -390,6 +409,10 @@ if [[ "${ALL_IN_ONE_FLAG}" != "" ]] && [[ "${ALL_IN_ONE_SCRIPT}" != "" ]]; then
 				part_size_max=$((${TGZ_FILES_SIZE["${TGZ_FILE}"]} * 1024))
 				partition_format="fat"
 				part_use=$(df -B1 -l /${TGZ_FILE} | grep " /${TGZ_FILE}\$" | awk -F' ' '{print $3}')
+				if [[ "$SOC_BAK_FIXED_SIZE" != "" ]]; then
+					# When the partition size is fixed, non-ext4 partitions are considered to have no used space
+					part_use=$((0))
+				fi
 			;;
 			*)
 				set +u
@@ -446,7 +469,7 @@ else
 				;;
 		esac
 		if [[ "$SOC_BAK_FIXED_SIZE" != "" ]]; then
-			echo "INFO: fixed size" | tee -a $SOCBAK_LOG_PATH
+			echo "INFO: fixed size"
 		else
 			socbak_get_tar_size ${TGZ_FILE}.tgz
 			TAR_SIZE_AUTO=$(( ${SOCBAK_GET_TAR_SIZE_KB} / 8 ))
@@ -454,29 +477,50 @@ else
 				TAR_SIZE=$(($TAR_SIZE_AUTO))
 			fi
 			TAR_SIZE=$((${SOCBAK_GET_TAR_SIZE_KB}+${TAR_SIZE}))
-			echo "INFO: $TGZ_FILE : $TAR_SIZE KB" | tee -a $SOCBAK_LOG_PATH
+			echo "INFO: $TGZ_FILE : $TAR_SIZE KB"
 			if [ $TAR_SIZE -gt ${TGZ_FILES_SIZE["$TGZ_FILE"]} ];
 			then
-				echo "INFO: need to expand $TGZ_FILE from ${TGZ_FILES_SIZE[$TGZ_FILE]} KB to $TAR_SIZE KB" | tee -a $SOCBAK_LOG_PATH
+				echo "INFO: need to expand $TGZ_FILE from ${TGZ_FILES_SIZE[$TGZ_FILE]} KB to $TAR_SIZE KB"
 				TGZ_FILES_SIZE[$TGZ_FILE]=$TAR_SIZE
 			fi
 		fi
 	done
 fi
-echo "" >> $SOCBAK_LOG_PATH
-printenv >> $SOCBAK_LOG_PATH
-declare >> $SOCBAK_LOG_PATH
-echo "" >> $SOCBAK_LOG_PATH
+
+PARTITIONS_SIZE_NO_DATA_NEW_KB=$((0))
+if [[ "${SOC_BAK_FIXED_DATA_START}" != "" ]]; then
+	echo "INFO: SOC_BAK_FIXED_DATA_START open, start change rootfs_rw size"
+	for TGZ_FILE in "${TGZ_FILES[@]}"
+	do
+		if [[ "${TGZ_FILE}" != "data" ]]; then
+			PARTITIONS_SIZE_NO_DATA_NEW_KB=$((${PARTITIONS_SIZE_NO_DATA_NEW_KB} + ${TGZ_FILES_SIZE["${TGZ_FILE}"]}))
+		fi
+	done
+	PARTITIONS_SIZE_NO_DATA_NEW_KB=$((${PARTITIONS_SIZE_NO_DATA_NEW_KB} + ${ROOTFS_RW_SIZE}))
+	echo "INFO: PARTITIONS_SIZE_NO_DATA_KB -> PARTITIONS_SIZE_NO_DATA_NEW_KB: ${PARTITIONS_SIZE_NO_DATA_KB} -> ${PARTITIONS_SIZE_NO_DATA_NEW_KB}"
+	if [ $PARTITIONS_SIZE_NO_DATA_KB -gt $PARTITIONS_SIZE_NO_DATA_NEW_KB ]; then
+		ROOTFS_RW_SIZE=$((${ROOTFS_RW_SIZE} + (${PARTITIONS_SIZE_NO_DATA_KB} - ${PARTITIONS_SIZE_NO_DATA_NEW_KB})))
+	elif [ $PARTITIONS_SIZE_NO_DATA_KB -lt $PARTITIONS_SIZE_NO_DATA_NEW_KB ]; then
+		RW_BUFFER_SIZE=$((200 * 1024))
+		DIFF_SIZE=$((${PARTITIONS_SIZE_NO_DATA_NEW_KB} - ${PARTITIONS_SIZE_NO_DATA_KB} + ${RW_BUFFER_SIZE}))
+		if [ $ROOTFS_RW_SIZE -lt $DIFF_SIZE ]; then
+			echo "ERROR: Insufficient space in rootfs_rw to compensate for the expansion of other partitions, causing packaging failure in SOC_BAK_FIXED_DATA_START mode. ROOTFS_RW_SIZE:${ROOTFS_RW_SIZE} DIFF_SIZE:${DIFF_SIZE}"
+			exit 1
+		fi
+		ROOTFS_RW_SIZE=$((${ROOTFS_RW_SIZE} - (${PARTITIONS_SIZE_NO_DATA_NEW_KB} - ${PARTITIONS_SIZE_NO_DATA_KB})))
+	fi
+	echo "INFO: rootfs_rw size change to ${ROOTFS_RW_SIZE} KiB"
+fi
 
 TGZ_ALL_SIZE=$(($TGZ_ALL_SIZE+${ROOTFS_RW_SIZE}))
 for TGZ_FILE in "${TGZ_FILES[@]}"
 do
 	TGZ_ALL_SIZE=$(($TGZ_ALL_SIZE+${TGZ_FILES_SIZE["$TGZ_FILE"]}))
 done
-echo partition table size : $TGZ_ALL_SIZE KB | tee -a $SOCBAK_LOG_PATH
+echo partition table size : $TGZ_ALL_SIZE KB
 
 if [ $TGZ_ALL_SIZE -gt $EMMC_ALL_SIZE ]; then
-		echo "INFO: partition table size changed, from $EMMC_ALL_SIZE KB to $TGZ_ALL_SIZE KB" | tee -a $SOCBAK_LOG_PATH
+		echo "INFO: partition table size changed, from $EMMC_ALL_SIZE KB to $TGZ_ALL_SIZE KB"
 		EMMC_ALL_SIZE=$TGZ_ALL_SIZE
 fi
 
@@ -519,6 +563,23 @@ fi
 echo "</physical_partition>" >> $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
 cat $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
 
+pushd $TGZ_FILES_PATH/output
+if [[ "${SOC_BAK_FIXED_DATA_START}" != "" ]]; then
+	advcp -g  ${TGZ_FILES_PATH}/binTools/mk_gpt .
+	./mk_gpt -p "$TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE" -d "$TGZ_FILES_PATH/output/gpt.test" 1 >/dev/null || true
+	dd if="$TGZ_FILES_PATH/output/gpt.test" of="$TGZ_FILES_PATH/output/gpt.test.disk"
+	EMMC_SIZE_B=$(lsblk -b | grep '^mmcblk0' | head -n1 | awk -F' ' '{print $4}')
+	dd if=/dev/null of="$TGZ_FILES_PATH/output/gpt.test.disk" bs=1 count=1 seek=${EMMC_SIZE_B}
+	NEW_GPT_END_PART_START=$(gdisk -l "$TGZ_FILES_PATH/output/gpt.test.disk" 2>&1 | tail -n1 | awk -F' ' '{print $2}')
+	OLD_GPT_END_PART_START=$(gdisk -l /dev/mmcblk0 2>&1 | tail -n 1 | awk '{print $2}')
+	if [[ "$OLD_GPT_END_PART_START" != "$NEW_GPT_END_PART_START" ]] || [[ "$NEW_GPT_END_PART_START" == "" ]]; then
+		echo "WARRNING: SOC_BAK_FIXED_DATA_START mode, check last part start [NEW: $NEW_GPT_END_PART_START] != [DEV: $OLD_GPT_END_PART_START]"
+		exit 1
+	fi
+		echo "INFO: SOC_BAK_FIXED_DATA_START mode, check last part start [NEW: $NEW_GPT_END_PART_START] = [DEV: $OLD_GPT_END_PART_START]"
+fi
+popd
+
 function socbak_allinone_pack()
 {
 	if [[ "${ALL_IN_ONE_FLAG}" != "" ]] && [[ "${ALL_IN_ONE_SCRIPT}" != "" ]]; then
@@ -557,6 +618,7 @@ function socbak_allinone_pack()
 		emmc_done
 		popd
 		cleanup
+		advcp ${TGZ_FILES_PATH}/script/ota_update/ota_update.sh $RECOVERY_DIR/
 		pushd $RECOVERY_DIR
 			md5sum ./* > md5.txt
 		popd
@@ -564,14 +626,14 @@ function socbak_allinone_pack()
 }
 if [[ "${ALL_IN_ONE_FLAG}" != "" ]] && [[ "${ALL_IN_ONE_SCRIPT}" != "" ]]; then
 	if [[ "${SOC_BAK_ALL_IN_ONE}" =~ "sdcard" ]]; then
-		socbak_allinone_pack sdcard | tee -a $SOCBAK_LOG_PATH
+		socbak_allinone_pack sdcard
 	elif [[ "${SOC_BAK_ALL_IN_ONE}" =~ "tftp" ]]; then
-		socbak_allinone_pack tftp | tee -a $SOCBAK_LOG_PATH
+		socbak_allinone_pack tftp
 	elif [[ "${SOC_BAK_ALL_IN_ONE}" =~ "usb" ]]; then
-		socbak_allinone_pack usb | tee -a $SOCBAK_LOG_PATH
+		socbak_allinone_pack usb
 	else
-		socbak_allinone_pack sdcard | tee -a $SOCBAK_LOG_PATH
+		socbak_allinone_pack sdcard
 	fi
 fi
-
+echo "INFO: pack success, wait sync..."
 sync
