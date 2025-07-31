@@ -558,7 +558,7 @@ function make_partition_imgs()
 		split_and_compress_img $i ${LABELS[$i]}
 	) done
 
-	wait
+	# wait
 }
 
 function make_gpt_img()

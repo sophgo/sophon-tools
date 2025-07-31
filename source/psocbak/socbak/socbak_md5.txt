@@ -43,6 +43,6 @@ b0a0527f516529b20c94d667a9cfa443  ./binTools/dtc
 ea1486773c9b04d6c4640aec8a725f9a  ./binTools/mkimage
 39765e591d7fc5a8f38f1cf37defad96  ./binTools/gdisk
 608ca6d0a3e1b5c55d67b5396617b698  ./script/bm1684/bm_make_package.sh
-189b6882ab9daa5f62f0a83a51b07d17  ./script/bm1688/bm_make_package.sh
+b7976ce3c29844855a1a00a6b4d2d514  ./script/bm1688/bm_make_package.sh
 7864745c1a0c7e0b72e2a6c68e7e78f9  ./script/bm1688/raw2cimg_edge.py
 8deec607fb2c9627b5e910d94bed5669  ./script/ota_update/ota_update.sh

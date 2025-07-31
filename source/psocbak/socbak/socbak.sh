@@ -9,9 +9,10 @@ PWD="$(dirname "$(readlink -f "\$0")")"
 TGZ_FILES_PATH=${PWD}
 LOGFILE="$(readlink -f "${BASH_SOURCE[0]}").log"
 rm -f $LOGFILE*
-exec > >(while IFS= read -r line; do echo "[$(date '+%Y-%m-%d %H:%M:%S')] $line"; done | tee -a "$LOGFILE") 2>&1
+exec > >(tee -a "$LOGFILE") 2>&1
 
 echo "VERSION: v1.2.1"
+date '+%Y-%m-%d %H:%M:%S'
 
 export SOC_BAK_ALL_IN_ONE=${SOC_BAK_ALL_IN_ONE:-}
 export SOC_BAK_FIXED_SIZE=${SOC_BAK_FIXED_SIZE:-}
@@ -65,11 +66,11 @@ TGZ_FILES=(boot data opt system recovery rootfs)
 # Here are the default sizes for each partition
 declare -A -g TGZ_FILES_SIZE
 TGZ_FILES_SIZE=(["boot"]=131072 ["recovery"]=3145728 ["rootfs"]=2621440 ["opt"]=2097152 ["system"]=2097152 ["data"]=4194304)
+declare -A -g TGZ_FILES_SIZE_BM1688
+TGZ_FILES_SIZE_BM1688=(["boot"]=131072 ["recovery"]=131072 ["rootfs"]=3145728 ["data"]=4194304)
 # The increased size of each partition compared to the original partition table
 ROOTFS_RW_SIZE=$((6291456))
-# for bm1688 or cv186ah
 ROOTFS_RW_SIZE_BM1688=$((9291456))
-RECOVERY_SIZE_BM1688=$((131072))
 TGZ_ALL_SIZE=$((100*1024))
 EMMC_ALL_SIZE=20971520
 EMMC_MAX_SIZE=30000000
@@ -206,7 +207,10 @@ if [[ "$SOC_NAME" == "bm1684x" ]] || [[ "$SOC_NAME" == "bm1684" ]]; then
 elif [[ "$SOC_NAME" == "bm1688" ]]; then
 	NEED_BAK_FLASH=1
 	ROOTFS_RW_SIZE=${ROOTFS_RW_SIZE_BM1688}
-	TGZ_FILES_SIZE["recovery"]=${RECOVERY_SIZE_BM1688}
+	TGZ_FILES_SIZE["boot"]=${TGZ_FILES_SIZE_BM1688["boot"]}
+	TGZ_FILES_SIZE["recovery"]=${TGZ_FILES_SIZE_BM1688["recovery"]}
+	TGZ_FILES_SIZE["rootfs"]=${TGZ_FILES_SIZE_BM1688["rootfs"]}
+	TGZ_FILES_SIZE["data"]=${TGZ_FILES_SIZE_BM1688["data"]}
 	ALL_IN_ONE_SCRIPT="${TGZ_FILES_PATH}/script/bm1688/"
 fi
 
@@ -574,7 +578,6 @@ if [[ "${SOC_BAK_FIXED_DATA_START}" != "" ]]; then
 	OLD_GPT_END_PART_START=$(gdisk -l /dev/mmcblk0 2>&1 | tail -n 1 | awk '{print $2}')
 	if [[ "$OLD_GPT_END_PART_START" != "$NEW_GPT_END_PART_START" ]] || [[ "$NEW_GPT_END_PART_START" == "" ]]; then
 		echo "WARRNING: SOC_BAK_FIXED_DATA_START mode, check last part start [NEW: $NEW_GPT_END_PART_START] != [DEV: $OLD_GPT_END_PART_START]"
-		exit 1
 	fi
 		echo "INFO: SOC_BAK_FIXED_DATA_START mode, check last part start [NEW: $NEW_GPT_END_PART_START] = [DEV: $OLD_GPT_END_PART_START]"
 fi

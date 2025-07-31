@@ -83,10 +83,10 @@
    1. `TGZ_FILES_SIZE`: 默认配置各个分区的期望大小（socbak工具执行时会自动检测当前设备分区使用率，如果当前设备使用的空间大于期望大小，则自动扩大期望分区大小）
    2. `ROOTFS_RW_SIZE`: 根目录RW分区期望大小
    3. `ROOTFS_RW_SIZE_BM1688`: 对于BM1688/CV186AH平台根目录RW分区期望大小
-   4. `RECOVERY_SIZE_BM1688`: 对于BM1688/CV186AH平台recovery分区期望大小
+   4. `TGZ_FILES_SIZE_BM1688`: 对于BM1688/CV186AH平台其余分区的期望大小
 4. 修改方式：
    1. 如果是BM1684/BM1684X平台，修改`TGZ_FILES_SIZE`或者`ROOTFS_RW_SIZE`即可
-   2. 如果是BM1688/CV186AH平台，修改`TGZ_FILES_SIZE`、`ROOTFS_RW_SIZE_BM1688`或者`RECOVERY_SIZE_BM1688`即可
+   2. 如果是BM1688/CV186AH平台，修改`TGZ_FILES_SIZE`、`ROOTFS_RW_SIZE_BM1688`或者`TGZ_FILES_SIZE_BM1688`即可
    3. 修改后的总大小不得大于emmc大小，工具会自动检测，如果遇到`ERROR: bakpack size(XXX) > emmc size(XXX), please del some file and rework.`的报错，请检查文件是否太多了，或者自定义修改的分区期望大小太大了
 5. 保存`socbak.sh`文件，继续执行`bash socbak.sh`命令，开始打包
 
