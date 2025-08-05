@@ -6,8 +6,8 @@
 
 ## 文件内容
 
-1. ota_update.sh OTA远程刷机工具
-2. arm64_bin 该目录下会存放一些ota_update.sh依赖的二进制文件
+1. ota.sh OTA远程刷机工具
+2. arm64_bin 该目录下会存放一些ota.sh依赖的二进制文件
 
 ## 适用范围
 
@@ -24,7 +24,7 @@
 ## 使用方式
 
 1. 将sd卡卡刷包拷贝到设备上并解压
-2. 将ota_update.sh脚本cp到刷机包内，与BOOT文件同目录
+2. 将ota.sh脚本内容cp到刷机包内，文件名自定义，不要和刷机包中已有文件冲突，与BOOT文件同目录
 3. 检查目录格式是否类似这个
 
     ```bash
@@ -32,13 +32,13 @@
     BOOT                boot_emmc-opt.scr        data.12-of-58.gz  data.25-of-58.gz  data.38-of-58.gz  data.50-of-58.gz  gpt.gz              rootfs.12-of-32.gz  rootfs.25-of-32.gz  rootfs.9-of-32.gz
     boot.1-of-2.gz      boot_emmc-recovery.cmd   data.13-of-58.gz  data.26-of-58.gz  data.39-of-58.gz  data.51-of-58.gz  md5.txt             rootfs.13-of-32.gz  rootfs.26-of-32.gz  rootfs_rw.1-of-2.gz
     boot.2-of-2.gz      boot_emmc-recovery.scr   data.14-of-58.gz  data.27-of-58.gz  data.4-of-58.gz   data.52-of-58.gz  misc.1-of-1.gz      rootfs.14-of-32.gz  rootfs.27-of-32.gz  rootfs_rw.2-of-2.gz
-    ota_update.sh       ...
+    <ota_shell_file>       ...
     ```
 4. 尽可能得关闭业务，尤其是占用最后一个分区的业务或服务。并保存工作文件，OTA服务准备完成后会自动重启设备。
-5. 以root账户身份执行ota_update.sh脚本，比如命令`sudo bash ota_update.sh`，默认情况下OTA服务会保留最后一个分区（data分区）不烧录，如果当前设备和刷机包不满足这个条件，会报错 `[OTA PANIC] LAST_PART_NOT_FLASH mode, check last part start XXX != XXX`。如果**需要烧录data分区**，需要增加**一个参数说明不需要保留最后一个分区**：`sudo bash ota_update.sh LAST_PART_NOT_FLASH=0`
+5. 以root账户身份执行<ota_shell_file>脚本，比如命令`sudo bash <ota_shell_file>`，默认情况下OTA服务会保留最后一个分区（data分区）不烧录，如果当前设备和刷机包不满足这个条件，会报错 `[OTA PANIC] LAST_PART_NOT_FLASH mode, check last part start XXX != XXX`。如果**需要烧录data分区**，需要增加**一个参数说明不需要保留最后一个分区**：`sudo bash <ota_shell_file> LAST_PART_NOT_FLASH=0`
 
     ```bash
-    linaro@bm1684:/xxxxx$ sudo bash ota_update.sh 
+    linaro@bm1684:/xxxxx$ sudo bash <ota_shell_file>
     Running as unit: sophon-ota-update.service
     Unit sophon-ota-update.service could not be found.
     [INFO] ota server started, check status use: "systemctl status sophon-ota-update.service --no-page -l"
@@ -110,7 +110,7 @@
 https://github.com/user-attachments/assets/9362c671-0a5e-4be2-aaec-6411704c39b4
 
 1. 拷贝刷机包到/data分区
-2. 不带参数直接执行刷机包中的 `ota_update.sh`
+2. 不带参数直接执行刷机包中的 `<ota_shell_file>`
 3. ssh终端由于在/data下，所以被kill掉了。重新连接，查看OTA准备服务的日志
 4. 准备完成后设备自动重启，查看串口log
 5. 刷机到root-ro分区的第13个包时设备断电然后重新上电，模拟OTA刷机时电压不稳。设备重新上电后基于之前的刷机进度继续刷机
@@ -122,7 +122,7 @@ https://github.com/user-attachments/assets/9362c671-0a5e-4be2-aaec-6411704c39b4
 https://github.com/user-attachments/assets/ea21d468-b1d3-4b13-bd3e-d2fbd4852d46
 
 1. 拷贝刷机包到家目录
-2. 带 `LAST_PART_NOT_FLASH=0` 参数直接执行刷机包中的 `ota_update.sh`，查看OTA准备服务的日志，期间在/data分区创建了文件testfile
+2. 带 `LAST_PART_NOT_FLASH=0` 参数直接执行刷机包中的 `<ota_shell_file>`，查看OTA准备服务的日志，期间在/data分区创建了文件testfile
 3. 准备完成后设备自动重启，查看串口log
 5. 刷机完成后自动重启
 6. 启动后查看/data分区，发现创建的testfile文件被删除
