@@ -133,7 +133,7 @@ fn main() {
     let is_dhcp6 = args
         .ipv6
         .as_deref()
-        .map(|v| (v.to_lowercase() == "dhcp" || v.to_lowercase() == "auto"))
+        .map(|v| v.to_lowercase() == "dhcp" || v.to_lowercase() == "auto")
         .unwrap_or(false);
     // 处理 netmask 支持数字
     if !is_dhcp {
