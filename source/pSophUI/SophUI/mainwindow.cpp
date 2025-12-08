@@ -39,7 +39,7 @@ QString MainWindow::executeLinuxCmd(QString strCmd)
     p.start("bash", QStringList() << "-c" << strCmd);
     p.waitForFinished();
     QString strResult = p.readAllStandardOutput();
-    qDebug() << strResult  + strCmd;
+    qDebug() << "run " + strCmd + " ret: " + strResult;
     return strResult;
 }
 
@@ -92,19 +92,23 @@ MainWindow::MainWindow(QWidget *parent)
     ip_clock->start(5000);
 
     connect(ui->wan_button, SIGNAL(clicked()), this,SLOT(_wan_button_click_cb()));
-
     connect(ui->lan_button, SIGNAL(clicked()), this, SLOT(_lan_button_click_cb()));
-
-    QRegExp rx("\\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\b");
-    ui->wan_ip->setValidator(new QRegExpValidator(rx, this));
-    ui->wan_net->setValidator(new QRegExpValidator(rx, this));
-    ui->wan_gate->setValidator(new QRegExpValidator(rx, this));
-    ui->wan_dns->setValidator(new QRegExpValidator(rx, this));
-
-    ui->lan_ip->setValidator(new QRegExpValidator(rx, this));
-    ui->lan_net->setValidator(new QRegExpValidator(rx, this));
-    ui->lan_gate->setValidator(new QRegExpValidator(rx, this));
-    ui->lan_dns->setValidator(new QRegExpValidator(rx, this));
+    connect(ui->wan_ip, &QLineEdit::editingFinished, this, [=]{ checkIPv4(ui->wan_ip, "WAN IPv4"); });
+    connect(ui->wan_net, &QLineEdit::editingFinished, this, [=]{ checkIPv4SubnetMask(ui->wan_net, "WAN IPv4 NETMASK"); });
+    connect(ui->wan_gate, &QLineEdit::editingFinished, this, [=]{ checkIPv4(ui->wan_gate, "WAN IPv4 GATEWAY"); });
+    connect(ui->wan_dns, &QLineEdit::editingFinished, this, [=]{ checkIPv4(ui->wan_dns, "WAN IPv4 DNS"); });
+    connect(ui->lan_ip, &QLineEdit::editingFinished, this, [=]{ checkIPv4(ui->lan_ip, "LAN IPv4"); });
+    connect(ui->lan_net, &QLineEdit::editingFinished, this, [=]{ checkIPv4SubnetMask(ui->lan_net, "LAN IPv4 NETMASK"); });
+    connect(ui->lan_gate, &QLineEdit::editingFinished, this, [=]{ checkIPv4(ui->lan_gate, "LAN IPv4 GATEWAY"); });
+    connect(ui->lan_dns, &QLineEdit::editingFinished, this, [=]{ checkIPv4(ui->lan_dns, "LAN IPv4 DNS"); });
+    connect(ui->wan_ip6, &QLineEdit::editingFinished, this, [=]{ checkIPv6(ui->wan_ip6, "WAN IPv6"); });
+    connect(ui->wan_net6, &QLineEdit::editingFinished, this, [=]{ checkIPv6SubnetMask(ui->wan_net6, "WAN IPv6 NETMASK"); });
+    connect(ui->wan_gate6, &QLineEdit::editingFinished, this, [=]{ checkIPv6(ui->wan_gate6, "WAN IPv6 GATEWAY"); });
+    connect(ui->wan_dns6, &QLineEdit::editingFinished, this, [=]{ checkIPv6(ui->wan_dns6, "WAN IPv6 DNS"); });
+    connect(ui->lan_ip6, &QLineEdit::editingFinished, this, [=]{ checkIPv6(ui->lan_ip6, "LAN IPv6"); });
+    connect(ui->lan_net6, &QLineEdit::editingFinished, this, [=]{ checkIPv6SubnetMask(ui->lan_net6, "LAN IPv6 NETMASK"); });
+    connect(ui->lan_gate6, &QLineEdit::editingFinished, this, [=]{ checkIPv6(ui->lan_gate6, "LAN IPv6 GATEWAY"); });
+    connect(ui->lan_dns6, &QLineEdit::editingFinished, this, [=]{ checkIPv6(ui->lan_dns6, "LAN IPv6 DNS"); });
 
     _flash_show_info();
 
@@ -185,36 +189,37 @@ void MainWindow::ShowDemosInf(bool show)
 
 void MainWindow::_get_ip_info(QNetworkInterface interface)
 {
-    QString ip_str;
-    QString netmask_str;
-    QString gateway_str;
-    QString dns_str;
-
+    QList<QString> ip_str_list;
+    QList<QString> ip_str_v6_list;
     QString mac_str;
     QString device_name = interface.name();
+    QString *info_str = nullptr;
+    if(interface.name() == "eth0")
+        info_str = &network_info_eth0;
+    else if(interface.name() == "eth1")
+        info_str = &network_info_eth1;
     mac_str = interface.hardwareAddress().toUtf8();
     QList<QNetworkAddressEntry>addressList = interface.addressEntries();
     foreach(QNetworkAddressEntry _entry, addressList)
     {
         QHostAddress address = _entry.ip();
+        address.setScopeId(QString());
         if(address.protocol() == QAbstractSocket::IPv4Protocol)
-        {
-            ip_str = address.toString();
-            netmask_str = _entry.netmask().toString();
-        }
+            ip_str_list.append(QString("%1/%2").arg(address.toString()).arg(_entry.prefixLength()));
+        else if(address.protocol() == QAbstractSocket::IPv6Protocol)
+            ip_str_v6_list.append(QString("%1/%2").arg(address.toString()).arg(_entry.prefixLength()));
     }
-    qDebug() << "mac: " << mac_str << " ip: " << ip_str << " netmask: " << netmask_str;
-    if(interface.name() == "eth0")
-    {
-        wan_mac =     "WAN(eth0) \n            MAC:      " + mac_str+ "\n";
-        wan_ip =            "            IP:       " +ip_str+ "\n";
-        wan_netmask =       "            NETMASK:  " +netmask_str+ "\n";
-    }
-    else if(interface.name() == "eth1")
-    {
-        lan_mac =     "LAN(eth1) \n            MAC:      " +mac_str + "\n";
-        lan_ip =            "            IP:       " +ip_str+ "\n";
-        lan_netmask =       "            NETMASK:  " +netmask_str+ "\n";
+    qDebug() << "mac: " << mac_str << " ip: " << ip_str_list.toStdList();
+    if(info_str != nullptr) {
+        *info_str =      "  MAC:\t" + mac_str+ "\n";
+        *info_str +=    "  IPv4:";
+        foreach(QString _entry, ip_str_list)
+            *info_str += "\t" + _entry + "\n";
+        if(ip_str_list.empty())
+            *info_str += "\n";
+        *info_str +=    "  IPv6:";
+        foreach(QString _entry, ip_str_v6_list)
+            *info_str += "\t" + _entry + "\n";
     }
 }
 
@@ -224,7 +229,7 @@ void MainWindow::_flash_show_info()
     {
         _get_ip_info(netInterface);
     }
-    ui->ip_detail->setText(wan_mac+wan_ip+wan_netmask+lan_mac+lan_ip+lan_netmask);
+    ui->ip_detail->setText("WAN(eth0):\n" + network_info_eth0 + "\nLAN(eth1):\n" + network_info_eth1);
     _show_cmd_to_label(ui->info_detail,"SOPHON_QT_1");
     _show_cmd_to_label(ui->info_detail_2,"SOPHON_QT_2");
 #if GET_BASH_INFO_ASYNC
@@ -239,158 +244,105 @@ void MainWindow::_flash_show_info()
 void MainWindow::_show_current_time()
 {
     QDateTime *date_time = new QDateTime(QDateTime::currentDateTime());
-    ui->TIME_LABLE->setText(tr("%1\n").arg(date_time->toString("hh:mm:ss"))
-              + tr("%1").arg(date_time->toString("yyyy-MM-dd ddd")));
+    ui->TIME_LABLE->setText(QString("%1\n").arg(date_time->toString("hh:mm:ss"))
+              + QString("%1").arg(date_time->toString("yyyy-MM-dd ddd")));
     delete date_time;
+}
+
+bool MainWindow::__set_network(
+    const QString& dev_name,
+    const QString& ipv4, const QString& ipv4_net,
+    const QString& ipv4_gate, const QString& ipv4_dns,
+    const QString& ipv6, const QString& ipv6_net,
+    const QString& ipv6_gate, const QString& ipv6_dns) {
+
+    MyMessageBox msgBox;
+    __setFontRecursively<QWidget>(&msgBox);
+
+    msgBox.setWindowTitle("WARNING!");
+    msgBox.setText("Question?");
+    msgBox.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
+    msgBox.setDefaultButton(QMessageBox::No);
+
+    QString ipv4_set_str;
+    QString ipv6_set_str;
+
+    if(!ipv4.isEmpty() && ipv4_net.isEmpty()) {
+        msgBox.setInformativeText(tr("子网掩码不能为空"));
+        msgBox.setStandardButtons(QMessageBox::Yes);
+        msgBox.exec();
+        msgBox.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
+        return false;
+    }
+    if(!ipv6.isEmpty() && ipv6_net.isEmpty()) {
+        msgBox.setInformativeText(tr("子网掩码不能为空"));
+        msgBox.setStandardButtons(QMessageBox::Yes);
+        msgBox.exec();
+        msgBox.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
+        return false;
+    }
+    if(ipv4.isEmpty())
+        ipv4_set_str = QString("auto '' '' ''");
+    else
+        ipv4_set_str = QString("'%1' '%2' '%3' '%4'")
+                           .arg(ipv4).arg(ipv4_net).arg(ipv4_gate).arg(ipv4_dns);
+    if(ipv6.isEmpty())
+        ipv6_set_str = QString("auto '' '' ''");
+    else
+        ipv6_set_str = QString("'%1' '%2' '%3' '%4'")
+                       .arg(ipv6).arg(ipv6_net).arg(ipv6_gate).arg(ipv6_dns);
+    QString msg_str;
+    msg_str += QString("dev: %1\n\n").arg(dev_name);
+    msg_str += "IPv4:\n";
+    msg_str += QString("  address: %1\n").arg(ipv4.isEmpty() ? "DHCP AUTO" : ipv4);
+    msg_str += QString("  network: %1\n").arg(ipv4.isEmpty() ? "DHCP AUTO" : ipv4_net);
+    msg_str += QString("  gateway: %1\n").arg(ipv4.isEmpty() ? "DHCP AUTO" : ipv4_gate);
+    msg_str += QString("  DNS: %1\n\n").arg(ipv4.isEmpty() ? "DHCP AUTO" : ipv4_dns);
+    msg_str += "IPv6:\n";
+    msg_str += QString("  address6: %1\n").arg(ipv6.isEmpty() ? "DHCP AUTO" : ipv6);
+    msg_str += QString("  network6: %1\n").arg(ipv6.isEmpty() ? "DHCP AUTO" : ipv6_net);
+    msg_str += QString("  gateway6: %1\n").arg(ipv6.isEmpty() ? "DHCP AUTO" : ipv6_gate);
+    msg_str += QString("  DNS: %1\n").arg(ipv6.isEmpty() ? "DHCP AUTO" : ipv6_dns);
+    msgBox.setInformativeText(msg_str);
+    if(msgBox.exec() == QMessageBox::Yes) {
+        executeLinuxCmd("bm_set_ip " + dev_name + " " + ipv4_set_str + " " + ipv6_set_str);
+        return true;
+    }
+    return false;
 }
 
 void MainWindow::_wan_button_click_cb()
 {
-    QString set_str;
-    bool flag = false;
-
-    MyMessageBox msgBox;
-    __setFontRecursively<QWidget>(&msgBox);
-    // msgBox.setFixedSize(640*4,480*4);//设置MessageBox的大小
-
-    msgBox.setWindowTitle("WARNING!");
-    msgBox.setText("Question?");
-    msgBox.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
-    msgBox.setDefaultButton(QMessageBox::No);
-
-
-    if(ui->wan_ip->text().isEmpty() && ui->wan_net->text().isEmpty() && ui->wan_gate->text().isEmpty() && ui->wan_dns->text().isEmpty())
-    {
-        qDebug() << QStringLiteral("Input exmpty will set to dhcp!");
-
-        msgBox.setInformativeText(tr("WAN(eth0)将会设置成动态IP模式"));
-        int ret = msgBox.exec();
-        if( ret == QMessageBox::Yes)
-        {
-            qDebug() << QStringLiteral("set ip to dhcp!");
-            /* set_ip */
-            executeLinuxCmd("bm_set_ip_auto eth0");
-            flag = true;
-        }
+    if(true == __set_network("eth0",
+                              ui->wan_ip->text(), ui->wan_net->text(),
+                              ui->wan_gate->text(), ui->wan_dns->text(),
+                              ui->wan_ip6->text(), ui->wan_net6->text(),
+                              ui->wan_gate6->text(), ui->wan_dns6->text())) {
+        ui->wan_ip->clear();
+        ui->wan_net->clear();
+        ui->wan_gate->clear();
+        ui->wan_dns->clear();
+        ui->wan_ip6->clear();
+        ui->wan_net6->clear();
+        ui->wan_gate6->clear();
+        ui->wan_dns6->clear();
     }
-    else
-    {
-        QString _ip = ui->wan_ip->text();
-        QString _netmask = ui->wan_net->text();
-        QString _gateway = ui->wan_gate->text();
-        QString _dns = ui->wan_dns->text();
-
-        set_str = "IP: " +_ip +"\nNETMASK: " + _netmask + "\nGATEWAY: "  +_gateway +"\nDNS: " + _dns;
-
-        msgBox.setInformativeText(set_str);
-        if (ui->wan_net->text().isEmpty()){
-            msgBox.setInformativeText(tr("子网掩码不能为空"));
-            msgBox.setStandardButtons(QMessageBox::Yes);
-            msgBox.exec();
-            msgBox.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
-            return;
-        }
-        else if (ui->wan_net->text() == "0.0.0.0"){
-            msgBox.setInformativeText(tr("无效的子网掩码:0.0.0.0"));
-            msgBox.setStandardButtons(QMessageBox::Yes);
-            msgBox.exec();
-            msgBox.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
-            return;
-        }
-        if (ui->wan_gate->text().isEmpty())
-            _gateway="\"\"";
-        if (ui->wan_dns->text().isEmpty())
-            _dns="\"\"";
-        qDebug() << ":" + _netmask + ":" + _gateway +":" +_dns ;
-        int ret = msgBox.exec();
-        if( ret == QMessageBox::Yes)
-        {
-            qDebug() << QStringLiteral("set ip to static!");
-            /* set_ip */
-            executeLinuxCmd("bm_set_ip eth0 " + _ip + " " +_netmask + " " + _gateway+ " " + _dns);
-            flag = true;
-        }
-    }
-    if (flag == true)
-    {
-        ui->wan_ip->setText("");
-        ui->wan_net->setText("");
-        ui->wan_gate->setText("");
-        ui->wan_dns->setText("");
-    }
-
 }
 void MainWindow::_lan_button_click_cb()
 {
-    QString set_str;
-    bool flag = false;
-
-    MyMessageBox msgBox;
-    __setFontRecursively<QWidget>(&msgBox);
-    // msgBox.setFixedSize(640*4,480*4);//设置MessageBox的大小
-
-    msgBox.setWindowTitle("WARNING!");
-    msgBox.setText("Question?");
-    msgBox.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
-    msgBox.setDefaultButton(QMessageBox::No);
-
-    if(ui->lan_ip->text().isEmpty() && ui->lan_net->text().isEmpty() && ui->lan_gate->text().isEmpty() && ui->lan_dns->text().isEmpty())
-    {
-        qDebug() << QStringLiteral("Input exmpty will set to dhcp!");
-        msgBox.setInformativeText(tr("LAN(eth1)将会设置成动态IP模式"));
-        int ret = msgBox.exec();
-        if( ret == QMessageBox::Yes)
-        {
-            qDebug() << QStringLiteral("set ip to dhcp!");
-            /* set_ip */
-            executeLinuxCmd("bm_set_ip_auto eth1");
-            flag = true;
-        }
-    }
-    else
-    {
-        QString _ip = ui->lan_ip->text();
-        QString _netmask = ui->lan_net->text();
-        QString _gateway = ui->lan_gate->text();
-        QString _dns = ui->lan_dns->text();
-
-        set_str = "IP: " +_ip +"\nNETMASK: " + _netmask + "\nGATEWAY: "  +_gateway +"\nDNS: " + _dns;
-
-        //int ret = MyMessageBox::warning(this, QStringLiteral("warning!"), set_str, QMessageBox::Cancel | QMessageBox::Ok);
-        msgBox.setInformativeText(set_str);
-        if (ui->lan_net->text().isEmpty()){
-            msgBox.setInformativeText(tr("子网掩码不能为空"));
-            msgBox.setStandardButtons(QMessageBox::Yes);
-            msgBox.exec();
-            msgBox.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
-            return;
-        }
-        else if (ui->lan_net->text() == "0.0.0.0"){
-            msgBox.setInformativeText(tr("无效的子网掩码:0.0.0.0"));
-            msgBox.setStandardButtons(QMessageBox::Yes);
-            msgBox.exec();
-            msgBox.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
-            return;
-        }
-        if (ui->lan_gate->text().isEmpty())
-            _gateway="\"\"";
-        if (ui->lan_dns->text().isEmpty())
-            _dns="\"\"";
-        int ret = msgBox.exec();
-        if( ret == QMessageBox::Yes)
-        {
-            qDebug() << QStringLiteral("set ip to static!");
-            /* set_ip */
-            executeLinuxCmd("bm_set_ip eth1 " + _ip + " " +_netmask + " " + _gateway+ " " + _dns);
-            flag = true;
-        }
-    }
-    if (flag == true)
-    {
-        ui->lan_ip->setText("");
-        ui->lan_net->setText("");
-        ui->lan_gate->setText("");
-        ui->lan_dns->setText("");
+    if(true == __set_network("eth1",
+                              ui->lan_ip->text(), ui->lan_net->text(),
+                              ui->lan_gate->text(), ui->lan_dns->text(),
+                              ui->lan_ip6->text(), ui->lan_net6->text(),
+                              ui->lan_gate6->text(), ui->lan_dns6->text())) {
+        ui->lan_ip->clear();
+        ui->lan_net->clear();
+        ui->lan_gate->clear();
+        ui->lan_dns->clear();
+        ui->lan_ip6->clear();
+        ui->lan_net6->clear();
+        ui->lan_gate6->clear();
+        ui->lan_dns6->clear();
     }
 }
 

@@ -83,17 +83,84 @@ private slots:
     void on_show_net_button_clicked();
 
 private:
+    bool __set_network(const QString& dev_name,
+        const QString& ipv4, const QString& ipv4_net,
+        const QString& ipv4_gate, const QString& ipv4_dns,
+        const QString& ipv6, const QString& ipv6_net,
+        const QString& ipv6_gate, const QString& ipv6_dns);
+
+    void checkIPv4(QLineEdit* edit, const QString& fieldName){
+        if(edit->text().isEmpty())
+            return;
+        QHostAddress addr;
+        if(addr.setAddress(edit->text()))
+            if(addr.protocol() == QAbstractSocket::IPv4Protocol)
+                if(addr.toString() == edit->text())
+                    return;
+        edit->clear();
+        QMessageBox::warning(this, "ERROR", QString(tr("请输入合法的 IPv4 地址(%1)")).arg(fieldName));
+        edit->setFocus();
+    };
+
+    bool isValidIPv4Mask(quint32 mask) {
+        quint32 inverted = ~mask;
+        if (mask == 0x00000000 || mask == 0xFFFFFFFF)
+            return true;
+        return ((inverted + 1) & inverted) == 0;
+    }
+
+    void checkIPv4SubnetMask(QLineEdit* edit, const QString& fieldName) {
+        if (edit->text().isEmpty())
+            return;
+        bool ok;
+        int cidr = edit->text().toInt(&ok);
+        if (ok && cidr > 0 && cidr <= 32)
+            return;
+        QHostAddress addr;
+        if (addr.setAddress(edit->text()))
+            if (addr.protocol() == QAbstractSocket::IPv4Protocol)
+                if (addr.toString() == edit->text())
+                    if (edit->text() != "0.0.0.0")
+                        if (isValidIPv4Mask((quint32)addr.toIPv4Address()))
+                            return;
+        edit->clear();
+        QMessageBox::warning(this, "ERROR", QString(tr("请输入合法的子网掩码(%1)\n(格式：255.255.255.0 或 1-32)")).arg(fieldName));
+        edit->setFocus();
+    };
+
+    void checkIPv6(QLineEdit* edit, const QString& fieldName){
+        if(edit->text().isEmpty())
+            return;
+        QHostAddress addr;
+        qDebug() << "checkIPv6";
+        if(addr.setAddress(edit->text()))
+            if(addr.protocol() == QAbstractSocket::IPv6Protocol)
+                if(addr.toString() == edit->text())
+                    return;
+        edit->clear();
+        QMessageBox::warning(this, "ERROR", QString(tr("请输入合法的 IPv6 地址(%1)")).arg(fieldName));
+        edit->setFocus();
+    };
+
+    void checkIPv6SubnetMask(QLineEdit* edit, const QString& fieldName) {
+        if (edit->text().isEmpty())
+            return;
+        bool ok;
+        int prefixLength = edit->text().toInt(&ok);
+        if (ok && prefixLength > 0 && prefixLength <= 128)
+            return;
+        edit->clear();
+        QMessageBox::warning(this, "ERROR", QString(tr("请输入合法的 IPv6 子网掩码(%1)\n(格式：1-128 之间的数字，如 64)")).arg(fieldName));
+        edit->setFocus();
+    };
+
     Ui::MainWindow *ui;
 
     QTimer * time_clock;
     QTimer * ip_clock;
 
-    QString wan_ip;
-    QString wan_mac;
-    QString wan_netmask;
-    QString lan_ip;
-    QString lan_mac;
-    QString lan_netmask;
+    QString network_info_eth0;
+    QString network_info_eth1;
 
     QSet<QLabel*> runingComToQlabel;
 
