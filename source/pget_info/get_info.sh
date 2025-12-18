@@ -496,6 +496,7 @@ if [[ "${WORK_MODE}" == "SOC" ]]; then
         SHUTDOWN_REASON_HEX_MAP["00000082"]="REBOOT"
         SHUTDOWN_REASON_HEX_MAP["00000083"]="OVER_HEAT"
         SHUTDOWN_REASON_HEX_MAP["00000084"]="WATCHDOG"
+        SHUTDOWN_REASON_HEX_MAP["00000085"]="OVER_HEAT_MCU"
         for bootfile in $(ls /root/.boot/ 2>/dev/null); do
             S_INFO=$(od_read_hex 0 4 /root/.boot/$bootfile)
             F_INFO=$(echo $bootfile | sed 's|.txt||g')
