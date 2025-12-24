@@ -39,6 +39,8 @@ if [[ "$userInputSubId" =~ ^[0-9]+(\+[0-9]+)+$ ]]; then
 fi
 echo "Core Id: $userInputSubId, Cmd: $userInputCmd"
 if [ "$userInputSubId" == "all" ]; then
+    temp_shm_id_info=$(ipcmk -M $((1024 * 1024 * 1)) -p 0777)
+    temp_shm_id=$(echo "$temp_shm_id_info" | grep -oP '\d+')
     for ((i = 0; i < $seNCtrl_ALL_SUB_NUM; i++)); do
         if [[ "${seNCtrl_ALL_SUB_IP[$i]}" == "NAN" ]]; then continue; fi
         if [ ${#seNCtrl_ALL_SUB_RUNS[@]} -gt 0 ] && [[ ! " ${seNCtrl_ALL_SUB_RUNS[*]} " =~ " $(($i+1)) " ]]; then continue; fi
@@ -51,6 +53,7 @@ if [ "$userInputSubId" == "all" ]; then
         seNCtrl_RUN_PID+=("$!")
         unset SSHPASS
     done
+    ipcrm -m "${temp_shm_id}"
     for element in "${seNCtrl_RUN_PID[@]}"
     do
         wait -n "$element"

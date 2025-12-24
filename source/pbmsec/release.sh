@@ -4,7 +4,7 @@ BUILD_RET=0
 
 echo "build bmsec ..."
 
-BMSEC_PACKAGE_VERSION="1.6.2"
+BMSEC_PACKAGE_VERSION="1.6.3"
 
 export CMD_PANDOC=$(command -v pandoc)
 export CMD_DPKG_DEB=$(command -v dpkg-deb)
