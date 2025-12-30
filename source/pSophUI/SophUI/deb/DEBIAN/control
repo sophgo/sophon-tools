@@ -1,6 +1,6 @@
 Package: sophgo-hdmi
 Source: sophgo-hdmi
-Version: 1.6.5
+Version: 1.6.6
 Architecture: arm64
 Maintainer: sophgo
 Priority: optional

@@ -155,6 +155,12 @@ else
                 export QT_QPA_PLATFORM_PLUGIN_PATH=$QTDIR/qt5/plugins/
                 export LD_LIBRARY_PATH=/opt/lib:$LD_LIBRARY_PATH
                 export QT_QPA_PLATFORM=linuxfb:fb=/dev/fl2000-0 #framebuffer驱动
+                if [[ "$(cat /proc/device-tree/info/file-name)" == "bm1684x_se7_v3.0.dtb" ]] && [[ "$(lspci | grep uPD72020 | wc -l
+)" != "0" ]] ; then
+                        export QT_QPA_PLATFORM=${QT_QPA_PLATFORM}':fl2kSize=1440x900'
+                else
+                        export QT_QPA_PLATFORM=${QT_QPA_PLATFORM}':fl2kSize=1920x1080'
+                fi
                 # for ms91xx
                 # export QT_QPA_PLATFORM=linuxfb:ms91xxmode=2
         fi
