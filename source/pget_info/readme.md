@@ -86,7 +86,15 @@ ls *get_info.log.gz | sort -n | xargs -I{} zcat {} 1>>/data/get_info.log
 	while true; do sleep 1; PATH="$(pwd)/staticBinTools_arm64:$PATH" bash get_info.sh 2>/dev/null 1>> get_info.log; done;
 	```
 
-### get_info_log_to_png.py
+### 数据可视化
+
+#### 在线网站
+
+可以在网站 [https://zetao-zhang-sophgo.github.io/getinfo2png/](https://zetao-zhang-sophgo.github.io/getinfo2png/) 进行数据的可视化。
+
+#### get_info_log_to_png.py
+
+也可以使用本仓库的转换脚本进行转换：
 
 ``` bash
 
