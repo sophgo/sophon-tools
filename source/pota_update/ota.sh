@@ -111,10 +111,28 @@ otaenvsetup_str="setenv otaenvset  ';'
 fi
 
 # 检查参数
+LAST_PART_NOT_FLASH=1
+SHELL_NEED_AUTOBOOT_ONCE=""
+SHELL_NEED_AUTOBOOT_ONCE_TEMP_DIR=""
+RUN_WORK_DIR=""
 for arg in "$@"; do
     case $arg in
+        RUN_WORK_DIR=*)
+            RUN_WORK_DIR="${arg#*=}"
+            shift
+            ;;
         LAST_PART_NOT_FLASH=*)
             LAST_PART_NOT_FLASH="${arg#*=}"
+            shift
+            ;;
+        SHELL_NEED_AUTOBOOT_ONCE=*)
+            SHELL_NEED_AUTOBOOT_ONCE="${arg#*=}"
+            SHELL_NEED_AUTOBOOT_ONCE="$(readlink -f ${SHELL_NEED_AUTOBOOT_ONCE})"
+            shift
+            ;;
+        SHELL_NEED_AUTOBOOT_ONCE_TEMP_DIR=*)
+            SHELL_NEED_AUTOBOOT_ONCE_TEMP_DIR="${arg#*=}"
+            SHELL_NEED_AUTOBOOT_ONCE_TEMP_DIR="$(readlink -f ${SHELL_NEED_AUTOBOOT_ONCE_TEMP_DIR})"
             shift
             ;;
     esac
@@ -128,15 +146,17 @@ if [[ "$SHELL_FILE" != "${DDR_SHELL_FILE}" ]]; then
     cp "$SHELL_FILE" "${DDR_SHELL_FILE}"
     chmod +x "${DDR_SHELL_FILE}"
     cd /
-    # systemctl stop sophon-ota-update.service
-    # systemctl reset-failed sophon-ota-update.service
-    # rm /run/systemd/transient/sophon-ota-update.service
-    # systemctl daemon-reload
-    systemd-run --unit=sophon-ota-update.service --collect bash -c "${DDR_SHELL_FILE} $(dirname \
-$SHELL_FILE) ${LAST_PART_NOT_FLASH}"
+    sudo systemctl stop sophon-ota-update.service 2>/dev/null
+    sudo systemctl reset-failed sophon-ota-update.service 2>/dev/null
+    sudo rm /run/systemd/transient/sophon-ota-update.service 2>/dev/null
+    sudo systemctl daemon-reload 2>/dev/null
+    systemd-run --unit=sophon-ota-update.service --collect bash -c "${DDR_SHELL_FILE} RUN_WORK_DIR=$(dirname \
+$SHELL_FILE) LAST_PART_NOT_FLASH=${LAST_PART_NOT_FLASH} SHELL_NEED_AUTOBOOT_ONCE=${SHELL_NEED_AUTOBOOT_ONCE} \
+SHELL_NEED_AUTOBOOT_ONCE_TEMP_DIR=${SHELL_NEED_AUTOBOOT_ONCE_TEMP_DIR}"
     if [[ "$?" != "0" ]]; then
-        systemd-run --unit=sophon-ota-update.service bash -c "${DDR_SHELL_FILE} $(dirname \
-$SHELL_FILE) ${LAST_PART_NOT_FLASH}"
+        systemd-run --unit=sophon-ota-update.service bash -c "${DDR_SHELL_FILE} RUN_WORK_DIR=$(dirname \
+$SHELL_FILE) LAST_PART_NOT_FLASH=${LAST_PART_NOT_FLASH} SHELL_NEED_AUTOBOOT_ONCE=${SHELL_NEED_AUTOBOOT_ONCE} \
+SHELL_NEED_AUTOBOOT_ONCE_TEMP_DIR=${SHELL_NEED_AUTOBOOT_ONCE_TEMP_DIR}"
     fi
     systemctl status sophon-ota-update.service --no-page -l
     echo "[INFO] ota server started, check status use: \"systemctl status sophon-ota-update.service \
@@ -159,26 +179,32 @@ exec > >(tee -a "$LOGFILE") 2>&1
 echo "[INFO] ota update tool, version: v1.3.3"
 
 WORK_DIR=""
-if [ ! -d ${1}/sdcard ]; then
+if [ ! -d ${RUN_WORK_DIR}/sdcard ]; then
     echo "[INFO] cannot find sdcard, maybe in sdcard ..."
-    md5file=$(find ${1} -type f -name "*md5*")
+    md5file=$(find ${RUN_WORK_DIR} -type f -name "*md5*")
     file_validate ${md5file}
-    file_validate ${1}/BOOT
-    file_validate ${1}/boot.scr
-    WORK_DIR=$(realpath ${1})
+    file_validate ${RUN_WORK_DIR}/BOOT
+    file_validate ${RUN_WORK_DIR}/boot.scr
+    WORK_DIR=$(realpath ${RUN_WORK_DIR})
 else
-    WORK_DIR="$1"/sdcard
+    WORK_DIR="$RUN_WORK_DIR"/sdcard
 fi
 echo "[INFO] work dir: $WORK_DIR"
+WORD_DIR_ROOTFS_RW_REPACK="${SHELL_NEED_AUTOBOOT_ONCE_TEMP_DIR}"
+echo "[INFO] work dir rootfs rw repack: $WORD_DIR_ROOTFS_RW_REPACK"
 pushd $WORK_DIR || panic "cannot pushd $WORK_DIR, please check files healthy"
 
-LAST_PART_NOT_FLASH="1"
-if [[ "$2" == "0" ]]; then
+if [[ "$LAST_PART_NOT_FLASH" == "0" ]]; then
     LAST_PART_NOT_FLASH="0"
     echo "[INFO] LAST_PART_NOT_FLASH mode disable"
 else
     LAST_PART_NOT_FLASH="1"
     echo "[INFO] LAST_PART_NOT_FLASH mode enable"
+fi
+
+if [[ "$SHELL_NEED_AUTOBOOT_ONCE" != "" ]]; then
+    echo "[INFO] SHELL_NEED_AUTOBOOT_ONCE is $SHELL_NEED_AUTOBOOT_ONCE"
+    file_validate "${SHELL_NEED_AUTOBOOT_ONCE}"
 fi
 
 # 记录系统信息
@@ -209,10 +235,102 @@ ota_cleanup() {
             mv $WORK_DIR/gpt.gz.ota_update_bak $WORK_DIR/gpt.gz
         fi
     fi
+    if [[ "$SHELL_NEED_AUTOBOOT_ONCE" != "" ]]; then
+        if [[ -d "${WORD_DIR_ROOTFS_RW_REPACK}" ]]; then
+            umount ${WORD_DIR_ROOTFS_RW_REPACK}/rootfs_rw_part_dir 2>/dev/null
+            if [[ "$(ls $WORK_DIR/rootfs_rw.*-of-*.gz.bak 2>/dev/null | wc -l)" != "0" ]]; then
+                pushd ${WORK_DIR}
+                    rm -f rootfs_rw.*-of-*.gz
+                    for f in rootfs_rw.*-of-*.gz.bak; do mv "$f" "${f%.bak}"; done
+                popd
+            fi
+        fi
+    fi
     mount -a
 	exit 0
 }
 trap ota_cleanup EXIT SIGHUP SIGINT SIGQUIT SIGTERM
+
+# 配置RW分区中的自动启动脚本
+if [[ "$SHELL_NEED_AUTOBOOT_ONCE" != "" ]]; then
+    echo "[INFO] configure rootfs_rw partition auto rootfs_rw once script start"
+    if [[ "${WORD_DIR_ROOTFS_RW_REPACK}" == "" ]]; then
+        panic "work dir rootfs rw repack not set"
+    fi
+    RANDOM_STR="$(openssl rand -hex 8)"
+    umount ${WORD_DIR_ROOTFS_RW_REPACK}/rootfs_rw_part_dir 2>/dev/null
+    rm -rf ${WORD_DIR_ROOTFS_RW_REPACK}
+    mkdir -p ${WORD_DIR_ROOTFS_RW_REPACK}
+    # 需要RW分区X2大小的内存空间
+    cp ${WORK_DIR}/rootfs_rw.*-of-*.gz ${WORD_DIR_ROOTFS_RW_REPACK}/
+    pushd ${WORD_DIR_ROOTFS_RW_REPACK}/
+        echo "[INFO] dec rootfs_rw partition start"
+        ls rootfs_rw.*-of-*.gz | sort -V | xargs cat | \
+gunzip -c > rootfs_rw.part || panic "dec rootfs_rw partition error"
+        mkdir rootfs_rw_part_dir
+        mount rootfs_rw.part rootfs_rw_part_dir
+        mkdir -p rootfs_rw_part_dir/overlay/etc/systemd/system/
+        mkdir -p rootfs_rw_part_dir/overlay/etc/systemd/system/multi-user.target.wants/
+        mkdir -p rootfs_rw_part_dir/overlay/usr/sbin/
+        echo "[Unit]
+Description=autoboot after ota update, server id is ${RANDOM_STR}
+After=network.target bmrt_setup.service bmrt_loadko.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c /usr/sbin/ota_autoboot_once_${RANDOM_STR}.sh
+ExecStartPost=/bin/systemctl disable ota_autoboot_once_${RANDOM_STR}.service
+
+[Install]
+WantedBy=multi-user.target" > \
+rootfs_rw_part_dir/overlay/etc/systemd/system/ota_autoboot_once_${RANDOM_STR}.service
+        cp ${SHELL_NEED_AUTOBOOT_ONCE} rootfs_rw_part_dir/overlay/usr/sbin/ota_autoboot_once_${RANDOM_STR}.sh
+        chmod +x rootfs_rw_part_dir/overlay/usr/sbin/ota_autoboot_once_${RANDOM_STR}.sh
+        pushd rootfs_rw_part_dir/overlay/etc/systemd/system/multi-user.target.wants/
+            ln -s ../ota_autoboot_once_${RANDOM_STR}.service ota_autoboot_once_${RANDOM_STR}.service
+        popd
+        echo "[INFO] creat ota_autoboot_once_${RANDOM_STR}.service success"
+        sync
+        umount rootfs_rw_part_dir || panic "umount rootfs_rw partition error"
+        sync
+        rm -rf rootfs_rw.*-of-*.gz
+        rm -rf rootfs_rw_part_dir
+        SECTOR_BYTES=512
+        chunk_size=200704
+        count=1
+        offset=0
+        part_name="rootfs_rw"
+        size=$(du -b rootfs_rw.part | awk '{print $1}')
+        size=$(expr \( ${size} + ${SECTOR_BYTES} - 1 \) / ${SECTOR_BYTES})
+        function compute_round_quotient()
+        {
+            local total_size=$1
+            local unit_size=$2
+            [ ${unit_size} -gt 0 ] || panic "bad unit_size ${unit_size} in compute_round_quotient()"
+            expr \( ${total_size} + ${unit_size} - 1 \) / ${unit_size}
+        }
+        limit=$(compute_round_quotient ${size} ${chunk_size})
+        while true; do
+            filename=${part_name}.${count}-of-${limit};
+            if [ ${size} -lt ${chunk_size} ]; then
+                chunk_size=${size}
+            fi
+            dd status=none if=rootfs_rw.part of=${filename} bs=${SECTOR_BYTES} \
+skip=${offset} count=${chunk_size} || panic "dd create part ${filename} from rootfs_rw.part error"
+            pigz -v ${filename} || panic "gzip part ${filename} error"
+            count=$(expr ${count} + 1)
+            offset=$(expr ${offset} + ${chunk_size})
+            echo "[INFO] create part ${filename} success, size: ${chunk_size} sectors, offset: ${offset} sectors"
+            size=$(expr ${size} - ${chunk_size}) || break
+        done
+        rm -f rootfs_rw.part
+        md5sum rootfs_rw.*-of-*.gz > rootfs_rw.md5
+    popd
+    pushd ${WORK_DIR}
+        ls rootfs_rw.*-of-*.gz | sort -V | xargs -I{} mv {} {}.bak
+        cp ${WORD_DIR_ROOTFS_RW_REPACK}/rootfs_rw.*-of-*.gz ./
+    popd
+fi
 
 # 确定刷机包大小和刷机后占空空间
 echo "[INFO] check update size check start"
@@ -786,6 +904,17 @@ set >>"$LOGFILE"
 if [[ "$LAST_PART_NOT_FLASH" == "1" ]]; then
     if [ -f gpt.gz.ota_update_bak ]; then
         mv gpt.gz.ota_update_bak gpt.gz
+    fi
+fi
+if [[ "$SHELL_NEED_AUTOBOOT_ONCE" != "" ]]; then
+    if [[ -d "${WORD_DIR_ROOTFS_RW_REPACK}" ]]; then
+        umount ${WORD_DIR_ROOTFS_RW_REPACK}/rootfs_rw_part_dir 2>/dev/null
+        if [[ "$(ls $WORK_DIR/rootfs_rw.*-of-*.gz.bak | wc -l)" != "0" ]]; then
+            pushd ${WORK_DIR}
+                rm -f rootfs_rw.*-of-*.gz
+                for f in rootfs_rw.*-of-*.gz.bak; do mv "$f" "${f%.bak}"; done
+            popd
+        fi
     fi
 fi
 popd #sdcard
