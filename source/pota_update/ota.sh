@@ -190,7 +190,7 @@ else
     WORK_DIR="$RUN_WORK_DIR"/sdcard
 fi
 echo "[INFO] work dir: $WORK_DIR"
-WORD_DIR_ROOTFS_RW_REPACK="${SHELL_NEED_AUTOBOOT_ONCE_TEMP_DIR}"
+WORD_DIR_ROOTFS_RW_REPACK="${SHELL_NEED_AUTOBOOT_ONCE_TEMP_DIR}/ota_update_rootfs_rw_repack_temp"
 echo "[INFO] work dir rootfs rw repack: $WORD_DIR_ROOTFS_RW_REPACK"
 pushd $WORK_DIR || panic "cannot pushd $WORK_DIR, please check files healthy"
 
