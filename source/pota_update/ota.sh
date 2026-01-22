@@ -268,7 +268,7 @@ if [[ "$SHELL_NEED_AUTOBOOT_ONCE" != "" ]]; then
         ls rootfs_rw.*-of-*.gz | sort -V | xargs cat | \
 gunzip -c > rootfs_rw.part || panic "dec rootfs_rw partition error"
         mkdir rootfs_rw_part_dir
-        mount rootfs_rw.part rootfs_rw_part_dir
+        mount rootfs_rw.part rootfs_rw_part_dir || panic "mount rootfs_rw partition error"
         mkdir -p rootfs_rw_part_dir/overlay/etc/systemd/system/
         mkdir -p rootfs_rw_part_dir/overlay/etc/systemd/system/multi-user.target.wants/
         mkdir -p rootfs_rw_part_dir/overlay/usr/sbin/
@@ -284,7 +284,8 @@ ExecStartPost=/bin/systemctl disable ota_autoboot_once_${RANDOM_STR}.service
 [Install]
 WantedBy=multi-user.target" > \
 rootfs_rw_part_dir/overlay/etc/systemd/system/ota_autoboot_once_${RANDOM_STR}.service
-        cp ${SHELL_NEED_AUTOBOOT_ONCE} rootfs_rw_part_dir/overlay/usr/sbin/ota_autoboot_once_${RANDOM_STR}.sh
+        cp ${SHELL_NEED_AUTOBOOT_ONCE} rootfs_rw_part_dir/overlay/usr/sbin/ota_autoboot_once_${RANDOM_STR}.sh \
+|| panic "copy ota_autoboot_once script error"
         chmod +x rootfs_rw_part_dir/overlay/usr/sbin/ota_autoboot_once_${RANDOM_STR}.sh
         pushd rootfs_rw_part_dir/overlay/etc/systemd/system/multi-user.target.wants/
             ln -s ../ota_autoboot_once_${RANDOM_STR}.service ota_autoboot_once_${RANDOM_STR}.service
