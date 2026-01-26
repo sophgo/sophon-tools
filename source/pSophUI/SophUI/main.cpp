@@ -5,6 +5,7 @@
 #include <QFont>
 #include <QString>
 #include <QFile>
+#include <QSize>
 #include <QFontDatabase>
 #include <QScreen>
 #include <QTranslator>
@@ -24,6 +25,14 @@ static void __setFontRecursively(T *inObject, qint64 fontSize=15)
     {
         __setFontRecursively(childObject,fontSize);
     }
+}
+
+static QSize getPrimaryResolution() {
+    QScreen *primaryScreen = QGuiApplication::primaryScreen();
+    if (primaryScreen) {
+        return primaryScreen->size();
+    }
+    return QSize(1920, 1080); // Default resolution if primary screen is not found
 }
 
 static QtMsgType infoLimit = QtWarningMsg;
@@ -80,7 +89,12 @@ int main(int argc, char *argv[])
         //resize before show window
         w.resize(screenWidth, screenHeight);
     }else{
-        w.setFixedSize(1920, 1080);
+        QString platform = QGuiApplication::platformName();
+        qDebug() << "Current platform:" << platform;
+        QSize primaryResolution = getPrimaryResolution();
+        qDebug() << "Primary screen resolution:" << primaryResolution;
+        w.showFullScreen();
+        w.setFixedSize(primaryResolution);
     }
     __setFontRecursively<QWidget>(&w);
     w.show();
