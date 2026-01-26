@@ -6,6 +6,10 @@
 
 配置netplan时需要确保文件`/etc/netplan/01-netcfg.yaml`存在并且格式正确
 
+## 预编译版本获取方式
+
+可以从本仓库的Release页面下载：[https://github.com/sophgo/sophon-tools/releases](https://github.com/sophgo/sophon-tools/releases)
+
 ## 编译方式
 
 需要准备rust交叉编译环境和upx工具,然后执行如下命令即可在target目录下生成编译后的二进制文件
