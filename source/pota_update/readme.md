@@ -78,6 +78,22 @@
 
 修改脚本末尾几行，注释掉的 `reboot -f` 即可
 
+## 保留网络配置的OTA流程
+
+> 考虑到兼容性，该模式通过用户自定义刷机后第一次启动时自动运行的脚本实现保留网络配置
+
+1. 获取当前设备的网络配置，编写或生成配置网络的脚本。目前为使用者提供一个自动抓取网络配置的范例程序，当前目录的 `get_network_info.sh` 文件，功能如下：
+	- 自动检测**netplan/systemd/networkManager**配置的**IP地址、子网掩码、网关、DNS**
+	- 范例不支持IPV6、路由配置、高级网络安全相关的配置（PEAP等）、wifi配置
+	- 范例会生成使用**bm_set_ip**和**bm_set_ip_auto**进行配网的脚本
+2. 执行`ota.sh`脚本时增加如下两个参数
+	- `SHELL_NEED_AUTOBOOT_ONCE` 需要刷机后第一次启动时自动运行的脚本路径，该脚本包含了网络配置的命令，文件大小推荐1MB以下
+	- `SHELL_NEED_AUTOBOOT_ONCE_TEMP_DIR` 修改刷机包的临时工作目录路径，需要预留 `ROOTFS_RW已用分区+200MB` 的大小。
+
+> `ROOTFS_RW已用分区大小` 获取方式，查看刷机包中有多少个`rootfs_rw.*.gz`文件，如果有3个，则 `ROOTFS_RW已用分区大小` 为300M
+
+如果使用者有超出范例的需求，需要使用者自行编写启动脚本
+
 ## 准备阶段常见报错处理方式
 
 ### \[PANIC\] umount /dev/mmcblk0px error!!!
