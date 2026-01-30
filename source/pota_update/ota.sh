@@ -176,7 +176,7 @@ LOGFILE="$(readlink -f "${BASH_SOURCE[0]}").log"
 rm -f $LOGFILE*
 exec > >(tee -a "$LOGFILE") 2>&1
 
-echo "[INFO] ota update tool, version: v1.3.3"
+echo "[INFO] ota update tool, version: v1.4.0"
 
 WORK_DIR=""
 if [ ! -d ${RUN_WORK_DIR}/sdcard ]; then
