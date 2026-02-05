@@ -164,7 +164,7 @@ static int test_one_memcp(bm_handle_t bm_handle, bm_device_mem_t* dst,
           "0x%lX->0x%lX, size 0x%llX\r\n",
           id, eaddr, sys_buffer[eaddr], sys_buffer2[eaddr],
           src->u.device.device_addr, dst->u.device.device_addr, shape_size);
-      printf("[ERROR %d] start memory dump:");
+      printf("[ERROR %d] start memory dump:", id);
       for (size_t offset = 0; offset < shape_size; offset += 1)
         printf("[ERROR %d] 0x%lX [SRC:0x%X] <-> [DST:0x%X]\r\n", id, offset,
                sys_buffer[offset], sys_buffer2[offset]);
