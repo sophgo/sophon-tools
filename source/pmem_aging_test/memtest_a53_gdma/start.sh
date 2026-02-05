@@ -159,7 +159,7 @@ function memtest_s() {
 	fi
 }
 
-echo "MEMTEST VERSION: V1.3.2"
+echo "MEMTEST VERSION: V1.4.0"
 
 # prepare memtest_gdma
 dir_path="$(dirname "$(readlink -f "$0")")"
