@@ -102,7 +102,7 @@ function memtest_s() {
 		fi
 		rm -f ./*.txt
 		chmod +x memtest_gdma
-		./memtest_gdma ${DEV_ID} "[1,16,1024,1024]" ${LOOP_NUM} ${t_num}
+		./memtest_gdma ${DEV_ID} '[1,16,1024,1024]' ${LOOP_NUM} ${t_num}
 		if [[ "$?" != "0" ]]; then
 			panic "memtest_gdma error"
 		fi
