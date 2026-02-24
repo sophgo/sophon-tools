@@ -1,0 +1,77 @@
+# ========================
+# Rust项目.gitignore模板
+# ========================
+
+# Cargo生成的编译文件和可执行文件
+/target/
+**/*.rs.bk
+
+# Cargo缓存和包目录
+~/.cargo/config
+/.rustup/
+
+# 构建产物
+Cargo.lock
+*.exe
+*.dll
+*.so
+*.dylib
+*.a
+*.lib
+
+# 调试信息文件
+*.pdb
+*.dSYM/
+
+# 测试覆盖率数据
+/coverage/
+*.profraw
+
+# Cargo mutants生成的文件
+**/mutants.out*/
+
+# 文档生成
+/doc/
+
+# 包管理器
+/.cargo/registry/
+/.cargo/git/
+
+# IDE和编辑器配置文件
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 操作系统生成的文件
+.DS_Store
+Thumbs.db
+
+# 日志文件
+*.log
+
+# 临时文件
+/tmp/
+*.tmp
+
+# 环境变量文件
+.env
+.env.local
+.env.production
+
+# 预编译头文件
+*.gch
+*.pch
+
+# 其他编译中间文件
+*.o
+*.obj
+
+# 备份文件
+*.bak
+*.backup
+
+# 包管理器的锁文件（如果使用其他包管理器）
+package-lock.json
+yarn.lock

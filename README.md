@@ -27,6 +27,7 @@
 | [autotelecomm](./source/pautotelecomm) | source/pautotelecomm | 是 | 4G/5G自动拨号工具 |
 | [multi_video_qt](./source/pmulti_video_qt) | source/pmulti_video_qt | 否 | QT多路视频解码播放器 |
 | [bm_set_ip](./source/pbm_set_ip) | source/pbm_set_ip | 否 | 配网工具 |
+| [get_info_exporter](./source/pget_info_exporter) | source/pget_info_exporter | 否 | 用于SE5/SE7/SE9的exporter实现 |
 
 ## 编译方式
 

@@ -1,0 +1,44 @@
+[package]
+name = "get-info-exporter"
+version = "0.1.1"
+edition = "2021"
+description = "Prometheus exporter for hardware monitoring"
+license = "MIT"
+readme = "README.md"
+
+[dependencies]
+prometheus = { version = "0.13", features = ["process"] }
+tokio = { version = "1.0", features = ["full"] }
+warp = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+anyhow = "1.0"
+thiserror = "1.0"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+sysinfo = "0.30"
+lazy_static = "1.4"
+clap = { version = "4.0", features = ["derive"] }
+memmap2 = "0.9.9"
+nix = "0.28"
+libc = "0.2"
+chrono = "0.4.43"
+linux-embedded-hal = "0.4.1"
+num = "0.4.3"
+regex = "1.12.3"
+
+[dev-dependencies]
+reqwest = "0.11"
+tokio = { version = "1.0", features = ["full"] }
+
+[[bin]]
+name = "get-info-exporter"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3      # 3: 最高优化，追求速度
+lto = true         # 开启全程序链接优化 (Link Time Optimization)
+codegen-units = 1  # 单个代码生成单元，极慢但生成的二进制文件最快
+panic = 'abort'    # 发生panic时终止而不是展开栈，减少二进制大小和提升速度
+strip = true       # 移除符号，减小二进制体积

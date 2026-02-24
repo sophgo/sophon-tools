@@ -1,0 +1,34 @@
+# TPU 信息导出器配置
+
+# 导出器配置
+exporter:
+  # 监听端口
+  port: 9100
+
+  # 绑定的主机
+  host: "0.0.0.0"
+
+  # 指标端点路径,不要有前导斜杠 /
+  metrics_path: "metrics"
+
+  # 健康检查端点路径,不要有前导斜杠 /
+  health_path: "health"
+
+  # 更新间隔（秒）
+  update_interval_seconds: 10
+
+# 硬件监控配置
+hardware:
+  # 温度阈值（摄氏度）
+  temperature_thresholds:
+    # 临界温度阈值
+    critical: 90.0
+
+    # 警告温度阈值
+    warning: 85.0
+
+    # 正常温度阈值
+    normal: 75.0
+
+  # 功率限制（瓦特）
+  power_limit_watts: 54.0
