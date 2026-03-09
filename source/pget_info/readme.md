@@ -90,7 +90,7 @@ ls *get_info.log.gz | sort -n | xargs -I{} zcat {} 1>>/data/get_info.log
 
 #### 在线网站
 
-可以在网站 [https://zetao-zhang-sophgo.github.io/getinfo2png/](https://zetao-zhang-sophgo.github.io/getinfo2png/) 进行数据的可视化。
+可以在网站 [https://zfsopv.github.io/getinfo2png/](https://zfsopv.github.io/getinfo2png/) 进行数据的可视化。
 
 #### get_info_log_to_png.py
 
