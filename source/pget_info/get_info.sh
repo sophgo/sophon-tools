@@ -336,7 +336,7 @@ function logs_path_mode() {
                 echo "ERROR: DIR_SIZE_KB: [${DIR_SIZE_KB}]KB"
             fi
             if [ ${DIR_SIZE_KB} -gt ${DIR_SIZE_MAX_KB} ]; then
-                echo "INFO: DRI SIZE: [${DIR_SIZE_KB}] > MAX SIZE: [${DIR_SIZE_MAX_KB}]"
+                echo "INFO: DRI SIZE: [${DIR_SIZE_KB}] > MAX SIZE: [${DIRfio_12h_getinfo.log_SIZE_MAX_KB}]"
                 rm_first_file
             else
                 break
@@ -612,7 +612,7 @@ function get_cpu_all() {
         blk_sector_size=$(blockdev --getss /dev/${blk_dev})
         blk_write1=$(echo "${blk_data1}" | grep -a "${blk_dev} " | awk -F' ' '{print $10}' 2>/dev/null)
         blk_write2=$(echo "${blk_data2}" | grep -a "${blk_dev} " | awk -F' ' '{print $10}' 2>/dev/null)
-        write_speed=$(echo "scale=2; ($blk_write2 - $blk_write1) * ${blk_sector_size} / 1024 / ${interval} + ${write_speed}" | bc 2>/dev/null)
+        write_speed=$(echo "scale=2; ($blk_write2 - $blk_write1) * ${blk_sector_size} / 1024 / ${interval}" | bc 2>/dev/null)
         printf "%s,%.2f " ${blk_dev} ${write_speed}
     done
     printf "|"
