@@ -135,6 +135,10 @@ class serialCom:
         res_1 = ret_1.split("\n")[1]
         print(ret_1.strip().split("\n")[0].strip())
         if ret_1.strip().split("\n")[0].strip() == "+CPIN: READY":
+            msg_1 = "AT+CCID\r"
+            self.send_msg(msg_1)
+            time.sleep(1)
+            _ = self.recive_msg().decode("utf-8")
             return 0
         elif res_1.strip() == "ERROR":
             return -1

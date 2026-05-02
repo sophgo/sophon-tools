@@ -4,11 +4,12 @@ import subprocess
 import fibocom_base
 import redcap_base
 import simcom_bash
+import fibocom_fm650cn
 
 # 这里以字典的方式记录适配设备的VID与PID，用于开机后检查设备是否成功链接
 # 在使用过程中如果有新适配的设备，可以将其添加到该字典中
 model_dict = {"NL668": ["1508:1001"],
-              "FM650": ["2cb7:0a05", "2cb7:0a06", "2cb7:0a07"],
+              "FM650": ["2cb7:0a04", "2cb7:0a05", "2cb7:0a06", "2cb7:0a07"],
               "redcap": ["3466:3301"],
               "simcom": ["1e0e:9011"]}
 
@@ -48,7 +49,7 @@ def choose_model():
         sc = fibocom_base.serialCom_fibocom("auto", "auto", "1.1.1.1")
         sc.run()
     elif idx == 1:
-        sc = fibocom_base.serialCom_fibocom("auto", "auto", "1.1.1.1")
+        sc = fibocom_fm650cn.serialCom_fibocom_fm650cn("auto", "auto", "1.1.1.1")
         sc.run()
     elif idx == 2:
         sc = redcap_base.serialCom_redcap("auto", "auto", "1.1.1.1")

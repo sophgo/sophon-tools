@@ -1,6 +1,6 @@
 #!/bin/bash
 
-VERSION=1.2.5
+VERSION=1.2.6
 rm -rf output
 mkdir -p output
 
@@ -36,7 +36,7 @@ bash install.sh || exit
 popd || exit
 sync
 
-if [[ "$(pip list | grep pyserial | wc -l)" == "0" ]]; then
+if [[ "$(python3 -m pip list | grep pyserial | wc -l)" == "0" ]]; then
     echo "not find pyserial by python, need install ..."
     python3 -m pip install -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple pyserial
 fi
