@@ -98,6 +98,19 @@ class serialCom:
         print("ipv6 address not detected on interface:", self.ethname)
         return False
 
+    def clear_interface_addresses(self):
+        commands = [
+            ("ip -4 addr flush dev " + self.ethname + " scope global", "ipv4"),
+            ("ip -6 addr flush dev " + self.ethname + " scope global", "ipv6"),
+        ]
+        for cmd, address_family in commands:
+            print("clear interface", address_family, "address cmd:", cmd)
+            status, output = subprocess.getstatusoutput(cmd)
+            if status != 0:
+                print("clear interface", address_family, "address failed, status:", status, "output:", output.strip())
+            else:
+                print("clear interface", address_family, "address success")
+
     # 当serial设置为auto的时候，会通过该函数自行查找可以通信的设备文件名
     def search_serial(self):
         print("Start checking serial")
@@ -279,6 +292,7 @@ class serialCom:
         if ret == 0:
             self.ethname = self.get_network_interface()
             print("start dhcp on interface:", self.ethname, "active pdp type:", self.active_pdp_type)
+            self.clear_interface_addresses()
             script_dir = os.path.dirname(os.path.abspath(__file__))
             script_path = os.path.join(script_dir, 'dhclient-script')
             try:
