@@ -22,9 +22,81 @@ class serialCom:
         self.monitor_target = monitor_target
         self.isp = ""
         self.dhclient_path = ""
+        self.active_pdp_type = "IP"
         self.apn_list = {"3gnet": ["CHN-CU", "CHN-UN", "CHINA UNICOM", "CHN-UNICOM", "UNICOM", "46001"],
                          "ctnet": ["CHN-TE", "CHINA Te", "CHN-CT", "CT", "46011"],
                          "cmnet": ["CHN-CM", "CHINA MO", "CHINA MOBILE", "CMCC", "46000"]}
+
+    def get_pdp_type_candidates(self):
+        return ["IPV4V6", "IP"]
+
+    def set_pdp_type(self, pdp_type):
+        print("configure pdp type:", pdp_type, "apn:", self.apn)
+        msg = "AT+CGDCONT=1,\"" + pdp_type + "\",\"" + self.apn + "\"\r"
+        self.send_msg(msg)
+        time.sleep(5)
+        ret = self.recive_msg().decode("utf-8")
+        if "OK" in ret.strip().split():
+            self.active_pdp_type = pdp_type
+            print("pdp type set success:", pdp_type)
+            return 0
+        print("pdp type set failed:", pdp_type, "response:", ret.strip())
+        return -1
+
+    def get_network_interface(self):
+        msg = 'ip a | grep enx'
+        _, output = subprocess.getstatusoutput(msg)
+        if ":" in output:
+            ethname = output.split(":", 2)[1].strip()
+            if len(ethname) > 0:
+                print("network interface detected:", ethname)
+                return ethname
+
+        msg = "ip a | grep usb0"
+        status, output = subprocess.getstatusoutput(msg)
+        if status != 0:
+            print("Network port query failed")
+            exit(1)
+
+        if ":" in output:
+            ethname = output.split(":", 2)[1].strip()
+            if len(ethname) > 0:
+                print("network interface detected:", ethname)
+                return ethname
+
+        print("Network port query failed")
+        exit(1)
+
+    def run_dhclient(self, script_path, ipv6=False):
+        dhclient_bin = self.dhclient_path if self.dhclient_path != "" else "dhclient"
+        cmd = dhclient_bin + " -sf " + script_path
+        if ipv6:
+            cmd += " -6"
+        cmd += " " + self.ethname
+        print("start dhclient", "ipv6" if ipv6 else "ipv4", "cmd:", cmd)
+        status = os.system(cmd)
+        if status != 0:
+            print("dhclient", "ipv6" if ipv6 else "ipv4", "failed, status:", status)
+            return -1
+        print("dhclient", "ipv6" if ipv6 else "ipv4", "success")
+        return 0
+
+    def has_global_ipv6_address(self):
+        cmd = "ip -6 addr show dev " + self.ethname + " scope global"
+        status, output = subprocess.getstatusoutput(cmd)
+        print("check ipv6 address cmd:", cmd)
+        if status != 0:
+            print("ipv6 address check failed, status:", status)
+            return False
+
+        for line in output.splitlines():
+            line = line.strip()
+            if line.startswith("inet6 "):
+                print("ipv6 address detected:", line)
+                return True
+
+        print("ipv6 address not detected on interface:", self.ethname)
+        return False
 
     # 当serial设置为auto的时候，会通过该函数自行查找可以通信的设备文件名
     def search_serial(self):
@@ -167,6 +239,12 @@ class serialCom:
     # 未入网等不正常情况下返回-1
     def check_isp(self):
         print("\nstart checking isp")
+        msg = "AT+COPS=3,2\r"
+        self.send_msg(msg)
+        time.sleep(1)
+        ret = self.recive_msg().decode("utf-8")
+        if "OK" not in ret.strip().split():
+            print("set operator format to numeric failed:", ret.strip())
         msg = "AT+COPS?\r"
         self.send_msg(msg)
         time.sleep(1)
@@ -186,43 +264,34 @@ class serialCom:
         self.send_msg(cmd)
         time.sleep(1)
         _ = self.recive_msg().decode("utf-8")
-        msg = "AT+CGDCONT=1,\"IP\",\"" + self.apn + "\"\r"
-        self.send_msg(msg)
-        time.sleep(5)
-        ret = self.recive_msg().decode("utf-8")
-        if "OK" in ret.strip().split():
-            return 0
-        else:
-            return -1
+        for pdp_type in self.get_pdp_type_candidates():
+            print("start dial with pdp type:", pdp_type)
+            if self.set_pdp_type(pdp_type) == 0:
+                print("dial preparation success, active pdp type:", self.active_pdp_type)
+                return 0
+            print("fallback to next pdp type after failure:", pdp_type)
+        print("all pdp type attempts failed")
+        return -1
 
     # 使网卡获取动态IP
     def DHCP(self):
         ret = self.NetworkTools()
         if ret == 0:
-            msg = 'ip a | grep enx'
-            _, output = subprocess.getstatusoutput(msg)
-            self.ethname = output.split(":")[1].strip()
-            if len(self.ethname) <= 0:
-                msg = "ip a | grep usb0"
-                status, output = subprocess.getstatusoutput(msg)
-                if status != 0:
-                    print("Network port query failed")
-                    exit(1)
-                self.ethname = output.split(":")[1].strip()
-            if len(self.ethname) <= 0:
-                print("Network port query failed")
-                exit(1)
-
+            self.ethname = self.get_network_interface()
+            print("start dhcp on interface:", self.ethname, "active pdp type:", self.active_pdp_type)
             script_dir = os.path.dirname(os.path.abspath(__file__))
             script_path = os.path.join(script_dir, 'dhclient-script')
-            if self.dhclient_path == "":
-                cmd = "dhclient -sf " + script_path + " " + self.ethname
-            else:
-                cmd = self.dhclient_path + " -sf " + script_path + " " + self.ethname
             try:
-                os.system(cmd)
+                if self.run_dhclient(script_path) != 0:
+                    print("ipv4 dhclient failed, stop dhcp flow")
+                    return -1
+                ipv6_ret = self.has_global_ipv6_address()
+                if not ipv6_ret:
+                    print("ipv6 address not ready, keep ipv4 only")
+                else:
+                    print("ipv4 dhclient succeeded and ipv6 address is ready")
             except Exception as e:
-                print("DCHP Error")
+                print("DCHP Error", e)
                 return -1
         else:
             exit(1)
