@@ -24,8 +24,8 @@ bash build.sh
 Examples:
   DHCP IPv4:         bm_set_ip eth0 dhcp ''
   DHCP IPv4+IPv6:    bm_set_ip eth0 dhcp '' '' '' dhcp
-  Static IPv4:       bm_set_ip eth0 192.168.1.100 24 192.168.1.1
-  Static IPv4+IPv6:  bm_set_ip eth0 192.168.1.100 24 192.168.1.1 8.8.8.8 2001:db8::1 64 fe80::1
+  Static IPv4:       bm_set_ip eth0 192.168.1.100 255.255.255.0 192.168.1.1
+  Static IPv4+IPv6:  bm_set_ip eth0 192.168.1.100 255.255.255.0 192.168.1.1 8.8.8.8 2001:db8::1 64 fe80::1
 
 Arguments:
   <NET_DEVICE>    网卡名
