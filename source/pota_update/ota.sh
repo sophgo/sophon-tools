@@ -13,7 +13,8 @@ led error on;sleep 0.1;led error off;sleep 0.1;\
 led error on;sleep 0.1;led error off;sleep 0.1;led error on;'
 setenv led_ota_flash_ok 'led status on;led error off;sleep 2';
 setenv LED_OTA_ERROR_FLAG 0
-setenv led_ota_flash_error 'setenv ledei 0;led status off;led error off;sleep 2;\
+setenv led_ota_flash_error 'env default -a;env save;setenv ledei 0;\
+led status off;led error off;sleep 2;\
 led status on; sleep 0.5; led status off;sleep 0.5;\
 while test \$ledei -lt \$LED_OTA_ERROR_FLAG;do \
 led error on;sleep 0.5;led error off;sleep 0.5;setexpr ledei \$ledei + 1;done;\
