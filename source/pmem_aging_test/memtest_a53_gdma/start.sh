@@ -20,6 +20,11 @@ function memtest_s() {
 			echo "[MEMTEST ERROR] $@" >&1 >>"$MEMTEST_ERROR_LOG"
 			wall "[MEMTEST ERROR] $@"
 		fi
+		if [[ -n "$MEMTEST_DMESG_LOG" ]]; then
+			dmesg >"$MEMTEST_DMESG_LOG" 2>/dev/null
+			echo "" >>"$MEMTEST_DMESG_LOG"
+			dmesg -T >>"$MEMTEST_DMESG_LOG" 2>/dev/null
+		fi
 		systemctl stop memtest_s.service
 	}
 
