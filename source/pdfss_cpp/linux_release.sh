@@ -39,7 +39,7 @@ elif [[ "$1" == "mingw" ]]; then
 	mv dfss-cpp.exe ${build_shell}/output/dfss-cpp-win-i686.exe
 elif [[ "$1" == "loongarch64" ]]; then
 	make clean
-	EXT_LIB_FLAG_STATIC=" -static -Wl,-Bstatic -lssh2 -lmbedcrypto -lpthread -lz " EXT_LIB_FLAG_DYNAMIC=" " EXT_FLAG=" -march=loongarch64 -mno-lsx -mno-lasx " ARCH="loongarch64" BUILD_PATH="${build_shell}" CROSS_COMPILE="loongarch64-unknown-linux-gnu-" LIBS_TYPE="${build_target}" NEED_DEBUG="${NEED_DEBUG}" make VERBOSE=1
+	EXT_LIB_FLAG_STATIC=" -static -Wl,-Bstatic -lssh2 -lmbedcrypto -lpthread -lz " EXT_LIB_FLAG_DYNAMIC=" " EXT_FLAG=" -march=loongarch64 -mno-lsx -mno-lasx " ARCH="loongarch64" BUILD_PATH="${build_shell}" CROSS_COMPILE="loongarch64-linux-gnu-" LIBS_TYPE="${build_target}" NEED_DEBUG="${NEED_DEBUG}" make VERBOSE=1
 	mv dfss-cpp ${build_shell}/output/dfss-cpp-linux-loongarch64
 elif [[ "$1" == "riscv64" ]]; then
 	make clean

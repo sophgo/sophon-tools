@@ -129,7 +129,7 @@ elif [[ "$1" == "mingw64" ]]; then
 	pushd "${build_shell}/mbedtls"
 	mkdir build
 	cd build
-	WINDOWS=1 CC=${CROSS_COMPILE}gcc SHARED=0 cmake -DCMAKE_INSTALL_LIBDIR=lib -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=x86_64 -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTING=OFF -DUSE_STATIC_MBEDTLS_LIBRARY=ON -DUSE_SHARED_MBEDTLS_LIBRARY=OFF -DINSTALL_MBEDTLS_HEADERS=ON  -DCMAKE_INSTALL_PREFIX="${build_target}" ..
+	WINDOWS=1 CC=${CROSS_COMPILE}gcc SHARED=0 cmake -DCMAKE_C_FLAGS="-Wno-error=unterminated-string-initialization" -DCMAKE_INSTALL_LIBDIR=lib -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=x86_64 -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTING=OFF -DUSE_STATIC_MBEDTLS_LIBRARY=ON -DUSE_SHARED_MBEDTLS_LIBRARY=OFF -DINSTALL_MBEDTLS_HEADERS=ON  -DCMAKE_INSTALL_PREFIX="${build_target}" ..
 	WINDOWS=1 make -j$(nproc) CC=${CROSS_COMPILE}gcc
 	WINDOWS=1 make install -j$(nproc) CC=${CROSS_COMPILE}gcc
 	cd ..
@@ -178,7 +178,7 @@ elif [[ "$1" == "mingw" ]]; then
 	pushd "${build_shell}/mbedtls"
 	mkdir build
 	cd build
-	WINDOWS=1 CC=${CROSS_COMPILE}gcc SHARED=0 cmake -DCMAKE_INSTALL_LIBDIR=lib -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=i686 -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTING=OFF -DUSE_STATIC_MBEDTLS_LIBRARY=ON -DUSE_SHARED_MBEDTLS_LIBRARY=OFF -DINSTALL_MBEDTLS_HEADERS=ON  -DCMAKE_INSTALL_PREFIX="${build_target}" ..
+	WINDOWS=1 CC=${CROSS_COMPILE}gcc SHARED=0 cmake -DCMAKE_C_FLAGS="-Wno-error=unterminated-string-initialization" -DCMAKE_INSTALL_LIBDIR=lib -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=i686 -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTING=OFF -DUSE_STATIC_MBEDTLS_LIBRARY=ON -DUSE_SHARED_MBEDTLS_LIBRARY=OFF -DINSTALL_MBEDTLS_HEADERS=ON  -DCMAKE_INSTALL_PREFIX="${build_target}" ..
 	WINDOWS=1 CC=${CROSS_COMPILE}gcc make -j$(nproc)
 	WINDOWS=1 CC=${CROSS_COMPILE}gcc make install -j$(nproc)
 	cd ..
@@ -209,11 +209,11 @@ elif [[ "$1" == "mingw" ]]; then
 	make install -j$(nproc)
 	popd #libssh2
 elif [[ "$1" == "loongarch64" ]]; then
-	loongarch64-unknown-linux-gnu-gcc -v || exit 1
+	loongarch64-linux-gnu-gcc -v || exit 1
 
 	rm -rf loongarch64_build
 	mkdir -p loongarch64_build
-	export CROSS_COMPILE=loongarch64-unknown-linux-gnu-
+	export CROSS_COMPILE=loongarch64-linux-gnu-
 
 	## zlib static
 	pushd "${build_shell}/zlib"
@@ -237,11 +237,11 @@ elif [[ "$1" == "loongarch64" ]]; then
 	ln -s lib lib64
 	popd
 
-	export CC=loongarch64-unknown-linux-gnu-gcc
-	export CXX=loongarch64-unknown-linux-gnu-g++
-	export LD=loongarch64-unknown-linux-gnu-ld
-	export AR=loongarch64-unknown-linux-gnu-ar
-	export CROSS_COMPILE=loongarch64-unknown-linux-gnu-
+	export CC=loongarch64-linux-gnu-gcc
+	export CXX=loongarch64-linux-gnu-g++
+	export LD=loongarch64-linux-gnu-ld
+	export AR=loongarch64-linux-gnu-ar
+	export CROSS_COMPILE=loongarch64-linux-gnu-
 
 	## libssh2 static
 	pushd "${build_shell}/libssh2"
