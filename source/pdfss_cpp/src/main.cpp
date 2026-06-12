@@ -60,7 +60,6 @@ namespace fs = std::experimental::filesystem;
 namespace fs = std::filesystem;
 #endif
 
-static char buffer[1024 * 128];
 static bool http_open_get_enable = false;
 static uint64_t connect_timeout = 5;
 static int ret_flag = 0;
@@ -75,7 +74,7 @@ struct ServerInfo {
   double speed;
 };
 
-struct ServerInfo* fast_server = NULL;
+struct ServerInfo* fast_server = nullptr;
 struct ThreadArgs {
   bool test_speed;
   ServerInfo* server_in;
@@ -130,7 +129,7 @@ static void remove_some_server_info(
   }
 }
 
-static void print_server_info(std::vector<struct ServerInfo> server_infos) {
+static void print_server_info(const std::vector<struct ServerInfo>& server_infos) {
   log_info("ID IP PORT");
   for (auto it = server_infos.begin(); it != server_infos.end();) {
     log_info("%d %s %d", it->id, it->host.c_str(), it->port);
@@ -390,11 +389,11 @@ void sftp_test_speed(struct ServerInfo* server) {
 }
 
 int64_t http_get_file(struct ServerInfo* server, const std::string& path,
-                      std::string* file_buf = NULL) {
+                      std::string* file_buf = nullptr) {
   string url = string("http://") + server->host + string(":") +
                std::to_string(server->port);
   string file_name = getFileNameFromPath(path.c_str());
-  if (NULL == file_buf)
+  if (nullptr == file_buf)
     log_info("http get file from %s -> %s", url.c_str(), file_name.c_str());
   else
     log_info("http get file from %s -> buffer", url.c_str());
@@ -406,7 +405,7 @@ int64_t http_get_file(struct ServerInfo* server, const std::string& path,
   int64_t total_size = -1;
   std::ostringstream oss;
   std::ofstream ofs;
-  if (NULL == file_buf) {
+  if (nullptr == file_buf) {
     ofs.open(file_name, std::ios::binary);
     if (!ofs.is_open()) {
       log_error("Failed to open file for writing: %s", file_name.c_str());
@@ -419,7 +418,7 @@ int64_t http_get_file(struct ServerInfo* server, const std::string& path,
       client.Get(("/" + path).c_str(),
                  [&](const char* data, size_t data_length) {
                    total_downloaded += data_length;
-                   if (NULL != file_buf) {
+                   if (nullptr != file_buf) {
                      oss.write(data, data_length);
                      if (total_downloaded > 1024 * 1024 * 4) {
                        log_error("get file to buf, size bigger 4M");
@@ -441,7 +440,7 @@ int64_t http_get_file(struct ServerInfo* server, const std::string& path,
                  });
   clock_gettime(CLOCK_MONOTONIC, &current_time);
   std::cout << "" << std::endl;
-  if (NULL != file_buf) {
+  if (nullptr != file_buf) {
     *file_buf = oss.str();
     log_debug("get file buf: %s", file_buf->c_str());
   } else {
@@ -457,8 +456,8 @@ int64_t http_get_file(struct ServerInfo* server, const std::string& path,
   }
 }
 
-uint64_t sftp_get_file(struct ServerInfo* server, string path,
-                       string* file_buf = NULL) {
+int64_t sftp_get_file(struct ServerInfo* server, string path,
+                      string* file_buf = nullptr) {
   const string hostname = server->host;
   const string username = server->user;
   const string password = server->pass;
@@ -471,7 +470,7 @@ uint64_t sftp_get_file(struct ServerInfo* server, string path,
   LIBSSH2_SFTP* sftp_session;
   LIBSSH2_SFTP_HANDLE* sftp_handle;
 
-  if (NULL == file_buf)
+  if (nullptr == file_buf)
     log_info("sftp get file from sftp://%s:%d -> %s", server->host.c_str(),
              server->port, file_name.c_str());
   else
@@ -511,7 +510,7 @@ uint64_t sftp_get_file(struct ServerInfo* server, string path,
 
   char* support_auth =
       libssh2_userauth_list(session, username.c_str(), username.length());
-  if (support_auth != NULL) {
+  if (support_auth != nullptr) {
     log_info("server support auth list: %s", support_auth);
   }
 
@@ -524,10 +523,10 @@ uint64_t sftp_get_file(struct ServerInfo* server, string path,
 #else
     close(sock);
 #endif
-    return 0;
+    return -1;
   }
 
-  char* banner_s = (char*)calloc(0, 1024 * 512);
+  char* banner_s = nullptr;
   rc = libssh2_userauth_banner(session, &banner_s);
   if (rc == LIBSSH2_ERROR_NONE) {
     log_info(
@@ -549,7 +548,7 @@ uint64_t sftp_get_file(struct ServerInfo* server, string path,
 #else
     close(sock);
 #endif
-    return 0;
+    return -1;
   }
 
   sftp_handle =
@@ -565,7 +564,7 @@ uint64_t sftp_get_file(struct ServerInfo* server, string path,
 #else
     close(sock);
 #endif
-    return 0;
+    return -1;
   }
 
   LIBSSH2_SFTP_ATTRIBUTES attributes;
@@ -581,7 +580,7 @@ uint64_t sftp_get_file(struct ServerInfo* server, string path,
 #else
     close(sock);
 #endif
-    return 0;
+    return -1;
   }
   uint64_t file_size = attributes.filesize;
 
@@ -589,7 +588,7 @@ uint64_t sftp_get_file(struct ServerInfo* server, string path,
   clock_gettime(CLOCK_MONOTONIC, &start_time);
   std::ostringstream oss;
   std::ofstream local_file;
-  if (NULL == file_buf) {
+  if (nullptr == file_buf) {
     local_file.open(file_name, std::ios::binary);
     if (!local_file.is_open()) {
       log_error("Failed to open file for writing: %s", file_name.c_str());
@@ -602,15 +601,16 @@ uint64_t sftp_get_file(struct ServerInfo* server, string path,
 #else
       close(sock);
 #endif
-      return 0;
+      return -1;
     }
   }
   ssize_t n;
   uint64_t total_downloaded = 0;
-  while ((n = libssh2_sftp_read(sftp_handle, buffer, sizeof(buffer))) > 0) {
+  std::vector<char> read_buf(1024 * 128);
+  while ((n = libssh2_sftp_read(sftp_handle, read_buf.data(), read_buf.size())) > 0) {
     total_downloaded += n;
-    if (NULL != file_buf) {
-      oss.write(buffer, n);
+    if (nullptr != file_buf) {
+      oss.write(read_buf.data(), n);
       if (total_downloaded > 1024 * 1024 * 4) {
         log_error("get file to buf, size bigger 4M");
         libssh2_sftp_close(sftp_handle);
@@ -622,10 +622,10 @@ uint64_t sftp_get_file(struct ServerInfo* server, string path,
 #else
         close(sock);
 #endif
-        return 0;
+        return -1;
       }
     } else {
-      local_file.write(buffer, n);
+      local_file.write(read_buf.data(), n);
       clock_gettime(CLOCK_MONOTONIC, &current_time);
       double elapsed_ms =
           (current_time.tv_sec - start_time.tv_sec) * 1000.0 +
@@ -633,7 +633,7 @@ uint64_t sftp_get_file(struct ServerInfo* server, string path,
       print_progress(total_downloaded, file_size, elapsed_ms);
     }
   }
-  if (NULL != file_buf) {
+  if (nullptr != file_buf) {
     *file_buf = oss.str();
     log_debug("sftp get file buf: %s", file_buf->c_str());
   } else {
@@ -658,10 +658,10 @@ uint64_t sftp_get_file(struct ServerInfo* server, string path,
 #endif
   if (file_size == total_downloaded) {
     log_debug("get file %s ok", path.c_str());
-    return total_downloaded;
+    return (int64_t)total_downloaded;
   } else {
     log_error("Failed to download file: %s", path.c_str());
-    return 0;
+    return -1;
   }
 }
 
@@ -737,7 +737,7 @@ int64_t sftp_put_file(struct ServerInfo* server, string local_path,
 
   char* support_auth =
       libssh2_userauth_list(session, username.c_str(), username.length());
-  if (support_auth != NULL) {
+  if (support_auth != nullptr) {
     log_info("server support auth list: %s", support_auth);
   }
 
@@ -753,7 +753,7 @@ int64_t sftp_put_file(struct ServerInfo* server, string local_path,
     return -1;
   }
 
-  char* banner_s = (char*)calloc(0, 1024 * 512);
+  char* banner_s = nullptr;
   rc = libssh2_userauth_banner(session, &banner_s);
   if (rc == LIBSSH2_ERROR_NONE) {
     log_info(
@@ -815,42 +815,12 @@ int64_t sftp_put_file(struct ServerInfo* server, string local_path,
     return -1;
   }
   int64_t total_upload = 0;
-  ssize_t bytes_written = 0;
   ssize_t bytes_read = 0;
-  bool ef = false;
-  while (!local_file.eof()) {
-    if (local_file.eof()) {
-      log_error("End of file reached.");
-      ef = true;
-    } else if (local_file.fail()) {
-      log_error("Logical error on i/o operation.");
-      ef = true;
-    } else if (local_file.bad()) {
+  std::vector<char> write_buf(1024 * 128);
+  while (local_file.read(write_buf.data(), write_buf.size()) || local_file.gcount() > 0) {
+    bytes_read = (ssize_t)local_file.gcount();
+    if (local_file.bad()) {
       log_error("Read error on i/o operation.");
-      ef = true;
-    }
-    if (ef) {
-      libssh2_sftp_close(sftp_handle);
-      libssh2_sftp_shutdown(sftp_session);
-      libssh2_session_disconnect(session, "Normal Shutdown");
-      libssh2_session_free(session);
-#ifdef WIN32
-      closesocket(sock);
-#else
-      close(sock);
-#endif
-    }
-    local_file.read(buffer, sizeof(buffer));
-    bytes_read = local_file.gcount();
-    bytes_written = 0;
-    while (bytes_written != bytes_read) {
-      bytes_written += libssh2_sftp_write(sftp_handle, buffer + bytes_written,
-                                          bytes_read - bytes_written);
-    }
-    if (bytes_written != bytes_read) {
-      log_error(
-          "Failed to write to remote file, bytes_written:%d,bytes_read:%d",
-          bytes_written, bytes_read);
       libssh2_sftp_close(sftp_handle);
       libssh2_sftp_shutdown(sftp_session);
       libssh2_session_disconnect(session, "Normal Shutdown");
@@ -861,6 +831,25 @@ int64_t sftp_put_file(struct ServerInfo* server, string local_path,
       close(sock);
 #endif
       return -1;
+    }
+    ssize_t bytes_written = 0;
+    while (bytes_written < bytes_read) {
+      ssize_t n = libssh2_sftp_write(sftp_handle, write_buf.data() + bytes_written,
+                                     (size_t)(bytes_read - bytes_written));
+      if (n < 0) {
+        log_error("SFTP write error: %ld", (long)n);
+        libssh2_sftp_close(sftp_handle);
+        libssh2_sftp_shutdown(sftp_session);
+        libssh2_session_disconnect(session, "Normal Shutdown");
+        libssh2_session_free(session);
+#ifdef WIN32
+        closesocket(sock);
+#else
+        close(sock);
+#endif
+        return -1;
+      }
+      bytes_written += n;
     }
     total_upload += bytes_written;
     clock_gettime(CLOCK_MONOTONIC, &current_time);
@@ -884,14 +873,12 @@ int64_t sftp_put_file(struct ServerInfo* server, string local_path,
 #else
   close(sock);
 #endif
-  return total_upload;
-  if (file_size == total_upload) {
-    log_debug("put file %s ok", local_path.c_str());
-    return total_upload;
-  } else {
+  if (total_upload != file_size) {
     log_error("Failed to upload file: %s", local_path.c_str());
     return -1;
   }
+  log_debug("put file %s ok", local_path.c_str());
+  return total_upload;
 }
 
 bool is_sftp_service(ServerInfo* server_in) {
@@ -942,7 +929,11 @@ bool is_sftp_service(ServerInfo* server_in) {
   }
   libssh2_session_disconnect(session, "Normal Shutdown");
   libssh2_session_free(session);
+#ifdef WIN32
+  closesocket(sock);
+#else
   close(sock);
+#endif
   log_info("[%s] find sftp server", server_in->host.c_str());
   server_in->is_ok = true;
   return true;
@@ -968,7 +959,7 @@ void* sftp_server_and_speed(void* arg) {
   }
   pthread_mutex_lock(&mtx_get_server);
   if (args->test_speed) {
-    if (fast_server == NULL) {
+    if (fast_server == nullptr) {
       sftp_test_speed(args->server_in);
       if (args->server_in->speed > (1024 * 1024 * 4)) {
         fast_server = args->server_in;
@@ -1001,7 +992,12 @@ struct ServerInfo* get_available_server(
       "get available server, It takes approximately 2 minutes... (speed test "
       "enable:%d)",
       test_speed);
-  fast_server = NULL;
+  fast_server = nullptr;
+  {
+    pthread_mutex_lock(&cv_m);
+    cv_ready = false;
+    pthread_mutex_unlock(&cv_m);
+  }
   {
     pthread_t* threads = new pthread_t[servers.size()];
     size_t num_threads = servers.size();
@@ -1030,19 +1026,19 @@ struct ServerInfo* get_available_server(
     }
     delete[] threads;
   }
-  if (test_speed == 1) {
-    if (fast_server != NULL) return fast_server;
-    ServerInfo* max_index = 0;
-    int max_speed = 0;
+  if (test_speed) {
+    if (fast_server != nullptr) return fast_server;
+    ServerInfo* max_index = nullptr;
+    double max_speed = 0.0;
     for (ServerInfo& server : servers) {
       if (max_speed < server.speed) {
         max_speed = server.speed;
         max_index = &server;
       }
     }
-    if (max_speed == 0) {
+    if (max_index == nullptr) {
       log_error("No available server found");
-      return NULL;
+      return nullptr;
     } else {
       return max_index;
     }
@@ -1054,13 +1050,13 @@ struct ServerInfo* get_available_server(
     }
   }
   log_error("No available server found");
-  return NULL;
+  return nullptr;
 }
 
 bool get_file_open(string re_path) {
   log_info("get file from %s", re_path.c_str());
   ServerInfo* max_index = get_available_server(true, sdk_server_info);
-  if (NULL == max_index) {
+  if (nullptr == max_index) {
     return false;
   }
   if (http_open_get_enable) {
@@ -1095,7 +1091,7 @@ void sftp_login(string username) {
         sdk_server_info.end());
     login_info = get_available_server(true, sdk_server_info);
   }
-  if (NULL == login_info) {
+  if (nullptr == login_info) {
     log_error("cannot not find available server for login");
   } else {
     log_info("find available server: sftp://%s@%s:%d", username.c_str(),
@@ -1116,7 +1112,7 @@ bool get_file_dflag(string dflag) {
   log_debug("start to get file by dfalg: %s", dflag.c_str());
   string file_path;
   ServerInfo* server = get_available_server(true, sdk_server_info);
-  if (server == NULL) {
+  if (server == nullptr) {
     return false;
   }
   std::string json_buf;
@@ -1124,7 +1120,7 @@ bool get_file_dflag(string dflag) {
   if (http_open_get_enable) {
     flags_ok = http_get_file(server, "/.dfss_flags", &json_buf) > 0;
   } else {
-    flags_ok = sftp_get_file(server, "/.dfss_flags", &json_buf) > 0;
+    flags_ok = sftp_get_file(server, "/.dfss_flags", &json_buf) >= 0;
   }
   if (flags_ok) {
     try {
@@ -1148,7 +1144,7 @@ bool get_file_dflag(string dflag) {
   if (http_open_get_enable) {
     if (http_get_file(server, file_path) > 0) return true;
   } else {
-    if (sftp_get_file(server, file_path) > 0) return true;
+    if (sftp_get_file(server, file_path) >= 0) return true;
   }
   return false;
 }
@@ -1214,12 +1210,13 @@ bool sftp_upfile(std::string upflag, std::string upfile) {
           [&](const ServerInfo& info) { return info.only_open == true; }),
       sdk_server_info.end());
   ServerInfo* server = get_available_server(true, sdk_server_info);
-  if (server == NULL) {
+  if (server == nullptr) {
     return false;
   }
-  server->user = "customerUploadAccount";
-  server->pass = "1QQHJONFflnI2BLsxUvA";
-  if (sftp_put_file(server, upfile, base64_decode(upflag)) > 0) return true;
+  ServerInfo upload_server = *server;  // 使用副本，不修改全局服务器列表
+  upload_server.user = "customerUploadAccount";
+  upload_server.pass = "1QQHJONFflnI2BLsxUvA";
+  if (sftp_put_file(&upload_server, upfile, base64_decode(upflag)) > 0) return true;
   return false;
 }
 
@@ -1227,16 +1224,16 @@ std::string getExecutablePath() {
   static char buffer_in[1024];
   memset(buffer_in, 0, 1024);
 #ifdef _WIN32
-  GetModuleFileNameA(NULL, buffer, sizeof(buffer));
+  GetModuleFileNameA(NULL, buffer_in, sizeof(buffer_in));
 #else
-  ssize_t len = readlink("/proc/self/exe", buffer, sizeof(buffer) - 1);
+  ssize_t len = readlink("/proc/self/exe", buffer_in, sizeof(buffer_in) - 1);
   if (len != -1) {
-    buffer[len] = '\0';
+    buffer_in[len] = '\0';
   } else {
     return std::string();
   }
 #endif
-  return std::string(buffer);
+  return std::string(buffer_in);
 }
 
 void config_json_read() {
