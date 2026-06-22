@@ -1,0 +1,18 @@
+server:
+  port: 8080
+  www: /var/lib/sophliteos/dist
+  admin-password: c3284d0f94606de1fd2af172aba15bf3
+  timeout: 12m
+
+log:
+  path: /var/log/sophliteos
+  level: INFO
+
+db:
+  path: /var/lib/sophliteos/db/sophliteos.db
+  save-days: 90
+
+ssm:
+  server: '127.0.0.1:9779'
+  username: admin
+  password: flybitmain

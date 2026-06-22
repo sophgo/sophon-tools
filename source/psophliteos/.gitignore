@@ -1,0 +1,17 @@
+# 前端依赖与构建产物
+frontend/node_modules/
+frontend/dist/
+frontend/.yarn/
+
+# 后端构建产物
+sophliteos
+sophliteos-linux_*.tgz
+dist/
+
+# 发布产物
+release/sophliteos*
+build/release*
+build/sophliteos/data/sophliteos/*
+
+# 测试
+test
