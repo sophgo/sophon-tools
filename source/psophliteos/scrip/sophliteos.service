@@ -1,0 +1,16 @@
+[Unit]
+Description=sophliteos
+After=network.target
+
+[Service]
+User=root
+ExecStart=/bin/sophliteos
+ExecReload=/bin/kill -HUP $MAINPID
+KillMode=control-group
+Restart=on-failure
+RestartPreventExitStatus=255
+Type=simple
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

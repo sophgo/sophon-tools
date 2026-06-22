@@ -1,0 +1,11 @@
+#!/bin/bash
+
+mkdir -p /etc/sophliteos/config /var/log/sophliteos /var/lib/sophliteos/db /data/sophliteos
+rm -rf /var/lib/sophliteos/dist
+
+cp -r dist /var/lib/sophliteos/
+cp "${dir}"sophliteos /bin
+cp config/sophliteos.yaml /etc/sophliteos/config
+cp database/sophliteos.db /var/lib/sophliteos/db
+cp sophliteos.service /etc/systemd/system/
+cp release_version.txt /var/lib/sophliteos
