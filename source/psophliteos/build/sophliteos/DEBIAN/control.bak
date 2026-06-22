@@ -1,0 +1,6 @@
+Package: sophliteos
+Source: sophliteos
+Version: 1.1.2
+Maintainer: sophgo
+Priority: optional
+Description: sophliteos program.

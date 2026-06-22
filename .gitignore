@@ -36,3 +36,7 @@ yarn.lock
 package-lock.json
 
 __pycache__
+
+# psophliteos 子工程的 build/ 是构建脚本与 DEBIAN 打包模板（源码），非产物，需入库
+!source/psophliteos/build/
+!source/psophliteos/build/**

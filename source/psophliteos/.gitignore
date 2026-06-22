@@ -3,8 +3,8 @@ frontend/node_modules/
 frontend/dist/
 frontend/.yarn/
 
-# 后端构建产物
-sophliteos
+# 后端构建产物（/ 锚定子工程根，避免误伤 build/sophliteos 打包骨架）
+/sophliteos
 sophliteos-linux_*.tgz
 dist/
 
