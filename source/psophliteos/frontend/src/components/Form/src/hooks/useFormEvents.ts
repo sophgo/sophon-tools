@@ -93,7 +93,10 @@ export function useFormEvents({
       } else {
         nestKeyArray.forEach((nestKey: string) => {
           try {
-            const value = eval('values' + delimiter + nestKey);
+            // 用属性访问替代 eval，避免代码注入（nestKey 为点分字段名如 a.b.c）
+            const value = nestKey
+              .split('.')
+              .reduce<any>((o, k) => (o == null ? undefined : o[k]), values);
             if (isDef(value)) {
               formModel[nestKey] = value;
               validKeys.push(nestKey);

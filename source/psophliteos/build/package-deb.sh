@@ -23,7 +23,7 @@ cp -r $TOP/tmp/* $LITEOS_DATA/sophliteos/
 #sed Architecture info to control file
 cp $LITEOS_CTRL/control.bak $LITEOS_CTRL/control
 version=$(echo $(cat $LITEOS_CTRL/control | grep Version) | cut -d ' ' -f 2)
-if [[ "soc"=="$1" ]];then
+if [[ "soc" == "$1" ]]; then
   sed -i '$a Architecture: arm64' $LITEOS_CTRL/control
 else
   PRODUCT=pcie

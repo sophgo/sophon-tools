@@ -67,8 +67,6 @@ export function useFormRules(formData?: Recordable) {
 
   const validateConfirmNewPassword = (password: string) => {
     return async (_: RuleObject, value: string) => {
-      console.log(password);
-
       if (value && value !== password) {
         return Promise.reject(t('layout.header.diffNewPassword'));
       }

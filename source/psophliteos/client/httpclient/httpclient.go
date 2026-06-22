@@ -75,7 +75,7 @@ func NewMultiFileRequest(url, method string, header, params map[string]string, f
 }
 
 func urlBuild(url string) string {
-	if !strings.HasPrefix(url, "http://") || !strings.HasPrefix(url, "https://") {
+	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
 		url = "http://" + url
 	}
 	return url

@@ -1,2 +1,5 @@
 #!/bin/bash
-rm -rf /data/sophliteos
+# 仅首次安装时清理；升级($1=upgrade)时保留 /data/sophliteos 下的用户数据
+if [ "$1" = "install" ] || [ -z "$1" ]; then
+  rm -rf /data/sophliteos
+fi

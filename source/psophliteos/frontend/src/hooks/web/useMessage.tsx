@@ -48,7 +48,8 @@ function getIcon(iconType: string) {
 
 function renderContent({ content }: Pick<ModalOptionsEx, 'content'>) {
   if (isString(content)) {
-    return <div innerHTML={`<div>${content as string}</div>`}></div>;
+    // 渲染为纯文本而非 innerHTML，避免 XSS（content 多为 i18n 文案，无需解析 HTML）
+    return <div>{content}</div>;
   } else {
     return content;
   }
