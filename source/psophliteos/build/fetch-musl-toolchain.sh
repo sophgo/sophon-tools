@@ -29,7 +29,7 @@ fi
 mkdir -p "${TOOLCHAIN_ROOT}"
 ARCHIVE="${TOOLCHAIN_ROOT}/${TOOLCHAIN_NAME}.tgz"
 
-echo "下载 musl 交叉工具链: ${TOOLCHAIN_URL}"
+echo "下载 musl 交叉工具链: ${TOOLCHAIN_URL}" >&2
 if command -v curl >/dev/null 2>&1; then
   curl -fL -o "${ARCHIVE}" "${TOOLCHAIN_URL}"
 elif command -v wget >/dev/null 2>&1; then
