@@ -13,5 +13,8 @@ release/sophliteos*
 build/release*
 build/sophliteos/data/sophliteos/*
 
+# 工具链缓存
+build/toolchain/
+
 # 测试
 test
