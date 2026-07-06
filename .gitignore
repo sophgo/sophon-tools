@@ -40,3 +40,6 @@ __pycache__
 # psophliteos 子工程的 build/ 是构建脚本与 DEBIAN 打包模板（源码），非产物，需入库
 !source/psophliteos/build/
 !source/psophliteos/build/**
+# pssm 子工程的 build/ 是构建脚本（源码），非产物，需入库
+!source/pssm/build/
+!source/pssm/build/**

@@ -75,6 +75,15 @@
               :status="progressStatus"
             />
           </a-form-item>
+          <a-form-item
+            v-if="!isSoftware"
+            :label="t('maintenance.flashData')"
+          >
+            <RadioGroup v-model:value="flashData">
+              <Radio :value="true">是</Radio>
+              <Radio :value="false">否</Radio>
+            </RadioGroup>
+          </a-form-item>
           <!-- <a-form-item :wrapper-col="{ span: 14, offset: 4 }" /> -->
           <a-button
             v-if="!isSsm && !isSoftware"
@@ -136,7 +145,8 @@
   import { reactive, ref, onMounted, watch } from 'vue';
   import type { UnwrapRef } from 'vue';
   import { storeToRefs } from 'pinia';
-  import { Upload, Progress } from 'ant-design-vue';
+  import { Upload, Progress, Radio } from 'ant-design-vue';
+  const RadioGroup = Radio.Group;
   import { UploadOutlined } from '@ant-design/icons-vue';
 
   import {
@@ -232,6 +242,7 @@
   // 上传逻辑
   const fileList = ref<any>([]);
   const uploading = ref(false);
+  const flashData = ref(false);
   const progress = {
     strokeColor: {
       '0%': '#108ee9',
@@ -491,7 +502,9 @@
         : props.isSsm
         ? upgradeSsmApi
         : upgradeApi;
-      const dataParams = props.isSoftware ? {} : { module: 'ctrl' };
+      const dataParams = props.isSoftware
+        ? {}
+        : { module: 'ctrl', flashData: flashData.value ? 'true' : 'false' };
       const file = show.value ? '' : item.file;
 
       await currentApi(

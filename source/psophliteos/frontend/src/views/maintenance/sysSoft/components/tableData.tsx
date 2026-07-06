@@ -59,6 +59,12 @@ export function getBasicColumns(): BasicColumn[] {
       align: 'left',
       ellipsis: true,
     },
+    {
+      title: t('maintenance.systemUpdate.taskList.info'),
+      dataIndex: 'info',
+      align: 'left',
+      ellipsis: true,
+    },
   ];
   if (deviceStore.isSingleBoard) {
     arr.splice(1, 2);

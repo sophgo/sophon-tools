@@ -15,4 +15,4 @@ db:
 ssm:
   server: '127.0.0.1:9779'
   username: admin
-  password: flybitmain
+  password: admin

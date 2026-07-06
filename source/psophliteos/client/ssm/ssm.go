@@ -70,28 +70,25 @@ func getUrlHeader(uri string) (string, map[string]string, error) {
 
 	conf := &config.Conf
 	conf.Lock()
-	v := conf.GetViper()
-	server := v.GetString("ssm.server")
-	// username := v.GetString("ssm.username")
-	// password := v.GetString("ssm.password")
+	server := conf.GetViper().GetString("ssm.server")
+	username := conf.GetViper().GetString("ssm.username")
+	password := conf.GetViper().GetString("ssm.password")
 	conf.Unlock()
 
 	header := make(map[string]string)
-	// cache, found := tokenCache.Get(username)
-	// if found {
-	// 	header["Authorization"] = "Bearer " + cache.(string)
-	// } else {
-	// 	conf.Lock()
-	// 	token, err := SystemLogin(server, username, password)
-	// 	conf.Unlock()
-	// 	if err != nil {
-	// 		return "", map[string]string{}, err
-	// 	} else {
-	// 		tokenCache.Set(username, token, 2*time.Hour)
-	// 	}
-	// 	header["Authorization"] = "Bearer " + token
-	// }
-
+	if username == "" {
+		return server + uri, header, nil
+	}
+	if cache, found := tokenCache.Get(username); found {
+		header["Authorization"] = "Bearer " + cache.(string)
+		return server + uri, header, nil
+	}
+	token, err := SystemLogin(server, username, password)
+	if err != nil {
+		return "", map[string]string{}, err
+	}
+	tokenCache.Set(username, token, 2*time.Hour)
+	header["Authorization"] = "Bearer " + token
 	return server + uri, header, nil
 }
 

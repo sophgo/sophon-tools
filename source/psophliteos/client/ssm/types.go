@@ -260,6 +260,7 @@ type OtaVersion struct {
 	FileName   string `json:"fileName"`
 	ModuleName string `json:"moduleName"`
 	CmdFlag    string `json:"cmdFlag"`
+	FlashData  bool   `json:"flashData"`
 }
 
 type OtaTask struct {
@@ -277,7 +278,10 @@ type OtaTask struct {
 	Type           int    `json:"type"`
 	UserID         string `json:"userId"`
 	Version        string `json:"version"`
-	WorkflowID     int    `json:"workflowId"`
+	// WorkflowID 对齐 pssm ota.Workflow.WorkflowID（newWorkflowID 返回 16 位 hex 串）。
+	// 曾误为 int，导致 json.Unmarshal 对 hex 串报 TypeError 被 _ = 吞掉、值恒为 0，
+	// OtaRollback 按 WorkflowID 匹配失败。改为 string 闭环。
+	WorkflowID     string `json:"workflowId"`
 }
 
 type CoreOpe struct {

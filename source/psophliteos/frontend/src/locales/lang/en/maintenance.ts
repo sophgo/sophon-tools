@@ -1,4 +1,5 @@
 export default {
+  flashData: 'Flash data partition',
   appSoftUpdate: 'Application Upgrade',
   sysSoftUpdate: 'System Upgrade',
   updatedFiles: 'Uploaded File',
@@ -35,12 +36,14 @@ export default {
       type: 'Operate Type',
       fileName: 'File Name',
       createTime: 'Create Time',
+      info: 'Remark',
     },
+    detail: 'Task Detail',
     status: {
       '1': 'Submit',
       '2': 'Success',
       '3': 'Failure',
-      '4': 'Expired',
+      '4': 'Running',
     },
     type: {
       '1': 'Upgrade',

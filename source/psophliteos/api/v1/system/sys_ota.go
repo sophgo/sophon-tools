@@ -277,6 +277,7 @@ func (b *OtaApi) OtaUpgrate(c *gin.Context) {
 		FileName:   otaName,
 		ModuleName: module,
 		CmdFlag:    cmdFlag,
+		FlashData:  c.Request.FormValue("flashData") == "true",
 	}
 	logger.Info("OTA info is :%v", otaInfo)
 
@@ -297,7 +298,11 @@ func (b *OtaApi) OtaUpgradeList(c *gin.Context) {
 	mvc.HandleError(err)
 	var otaTasks []ssm.OtaTask
 	res, _ := json.Marshal(result.Result)
-	_ = json.Unmarshal(res, &otaTasks)
+	if err := json.Unmarshal(res, &otaTasks); err != nil {
+		// 曾被 _ = 静默吞掉，导致字段类型不匹配（如 WorkflowID）排障困难。
+		// info 字段即便有类型错误仍会被填充，这里仅记录便于定位。
+		logger.Error("unmarshal ota upgrade list: %v", err)
+	}
 	c.JSON(http.StatusOK, mvc.Success(otaTasks))
 
 }

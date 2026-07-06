@@ -1,0 +1,7 @@
+release/
+install/
+ssm
+ssm-arm64
+*.db
+*.out
+build/version.txt

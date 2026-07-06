@@ -1,4 +1,5 @@
 export default {
+  flashData: '烧录data分区',
   appSoftUpdate: '应用软件升级',
   sysSoftUpdate: '系统软件升级',
   updatedFiles: '文件已就绪',
@@ -37,12 +38,14 @@ export default {
       type: '操作类型',
       fileName: '升级文件名',
       createTime: '创建时间',
+      info: '备注信息',
     },
+    detail: '任务详情',
     status: {
       '1': '已提交',
       '2': '成功',
       '3': '失败',
-      '4': '已过期',
+      '4': '运行中',
     },
     type: {
       '1': '升级',
