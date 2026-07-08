@@ -245,13 +245,50 @@
   const canGoParent = computed(() => pathParts.value.length > 0);
 
   const columns = computed(() => [
-    { title: t('maintenance.fileManage.name'), key: 'name', dataIndex: 'name' },
-    { title: t('maintenance.fileManage.size'), dataIndex: 'size', width: 100 },
-    { title: t('maintenance.fileManage.mode'), dataIndex: 'mode', width: 120 },
-    { title: t('maintenance.fileManage.owner'), dataIndex: 'owner', width: 100 },
-    { title: t('maintenance.fileManage.group'), dataIndex: 'group', width: 100 },
-    { title: t('maintenance.fileManage.modTime'), dataIndex: 'modTime', width: 160,
-      customRender: ({ text }: any) => (text ? new Date(text * 1000).toLocaleString() : '-') },
+    {
+      title: t('maintenance.fileManage.name'),
+      key: 'name',
+      dataIndex: 'name',
+      sorter: (a: FileInfo, b: FileInfo) => (a.isDir === b.isDir ? a.name.localeCompare(b.name) : a.isDir ? -1 : 1),
+      sortDirections: ['descend', 'ascend'],
+    },
+    {
+      title: t('maintenance.fileManage.size'),
+      dataIndex: 'size',
+      width: 100,
+      sorter: (a: FileInfo, b: FileInfo) => (a.size || 0) - (b.size || 0),
+      sortDirections: ['descend', 'ascend'],
+      customRender: ({ text, record }: any) => (record.isDir ? '-' : formatBytes(text)),
+    },
+    {
+      title: t('maintenance.fileManage.mode'),
+      dataIndex: 'mode',
+      width: 120,
+      sorter: (a: FileInfo, b: FileInfo) => (a.mode || '').localeCompare(b.mode || ''),
+      sortDirections: ['descend', 'ascend'],
+    },
+    {
+      title: t('maintenance.fileManage.owner'),
+      dataIndex: 'owner',
+      width: 100,
+      sorter: (a: FileInfo, b: FileInfo) => (a.owner || '').localeCompare(b.owner || ''),
+      sortDirections: ['descend', 'ascend'],
+    },
+    {
+      title: t('maintenance.fileManage.group'),
+      dataIndex: 'group',
+      width: 100,
+      sorter: (a: FileInfo, b: FileInfo) => (a.group || '').localeCompare(b.group || ''),
+      sortDirections: ['descend', 'ascend'],
+    },
+    {
+      title: t('maintenance.fileManage.modTime'),
+      dataIndex: 'modTime',
+      width: 160,
+      sorter: (a: FileInfo, b: FileInfo) => (a.modTime || 0) - (b.modTime || 0),
+      sortDirections: ['descend', 'ascend'],
+      customRender: ({ text }: any) => (text ? new Date(text * 1000).toLocaleString() : '-'),
+    },
     { title: '', key: 'action', width: 360 },
   ]);
 
