@@ -36,11 +36,12 @@ func (c *Collector) Disks() []Disk {
 			continue
 		}
 		dev := fields[0]
-		// 仅 /dev 设备，跳过 loop
-		if !strings.HasPrefix(dev, "/dev") {
-			continue
-		}
-		if strings.Contains(dev, "loop") {
+		mountOn := strings.Join(fields[6:], " ")
+		// 仅 /dev 设备（跳过 loop），或根 overlay（容器化根分区，dev=overlay mountOn=/）。
+		// 过滤 tmpfs/devtmpfs/proc 等虚拟 fs（dev 非 /dev/）。
+		isDev := strings.HasPrefix(dev, "/dev") && !strings.Contains(dev, "loop")
+		isRootOverlay := dev == "overlay" && mountOn == "/"
+		if !isDev && !isRootOverlay {
 			continue
 		}
 		usedKB, err := strconv.ParseInt(fields[3], 10, 64)
@@ -54,8 +55,6 @@ func (c *Collector) Disks() []Disk {
 		// 总容量 = Used + Avail（不含 ext4 reserved blocks），
 		// 使 sophliteos usage = (1 - Free/Total) 与 df Use% 一致。
 		totalKB := usedKB + availKB
-		// mountOn：fields[6:] 拼接（防挂载点含空格）
-		mountOn := strings.Join(fields[6:], " ")
 		disks = append(disks, Disk{
 			DiskName: dev,
 			Total:    float64(totalKB / 1024), // 整数除法→MB，对齐 bmssm

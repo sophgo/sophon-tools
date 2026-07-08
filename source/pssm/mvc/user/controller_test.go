@@ -14,6 +14,7 @@ import (
 	"ssm/middleware"
 	"ssm/mvc/audit"
 	"ssm/pkg/auth"
+	"ssm/pkg/response"
 )
 
 func init() { gin.SetMode(gin.ReleaseMode) }
@@ -55,11 +56,19 @@ func TestLoginSuccess(t *testing.T) {
 		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
 	}
 
-	var resp LoginResponse
+	var resp response.Result
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("unmarshal: %v body=%s", err, w.Body.String())
 	}
-	if resp.Token == "" {
+	if resp.Code != 0 {
+		t.Fatalf("expected code=0, got %d body=%s", resp.Code, w.Body.String())
+	}
+	raw, _ := json.Marshal(resp.Result)
+	var lr LoginResponse
+	if err := json.Unmarshal(raw, &lr); err != nil {
+		t.Fatalf("unmarshal result: %v body=%s", err, w.Body.String())
+	}
+	if lr.Token == "" {
 		t.Fatal("token should not be empty")
 	}
 }
@@ -163,7 +172,7 @@ func TestLogout(t *testing.T) {
 	api.POST("/logout", ctrl.Logout)
 
 	secret := config.Conf.GetViper().GetString("server.authSecret")
-	tokenStr, _, _ := auth.IssueToken("admin", secret)
+	tokenStr, _, _ := auth.IssueToken("admin", secret, false)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/logout", nil)
@@ -189,7 +198,7 @@ func TestListUsersWithAuth(t *testing.T) {
 
 	// 签发 token
 	secret := config.Conf.GetViper().GetString("server.authSecret")
-	tokenStr, _, _ := auth.IssueToken("alice", secret)
+	tokenStr, _, _ := auth.IssueToken("alice", secret, false)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/user", nil)
@@ -200,9 +209,17 @@ func TestListUsersWithAuth(t *testing.T) {
 		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
 	}
 
-	var users []UserResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &users); err != nil {
+	var usersResp response.Result
+	if err := json.Unmarshal(w.Body.Bytes(), &usersResp); err != nil {
 		t.Fatalf("unmarshal: %v", err)
+	}
+	if usersResp.Code != 0 {
+		t.Fatalf("expected code=0, got %d body=%s", usersResp.Code, w.Body.String())
+	}
+	raw, _ := json.Marshal(usersResp.Result)
+	var users []UserResponse
+	if err := json.Unmarshal(raw, &users); err != nil {
+		t.Fatalf("unmarshal result: %v body=%s", err, w.Body.String())
 	}
 	if len(users) != 2 {
 		t.Fatalf("expected 2 users, got %d", len(users))
@@ -239,7 +256,7 @@ func TestCreateUser(t *testing.T) {
 	api.POST("/user", ctrl.CreateUser)
 
 	secret := config.Conf.GetViper().GetString("server.authSecret")
-	tokenStr, _, _ := auth.IssueToken("admin", secret)
+	tokenStr, _, _ := auth.IssueToken("admin", secret, false)
 
 	body, _ := json.Marshal(CreateUserRequest{Username: "newuser", Password: "newpass", Role: "user"})
 	w := httptest.NewRecorder()
@@ -272,7 +289,7 @@ func TestControllerDeleteUser(t *testing.T) {
 	api.DELETE("/user/:name", ctrl.DeleteUser)
 
 	secret := config.Conf.GetViper().GetString("server.authSecret")
-	tokenStr, _, _ := auth.IssueToken("admin", secret)
+	tokenStr, _, _ := auth.IssueToken("admin", secret, false)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/user/victim", nil)

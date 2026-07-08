@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+
+	"ssm/pkg/response"
 )
 
 // Controller Docker 模块 gin handler 集合。
@@ -26,10 +28,10 @@ func DefaultController() *Controller {
 
 // handleDegraded 写入降级响应（200 + available:false）。
 func (ctrl *Controller) handleDegraded(c *gin.Context) {
-	c.JSON(http.StatusOK, DegradedResponse{
+	c.JSON(http.StatusOK, response.OK(DegradedResponse{
 		Available: false,
 		Reason:    "docker not available",
-	})
+	}))
 }
 
 // handleDockerError 根据 docker 错误类型写入适当的 HTTP 错误响应。
@@ -37,10 +39,7 @@ func (ctrl *Controller) handleDockerError(c *gin.Context, err error) {
 	if err == nil {
 		return
 	}
-	c.JSON(http.StatusBadGateway, ErrorResponse{
-		Error: err.Error(),
-		Code:  "DOCKER_ERROR",
-	})
+	c.JSON(http.StatusBadGateway, response.Fail(err.Error()))
 }
 
 // ListContainers 处理 GET /api/v1/docker/container（受保护）。
@@ -56,7 +55,7 @@ func (ctrl *Controller) ListContainers(c *gin.Context) {
 		ctrl.handleDockerError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, containers)
+	c.JSON(http.StatusOK, response.OK(containers))
 }
 
 // StartContainer 处理 POST /api/v1/docker/container/:name/start（受保护）。
@@ -68,7 +67,7 @@ func (ctrl *Controller) StartContainer(c *gin.Context) {
 
 	name := c.Param("name")
 	if err := validateName(name); err != nil {
-		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error(), Code: "BAD_REQUEST"})
+		c.JSON(http.StatusBadRequest, response.Fail(err.Error()))
 		return
 	}
 
@@ -76,7 +75,7 @@ func (ctrl *Controller) StartContainer(c *gin.Context) {
 		ctrl.handleDockerError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "container started"})
+	c.JSON(http.StatusOK, response.OK(gin.H{"message": "container started"}))
 }
 
 // StopContainer 处理 POST /api/v1/docker/container/:name/stop（受保护）。
@@ -88,7 +87,7 @@ func (ctrl *Controller) StopContainer(c *gin.Context) {
 
 	name := c.Param("name")
 	if err := validateName(name); err != nil {
-		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error(), Code: "BAD_REQUEST"})
+		c.JSON(http.StatusBadRequest, response.Fail(err.Error()))
 		return
 	}
 
@@ -96,7 +95,7 @@ func (ctrl *Controller) StopContainer(c *gin.Context) {
 	if t := c.Query("timeout"); t != "" {
 		parsed, err := strconv.ParseUint(t, 10, 32)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid timeout", Code: "BAD_REQUEST"})
+			c.JSON(http.StatusBadRequest, response.Fail("invalid timeout"))
 			return
 		}
 		timeout = uint(parsed)
@@ -106,7 +105,7 @@ func (ctrl *Controller) StopContainer(c *gin.Context) {
 		ctrl.handleDockerError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "container stopped"})
+	c.JSON(http.StatusOK, response.OK(gin.H{"message": "container stopped"}))
 }
 
 // RemoveContainer 处理 DELETE /api/v1/docker/container/:name（受保护）。
@@ -118,7 +117,7 @@ func (ctrl *Controller) RemoveContainer(c *gin.Context) {
 
 	name := c.Param("name")
 	if err := validateName(name); err != nil {
-		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error(), Code: "BAD_REQUEST"})
+		c.JSON(http.StatusBadRequest, response.Fail(err.Error()))
 		return
 	}
 
@@ -131,7 +130,7 @@ func (ctrl *Controller) RemoveContainer(c *gin.Context) {
 		ctrl.handleDockerError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "container removed"})
+	c.JSON(http.StatusOK, response.OK(gin.H{"message": "container removed"}))
 }
 
 // ListImages 处理 GET /api/v1/docker/image（受保护）。
@@ -146,7 +145,7 @@ func (ctrl *Controller) ListImages(c *gin.Context) {
 		ctrl.handleDockerError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, images)
+	c.JSON(http.StatusOK, response.OK(images))
 }
 
 // RemoveImage 处理 DELETE /api/v1/docker/image/:id（受保护）。
@@ -158,7 +157,7 @@ func (ctrl *Controller) RemoveImage(c *gin.Context) {
 
 	id := c.Param("id")
 	if err := validateID(id); err != nil {
-		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error(), Code: "BAD_REQUEST"})
+		c.JSON(http.StatusBadRequest, response.Fail(err.Error()))
 		return
 	}
 
@@ -166,7 +165,7 @@ func (ctrl *Controller) RemoveImage(c *gin.Context) {
 		ctrl.handleDockerError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "image removed"})
+	c.JSON(http.StatusOK, response.OK(gin.H{"message": "image removed"}))
 }
 
 // GetLogs 处理 GET /api/v1/docker/logs/:name（受保护）。
@@ -178,7 +177,7 @@ func (ctrl *Controller) GetLogs(c *gin.Context) {
 
 	name := c.Param("name")
 	if err := validateName(name); err != nil {
-		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error(), Code: "BAD_REQUEST"})
+		c.JSON(http.StatusBadRequest, response.Fail(err.Error()))
 		return
 	}
 
@@ -188,7 +187,7 @@ func (ctrl *Controller) GetLogs(c *gin.Context) {
 	if sinceStr != "" {
 		parsed, err := strconv.ParseInt(sinceStr, 10, 64)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid since parameter", Code: "BAD_REQUEST"})
+			c.JSON(http.StatusBadRequest, response.Fail("invalid since parameter"))
 			return
 		}
 		since = parsed
@@ -199,7 +198,7 @@ func (ctrl *Controller) GetLogs(c *gin.Context) {
 		ctrl.handleDockerError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, LogsResponse{Logs: logs})
+	c.JSON(http.StatusOK, response.OK(LogsResponse{Logs: logs}))
 }
 
 // validateName 校验容器名称：只允许字母、数字、下划线、短横线、点号，最长 256 字符。

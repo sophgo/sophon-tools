@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -11,11 +12,42 @@ import (
 	"ssm/config"
 	"ssm/middleware"
 	"ssm/pkg/auth"
+	"ssm/pkg/response"
 
 	dockerclient "github.com/fsouza/go-dockerclient"
 )
 
 func init() { gin.SetMode(gin.ReleaseMode) }
+
+// decodeResult 解析统一信封，将 env.Result 反序列化到 out。
+func decodeResult(t *testing.T, body []byte, out interface{}) {
+	t.Helper()
+	var env response.Result
+	if err := json.Unmarshal(body, &env); err != nil {
+		t.Fatalf("unmarshal envelope: %v body=%s", err, body)
+	}
+	if env.Code != 0 {
+		t.Fatalf("expected envelope code=0, got %d msg=%s err=%s body=%s",
+			env.Code, env.Msg, env.ErrorMessage, body)
+	}
+	raw, err := json.Marshal(env.Result)
+	if err != nil {
+		t.Fatalf("marshal result: %v", err)
+	}
+	if err := json.Unmarshal(raw, out); err != nil {
+		t.Fatalf("unmarshal result: %v body=%s", err, body)
+	}
+}
+
+// decodeErrorEnvelope 解析失败信封，返回 (ErrorMessage, Code)。
+func decodeErrorEnvelope(t *testing.T, body []byte) response.Result {
+	t.Helper()
+	var env response.Result
+	if err := json.Unmarshal(body, &env); err != nil {
+		t.Fatalf("unmarshal envelope: %v body=%s", err, body)
+	}
+	return env
+}
 
 func setupDockerTest(t *testing.T) {
 	t.Helper()
@@ -27,7 +59,7 @@ func setupDockerTest(t *testing.T) {
 // makeToken 签发测试 token。
 func makeToken() string {
 	secret := config.Conf.GetViper().GetString("server.authSecret")
-	tokenStr, _, _ := auth.IssueToken("admin", secret)
+	tokenStr, _, _ := auth.IssueToken("admin", secret, false)
 	return tokenStr
 }
 
@@ -77,9 +109,7 @@ func TestListContainersWithAuth(t *testing.T) {
 	}
 
 	var containers []ContainerSummary
-	if err := json.Unmarshal(w.Body.Bytes(), &containers); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	decodeResult(t, w.Body.Bytes(), &containers)
 	if len(containers) != 2 {
 		t.Fatalf("expected 2 containers, got %d", len(containers))
 	}
@@ -100,9 +130,7 @@ func TestListContainersWithStatusFilter(t *testing.T) {
 	}
 
 	var containers []ContainerSummary
-	if err := json.Unmarshal(w.Body.Bytes(), &containers); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	decodeResult(t, w.Body.Bytes(), &containers)
 	if len(containers) != 1 {
 		t.Fatalf("expected 1 running container, got %d", len(containers))
 	}
@@ -198,9 +226,7 @@ func TestListImagesWithAuth(t *testing.T) {
 	}
 
 	var images []ImageSummary
-	if err := json.Unmarshal(w.Body.Bytes(), &images); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	decodeResult(t, w.Body.Bytes(), &images)
 	if len(images) != 2 {
 		t.Fatalf("expected 2 images, got %d", len(images))
 	}
@@ -236,9 +262,7 @@ func TestGetLogsWithAuth(t *testing.T) {
 	}
 
 	var resp LogsResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	decodeResult(t, w.Body.Bytes(), &resp)
 	if resp.Logs == "" {
 		t.Fatal("expected non-empty logs")
 	}
@@ -263,9 +287,7 @@ func TestDegradedListContainers(t *testing.T) {
 	}
 
 	var resp DegradedResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	decodeResult(t, w.Body.Bytes(), &resp)
 	if resp.Available {
 		t.Fatal("expected available=false")
 	}
@@ -478,12 +500,12 @@ func TestDockerErrorReturns502(t *testing.T) {
 		t.Fatalf("expected 502 for docker error, got %d body=%s", w.Code, w.Body.String())
 	}
 
-	var errResp ErrorResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &errResp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
+	env := decodeErrorEnvelope(t, w.Body.Bytes())
+	if env.Code != 1 {
+		t.Errorf("expected envelope code=1, got %d", env.Code)
 	}
-	if errResp.Code != "DOCKER_ERROR" {
-		t.Errorf("expected code DOCKER_ERROR, got %s", errResp.Code)
+	if !strings.Contains(env.ErrorMessage, "docker internal error") {
+		t.Errorf("expected error_message containing 'docker internal error', got %q", env.ErrorMessage)
 	}
 }
 

@@ -1,0 +1,19 @@
+#!/bin/bash
+# ssm deb postinst：装好后建运行目录、装服务、启动。
+# $1: install/upgrade/configure（dpkg 调用，详见 deb-policy）
+set -e
+
+# 运行目录（DB / 日志 / JWT secret 持久化）
+mkdir -p /var/lib/ssm /var/log/ssm /etc/sophon/ssm
+
+# 配置副本到 /etc/sophon/ssm 便于统一编辑；已存在则保留（不覆盖用户改动）
+if [ ! -f /etc/sophon/ssm/ssm.yaml ] && [ -f /opt/sophon/ssm/config/ssm.yaml ]; then
+  cp /opt/sophon/ssm/config/ssm.yaml /etc/sophon/ssm/ssm.yaml
+fi
+
+systemctl daemon-reload
+systemctl enable ssm 2>/dev/null || true
+# 升级时重启；首次安装时启动
+systemctl restart ssm 2>/dev/null || systemctl start ssm 2>/dev/null || true
+
+exit 0

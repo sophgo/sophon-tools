@@ -11,30 +11,30 @@ import (
 
 // fakeMetrics 测试用 MetricProvider，返回夹具预置值。
 type fakeMetrics struct {
-	os      string
-	rt      string
-	sdk     string
-	cpu     metrics.CPU
-	mem     metrics.Memory
-	disks   []metrics.Disk
-	nets    []metrics.NetCard
-	chipT   int
-	boardT  int
-	tpuU    int
-	tpuMem  float64
+	os     string
+	rt     string
+	sdk    string
+	cpu    metrics.CPU
+	mem    metrics.Memory
+	disks  []metrics.Disk
+	nets   []metrics.NetCard
+	chipT  int
+	boardT int
+	tpuU   int
+	tpuMem float64
 }
 
-func (f *fakeMetrics) OSVersion() string            { return f.os }
-func (f *fakeMetrics) Runtime() string              { return f.rt }
-func (f *fakeMetrics) SdkVersion() string           { return f.sdk }
-func (f *fakeMetrics) CPUInfo() metrics.CPU         { return f.cpu }
-func (f *fakeMetrics) Memory() metrics.Memory       { return f.mem }
-func (f *fakeMetrics) Disks() []metrics.Disk        { return f.disks }
-func (f *fakeMetrics) NetCards() []metrics.NetCard  { return f.nets }
-func (f *fakeMetrics) ChipTemp() int                { return f.chipT }
-func (f *fakeMetrics) BoardTemp() int               { return f.boardT }
-func (f *fakeMetrics) TPUUsage() int                { return f.tpuU }
-func (f *fakeMetrics) TPUMem() float64              { return f.tpuMem }
+func (f *fakeMetrics) OSVersion() string           { return f.os }
+func (f *fakeMetrics) Runtime() string             { return f.rt }
+func (f *fakeMetrics) SdkVersion() string          { return f.sdk }
+func (f *fakeMetrics) CPUInfo() metrics.CPU        { return f.cpu }
+func (f *fakeMetrics) Memory() metrics.Memory      { return f.mem }
+func (f *fakeMetrics) Disks() []metrics.Disk       { return f.disks }
+func (f *fakeMetrics) NetCards() []metrics.NetCard { return f.nets }
+func (f *fakeMetrics) ChipTemp() int               { return f.chipT }
+func (f *fakeMetrics) BoardTemp() int              { return f.boardT }
+func (f *fakeMetrics) TPUUsage() int               { return f.tpuU }
+func (f *fakeMetrics) TPUMem() float64             { return f.tpuMem }
 
 // defaultFakeMetrics 返回真机夹具值（SE7 / BM1684X）。
 func defaultFakeMetrics() *fakeMetrics {
@@ -71,40 +71,6 @@ func setDeviceGlobals(t *testing.T) func() {
 		global.DeviceTypeEx = origDeviceTypeEx
 		global.DeviceType = origDeviceType
 		global.ModuleType = origModuleType
-	}
-}
-
-// ---------------------------------------------------------------
-// SsmOK 信封 DeviceSn = global.DeviceSnEx
-// ---------------------------------------------------------------
-
-func TestSsmOKDeviceSn(t *testing.T) {
-	restore := setDeviceGlobals(t)
-	defer restore()
-
-	resp := SsmOK(map[string]string{"k": "v"})
-	if resp.DeviceSn != global.DeviceSnEx {
-		t.Errorf("SsmOK DeviceSn = %q, want %q (global.DeviceSnEx)", resp.DeviceSn, global.DeviceSnEx)
-	}
-	if resp.DeviceSn != "HQATEVBAIAIAI0001" {
-		t.Errorf("SsmOK DeviceSn = %q, want HQATEVBAIAIAI0001", resp.DeviceSn)
-	}
-}
-
-func TestSsmOKDeviceSnEmptyWhenGlobalUnset(t *testing.T) {
-	// global.DeviceSnEx 默认空（dev 环境），SsmOK 应返空串不 panic
-	resp := SsmOK(nil)
-	if resp.DeviceSn != "" {
-		t.Errorf("SsmOK DeviceSn = %q, want empty when global unset", resp.DeviceSn)
-	}
-}
-
-func TestSsmErrDeviceSn(t *testing.T) {
-	restore := setDeviceGlobals(t)
-	defer restore()
-	resp := SsmErr("boom")
-	if resp.DeviceSn != "HQATEVBAIAIAI0001" {
-		t.Errorf("SsmErr DeviceSn = %q, want HQATEVBAIAIAI0001", resp.DeviceSn)
 	}
 }
 
@@ -169,6 +135,10 @@ func TestBuildCtrlResourceMetrics(t *testing.T) {
 	}
 	if r.DeviceModel != "SE7 V1" {
 		t.Errorf("DeviceModel = %q, want SE7 V1", r.DeviceModel)
+	}
+	// DeviceType 展示用截取后的型号主体（"SE7 V1" → "SE7"），完整型号在 DeviceModel。
+	if r.DeviceType != "SE7" {
+		t.Errorf("DeviceType = %q, want SE7", r.DeviceType)
 	}
 	if r.CollectDateTime == "" {
 		t.Error("CollectDateTime should be non-empty")

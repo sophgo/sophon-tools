@@ -24,6 +24,12 @@ func TestProductClass(t *testing.T) {
 		{"unknown", ClassUnknown},
 		{"", ClassUnknown},
 		{"SE7 ", ClassSOC}, // trim
+		// 完整型号串（global.DeviceTypeEx 形如 "SE7 V01"）按前缀识别，不再报
+		// "ota: path not implemented"。回归：用户 OTA 升级失败即因此触发。
+		{"SE7 V01", ClassSOC},
+		{"se9 v02", ClassSOC},
+		{"SC5 pro", ClassPCIE},
+		{"se8 v1", ClassMultiNode},
 	}
 	for _, tt := range cases {
 		got := productClass(tt.product)

@@ -8,8 +8,10 @@ import (
 	"ssm/database"
 	"ssm/global"
 	"ssm/logger"
+	mwalarm "ssm/mvc/alarm"
 	mwuser "ssm/mvc/user"
 	"ssm/pkg/alarm"
+	"ssm/pkg/auth"
 	"ssm/pkg/device"
 	"ssm/pkg/ota"
 )
@@ -29,8 +31,17 @@ func InitBase() {
 	logger.InitLogging(logPath, "ssm.log", logLevel)
 	logger.Info("ssm starting, version=%s", global.Version.String())
 
-	if authSecret == "" || authSecret == "ssm-dev-secret" {
-		logger.Warn("using default JWT secret, set server.authSecret in production")
+	// JWT secret 加固：默认/空 secret 时生成随机 32 字节 secret 持久化到 /var/lib/ssm/jwt_secret
+	secret, usedRandom, err := auth.EnsureSecret(authSecret)
+	if err != nil {
+		logger.Warn("ensure jwt secret failed: %v (using default)", err)
+	} else {
+		conf.Lock()
+		conf.GetViper().Set("server.authSecret", secret)
+		conf.Unlock()
+		if usedRandom {
+			logger.Warn("using random persisted JWT secret (server.authSecret not configured), stored at %s", auth.SecretFilePath())
+		}
 	}
 
 	global.Started = time.Now()
@@ -42,6 +53,7 @@ func InitBase() {
 	global.DeviceSnEx = device.DeviceSnEx
 	global.ChipSn = device.ChipSn
 	global.ModuleType = device.ModuleType
+	global.ModuleTypeEx = device.ModuleTypeEx
 	logger.Info("device: type=%s role=%s typeEx=%s sn=%s",
 		global.DeviceType, global.DeviceRole, global.DeviceTypeEx, global.DeviceSnEx)
 
@@ -58,9 +70,14 @@ func InitBase() {
 		logger.Warn("db init failed (non-fatal): %v", err)
 	}
 
-	// 告警监控引擎：设备信息已就绪即可启动，不依赖 DB（仅 POST 到 compat 订阅 callback）。
+	// 告警监控引擎：设备信息已就绪即可启动。
 	// 每 30s 采集 pkg/metrics 指标→比对 alarmThreshold→超限/恢复 POST AlarmRec。
-	alarm.Init()
+	// DB 可用时同步落库 alarms 表（mvc/alarm RecorderAdapter），否则仅 POST。
+	var alarmRecorder alarm.Recorder
+	if database.DB() != nil {
+		alarmRecorder = mwalarm.NewRecorderAdapter(mwalarm.NewService(database.DB()))
+	}
+	alarm.Init(alarmRecorder)
 }
 
 // createDefaultAdmin 在 user 表为空时插入默认 admin 用户。

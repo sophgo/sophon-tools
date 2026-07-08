@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"os"
 	"strconv"
 	"strings"
 )
@@ -72,6 +73,9 @@ func twoDigit(n int64) string {
 // bmVersionPath SophonSDK 版本真值来源（pget_info 走 /usr/sbin/bm_version）。
 const bmVersionPath = "/usr/sbin/bm_version"
 
+// libsophonCurrentPath libsophon 软链（pget_info LIBSOPHON_VERSION 走 readlink 此路径）。
+const libsophonCurrentPath = "/opt/sophon/libsophon-current"
+
 // buildInfoPath 4.9 内核 SOC 设备的 SDK 版本来源（pget_info SOC+bm1684x/bm1684+4.9 分支）。
 const buildInfoPath = "/system/data/buildinfo.txt"
 
@@ -87,15 +91,15 @@ var socModels = map[string]bool{
 	"cv186ah": true,
 }
 
-// SdkVersion 获取 SophonSDK 版本（严格对齐 pget_info get_info.sh 的决策树）。
+// SdkVersion 获取 SophonSDK 版本（对齐 pget_info get_info.sh 的决策树）。
 //
 //	CPU_MODEL(/proc/cpuinfo model name) × KERNEL_VERSION(uname -r) × WORK_MODE：
 //	  - SOC + bm1684x/bm1684 + 内核 5.4：bm_version "SophonSDK version:" 行
 //	  - SOC + bm1684x/bm1684 + 内核 4.9：/system/data/buildinfo.txt 行首 "VERSION" 的第 2 字段
-//	  - SOC + bm1688/cv186ah：bm_version "Gemini_SDK:" 行
+//	  - SOC + bm1688/cv186ah：bm_version "Gemini_SDK:" 行；缺失时回退 libsophon-current 软链
+//	    版本（对齐 get_info LIBSOPHON_VERSION，SE9 无 Gemini_SDK 行时前端"SDK版本"显示有意义值）
 //	  - PCIE（model name 非 SOC 型号）：/proc/bmsophon/driver_version 冒号第 2 字段再取第 1 词
-//	主分支失败/不命中返空串（与 pget_info 一致；不返回 libsophon 版本，二者语义不同，
-//	pbmsec 9_comInfo.sh 专门维护 libsophon→SDK 映射表正因如此，但其表已 stale 故不采用）。
+//	主分支失败/不命中返空串。
 func (c *Collector) SdkVersion() string {
 	cpu := modelLine(c.readStr(cpuInfoPath))
 	kernel := c.kernelVersion()
@@ -109,13 +113,38 @@ func (c *Collector) SdkVersion() string {
 				return c.buildInfoVersion()
 			}
 		case "bm1688", "cv186ah":
-			return c.bmVersionLine("Gemini_SDK:")
+			if v := c.bmVersionLine("Gemini_SDK:"); v != "" {
+				return v
+			}
+			// Gemini_SDK 行缺失（如 SE9）→ 回退 LIBSOPHON_VERSION（readlink libsophon-current）
+			return c.libsophonVersion()
 		}
 	} else {
 		// PCIE 模式：取驱动版本
 		return c.driverReleaseVersion()
 	}
 	return ""
+}
+
+// libsophonVersion 读 /opt/sophon/libsophon-current 软链目标，取 '-' 第 2 字段。
+// 对齐 get_info.sh: readlink /opt/sophon/libsophon-current | awk -F'-' '{print $2}'。
+// 软链不存在/解析失败返空串。
+func (c *Collector) libsophonVersion() string {
+	target, err := os.Readlink(libsophonCurrentPath)
+	if err != nil {
+		return ""
+	}
+	return parseLibsophonVersion(target)
+}
+
+// parseLibsophonVersion 从 readlink 目标（如 "libsophon-0.4.13" 或
+// "/opt/sophon/libsophon-0.4.13"）取 '-' 第 2 字段（"0.4.13"）。对齐 awk -F'-' '{print $2}'。
+func parseLibsophonVersion(readlinkTarget string) string {
+	parts := strings.Split(readlinkTarget, "-")
+	if len(parts) < 2 {
+		return ""
+	}
+	return strings.TrimSpace(parts[1])
 }
 
 // kernelVersion 跑 uname -r 取内核版本（如 "5.4.217-bm1684-g..."）。

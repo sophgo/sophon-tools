@@ -14,12 +14,16 @@ type Engine struct {
 	subs        SubscriptionLister
 	poster      Poster
 	thresholds  Thresholds
-	deviceSn    string
-	boardSn     string
-	chipSn      string
-	eventStatus map[EventId]bool
-	logger      Logger
-	now         func() time.Time
+	// thresholdsLoader 可选：每 tick 重新从配置加载阈值。注入后 SetAlarm 改配置
+	// 可在不重启进程的情况下生效（≤ interval）。nil 时用构造时传入的 thresholds 快照。
+	thresholdsLoader func() Thresholds
+	deviceSn         string
+	boardSn         string
+	chipSn          string
+	eventStatus     map[EventId]bool
+	logger          Logger
+	recorder        Recorder
+	now             func() time.Time
 }
 
 // NewEngine 创建引擎。deviceSn=设备 SN，boardSn=板卡 SN（SOC 单板=主控），
@@ -47,6 +51,17 @@ func (e *Engine) SetLogger(l Logger) {
 	}
 }
 
+// SetRecorder 注入告警历史落库器（默认 nil=不落库）。
+func (e *Engine) SetRecorder(r Recorder) {
+	e.recorder = r
+}
+
+// SetThresholdsLoader 注入阈值加载器。注入后 evaluate 每 tick 重读配置，
+// 使运行时修改阈值（SetAlarm API / 配置文件热更）无需重启即生效。
+func (e *Engine) SetThresholdsLoader(f func() Thresholds) {
+	e.thresholdsLoader = f
+}
+
 // Start 在后台 goroutine 周期执行 Tick。间隔 ≤0 时默认 30s（对齐 bmssm）。
 // ctx 取消后退出。
 func (e *Engine) Start(ctx context.Context, interval time.Duration) {
@@ -71,7 +86,18 @@ func (e *Engine) Start(ctx context.Context, interval time.Duration) {
 func (e *Engine) Tick() {
 	alarms := e.evaluate()
 	for _, a := range alarms {
+		e.record(a)
 		e.dispatch(a)
+	}
+}
+
+// record 落库告警历史（best-effort）。recorder 未注入或失败时不阻断。
+func (e *Engine) record(a AlarmRec) {
+	if e.recorder == nil {
+		return
+	}
+	if err := e.recorder.Record(a); err != nil {
+		e.logger.Errorf("alarm record: %v", err)
 	}
 }
 
@@ -80,7 +106,12 @@ func (e *Engine) evaluate() []AlarmRec {
 	now := e.now()
 	var out []AlarmRec
 	m := e.metrics
+	// 每 tick 重读阈值：注入了 thresholdsLoader 时从配置实时加载，
+	// 使 SetAlarm 改阈值无需重启即生效；否则用构造快照。
 	th := e.thresholds
+	if e.thresholdsLoader != nil {
+		th = e.thresholdsLoader()
+	}
 
 	// --- CPU ---
 	cpuUtil := roundInt(m.CPUInfo().UtilizationRate)

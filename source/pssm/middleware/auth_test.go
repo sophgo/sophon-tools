@@ -60,7 +60,7 @@ func TestAuthValidTokenSetsUser(t *testing.T) {
 		c.JSON(http.StatusOK, gin.H{"user": user})
 	})
 
-	tokenStr, _, err := auth.IssueToken("testuser", secret)
+	tokenStr, _, err := auth.IssueToken("testuser", secret, false)
 	if err != nil {
 		t.Fatalf("IssueToken: %v", err)
 	}
@@ -82,7 +82,7 @@ func TestAuthWrongSecretTokenReturns401(t *testing.T) {
 	r.Use(Auth())
 	r.GET("/api/v1/user", func(c *gin.Context) { c.Status(http.StatusOK) })
 
-	tokenStr, _, err := auth.IssueToken("testuser", "different-secret")
+	tokenStr, _, err := auth.IssueToken("testuser", "different-secret", false)
 	if err != nil {
 		t.Fatalf("IssueToken: %v", err)
 	}

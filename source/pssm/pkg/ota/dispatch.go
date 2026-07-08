@@ -4,17 +4,19 @@ import "strings"
 
 // productClass 按 Product 名称映射设备模式。
 //
-//	SE5/SE7/SE9（及小写）→ SOC
-//	SC5/SC7（及小写）   → PCIE
-//	SE6/SE8（及小写）   → MultiNode
+//	SE5/SE7/SE9（及小写、含后缀如 "SE7 V01"）→ SOC
+//	SC5/SC7（及小写、含后缀）            → PCIE
+//	SE6/SE8（及小写、含后缀）             → MultiNode
+//
+// 用前缀匹配而非精确匹配，兼容 global.DeviceTypeEx 形如 "SE7 V01" 的完整型号串。
 func productClass(product string) ProductClass {
 	p := strings.ToLower(strings.TrimSpace(product))
-	switch p {
-	case "se5", "se7", "se9":
+	switch {
+	case strings.HasPrefix(p, "se5"), strings.HasPrefix(p, "se7"), strings.HasPrefix(p, "se9"):
 		return ClassSOC
-	case "sc5", "sc7":
+	case strings.HasPrefix(p, "sc5"), strings.HasPrefix(p, "sc7"):
 		return ClassPCIE
-	case "se6", "se8":
+	case strings.HasPrefix(p, "se6"), strings.HasPrefix(p, "se8"):
 		return ClassMultiNode
 	}
 	return ClassUnknown

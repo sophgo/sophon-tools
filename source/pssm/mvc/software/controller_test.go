@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -17,9 +18,43 @@ import (
 	"ssm/config"
 	"ssm/middleware"
 	"ssm/pkg/auth"
+	"ssm/pkg/response"
 )
 
 func init() { gin.SetMode(gin.ReleaseMode) }
+
+// decodeResult 解析统一信封，将 env.Result 反序列化到 out。
+func decodeResult(t *testing.T, body []byte, out interface{}) {
+	t.Helper()
+	var env response.Result
+	if err := json.Unmarshal(body, &env); err != nil {
+		t.Fatalf("unmarshal envelope: %v body=%s", err, body)
+	}
+	if env.Code != 0 {
+		t.Fatalf("expected envelope code=0, got %d msg=%s err=%s body=%s",
+			env.Code, env.Msg, env.ErrorMessage, body)
+	}
+	raw, err := json.Marshal(env.Result)
+	if err != nil {
+		t.Fatalf("marshal result: %v", err)
+	}
+	if err := json.Unmarshal(raw, out); err != nil {
+		t.Fatalf("unmarshal result: %v body=%s", err, body)
+	}
+}
+
+// decodeErrorEnvelope 解析失败信封。
+func decodeErrorEnvelope(t *testing.T, body []byte) response.Result {
+	t.Helper()
+	var env response.Result
+	if err := json.Unmarshal(body, &env); err != nil {
+		t.Fatalf("unmarshal envelope: %v body=%s", err, body)
+	}
+	if env.Code != 1 {
+		t.Fatalf("expected envelope code=1, got %d body=%s", env.Code, body)
+	}
+	return env
+}
 
 func setupSoftwareTest(t *testing.T) {
 	t.Helper()
@@ -33,7 +68,7 @@ func makeToken() string {
 	if secret == "" {
 		secret = "ssm-dev-secret"
 	}
-	tokenStr, _, _ := auth.IssueToken("admin", secret)
+	tokenStr, _, _ := auth.IssueToken("admin", secret, false)
 	return tokenStr
 }
 
@@ -103,9 +138,7 @@ func TestControllerListSoftware(t *testing.T) {
 	}
 
 	var result []SoftwareInfo
-	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
-		t.Fatalf("unmarshal: %v body=%s", err, w.Body.String())
-	}
+	decodeResult(t, w.Body.Bytes(), &result)
 	if len(result) != 2 {
 		t.Fatalf("expected 2 modules, got %d", len(result))
 	}
@@ -135,9 +168,7 @@ func TestControllerInstallTarGz(t *testing.T) {
 	}
 
 	var resp InstallResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	decodeResult(t, w.Body.Bytes(), &resp)
 	if !resp.Success {
 		t.Fatalf("expected success=true, got %+v", resp)
 	}
@@ -219,7 +250,7 @@ func TestControllerUpgrade(t *testing.T) {
 		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
 	}
 	var resp InstallResponse
-	json.Unmarshal(w.Body.Bytes(), &resp)
+	decodeResult(t, w.Body.Bytes(), &resp)
 	if !resp.Success {
 		t.Errorf("expected success=true, got %+v", resp)
 	}
@@ -248,9 +279,7 @@ func TestControllerOTAUpload(t *testing.T) {
 	}
 
 	var resp OTAUploadResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	decodeResult(t, w.Body.Bytes(), &resp)
 	if resp.UploadID == "" {
 		t.Fatal("uploadId should not be empty")
 	}
@@ -298,9 +327,7 @@ func TestControllerOTADownload(t *testing.T) {
 	}
 
 	var resp OTADownloadResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	decodeResult(t, w.Body.Bytes(), &resp)
 	if resp.FileName != "fw.tgz" {
 		t.Errorf("fileName: %s", resp.FileName)
 	}
@@ -347,9 +374,7 @@ func TestControllerOTAUpgrade(t *testing.T) {
 	}
 
 	var resp OTAUpgradeResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	decodeResult(t, w.Body.Bytes(), &resp)
 	if !resp.Available {
 		t.Fatal("expected available=true")
 	}
@@ -380,9 +405,7 @@ func TestControllerOTAUpgradeDegraded(t *testing.T) {
 	}
 
 	var resp OTAUpgradeResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	decodeResult(t, w.Body.Bytes(), &resp)
 	if resp.Available {
 		t.Fatal("expected available=false for firmware without upgrade script")
 	}
@@ -459,10 +482,9 @@ func TestControllerInstallFileTooLarge(t *testing.T) {
 		t.Fatalf("expected 400, got %d body=%s", w.Code, w.Body.String())
 	}
 
-	var errResp ErrorResponse
-	json.Unmarshal(w.Body.Bytes(), &errResp)
-	if errResp.Code != "FILE_TOO_LARGE" {
-		t.Errorf("expected code FILE_TOO_LARGE, got %s", errResp.Code)
+	env := decodeErrorEnvelope(t, w.Body.Bytes())
+	if !strings.Contains(env.ErrorMessage, "file too large") {
+		t.Errorf("expected error_message containing 'file too large', got %q", env.ErrorMessage)
 	}
 }
 
@@ -568,7 +590,7 @@ func TestControllerInstallWithTarGzBytes(t *testing.T) {
 		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
 	}
 	var resp InstallResponse
-	json.Unmarshal(w.Body.Bytes(), &resp)
+	decodeResult(t, w.Body.Bytes(), &resp)
 	if !resp.Success {
 		t.Errorf("expected success=true, got %+v", resp)
 	}
@@ -597,7 +619,7 @@ func TestControllerOTAUpgradeWithScriptInBody(t *testing.T) {
 	}
 
 	var uploadResp OTAUploadResponse
-	json.Unmarshal(w.Body.Bytes(), &uploadResp)
+	decodeResult(t, w.Body.Bytes(), &uploadResp)
 	if uploadResp.UploadID == "" {
 		t.Fatal("uploadId empty")
 	}
@@ -613,7 +635,7 @@ func TestControllerOTAUpgradeWithScriptInBody(t *testing.T) {
 	}
 
 	var upResp OTAUpgradeResponse
-	json.Unmarshal(w2.Body.Bytes(), &upResp)
+	decodeResult(t, w2.Body.Bytes(), &upResp)
 	if !upResp.Available {
 		t.Fatal("expected available=true")
 	}
@@ -625,7 +647,7 @@ func TestControllerOTAUpgradeWithScriptInBody(t *testing.T) {
 	r.ServeHTTP(w3, req3)
 
 	var dlResp OTADownloadResponse
-	json.Unmarshal(w3.Body.Bytes(), &dlResp)
+	decodeResult(t, w3.Body.Bytes(), &dlResp)
 	if dlResp.Status != "completed" {
 		t.Errorf("expected status 'completed', got '%s'", dlResp.Status)
 	}

@@ -11,6 +11,12 @@ import (
 )
 
 const (
+	Mmcblk0Boot1Path = "/dev/mmcblk0boot1"
+	NvmemSnPath      = "/sys/bus/nvmem/devices/1-006a0/nvmem"
+	CpuInfoPath      = "/proc/cpuinfo"
+)
+
+const (
 	PCIE_DEV    = "pcie"
 	SOC_DEV     = "soc"
 	UNKNOWN_DEV = "unknown"
@@ -34,18 +40,29 @@ var (
 	DeviceSnEx   string
 	ChipSn       string
 	ModuleType   string
+	ModuleTypeEx string // MODULE_TYPE 键（如 "16-BP1-11"），用于拼接 DEVICE_MODEL；与 ModuleType(CHIP) 区分
 )
 
-// ParseOEMConfig 纯函数：解析 OEMconfig.ini 文本，返回 (typeEx, chipSn, deviceSn, moduleType)。
-// 文件格式示例：
+// ParseOEMConfig 纯函数：解析 OEMconfig.ini 文本，返回
+// (typeEx, chipSn, deviceSn, moduleType, moduleTypeEx)。
+// 兼容两种格式：
 //
-//	PRODUCT = SE8
-//	SN = <chipSn>
-//	SN = <deviceSn>
-//	CHIP = <moduleType>
+//	旧式（两条 SN 行）：
+//	  PRODUCT = SE8
+//	  SN = <chipSn>
+//	  SN = <deviceSn>
+//	  CHIP = <moduleType>
+//	新式（SN + DEVICE_SN 独立键，如 SE9）：
+//	  PRODUCT = SE9
+//	  SN = <chipSn>
+//	  DEVICE_SN = <deviceSn>
+//	  MODULE_TYPE = 16-BP1-11
+//	  CHIP = BM1688
 //
-// 第一条 SN 视为 ChipSn，第二条视为 DeviceSn（与 bmssm 行为一致）。
-func ParseOEMConfig(content string) (typeEx, chipSn, deviceSn, moduleType string) {
+// moduleType = CHIP 键（BM1688，供 metrics.ChipCapacity 查算力）；
+// moduleTypeEx = MODULE_TYPE 键（16-BP1-11，供拼接 DEVICE_MODEL，对齐 get_info
+// "PRODUCT MODULE_TYPE" 格式）。DeviceSn 优先 DEVICE_SN 键，无则回退第二条 SN。
+func ParseOEMConfig(content string) (typeEx, chipSn, deviceSn, moduleType, moduleTypeEx string) {
 	var snLines []string
 	for _, line := range strings.Split(content, "\n") {
 		// 形如 "KEY = VALUE"，去掉 KEY 与 '=' 后剩余作为值
@@ -65,22 +82,34 @@ func ParseOEMConfig(content string) (typeEx, chipSn, deviceSn, moduleType string
 			}
 		case "SN":
 			snLines = append(snLines, val)
+		case "DEVICE_SN":
+			if deviceSn == "" {
+				deviceSn = val
+			}
 		case "CHIP":
 			if moduleType == "" {
 				moduleType = val
 			}
+		case "MODULE_TYPE":
+			if moduleTypeEx == "" {
+				moduleTypeEx = val
+			}
 		}
 	}
-	if len(snLines) > 0 {
+	// ChipSn：第一条 SN（bmssm 兼容：两条 SN 时第一条为 ChipSn）
+	if len(snLines) > 0 && chipSn == "" {
 		chipSn = snLines[0]
 	}
-	if len(snLines) > 1 {
+	// DeviceSn：优先 DEVICE_SN 独立键（SE9 格式）；无则回退第二条 SN（旧式）
+	if deviceSn == "" && len(snLines) > 1 {
 		deviceSn = snLines[1]
 	}
 	return
 }
 
 // LoadFromOEM 从 OEMconfig.ini 文件加载并填充包级状态（SOC 路径）。
+// 对齐 get_info.sh：bm1688/cv186ah 的 SN 优先从 /dev/mmcblk0boot1 读（offset 0=CHIP_SN，
+// offset 32=DEVICE_SN），bm1684x/bm1684 优先从 nvmem 读（offset 0/512）；读不到再回退 OEMconfig。
 func LoadFromOEM(path string) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -88,7 +117,94 @@ func LoadFromOEM(path string) {
 	}
 	DeviceType = SOC_DEV
 	DeviceRole = SE5
-	DeviceTypeEx, ChipSn, DeviceSnEx, ModuleType = ParseOEMConfig(string(data))
+	DeviceTypeEx, ChipSn, DeviceSnEx, ModuleType, ModuleTypeEx = ParseOEMConfig(string(data))
+	// SN 优先走 get_info 的原始设备路径（mmcblk0boot1 / nvmem），OEMconfig 作回退
+	readSnFromRaw()
+}
+
+// readSnFromRaw 按 CPU 型号从原始设备路径读 SN，覆盖 OEMconfig 解析值（仅成功覆盖）。
+// 与 get_info.sh 的 SN 分支一致：
+//
+//	bm1688/cv186ah → /dev/mmcblk0boot1 offset 0/32
+//	bm1684x/bm1684 → nvmem offset 0/512
+func readSnFromRaw() {
+	cm := ReadCpuModel(CpuInfoPath)
+	switch {
+	case cm == "bm1688" || cm == "cv186ah":
+		if chip, dev := readSnFromMmcblkBoot1(Mmcblk0Boot1Path); chip != "" || dev != "" {
+			if chip != "" {
+				ChipSn = chip
+			}
+			if dev != "" {
+				DeviceSnEx = dev
+			}
+		}
+	case cm == "bm1684x" || cm == "bm1684":
+		if chip, dev := readSnFromNvmem(NvmemSnPath); chip != "" || dev != "" {
+			if chip != "" {
+				ChipSn = chip
+			}
+			if dev != "" {
+				DeviceSnEx = dev
+			}
+		}
+	}
+}
+
+// ReadCpuModel 从 /proc/cpuinfo 读 "model name" 字段（小写），对齐 get_info.sh CPU_MODEL。
+func ReadCpuModel(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "model name") {
+			eq := strings.Index(line, ":")
+			if eq < 0 {
+				continue
+			}
+			return strings.ToLower(strings.TrimSpace(line[eq+1:]))
+		}
+	}
+	return ""
+}
+
+// readSnFromMmcblkBoot1 从 /dev/mmcblk0boot1 读 CHIP_SN(offset 0) 和 DEVICE_SN(offset 32)，
+// 各 32 字节，去掉 \0 与首尾空白。对齐 get_info.sh od_read_char 0/32 32。
+func readSnFromMmcblkBoot1(path string) (chipSn, deviceSn string) {
+	return readSnAtOffsets(path, 0, 32)
+}
+
+// readSnFromNvmem 从 nvmem 读 CHIP_SN(offset 0) 和 DEVICE_SN(offset 512)，各 32 字节。
+// 对齐 get_info.sh od_read_char 0/512 32。
+func readSnFromNvmem(path string) (chipSn, deviceSn string) {
+	return readSnAtOffsets(path, 0, 512)
+}
+
+// readSnAtOffsets 打开 path，分别从 chipOff/devOff 各读 32 字节，去 \0 与空白。
+func readSnAtOffsets(path string, chipOff, devOff int64) (chipSn, deviceSn string) {
+	f, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	chipSn = readFixedString(f, chipOff, 32)
+	deviceSn = readFixedString(f, devOff, 32)
+	return
+}
+
+// readFixedString 在 f 的 offset 处读 n 字节，去掉 \0 与首尾空白。
+// ReadAt 在读到部分字节后也可能返回 io.EOF/ErrUnexpectedEOF，只要 read>0 即视为成功，
+// 避免短文件（如 nvmem DEVICE_SN 偏移接近 EOF）丢弃已读到的有效字节。
+func readFixedString(f *os.File, offset int64, n int) string {
+	buf := make([]byte, n)
+	read, _ := f.ReadAt(buf, offset)
+	if read == 0 {
+		return ""
+	}
+	s := strings.TrimRight(string(buf[:read]), "\x00")
+	return strings.TrimSpace(s)
 }
 
 // GetDeviceInfo 探测设备信息并填充包级状态。失败降级为 UNKNOWN_DEV，不返回错误阻断启动。
@@ -98,7 +214,14 @@ func GetDeviceInfo() {
 
 // getDeviceInfo 接受路径参数，供测试注入临时路径。
 func getDeviceInfo(i2cPath, oemPath, boardIPPath string) {
+	// 清旧值，避免二次调用（重检测/测试）时上一分支残留污染本次结果
 	DeviceType = UNKNOWN_DEV
+	DeviceRole = ""
+	DeviceTypeEx = ""
+	DeviceSnEx = ""
+	ChipSn = ""
+	ModuleType = ""
+	ModuleTypeEx = ""
 
 	// 1) I2C device information 优先（与 bmssm 顺序一致）
 	if ok, _ := system.PathExists(i2cPath); ok {

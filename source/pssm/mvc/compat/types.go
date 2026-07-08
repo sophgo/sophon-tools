@@ -8,57 +8,6 @@
 // 推荐新客户端使用受 JWT 保护的正路 /api/v1/*。
 package compat
 
-import "ssm/global"
-
-// ---------------------------------------------------------------
-// SsmResult 信封（对应 bmssm client.HttpResponse）
-// ---------------------------------------------------------------
-
-// SsmResult 为 bmssm 兼容响应信封。
-// 成功：Code=0, Msg="请求成功"
-// 失败：Code=1, Msg="请求失败"
-type SsmResult struct {
-	Code         int         `json:"code"`
-	Msg          string      `json:"msg"`
-	ErrorCode    int         `json:"error_code"`
-	ErrorMessage string      `json:"error_message"`
-	DeviceSn     string      `json:"deviceSn,omitempty"`
-	Result       interface{} `json:"result,omitempty"`
-}
-
-// SsmOK 构造成功 SsmResult。
-// 信封 DeviceSn = global.DeviceSnEx（sophliteos GetCtrlBasic/GetCtrlResource 从信封取 DeviceSn）。
-func SsmOK(result interface{}) SsmResult {
-	return SsmResult{
-		Code:     0,
-		Msg:      "请求成功",
-		DeviceSn: global.DeviceSnEx,
-		Result:   result,
-	}
-}
-
-// SsmErr 构造失败 SsmResult。
-// 信封 DeviceSn = global.DeviceSnEx（与 SsmOK 一致，bmssm HttpResponse 行为）。
-func SsmErr(msg string) SsmResult {
-	return SsmResult{
-		Code:         1,
-		Msg:          "请求失败",
-		ErrorMessage: msg,
-		DeviceSn:     global.DeviceSnEx,
-	}
-}
-
-// SsmErrCode 构造带错误码的失败 SsmResult。
-func SsmErrCode(code int, msg string) SsmResult {
-	return SsmResult{
-		Code:         1,
-		Msg:          "请求失败",
-		ErrorCode:    code,
-		ErrorMessage: msg,
-		DeviceSn:     global.DeviceSnEx,
-	}
-}
-
 // ---------------------------------------------------------------
 // 请求类型
 // ---------------------------------------------------------------
@@ -140,8 +89,9 @@ type OtaVersion struct {
 
 // SystemLoginResponse 系统登录响应（对应 bmssm RespLogin/sophliteos SystemLoginResponse）。
 type SystemLoginResponse struct {
-	Token string `json:"token"`
-	Role  string `json:"role"`
+	Token      string `json:"token"`
+	Role       string `json:"role"`
+	ChangePass bool   `json:"changePass,omitempty"`
 }
 
 // Ip IP 信息（对应 sophliteos Ip）。
@@ -225,6 +175,7 @@ type CtrlBasicSystem struct {
 // CtrlResource 控制板算力信息（对应 sophliteos CtrlResource）。
 type CtrlResource struct {
 	DeviceSn              string                `json:"deviceSn"`
+	DeviceType            string                `json:"deviceType"`
 	DeviceModel           string                `json:"deviceModel"`
 	CollectDateTime       string                `json:"collectDateTime"`
 	Sslots                []interface{}         `json:"sslots"`

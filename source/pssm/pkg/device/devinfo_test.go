@@ -11,7 +11,7 @@ func TestParseOEMConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ti, cs, ds, mt := ParseOEMConfig(string(data))
+	ti, cs, ds, mt, _ := ParseOEMConfig(string(data))
 	if ti != "SE8" {
 		t.Fatalf("typeEx=%q", ti)
 	}
@@ -27,7 +27,7 @@ func TestParseOEMConfig(t *testing.T) {
 }
 
 func TestParseOEMConfigEmpty(t *testing.T) {
-	ti, cs, ds, mt := ParseOEMConfig("")
+	ti, cs, ds, mt, _ := ParseOEMConfig("")
 	if ti != "" || cs != "" || ds != "" || mt != "" {
 		t.Fatalf("expected all empty: %q %q %q %q", ti, cs, ds, mt)
 	}
@@ -374,4 +374,71 @@ func resetGlobals() {
 	DeviceSnEx = ""
 	ChipSn = ""
 	ModuleType = ""
+}
+
+// TestParseOEMConfigSE9Format SE9 用 SN + DEVICE_SN 独立键（非两条 SN 行）。
+// 回归：此前 ParseOEMConfig 不认 DEVICE_SN 键，导致 SE9 deviceSn 为空。
+// 对齐 get_info.sh 从 mmcblk0boot1 offset 32 读出的 DEVICE_SN。
+func TestParseOEMConfigSE9Format(t *testing.T) {
+	content := `[base]
+SN = HQDZKF4BDJCBE0042
+DEVICE_SN = HQDZW2DBDJCBG0042
+MAC0 = e0a50901208f
+PRODUCT_TYPE = 0x10
+MODULE_TYPE = 16-BP1-11
+VENDER = SOPHGO
+PRODUCT = SE9
+CHIP = BM1688
+`
+	ti, cs, ds, mt, mte := ParseOEMConfig(content)
+	if ti != "SE9" {
+		t.Fatalf("typeEx=%q, want SE9", ti)
+	}
+	if cs != "HQDZKF4BDJCBE0042" {
+		t.Fatalf("chipSn=%q, want HQDZKF4BDJCBE0042", cs)
+	}
+	if ds != "HQDZW2DBDJCBG0042" {
+		t.Fatalf("deviceSn=%q, want HQDZW2DBDJCBG0042", ds)
+	}
+	if mt != "BM1688" {
+		t.Fatalf("moduleType=%q, want BM1688", mt)
+	}
+	if mte != "16-BP1-11" {
+		t.Fatalf("moduleTypeEx=%q, want 16-BP1-11", mte)
+	}
+}
+
+// TestReadSnFromMmcblkBoot1 验证 SE9(bm1688) 从 mmcblk0boot1 offset 0/32 读 SN，
+// 对齐 get_info.sh。用临时文件模拟 32 字节定长字段（\0 结尾）。
+func TestReadSnFromMmcblkBoot1(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "boot1")
+	// offset 0: chipSn (32B), offset 32: deviceSn (32B)
+	buf := make([]byte, 64)
+	copy(buf[0:], []byte("HQDZKF4BDJCBE0042"))
+	copy(buf[32:], []byte("HQDZW2DBDJCBG0042"))
+	if err := os.WriteFile(f, buf, 0644); err != nil {
+		t.Fatal(err)
+	}
+	chip, dev := readSnFromMmcblkBoot1(f)
+	if chip != "HQDZKF4BDJCBE0042" {
+		t.Errorf("chipSn=%q, want HQDZKF4BDJCBE0042", chip)
+	}
+	if dev != "HQDZW2DBDJCBG0042" {
+		t.Errorf("deviceSn=%q, want HQDZW2DBDJCBG0042", dev)
+	}
+}
+
+// TestReadCpuModel 从 /proc/cpuinfo 文本解析 model name（小写）。
+func TestReadCpuModel(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "cpuinfo")
+	content := `processor : 0
+BogoMIPS : 16.66
+model name : bm1688
+Features : fp asimd`
+	if err := os.WriteFile(f, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if got := ReadCpuModel(f); got != "bm1688" {
+		t.Errorf("cpuModel=%q, want bm1688", got)
+	}
 }

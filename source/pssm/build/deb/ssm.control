@@ -1,0 +1,11 @@
+Package: ssm
+Source: ssm
+Version: @VERSION@
+Architecture: @ARCH@
+Maintainer: Sophgo <support@sophgo.com>
+Priority: optional
+Section: admin
+Description: ssm - Sophon System Management
+ Sophon 设备系统管理后端（bmssm 现代化重构）。
+ 提供 /api/v1/* REST API、WebSocket 实时终端、文件管理、OTA 升级工作流、
+ 告警监控引擎、审计日志。默认监听 :9779，配置 SSM_CONF=/opt/sophon/ssm/config。

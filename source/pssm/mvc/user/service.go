@@ -83,3 +83,29 @@ func (s *UserService) Login(username, password string) (*User, error) {
 	}
 	return &user, nil
 }
+
+// FindUser 按 username 查询用户（不校验密码）。改密成功后用于回读 role 等字段。
+func (s *UserService) FindUser(username string) (*User, error) {
+	var user User
+	if err := s.db.Where("username = ?", username).First(&user).Error; err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+// ChangePassword 修改指定用户的密码：用 bcrypt 重新哈希并写回 DB。
+// 调用方负责校验旧密码（正式 token）或跳过（临时 token 首次改密）。
+func (s *UserService) ChangePassword(username, newPassword string) error {
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	res := s.db.Model(&User{}).Where("username = ?", username).Update("password_hash", string(hash))
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return errors.New("user not found")
+	}
+	return nil
+}

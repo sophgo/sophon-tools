@@ -7,9 +7,12 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"ssm/middleware"
+	"ssm/mvc/alarm"
 	"ssm/mvc/audit"
+	"ssm/mvc/logs"
 	"ssm/mvc/compat"
 	"ssm/mvc/docker"
+	"ssm/mvc/filemanage"
 	"ssm/mvc/hardware"
 	"ssm/mvc/health"
 	"ssm/mvc/network"
@@ -25,10 +28,14 @@ func Register(r *gin.Engine) {
 	// 用户模块控制器（使用 database.DB()）
 	userCtrl := user.DefaultController()
 	auditCtrl := audit.DefaultController()
+	logsCtrl := logs.DefaultController()
+	alarmCtrl := alarm.DefaultController()
 	netCtrl := network.DefaultController()
 	dockerCtrl := docker.DefaultController()
 	softwareCtrl := software.DefaultController()
 	hwCtrl := hardware.DefaultController()
+	fileCtrl := filemanage.DefaultController()
+	compatCtrl := compat.DefaultController()
 
 	// 公开：仅 login（含独立防爆破限流，约 5 次/12s/IP）
 	public := r.Group("/api/v1")
@@ -37,38 +44,14 @@ func Register(r *gin.Engine) {
 		public.POST("/login", userCtrl.Login)
 	}
 
-	// ---------------------------------------------------------------
-	// 兼容路由：bmssm 旧路径 /bitmain/v1/ssm/*
-	// /login 公开+限流，其余路由受 JWT Auth 保护
-	// ---------------------------------------------------------------
-	compatCtrl := compat.DefaultController()
-	compatGroup := r.Group("/bitmain/v1/ssm")
-	compatGroup.POST("/login", middleware.IPRateLimit(5, 12*time.Second), compatCtrl.Login)
+	// WebSocket 实时终端：不走 Auth 中间件（浏览器无法加 Authorization header），
+	// handler 内从 query ?token= 手动鉴权。
+	r.GET("/api/v1/hardware/terminal", compatCtrl.TerminalWS)
 
-	protected := compatGroup.Group("", middleware.Auth())
-	{
-		protected.GET("/software/device/basic", compatCtrl.GetCtrlBasic)
-		protected.GET("/software/device/resource/list", compatCtrl.GetCtrlResource)
-		protected.GET("/hardware/ip", compatCtrl.GetIP)
-		protected.POST("/hardware/ip", compatCtrl.SetIP)
-		protected.GET("/hardware/nat", compatCtrl.GetNAT)
-		protected.POST("/hardware/nat", compatCtrl.AddNAT)
-		protected.DELETE("/hardware/nat/PREROUTING-:num", compatCtrl.DeleteNAT)
-		protected.POST("/hardware/devices/reset", compatCtrl.Reboot)
-		protected.POST("/hardware/devices/down", compatCtrl.Shutdown)
-		protected.POST("/software/notify/subscribe", compatCtrl.SubscribeAlarm)
-		protected.POST("/software/notify/unsubscribe", compatCtrl.UnsubscribeAlarm)
-		protected.GET("/software/notify/subscribe/:name", compatCtrl.GetSubscription)
-		protected.POST("/software/device/configure/basic", compatCtrl.SetBasic)
-		protected.POST("/software/device/configure/alarm", compatCtrl.SetAlarm)
-		protected.POST("/file/ota", compatCtrl.UploadFirmware)
-		protected.POST("/workflow/upgrade", compatCtrl.ExecuteUpgrade)
-		protected.GET("/workflow/upgrade", compatCtrl.ListWorkflows)
-		protected.GET("/workflow/upgrade/:id", compatCtrl.GetWorkflow)
-		protected.POST("/workflow/rollback", compatCtrl.Rollback)
-		protected.POST("/hardware/devices/scp", compatCtrl.SCP)
-		protected.POST("/hardware/devices/exec", compatCtrl.Exec)
-	}
+	// 文件下载：不走 Auth 中间件，handler 内从 query ?token= 或 Authorization 头
+	// 鉴权。<a download> 无法带 Authorization 头，故走 query token；浏览器原生
+	// 流式落盘，避免 XHR blob 把大文件整块读入内存。
+	r.GET("/api/v1/files/download", fileCtrl.Download)
 
 	// 受保护：其余都需要 Auth 中间件
 	// logout 也在此组，便于读 c.Get("user") 记审计
@@ -76,6 +59,7 @@ func Register(r *gin.Engine) {
 	api.Use(middleware.Auth())
 	{
 		api.POST("/logout", userCtrl.Logout)
+		api.POST("/password", userCtrl.ChangePassword)
 
 		// 用户管理
 		api.GET("/user", userCtrl.ListUsers)
@@ -85,10 +69,19 @@ func Register(r *gin.Engine) {
 		// 审计日志
 		api.GET("/audit", auditCtrl.ListLogs)
 
+		// 系统日志下载（流式 tar.gz: /var/log/kern* + syslog*）
+		api.GET("/logs/download", logsCtrl.DownloadLogs)
+
+		// 告警历史
+		api.GET("/alarms", alarmCtrl.ListAlarms)
+
 		// 网络
 		api.GET("/network/ip", netCtrl.GetIP)
 		api.PUT("/network/ip", netCtrl.SetIP)
-		api.POST("/network/nat", netCtrl.AddNAT)
+		// NAT（compat 形态：sophliteos 使用 AddTable/Dirt）
+		api.GET("/network/nat", compatCtrl.GetNAT)
+		api.POST("/network/nat", compatCtrl.AddNAT)
+		api.DELETE("/network/nat/:num", compatCtrl.DeleteNAT)
 
 		// Docker
 		api.GET("/docker/container", dockerCtrl.ListContainers)
@@ -103,15 +96,45 @@ func Register(r *gin.Engine) {
 		api.GET("/software", softwareCtrl.ListSoftware)
 		api.POST("/software/install", softwareCtrl.Install)
 		api.POST("/software/upgrade", softwareCtrl.Upgrade)
-		api.POST("/ota/upload", softwareCtrl.OTAUpload)
+		// OTA（compat 工作流：upload→upgrade→list/get workflow→rollback）
+		api.POST("/ota/upload", compatCtrl.UploadFirmware)
+		api.POST("/ota/upgrade", compatCtrl.ExecuteUpgrade)
+		api.GET("/ota/workflow", compatCtrl.ListWorkflows)
+		api.GET("/ota/workflow/:id", compatCtrl.GetWorkflow)
+		api.POST("/ota/rollback", compatCtrl.Rollback)
+		// 保留旧 uploadId 查询端点（不破坏既有调用方）
 		api.GET("/ota/download/:id", softwareCtrl.OTADownload)
-		api.POST("/ota/upgrade", softwareCtrl.OTAUpgrade)
 
 		// 硬件
 		api.GET("/hardware/health", hwCtrl.GetHealth)
 		api.POST("/hardware/reboot", hwCtrl.Reboot)
+		api.POST("/hardware/shutdown", compatCtrl.Shutdown)
 		api.GET("/hardware/led", hwCtrl.GetLED)
 		api.PUT("/hardware/led", hwCtrl.SetLED)
 		api.GET("/hardware/card", hwCtrl.GetCard)
+		api.POST("/hardware/exec", compatCtrl.Exec)
+		api.POST("/hardware/scp", compatCtrl.SCP)
+
+		// 设备信息 / 配置（原 compat /bitmain/v1/ssm/* 迁移）
+		api.GET("/device/basic", compatCtrl.GetCtrlBasic)
+		api.GET("/device/resource", compatCtrl.GetCtrlResource)
+		api.POST("/device/configure/basic", compatCtrl.SetBasic)
+		api.GET("/device/configure/alarm", compatCtrl.GetAlarm)
+		api.POST("/device/configure/alarm", compatCtrl.SetAlarm)
+
+		// 告警订阅
+		api.POST("/software/notify/subscribe", compatCtrl.SubscribeAlarm)
+		api.POST("/software/notify/unsubscribe", compatCtrl.UnsubscribeAlarm)
+		api.GET("/software/notify/subscribe/:name", compatCtrl.GetSubscription)
+
+		// 文件管理（download 已上移至公开路由，支持 query token）
+		api.GET("/files", fileCtrl.List)
+		api.GET("/files/content", fileCtrl.ReadContent)
+		api.POST("/files/upload", fileCtrl.Upload)
+		api.POST("/files/chmod", fileCtrl.Chmod)
+		api.POST("/files/chown", fileCtrl.Chown)
+		api.POST("/files/mkdir", fileCtrl.Mkdir)
+		api.POST("/files/rename", fileCtrl.Rename)
+		api.DELETE("/files", fileCtrl.Delete)
 	}
 }

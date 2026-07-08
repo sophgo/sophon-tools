@@ -12,9 +12,30 @@ import (
 	"ssm/config"
 	"ssm/middleware"
 	"ssm/pkg/auth"
+	"ssm/pkg/response"
 )
 
 func init() { gin.SetMode(gin.ReleaseMode) }
+
+// decodeResult 解析统一信封，将 env.Result 反序列化到 out。
+func decodeResult(t *testing.T, body []byte, out interface{}) {
+	t.Helper()
+	var env response.Result
+	if err := json.Unmarshal(body, &env); err != nil {
+		t.Fatalf("unmarshal envelope: %v body=%s", err, body)
+	}
+	if env.Code != 0 {
+		t.Fatalf("expected envelope code=0, got %d msg=%s err=%s body=%s",
+			env.Code, env.Msg, env.ErrorMessage, body)
+	}
+	raw, err := json.Marshal(env.Result)
+	if err != nil {
+		t.Fatalf("marshal result: %v", err)
+	}
+	if err := json.Unmarshal(raw, out); err != nil {
+		t.Fatalf("unmarshal result: %v body=%s", err, body)
+	}
+}
 
 func setupHardwareTest(t *testing.T) {
 	t.Helper()
@@ -27,7 +48,7 @@ func setupHardwareTest(t *testing.T) {
 func makeAuthToken(t *testing.T) string {
 	t.Helper()
 	secret := config.Conf.GetViper().GetString("server.authSecret")
-	tokenStr, _, err := auth.IssueToken("admin", secret)
+	tokenStr, _, err := auth.IssueToken("admin", secret, false)
 	if err != nil {
 		t.Fatalf("issue token: %v", err)
 	}
@@ -57,9 +78,7 @@ func TestGetHealthWithAuth(t *testing.T) {
 	}
 
 	var resp HealthResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v body=%s", err, w.Body.String())
-	}
+	decodeResult(t, w.Body.Bytes(), &resp)
 	if resp.Uptime == "" {
 		t.Fatal("expected non-empty uptime")
 	}
@@ -213,9 +232,7 @@ func TestGetLEDWithAuth(t *testing.T) {
 	}
 
 	var resp LEDResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v body=%s", err, w.Body.String())
-	}
+	decodeResult(t, w.Body.Bytes(), &resp)
 	if resp.Available {
 		t.Fatal("expected LED not available (degradation)")
 	}
@@ -263,9 +280,7 @@ func TestSetLEDWithAuth(t *testing.T) {
 	}
 
 	var resp LEDResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v body=%s", err, w.Body.String())
-	}
+	decodeResult(t, w.Body.Bytes(), &resp)
 	if resp.Available {
 		t.Fatal("expected LED not available (degradation)")
 	}
@@ -337,9 +352,7 @@ func TestGetCardWithAuth(t *testing.T) {
 	}
 
 	var resp CardResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v body=%s", err, w.Body.String())
-	}
+	decodeResult(t, w.Body.Bytes(), &resp)
 	if resp.Available {
 		t.Fatal("expected card not available (bmlib not integrated)")
 	}

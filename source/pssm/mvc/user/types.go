@@ -30,8 +30,22 @@ type LoginRequest struct {
 	Password string `json:"password" binding:"required"`
 }
 
-// LoginResponse 登录响应体。
+// LoginResponse 登录响应体。ChangePass=true 表示密码仍是默认密码，前端应引导改密。
 type LoginResponse struct {
+	Token       string    `json:"token"`
+	ExpiresAt   time.Time `json:"expiresAt"`
+	Role        string    `json:"role"`
+	ChangePass  bool      `json:"changePass,omitempty"`
+}
+
+// ChangePasswordRequest 改密请求体（明文，不 md5）。
+type ChangePasswordRequest struct {
+	OldPassword string `json:"oldPassword"`
+	NewPassword string `json:"newPassword" binding:"required"`
+}
+
+// ChangePasswordResponse 改密成功后返回新正式 token。
+type ChangePasswordResponse struct {
 	Token     string    `json:"token"`
 	ExpiresAt time.Time `json:"expiresAt"`
 	Role      string    `json:"role"`

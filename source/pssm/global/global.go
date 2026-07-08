@@ -10,7 +10,8 @@ var (
 	DeviceTypeEx string
 	DeviceSnEx   string
 	ChipSn       string
-	ModuleType   string
+	ModuleType   string // CHIP 键（如 BM1688），供 metrics.ChipCapacity 查算力
+	ModuleTypeEx string // MODULE_TYPE 键（如 16-BP1-11），供拼接 DEVICE_MODEL
 
 	// 服务信息
 	Started time.Time
