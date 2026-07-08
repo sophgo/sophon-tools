@@ -899,7 +899,12 @@ if [[ "${WORK_MODE}" == "SOC" ]]; then
             SDK_VERSION=$(grep "VERSION" /system/data/buildinfo.txt 2>/dev/null | awk '{print $2}')
         fi
     elif [[ "${CPU_MODEL}" == "bm1688" ]] || [[ "${CPU_MODEL}" == "cv186ah" ]]; then
-        SDK_VERSION=$(/usr/sbin/bm_version 2>/dev/null | grep "Gemini_SDK" | sed 's|Gemini_SDK: ||g')
+        # 新格式 bm_version 首行 "SophonSDK(BM1688) 2.1" → 取 ')' 之后的版本；
+        # 旧格式 "Gemini_SDK: x.y" 行次之。两者都缺失则 SDK_VERSION 留空。
+        SDK_VERSION=$(/usr/sbin/bm_version 2>/dev/null | grep -E "^SophonSDK\(" | sed -E 's|^SophonSDK\([^)]*\)[[:space:]]*||g')
+        if [[ -z "${SDK_VERSION}" ]]; then
+            SDK_VERSION=$(/usr/sbin/bm_version 2>/dev/null | grep "Gemini_SDK" | sed 's|Gemini_SDK: ||g')
+        fi
         LIBSOPHON_VERSION=$(readlink /opt/sophon/libsophon-current 2>/dev/null | awk -F'-' '{print $2}')
         SOPHON_MEDIA_VERSION=$(readlink /opt/sophon/sophon-ffmpeg-latest 2>/dev/null | awk -F'_' '{print $2}')
     fi

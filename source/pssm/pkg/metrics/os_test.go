@@ -192,6 +192,49 @@ func TestSdkVersionSOC186ah(t *testing.T) {
 	}
 }
 
+// TestSdkVersionSOC1688NewFormat 锁定新格式 bm_version 首行 "SophonSDK(BM1688) 2.1"。
+// SE9 实测 bm_version 输出此格式（无 Gemini_SDK 行），SDK 版本取 ')' 之后的 "2.1"。
+func TestSdkVersionSOC1688NewFormat(t *testing.T) {
+	fr := &fakeFileReader{files: map[string]string{
+		"/proc/cpuinfo": "model name : bm1688\n",
+	}}
+	cmd := &fakeCmdRunner{responses: map[string]cmdResp{
+		"uname": {"5.10.4-7bc3705129ea-sophon-custom\n", nil},
+		"/usr/sbin/bm_version": {
+			"SophonSDK(BM1688) 2.1\n" +
+				"sophon-soc-libsophon : 0.4.13\n" +
+				"sophon-soc-libsophon-dev : 0.4.13\n" +
+				"sophon-media-soc-sophon-ffmpeg : 2.1.0\n" +
+				"sophon-media-soc-sophon-opencv : 2.1.0\n" +
+				"BL2 bm1688:gf53dd39-dirty 2025-11-18T16:50:31+08:00\n",
+			nil,
+		},
+	}}
+	c := NewCollector(fr, cmd)
+	got := c.SdkVersion()
+	want := "2.1"
+	if got != want {
+		t.Errorf("SdkVersion() bm1688 new-format = %q, want %q", got, want)
+	}
+}
+
+// TestSdkVersionSOC1688NewFormatNoSDKLine 新格式 bm_version 无 "SophonSDK(" 首行也无
+// Gemini_SDK 行（异常输出），SDK 版本返空（libsophon 回退依赖真实软链，单测环境无）。
+func TestSdkVersionSOC1688NewFormatNoSDKLine(t *testing.T) {
+	fr := &fakeFileReader{files: map[string]string{
+		"/proc/cpuinfo": "model name : bm1688\n",
+	}}
+	cmd := &fakeCmdRunner{responses: map[string]cmdResp{
+		"uname":                {"5.10.4\n", nil},
+		"/usr/sbin/bm_version": {"sophon-soc-libsophon : 0.4.13\n", nil},
+	}}
+	c := NewCollector(fr, cmd)
+	// 单测环境无 /opt/sophon/libsophon-current 软链，libsophon 回退返空
+	if got := c.SdkVersion(); got != "" {
+		t.Errorf("SdkVersion() bm1688 no-sdk-line = %q, want empty", got)
+	}
+}
+
 func TestSdkVersionPCIE(t *testing.T) {
 	fr := &fakeFileReader{files: map[string]string{
 		"/proc/cpuinfo":                 "model name : Intel(R) Xeon(R) CPU\n",

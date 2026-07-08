@@ -94,10 +94,12 @@ var socModels = map[string]bool{
 // SdkVersion 获取 SophonSDK 版本（对齐 pget_info get_info.sh 的决策树）。
 //
 //	CPU_MODEL(/proc/cpuinfo model name) × KERNEL_VERSION(uname -r) × WORK_MODE：
-//	  - SOC + bm1684x/bm1684 + 内核 5.4：bm_version "SophonSDK version:" 行
+//	  - SOC + bm1684x/bm1684 + 内核 5.4：bm_version "SophonSDK version:" 行；
+//	    缺失时尝试新格式 "SophonSDK(<chip>) <ver>" 行
 //	  - SOC + bm1684x/bm1684 + 内核 4.9：/system/data/buildinfo.txt 行首 "VERSION" 的第 2 字段
-//	  - SOC + bm1688/cv186ah：bm_version "Gemini_SDK:" 行；缺失时回退 libsophon-current 软链
-//	    版本（对齐 get_info LIBSOPHON_VERSION，SE9 无 Gemini_SDK 行时前端"SDK版本"显示有意义值）
+//	  - SOC + bm1688/cv186ah：新格式 bm_version 首行 "SophonSDK(BM1688) 2.1" → "2.1"；
+//	    缺失时旧格式 "Gemini_SDK:" 行；仍缺失回退 libsophon-current 软链版本
+//	    （对齐 get_info LIBSOPHON_VERSION，SE9 无 SDK 行时前端"SDK版本"显示有意义值）
 //	  - PCIE（model name 非 SOC 型号）：/proc/bmsophon/driver_version 冒号第 2 字段再取第 1 词
 //	主分支失败/不命中返空串。
 func (c *Collector) SdkVersion() string {
@@ -108,15 +110,23 @@ func (c *Collector) SdkVersion() string {
 		switch cpu {
 		case "bm1684x", "bm1684":
 			if strings.HasPrefix(kernel, "5.4.") {
-				return c.bmVersionLine("SophonSDK version:")
+				if v := c.bmVersionLine("SophonSDK version:"); v != "" {
+					return v
+				}
+				// 新格式 bm_version 首行 "SophonSDK(<chip>) <ver>" 兼容
+				return c.bmVersionSophonSDK()
 			} else if strings.HasPrefix(kernel, "4.9.") {
 				return c.buildInfoVersion()
 			}
 		case "bm1688", "cv186ah":
+			// 新格式 "SophonSDK(BM1688) 2.1" 优先；旧格式 "Gemini_SDK: x.y" 次之；
+			// 都缺失（如老固件无 bm_version 或输出异常）→ 回退 LIBSOPHON_VERSION
+			if v := c.bmVersionSophonSDK(); v != "" {
+				return v
+			}
 			if v := c.bmVersionLine("Gemini_SDK:"); v != "" {
 				return v
 			}
-			// Gemini_SDK 行缺失（如 SE9）→ 回退 LIBSOPHON_VERSION（readlink libsophon-current）
 			return c.libsophonVersion()
 		}
 	} else {
@@ -173,6 +183,33 @@ func (c *Collector) bmVersionLine(prefix string) string {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, prefix) {
 			return strings.TrimSpace(line[len(prefix):])
+		}
+	}
+	return ""
+}
+
+// bmVersionSophonSDK 跑 bm_version，找新格式首行 "SophonSDK(<chip>) <ver>"，
+// 返回 ')' 之后的版本（trim）。新格式 bm_version（bm1688/SE9 等）首行示例：
+// "SophonSDK(BM1688) 2.1" → "2.1"。前缀 "SophonSDK(" 区别于旧格式 "SophonSDK version:"。
+func (c *Collector) bmVersionSophonSDK() string {
+	if c.cmd == nil {
+		return ""
+	}
+	out, err := c.cmd.Run(bmVersionPath)
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "SophonSDK(") {
+			continue
+		}
+		idx := strings.IndexByte(line, ')')
+		if idx < 0 {
+			continue
+		}
+		if v := strings.TrimSpace(line[idx+1:]); v != "" {
+			return v
 		}
 	}
 	return ""
