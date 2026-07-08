@@ -307,3 +307,51 @@ func TestPayload_AlarmRecJSONContract(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------
+// rateToPercent 阈值归一化
+// ---------------------------------------------------------------
+
+func TestRateToPercent(t *testing.T) {
+	cases := []struct {
+		in   float64
+		want int
+	}{
+		{0.95, 95},  // 0-1 小数（旧默认值 / *Scale 字段）
+		{0, 0},
+		{1, 100},    // 边界：视为 100%
+		{90, 90},    // 前端 threshold 页直接发 0-100 百分比
+		{10, 10},
+		{0.05, 5},
+	}
+	for _, tt := range cases {
+		got := rateToPercent(tt.in)
+		if got != tt.want {
+			t.Errorf("rateToPercent(%v) = %d, want %d", tt.in, got, tt.want)
+		}
+	}
+}
+
+// 阈值加载器注入后 evaluate 每 tick 重读，保证 SetAlarm 改阈值无需重启即生效。
+func TestEngineThresholdsLoaderReload(t *testing.T) {
+	m := &fakeMetrics{cpu: metrics.CPU{UtilizationRate: 50}}
+	eng := NewEngine(m, &fakeSubs{}, &fakePoster{}, Thresholds{CpuRate: 95},
+		"DEV", "BOARD", "CHIP")
+	// 初始阈值 95：cpuUtil=50 不告警
+	if alarms := eng.evaluate(); len(alarms) != 0 {
+		t.Fatalf("expected no alarm at 50%%<95%%, got %d", len(alarms))
+	}
+	// 注入加载器返回更低的阈值，模拟 SetAlarm 调低后实时生效
+	eng.SetThresholdsLoader(func() Thresholds { return Thresholds{CpuRate: 40} })
+	// 同一进程、不重启，下一 tick 即用新阈值：50%%>40%% → CPU 告警
+	alarms := eng.evaluate()
+	found := false
+	for _, a := range alarms {
+		if a.Code == CodeCPURateAlarm {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected CPU alarm after lowering threshold to 40%% (cpu=50%%), got %v", alarms)
+	}
+}

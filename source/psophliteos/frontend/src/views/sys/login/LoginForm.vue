@@ -59,14 +59,13 @@
   import { LoginStateEnum, useLoginState, useFormRules, useFormValid } from './useLogin';
   // import { useDesign } from '/@/hooks/web/useDesign';
   //import { onKeyStroke } from '@vueuse/core';
-  import md5 from 'md5';
 
   const ACol = Col;
   const ARow = Row;
   const FormItem = Form.Item;
   const InputPassword = Input.Password;
   const { t } = useI18n();
-  const { notification } = useMessage();
+  const { notification, createMessage } = useMessage();
   // const { prefixCls } = useDesign('login');
   const userStore = useUserStore();
 
@@ -94,10 +93,9 @@
     try {
       loading.value = true;
       const userInfo = await userStore.login({
-        password: md5(md5(data.password)),
-        // password: data.password,
+        password: data.password,
         username: data.account,
-        // mode: 'none', //不要默认的错误提示
+        mode: 'none',
       });
       if (userInfo) {
         notification.success({
@@ -105,13 +103,18 @@
           description: `${t('sys.login.loginSuccessDesc')}: ${userInfo.realName}`,
           duration: 3,
         });
+        // 兜底跳转：防止路由未正确替换仍停留在 /login
+        if (location.hash.includes('/login')) {
+          location.hash = '#/overview';
+        }
       }
     } catch (error) {
-      // createErrorModal({
-      //   title: t('sys.api.errorTip'),
-      //   content: (error as unknown as Error).message || t('sys.api.networkExceptionMsg'),
-      //   getContainer: () => document.body.querySelector(`.${prefixCls}`) || document.body,
-      // });
+      const errMsg =
+        (error as any)?.response?.data?.error_message ||
+        (error as any)?.response?.data?.error ||
+        (error as unknown as Error).message ||
+        t('sys.api.networkExceptionMsg');
+      createMessage.error(errMsg);
     } finally {
       loading.value = false;
     }

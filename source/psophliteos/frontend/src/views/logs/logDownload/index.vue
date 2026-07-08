@@ -33,14 +33,18 @@
   async function loading(fileName) {
     compState.loading = true;
     const ret = await LogDownload();
-    const blob = new Blob([ret.data], { type: 'application/x-compressed-tar' });
-    let filename = fileName || ' ';
+    // 守卫：ssm 无日志下载端点时 ret 可能直接是 Blob 或无 data/headers
+    const blobData = ret?.data ?? ret;
+    const blob = new Blob([blobData || []], { type: 'application/x-compressed-tar' });
+    let filename = fileName || 'sys_log.tgz';
     try {
-      filename = decodeURI(ret.headers['content-disposition'].split(';')[1].split('filename=')[1]);
+      const cd = ret?.headers?.['content-disposition'];
+      if (cd) {
+        filename = decodeURI(cd.split(';')[1].split('filename=')[1]);
+      }
     } catch (e) {
       console.log(e);
     }
-    // filename = filename.split('.')[0] + '.tgz';
     filename = 'sys_log.tgz';
 
     //  @ts-ignore

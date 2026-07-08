@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"ssm/database"
+	"ssm/pkg/response"
 )
 
 // ErrorResponse 统一错误响应。
@@ -38,8 +39,8 @@ func (ctrl *Controller) ListLogs(c *gin.Context) {
 
 	result, err := ctrl.svc.ListLogs(offset, limit)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "failed to query audit logs", Code: "DB_ERROR"})
+		c.JSON(http.StatusInternalServerError, response.Fail("failed to query audit logs"))
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	c.JSON(http.StatusOK, response.OK(result))
 }

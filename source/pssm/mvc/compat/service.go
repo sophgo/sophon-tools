@@ -85,6 +85,30 @@ type LoginResult struct {
 // CtrlBasic 装配
 // ---------------------------------------------------------------
 
+// displayDeviceType 去掉型号后缀，仅保留型号主体用于前端展示。
+// "SE7 V1" → "SE7"，"se9 v02" → "SE9"。空串返空。
+func displayDeviceType(s string) string {
+	fields := strings.Fields(s)
+	if len(fields) == 0 {
+		return strings.ToUpper(strings.TrimSpace(s))
+	}
+	return strings.ToUpper(fields[0])
+}
+
+// buildDeviceModel 拼接 DEVICE_MODEL = "PRODUCT MODULE_TYPE"（对齐 get_info.sh）。
+// moduleTypeEx 为空时回退 typeEx（i2c 分支已有完整 model 如 "SE7 V1"）。
+func buildDeviceModel(typeEx, moduleTypeEx string) string {
+	typeEx = strings.TrimSpace(typeEx)
+	moduleTypeEx = strings.TrimSpace(moduleTypeEx)
+	if typeEx == "" {
+		return ""
+	}
+	if moduleTypeEx == "" {
+		return typeEx
+	}
+	return typeEx + " " + moduleTypeEx
+}
+
 // BuildCtrlBasic 从全局设备信息和网卡信息装配 CtrlBasic。
 // bmlib 依赖字段（agencyModule、serviceAddress、chipSn 详细）返空/零值。
 // alarmThreshold 从配置读取，对齐 bmssm 的 deviceConf.json alarmthreshold。
@@ -124,24 +148,24 @@ func (s *CompatService) BuildCtrlBasic() (CtrlBasic, error) {
 		deviceType = "unknown"
 	}
 
-		// deviceName 和 alarmThreshold 从配置读取
-		config.Conf.RLock()
-		v := config.Conf.GetViper()
-		deviceName := v.GetString("server.deviceName")
-		at := AlarmThreshold{
-			BoardTemperature:     int(v.GetFloat64("alarmThreshold.boardTemperature")),
-			CoreTemperature:      int(v.GetFloat64("alarmThreshold.coreTemperature")),
-			CpuRate:              v.GetFloat64("alarmThreshold.cpuRate"),
-			DiskRate:             v.GetFloat64("alarmThreshold.diskRate"),
-			ExternalHardDiskRate: v.GetFloat64("alarmThreshold.externalHardDiskRate"),
-			FanSpeed:             v.GetInt("alarmThreshold.fanSpeed"),
-			SystemScale:          v.GetFloat64("alarmThreshold.systemScale"),
-			TotalMemoryScale:     v.GetFloat64("alarmThreshold.totalMemoryScale"),
-			TpuRate:              v.GetFloat64("alarmThreshold.tpuRate"),
-			TpuScale:             v.GetFloat64("alarmThreshold.tpuScale"),
-			VideoScale:           v.GetFloat64("alarmThreshold.videoScale"),
-		}
-		config.Conf.RUnlock()
+	// deviceName 和 alarmThreshold 从配置读取
+	config.Conf.RLock()
+	v := config.Conf.GetViper()
+	deviceName := v.GetString("server.deviceName")
+	at := AlarmThreshold{
+		BoardTemperature:     int(v.GetFloat64("alarmThreshold.boardTemperature")),
+		CoreTemperature:      int(v.GetFloat64("alarmThreshold.coreTemperature")),
+		CpuRate:              v.GetFloat64("alarmThreshold.cpuRate"),
+		DiskRate:             v.GetFloat64("alarmThreshold.diskRate"),
+		ExternalHardDiskRate: v.GetFloat64("alarmThreshold.externalHardDiskRate"),
+		FanSpeed:             v.GetInt("alarmThreshold.fanSpeed"),
+		SystemScale:          v.GetFloat64("alarmThreshold.systemScale"),
+		TotalMemoryScale:     v.GetFloat64("alarmThreshold.totalMemoryScale"),
+		TpuRate:              v.GetFloat64("alarmThreshold.tpuRate"),
+		TpuScale:             v.GetFloat64("alarmThreshold.tpuScale"),
+		VideoScale:           v.GetFloat64("alarmThreshold.videoScale"),
+	}
+	config.Conf.RUnlock()
 	if deviceName == "" {
 		deviceName = "device_1"
 	}
@@ -156,10 +180,10 @@ func (s *CompatService) BuildCtrlBasic() (CtrlBasic, error) {
 		ChipSn: chipSn,
 		Configure: CtrlBasicConfigure{
 			AgencyModule:   []AgencyModuleItem{}, // bmlib 依赖，返空
-			AlarmThreshold: at, // 从配置读取，对齐 bmssm alarmthreshold
+			AlarmThreshold: at,                   // 从配置读取，对齐 bmssm alarmthreshold
 			Basic: BasicInfo{
 				DeviceName: deviceName,
-				DeviceType: deviceTypeEx, // bmssm 兼容：deviceType 放型号（DeviceTypeEx），sophliteos 用 GetDeviceType 截取
+				DeviceType: displayDeviceType(deviceTypeEx), // 展示用型号主体（"SE7 V1"→"SE7"），完整型号在 System.DeviceTypeEx
 			},
 			ServiceAddress: ServiceAddressConfig{}, // bmlib 依赖，返空
 		},
@@ -249,12 +273,24 @@ func (s *CompatService) BuildCtrlResource() []CtrlResource {
 	// 按 chip 型号查表得到算力，对齐 bmssm bmlib Chipid 表
 	calcCapacity, chipType := metrics.ChipCapacity(global.ModuleType)
 
+	// deviceType 对齐 pget_info DEVICE_MODEL：i2c 路径（bm1684x/bm1684）即 model 字段
+	// （"SE7 V1"），OEM 路径即 PRODUCT。sophliteos overview store 从 resource 解构
+	// deviceType 用于"基础信息/设备概览"展示，缺字段会显示 undefined，故在此补齐。
+	// 展示用截取后的型号主体（"SE7 V1" → "SE7"），完整型号保留在 DeviceModel。
+	deviceType := displayDeviceType(global.DeviceTypeEx)
+	if deviceType == "" {
+		deviceType = "unknown"
+	}
+
 	return []CtrlResource{
 		{
-			DeviceSn: global.DeviceSnEx,
-			DeviceModel: global.DeviceTypeEx,
+			DeviceSn:        global.DeviceSnEx,
+			DeviceType:      deviceType,
+			// DEVICE_MODEL 对齐 get_info.sh "PRODUCT MODULE_TYPE"（如 "SE9 16-BP1-11"）。
+			// i2c 分支 ModuleTypeEx 为空 → 保持 DeviceTypeEx（如 "SE7 V1"）不变。
+			DeviceModel:     buildDeviceModel(global.DeviceTypeEx, global.ModuleTypeEx),
 			CollectDateTime: time.Now().Format("2006-01-02 15:04:05"),
-			Sslots: []interface{}{},
+			Sslots:          []interface{}{},
 			CentralProcessingUnit: CentralProcessingUnit{
 				BmssmVersion: global.Version.String(),
 				BuildTime:    global.Version.BuildTime,
@@ -271,15 +307,15 @@ func (s *CompatService) BuildCtrlResource() []CtrlResource {
 					Temperature: m.BoardTemp(),
 					Chip: []ChipInfo{
 						{
-							ChipSn:                   chipSn,
-							Temperature:              m.ChipTemp(),
-							UtilizationRate:          m.TPUUsage(),
-							Memory:                   tpuMem,
-							CalculationCapacity:      calcCapacity,
-							CalculationCapacityInt8:  calcCapacity,
-							CalculationCapacityFp16:  calcCapacity / 4,
-							CalculationCapacityFp32:  calcCapacity / 8,
-							ChipType:                 chipType,
+							ChipSn:                  chipSn,
+							Temperature:             m.ChipTemp(),
+							UtilizationRate:         m.TPUUsage(),
+							Memory:                  tpuMem,
+							CalculationCapacity:     calcCapacity,
+							CalculationCapacityInt8: calcCapacity,
+							CalculationCapacityFp16: calcCapacity / 4,
+							CalculationCapacityFp32: calcCapacity / 8,
+							ChipType:                chipType,
 						},
 					},
 				},

@@ -289,3 +289,20 @@ func TestSdkVersionCmdNil(t *testing.T) {
 		t.Errorf("SdkVersion() cmd-nil = %q, want empty", got)
 	}
 }
+
+// TestParseLibsophonVersion 对齐 get_info awk -F'-' '{print $2}'。
+func TestParseLibsophonVersion(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"libsophon-0.4.13", "0.4.13"},
+		{"/opt/sophon/libsophon-0.4.13", "0.4.13"},
+		{"libsophon-0.5.3", "0.5.3"},
+		{"no-dash-here", "dash"}, // split by -: ["no","dash","here"] -> 第2段 "dash"
+		{"nodash", ""},
+		{"", ""},
+	}
+	for _, tt := range cases {
+		if got := parseLibsophonVersion(tt.in); got != tt.want {
+			t.Errorf("parseLibsophonVersion(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}

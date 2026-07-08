@@ -1,0 +1,5 @@
+#!/bin/bash
+# ssm deb postrm：卸载后刷新 systemd。
+set -e
+systemctl daemon-reload 2>/dev/null || true
+exit 0

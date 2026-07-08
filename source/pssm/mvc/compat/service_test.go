@@ -1,112 +1,12 @@
 package compat
 
 import (
-	"encoding/json"
 	"os"
 	"testing"
 
 	"ssm/config"
 	"ssm/global"
 )
-
-// ---------------------------------------------------------------
-// SsmResult 信封测试
-// ---------------------------------------------------------------
-
-func TestSsmOK(t *testing.T) {
-	result := map[string]string{"token": "abc123"}
-	resp := SsmOK(result)
-
-	if resp.Code != 0 {
-		t.Errorf("SsmOK Code = %d, want 0", resp.Code)
-	}
-	if resp.Msg != "请求成功" {
-		t.Errorf("SsmOK Msg = %q, want %q", resp.Msg, "请求成功")
-	}
-	if resp.Result == nil {
-		t.Fatal("SsmOK Result is nil")
-	}
-
-	// result 应该是传入的 map
-	data, _ := json.Marshal(resp)
-	var parsed map[string]interface{}
-	if err := json.Unmarshal(data, &parsed); err != nil {
-		t.Fatalf("unmarshal SsmOK: %v", err)
-	}
-	if parsed["code"] != float64(0) {
-		t.Errorf("parsed code = %v, want 0", parsed["code"])
-	}
-	tokenObj, ok := parsed["result"].(map[string]interface{})
-	if !ok {
-		t.Fatal("result is not an object")
-	}
-	if tokenObj["token"] != "abc123" {
-		t.Errorf("result.token = %v, want abc123", tokenObj["token"])
-	}
-}
-
-func TestSsmErr(t *testing.T) {
-	resp := SsmErr("something went wrong")
-
-	if resp.Code != 1 {
-		t.Errorf("SsmErr Code = %d, want 1", resp.Code)
-	}
-	if resp.Msg != "请求失败" {
-		t.Errorf("SsmErr Msg = %q, want %q", resp.Msg, "请求失败")
-	}
-	if resp.ErrorMessage != "something went wrong" {
-		t.Errorf("SsmErr ErrorMessage = %q, want %q", resp.ErrorMessage, "something went wrong")
-	}
-
-	data, _ := json.Marshal(resp)
-	var parsed map[string]interface{}
-	if err := json.Unmarshal(data, &parsed); err != nil {
-		t.Fatalf("unmarshal SsmErr: %v", err)
-	}
-	if parsed["code"] != float64(1) {
-		t.Errorf("parsed code = %v, want 1", parsed["code"])
-	}
-}
-
-func TestSsmErrCode(t *testing.T) {
-	resp := SsmErrCode(403, "forbidden")
-
-	if resp.Code != 1 {
-		t.Errorf("Code = %d, want 1", resp.Code)
-	}
-	if resp.ErrorCode != 403 {
-		t.Errorf("ErrorCode = %d, want 403", resp.ErrorCode)
-	}
-	if resp.ErrorMessage != "forbidden" {
-		t.Errorf("ErrorMessage = %q", resp.ErrorMessage)
-	}
-}
-
-func TestSsmResultEnvelopeRoundTrip(t *testing.T) {
-	// sophliteos 期望的 JSON 形状
-	okResp := SsmOK(map[string]interface{}{
-		"token": "my-jwt-token",
-		"role":  "admin",
-	})
-
-	data, err := json.Marshal(okResp)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-
-	var parsed map[string]interface{}
-	if err := json.Unmarshal(data, &parsed); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-
-	// 验证 sophliteos 字段都存在
-	fields := []string{"code", "msg", "error_code", "error_message", "result"}
-	for _, f := range fields {
-		if _, ok := parsed[f]; !ok {
-			t.Errorf("missing field %q in SsmResult JSON", f)
-		}
-	}
-}
 
 // ---------------------------------------------------------------
 // CIDR 掩码转换测试
@@ -311,9 +211,10 @@ func TestBuildCtrlBasicChipSn(t *testing.T) {
 		t.Errorf("DeviceName = %q, want %q (configurable, default 'device_1')",
 			basic.Configure.Basic.DeviceName, "device_1")
 	}
-	if basic.Configure.Basic.DeviceType != "SE7 V1" {
-		t.Errorf("Configure.Basic.DeviceType = %q, want %q (DeviceTypeEx, not DeviceType)",
-			basic.Configure.Basic.DeviceType, "SE7 V1")
+	// Basic.DeviceType 展示用截取后的型号主体（"SE7 V1" → "SE7"），
+	// 完整型号在 System.DeviceTypeEx。
+	if basic.Configure.Basic.DeviceType != "SE7" {
+		t.Errorf("Configure.Basic.DeviceType = %q, want SE7", basic.Configure.Basic.DeviceType)
 	}
 
 	// 确认 system 字段
@@ -402,5 +303,34 @@ func TestBuildCtrlBasicAlarmThreshold(t *testing.T) {
 	}
 	if at.VideoScale != 0.95 {
 		t.Errorf("VideoScale = %v, want 0.95", at.VideoScale)
+	}
+}
+
+func TestDisplayDeviceType(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"SE7 V1", "SE7"},
+		{"se9 v02", "SE9"},
+		{"SE5", "SE5"},
+		{"", ""},
+		{"  se6 ", "SE6"},
+	}
+	for _, tt := range cases {
+		if got := displayDeviceType(tt.in); got != tt.want {
+			t.Errorf("displayDeviceType(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestBuildDeviceModel(t *testing.T) {
+	cases := []struct{ typeEx, mte, want string }{
+		{"SE9", "16-BP1-11", "SE9 16-BP1-11"}, // SE9 OEM 分支
+		{"SE7 V1", "", "SE7 V1"},              // i2c 分支 ModuleTypeEx 空
+		{"", "16-BP1-11", ""},                 // 无 typeEx
+		{"SE9", "", "SE9"},
+	}
+	for _, tt := range cases {
+		if got := buildDeviceModel(tt.typeEx, tt.mte); got != tt.want {
+			t.Errorf("buildDeviceModel(%q,%q) = %q, want %q", tt.typeEx, tt.mte, got, tt.want)
+		}
 	}
 }

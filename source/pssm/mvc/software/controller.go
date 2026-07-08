@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 
 	"github.com/gin-gonic/gin"
+
+	"ssm/pkg/response"
 )
 
 // Controller 软件/OTA 模块 gin handler 集合。
@@ -32,13 +34,10 @@ func DefaultController() *Controller {
 func (ctrl *Controller) ListSoftware(c *gin.Context) {
 	software, err := ctrl.svc.ListSoftware()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, ErrorResponse{
-			Error: err.Error(),
-			Code:  "SOFTWARE_LIST_ERROR",
-		})
+		c.JSON(http.StatusInternalServerError, response.Fail(err.Error()))
 		return
 	}
-	c.JSON(http.StatusOK, software)
+	c.JSON(http.StatusOK, response.OK(software))
 }
 
 // ---------------------------------------------------------------
@@ -60,10 +59,7 @@ func (ctrl *Controller) Upgrade(c *gin.Context) {
 func (ctrl *Controller) handleSoftwareUpload(c *gin.Context, action string) {
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, ErrorResponse{
-			Error: "missing file field",
-			Code:  "BAD_REQUEST",
-		})
+		c.JSON(http.StatusBadRequest, response.Fail("missing file field"))
 		return
 	}
 	defer file.Close()
@@ -71,19 +67,13 @@ func (ctrl *Controller) handleSoftwareUpload(c *gin.Context, action string) {
 	// 文件名校验
 	origName := header.Filename
 	if !isValidPackageName(origName) {
-		c.JSON(http.StatusBadRequest, ErrorResponse{
-			Error: "invalid package filename (only letters, digits, _, -, . allowed, no path separators)",
-			Code:  "BAD_REQUEST",
-		})
+		c.JSON(http.StatusBadRequest, response.Fail("invalid package filename (only letters, digits, _, -, . allowed, no path separators)"))
 		return
 	}
 
 	// 大小限制
 	if ctrl.svc.maxSize > 0 && header.Size > ctrl.svc.maxSize {
-		c.JSON(http.StatusBadRequest, ErrorResponse{
-			Error: fmt.Sprintf("file too large: %d bytes (max %d)", header.Size, ctrl.svc.maxSize),
-			Code:  "FILE_TOO_LARGE",
-		})
+		c.JSON(http.StatusBadRequest, response.Fail(fmt.Sprintf("file too large: %d bytes (max %d)", header.Size, ctrl.svc.maxSize)))
 		return
 	}
 
@@ -93,29 +83,23 @@ func (ctrl *Controller) handleSoftwareUpload(c *gin.Context, action string) {
 
 	// 落盘
 	if err := c.SaveUploadedFile(header, savePath); err != nil {
-		c.JSON(http.StatusInternalServerError, ErrorResponse{
-			Error: fmt.Sprintf("save file: %v", err),
-			Code:  "SAVE_ERROR",
-		})
+		c.JSON(http.StatusInternalServerError, response.Fail(fmt.Sprintf("save file: %v", err)))
 		return
 	}
 
 	// 调用 service 安装
 	resp, err := ctrl.svc.InstallPackage(savePath, origName)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, ErrorResponse{
-			Error: err.Error(),
-			Code:  "INSTALL_ERROR",
-		})
+		c.JSON(http.StatusInternalServerError, response.Fail(err.Error()))
 		return
 	}
 
 	if !resp.Success {
-		c.JSON(http.StatusInternalServerError, resp)
+		c.JSON(http.StatusInternalServerError, response.Fail(resp.Message))
 		return
 	}
 
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, response.OK(resp))
 }
 
 // ---------------------------------------------------------------
@@ -126,10 +110,7 @@ func (ctrl *Controller) handleSoftwareUpload(c *gin.Context, action string) {
 func (ctrl *Controller) OTAUpload(c *gin.Context) {
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, ErrorResponse{
-			Error: "missing file field",
-			Code:  "BAD_REQUEST",
-		})
+		c.JSON(http.StatusBadRequest, response.Fail("missing file field"))
 		return
 	}
 	defer file.Close()
@@ -138,43 +119,31 @@ func (ctrl *Controller) OTAUpload(c *gin.Context) {
 
 	// 固件名称校验
 	if !isValidFirmwareName(origName) {
-		c.JSON(http.StatusBadRequest, ErrorResponse{
-			Error: fmt.Sprintf("invalid firmware filename: %s (allowed: .tgz, .bin)", origName),
-			Code:  "BAD_REQUEST",
-		})
+		c.JSON(http.StatusBadRequest, response.Fail(fmt.Sprintf("invalid firmware filename: %s (allowed: .tgz, .bin)", origName)))
 		return
 	}
 
 	// 大小限制
 	if ctrl.svc.maxSize > 0 && header.Size > ctrl.svc.maxSize {
-		c.JSON(http.StatusBadRequest, ErrorResponse{
-			Error: fmt.Sprintf("file too large: %d bytes (max %d)", header.Size, ctrl.svc.maxSize),
-			Code:  "FILE_TOO_LARGE",
-		})
+		c.JSON(http.StatusBadRequest, response.Fail(fmt.Sprintf("file too large: %d bytes (max %d)", header.Size, ctrl.svc.maxSize)))
 		return
 	}
 
 	// 落盘到临时路径
 	savePath := filepath.Join(ctrl.svc.otaDir, "tmp_"+sanitizeFileName(origName))
 	if err := c.SaveUploadedFile(header, savePath); err != nil {
-		c.JSON(http.StatusInternalServerError, ErrorResponse{
-			Error: fmt.Sprintf("save file: %v", err),
-			Code:  "SAVE_ERROR",
-		})
+		c.JSON(http.StatusInternalServerError, response.Fail(fmt.Sprintf("save file: %v", err)))
 		return
 	}
 
 	resp, err := ctrl.svc.UploadFirmware(savePath, origName, header.Size)
 	if err != nil {
 		os.Remove(savePath) // 清理临时文件
-		c.JSON(http.StatusBadRequest, ErrorResponse{
-			Error: err.Error(),
-			Code:  "UPLOAD_ERROR",
-		})
+		c.JSON(http.StatusBadRequest, response.Fail(err.Error()))
 		return
 	}
 
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, response.OK(resp))
 }
 
 // OTADownload 处理 GET /api/v1/ota/download/:id（受保护）。
@@ -182,23 +151,17 @@ func (ctrl *Controller) OTAUpload(c *gin.Context) {
 func (ctrl *Controller) OTADownload(c *gin.Context) {
 	uid := c.Param("id")
 	if uid == "" {
-		c.JSON(http.StatusBadRequest, ErrorResponse{
-			Error: "missing upload id",
-			Code:  "BAD_REQUEST",
-		})
+		c.JSON(http.StatusBadRequest, response.Fail("missing upload id"))
 		return
 	}
 
 	resp, err := ctrl.svc.GetFirmwareInfo(uid)
 	if err != nil {
-		c.JSON(http.StatusNotFound, ErrorResponse{
-			Error: err.Error(),
-			Code:  "NOT_FOUND",
-		})
+		c.JSON(http.StatusNotFound, response.Fail(err.Error()))
 		return
 	}
 
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, response.OK(resp))
 }
 
 // OTAUpgrade 处理 POST /api/v1/ota/upgrade（受保护）。
@@ -207,21 +170,15 @@ func (ctrl *Controller) OTADownload(c *gin.Context) {
 func (ctrl *Controller) OTAUpgrade(c *gin.Context) {
 	uid := c.Query("uploadId")
 	if uid == "" {
-		c.JSON(http.StatusBadRequest, ErrorResponse{
-			Error: "missing uploadId query parameter",
-			Code:  "BAD_REQUEST",
-		})
+		c.JSON(http.StatusBadRequest, response.Fail("missing uploadId query parameter"))
 		return
 	}
 
 	resp, err := ctrl.svc.ExecuteUpgrade(uid)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, ErrorResponse{
-			Error: err.Error(),
-			Code:  "UPGRADE_ERROR",
-		})
+		c.JSON(http.StatusInternalServerError, response.Fail(err.Error()))
 		return
 	}
 
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, response.OK(resp))
 }

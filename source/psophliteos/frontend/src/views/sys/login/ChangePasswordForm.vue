@@ -60,7 +60,6 @@
   import { useLoginState, useFormRules, LoginStateEnum, useFormValid } from './useLogin';
   import { changePassword } from '/@/api/sys/user';
   import { useMessage } from '/@/hooks/web/useMessage';
-  import md5 from 'md5';
   import { useUserStore } from '/@/store/modules/user';
 
   const { createMessage } = useMessage();
@@ -88,8 +87,8 @@
     const data = await validForm();
     if (!data) return;
     const params = {
-      password: md5(md5(data.password)),
-      newPassword: md5(md5(data.newPassword)),
+      oldPassword: data.password,
+      newPassword: data.newPassword,
     };
     loading.value = true;
 

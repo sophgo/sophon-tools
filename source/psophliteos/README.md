@@ -43,3 +43,48 @@ release/
 ## 安装运行
 - x86: `tar -xvf sophliteos-linux_amd64.tgz && sudo ./install.sh` 或 `sudo dpkg -i sophliteos_pcie_1.1.2.deb`
 - arm: `tar -xvf sophliteos-linux_arm64.tgz && sudo ./install.sh` 或 `sudo dpkg -i sophliteos_soc_1.1.2.deb`
+
+---
+
+## 登录页 LOGO 替换
+
+登录页的 LOGO（`class="sophgo_logo"`）保留可替换，其余页面的 sophgo logo（顶部用户下拉 `__header`、菜单 `menu_logo`、应用 `logo.png`、登录表单 `logo.png`）已移除。
+
+替换登录 LOGO 的两种方式：
+
+### 方式一：替换部署后的图片文件（无需重新构建）
+
+sophliteos 静态资源从 `/var/lib/sophliteos/dist/resource/` 提供，登录 LOGO 默认读取 `resource/img/login_logo.png`。
+
+```bash
+# 替换为目标 LOGO（建议 PNG，contain 缩放）
+sudo cp /path/to/your_logo.png /var/lib/sophliteos/dist/resource/img/login_logo.png
+```
+
+浏览器强刷（Ctrl+Shift+R）即可生效。
+
+> 注意：sophliteos deb 升级会刷新 `/var/lib/sophliteos/dist`，升级后需重新覆盖此文件。
+
+### 方式二：构建期注入自定义路径（持久，随升级保留）
+
+在 `source/psophliteos/frontend/.env`（或对应模式的 `.env.production`）设置：
+
+```bash
+# 任意可访问的 URL/路径，置空则不显示 LOGO
+VITE_GLOB_LOGIN_LOGO = /resource/img/your_login_logo.png
+```
+
+把你的 LOGO 放进 `source/psophliteos/frontend/public/resource/img/your_login_logo.png`，重新构建 deb：
+
+```bash
+cd source/psophliteos
+bash build/build-deb-sophliteos.sh 2.0.7 soc
+sudo dpkg -i release/sophliteos_soc_2.0.7.deb
+```
+
+该路径随 dist 打包，升级后保留。
+
+### 接口说明
+
+- `Login.vue` 通过 `import.meta.env.VITE_GLOB_LOGIN_LOGO` 读取 LOGO 路径（默认 `/resource/img/login_logo.png`），内联注入 `.sophgo_logo` 的 `background-image`。
+- `VITE_GLOB_APP_HIDE_MENU_LOGO=true` 可隐藏整个登录 LOGO。

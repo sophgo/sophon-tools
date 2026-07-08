@@ -79,6 +79,22 @@ const maintenance: AppRouteModule = {
         title: t('routes.dashboard.threshold'),
       },
     },
+    {
+      path: 'terminal',
+      name: 'Terminal',
+      component: () => import('/@/views/maintenance/terminal/index.vue'),
+      meta: {
+        title: t('routes.dashboard.terminal'),
+      },
+    },
+    {
+      path: 'filemanage',
+      name: 'FileManage',
+      component: () => import('/@/views/maintenance/filemanage/index.vue'),
+      meta: {
+        title: t('routes.dashboard.fileManage'),
+      },
+    },
   ],
 };
 

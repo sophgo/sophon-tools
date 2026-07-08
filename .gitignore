@@ -6,6 +6,11 @@ images/
 models/
 output/*
 !.gitkeep
+# psophliteos frontend src 下的 data/(icons.data) images/(logo/header) 是源码资源，需入库
+!source/psophliteos/frontend/src/**/data/
+!source/psophliteos/frontend/src/**/data/**
+!source/psophliteos/frontend/src/assets/images/
+!source/psophliteos/frontend/src/assets/images/**
 *.user
 *.zip
 *.tar
@@ -40,6 +45,26 @@ __pycache__
 # psophliteos 子工程的 build/ 是构建脚本与 DEBIAN 打包模板（源码），非产物，需入库
 !source/psophliteos/build/
 !source/psophliteos/build/**
+# psophliteos frontend/build/ 是 vben 构建配置（源码），非产物，需入库（事故曾丢）
+!source/psophliteos/frontend/build/
+!source/psophliteos/frontend/build/**
 # pssm 子工程的 build/ 是构建脚本（源码），非产物，需入库
 !source/pssm/build/
 !source/pssm/build/**
+
+# 构建产物（交叉编译二进制）
+source/pssm/ssm-arm64
+source/pssm/release/ssm
+source/psophliteos/sophliteos-arm64
+source/psophliteos/sophliteos-linux_*.tgz
+
+# sophliteos deb 构建产物
+source/psophliteos/build/tmp/
+source/psophliteos/release_version.txt
+source/psophliteos/dist/
+source/psophliteos/sophliteos
+source/psophliteos/sophliteos-linux_*.tgz
+source/psophliteos/build/sophliteos/DEBIAN/md5sums
+source/psophliteos/build/sophliteos/data/
+source/psophliteos/build/sophliteos_*.deb
+source/psophliteos/build/sophliteos/DEBIAN/control

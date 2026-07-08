@@ -1,7 +1,6 @@
 package initialization
 
 import (
-	"sophliteos/client/ssm"
 	"sophliteos/config"
 	"sophliteos/database"
 	"sophliteos/global"
@@ -25,7 +24,7 @@ func InitBase() {
 	// 日志处理
 	logger.InitLogging(logPath, config.Conf.GetName()+".log", logLevel)
 
-	// 初始化sqlite
+	// 初始化sqlite（保留 OptLog/Alarm 本地记录）
 	database.InitDB()
 
 	global.TimeOut, _ = time.ParseDuration("30s")
@@ -33,10 +32,6 @@ func InitBase() {
 	global.BlockAllRequests = false
 	global.Version = services.VersionInit("release_version.txt")
 
-	_, err := ssm.SubscribeAlarm()
-	if err != nil {
-		logger.Error("SubscribeAlarm error %v", err)
-	} else {
-		logger.Info("SubscribeAlarm Ok")
-	}
+	// ssm SubscribeAlarm 已移除：告警由 ssm /api/v1/* 直接提供，sophliteos 不再订阅。
+	logger.Info("InitBase done (ssm proxy mode)")
 }

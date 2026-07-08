@@ -141,14 +141,13 @@
       formState.fanSpeed = 9999;
       formState.boardTemperature = result.boardTemperature;
       formState.coreTemperature = result.coreTemperature;
-      formState.cpuRate = Math.round(result.cpuRate * 100);
+      // cpuRate/diskRate/tpuRate ssm 已是百分比（0-100），不再 *100
+      formState.cpuRate = Math.round(result.cpuRate);
+      formState.diskRate = Math.round(result.diskRate);
+      formState.tpuRate = Math.round(result.tpuRate);
+      // *Scale 字段为 0-1 分数，*100 转百分比
       formState.totalMemoryScale = Math.round(result.totalMemoryScale * 100);
-      // formState.systemScale = result.systemScale * 100;
-      // formState.videoScale = result.videoScale * 100;
       formState.tpuScale = Math.round(result.tpuScale * 100);
-      // formState.externalHardDiskRate = result.externalHardDiskRate * 100;
-      formState.diskRate = Math.round(result.diskRate * 100);
-      formState.tpuRate = Math.round(result.tpuRate * 100);
     }
   };
   const loading = ref(false);
@@ -184,8 +183,15 @@
             params[key] = Number(params[key]);
           }
         }
-        // 不需要转变的字段
-        const staticFields = ['fanSpeed', 'boardTemperature', 'coreTemperature'];
+        // 不需要 /100 的字段：已是百分比或绝对值
+        const staticFields = [
+          'fanSpeed',
+          'boardTemperature',
+          'coreTemperature',
+          'cpuRate',
+          'diskRate',
+          'tpuRate',
+        ];
         Object.keys(params).forEach((key) => {
           if (!staticFields.includes(key)) {
             params[key] = params[key] / 100;

@@ -11,7 +11,7 @@ case $(arch) in
   ;;
   *)
   echo "unsupported arch"
-  exit
+  exit 1
   ;;
 esac
 if [[ -d "release/${dir}" ]]; then
@@ -29,7 +29,8 @@ rm -rf /var/lib/sophliteos/dist
 
 cp -r dist /var/lib/sophliteos/
 cp "${dir}"sophliteos /bin
-cp config/sophliteos.yaml /etc/sophliteos/config
+# 配置文件仅在目标不存在时拷入模板，避免升级覆盖用户的 ssm.server/端口/日志等改动
+[ -f /etc/sophliteos/config/sophliteos.yaml ] || cp config/sophliteos.yaml /etc/sophliteos/config
 # 仅在目标 DB 不存在时拷入模板，避免覆盖已有用户/告警数据
 [ -f /var/lib/sophliteos/db/sophliteos.db ] || cp database/sophliteos.db /var/lib/sophliteos/db/sophliteos.db
 cp sophliteos.service /etc/systemd/system/
@@ -37,4 +38,5 @@ cp release_version.txt /var/lib/sophliteos
 
 systemctl daemon-reload
 systemctl enable sophliteos.service
-systemctl start sophliteos.service
+# 升级时重启；首次安装时启动
+systemctl restart sophliteos.service 2>/dev/null || systemctl start sophliteos.service

@@ -75,7 +75,7 @@
       width: 120,
     },
     pagination: false,
-    rowKey: 'deviceSn',
+    rowKey: 'key',
   });
   const [registerSysTable] = useTable({
     api: getSysTables,
@@ -87,7 +87,7 @@
       width: 120,
     },
     pagination: false,
-    rowKey: 'deviceSn',
+    rowKey: 'key',
   });
 
   async function add() {

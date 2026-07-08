@@ -20,6 +20,8 @@ export default {
   timeSetting: 'Time Setting',
   coreBoardMap: 'Core Board port Map',
   logDownload: 'logs Download',
+  terminal: 'Terminal',
+  fileManage: 'File Manager',
   content: {
     sysContent:
       'System OTA upgrade, suitable for version upgrade, does not support downgrade and cross version upgrade, otherwise it may cause system damage.',

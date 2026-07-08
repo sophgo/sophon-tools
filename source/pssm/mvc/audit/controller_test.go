@@ -12,6 +12,7 @@ import (
 	"ssm/config"
 	"ssm/middleware"
 	"ssm/pkg/auth"
+	"ssm/pkg/response"
 )
 
 func init() { gin.SetMode(gin.ReleaseMode) }
@@ -42,7 +43,7 @@ func TestListAuditLogsWithAuth(t *testing.T) {
 	api.GET("/audit", ctrl.ListLogs)
 
 	secret := config.Conf.GetViper().GetString("server.authSecret")
-	tokenStr, _, _ := auth.IssueToken("admin", secret)
+	tokenStr, _, _ := auth.IssueToken("admin", secret, false)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/audit?offset=0&limit=10", nil)
@@ -53,9 +54,17 @@ func TestListAuditLogsWithAuth(t *testing.T) {
 		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
 	}
 
-	var result PaginatedResult
-	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+	var resp response.Result
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("unmarshal: %v body=%s", err, w.Body.String())
+	}
+	if resp.Code != 0 {
+		t.Fatalf("expected code=0, got %d body=%s", resp.Code, w.Body.String())
+	}
+	raw, _ := json.Marshal(resp.Result)
+	var result PaginatedResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		t.Fatalf("unmarshal result: %v body=%s", err, w.Body.String())
 	}
 	if result.Total != 2 {
 		t.Fatalf("expected 2 logs, got %d", result.Total)

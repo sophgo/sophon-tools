@@ -87,10 +87,9 @@
   import type { UnwrapRef } from 'vue';
   import { ipGet, ipSet } from '/@/api/maintenance/index';
   import { Tabs, Modal } from 'ant-design-vue';
-  import { ExclamationCircleOutlined, CopyOutlined } from '@ant-design/icons-vue';
+  import { ExclamationCircleOutlined } from '@ant-design/icons-vue';
 
   import { useI18n } from '/@/hooks/web/useI18n';
-  import { copyTextToClipboard } from '/@/hooks/web/useCopyToClipboard';
   import { useMessage } from '/@/hooks/web/useMessage';
 
   import { IpSetParams } from '/@/api/maintenance/model/index';
@@ -117,7 +116,7 @@
   watch(
     () => wan.device,
     (value) => {
-      const currentNetCard: any = ipData.wan.find((item: any) => item.netCardName === value);
+      const currentNetCard: any = ipData.wan.find((item: any) => item.name === value);
       if (currentNetCard) {
         wan.ipType = currentNetCard?.dynamic + 1;
         wan.ip = currentNetCard?.ip || '';
@@ -232,72 +231,85 @@
   const init = async () => {
     const result = await ipGet();
     pageLoading.value = false;
-    if (result) {
+    if (result && Array.isArray(result)) {
       ipData.wan = result;
       if (!deviceStore.isSingleBoard) {
-        ipData.wan = result.filter((item) => item.netCardName.startsWith('enp'));
+        ipData.wan = result.filter(
+          (item) => item?.name && item.name.startsWith('enp'),
+        );
       }
       setInitValue();
     }
   };
   const setInitValue = () => {
     formItemList[0].options = ipData.wan.map((item: any) => ({
-      value: item.netCardName,
-      label: item.netCardName,
+      value: item.name,
+      label: item.name,
     }));
     wan.device = formItemList[0].options[0]?.value as any;
   };
-  // 复制地址
-  const copyAddress = () => {
-    const isSuccess = copyTextToClipboard(`${wan.ip}:8080`);
-    isSuccess && createMessage.success(t('sys.copySuccess'));
-  };
   const loading = ref(false);
   const submitForm = () => {
-    const content =
-      wan.ipType === 1
-        ? h('div', { style: { 'text-align': 'center', color: '#000', margin: '30px 0 0 -30px' } }, [
-            h('p', {}, t('maintenance.newworkSettings.ipRightOrNotNetword')),
-            h('p', {}, t('maintenance.newworkSettings.restartAfterSubmit')),
-            h('p', {}, [
-              h('span', {}, `${t('maintenance.newworkSettings.useAddress') + wan.ip}:8080 `),
-              h(CopyOutlined, {
-                title: t('maintenance.newworkSettings.copyAddress'),
-                style: { color: '#0960BC', cursor: 'pointer' },
-                onClick: copyAddress,
-              }),
-              h('span', {}, t('maintenance.newworkSettings.reOpenPage')),
-            ]),
-          ])
-        : h(
-            'div',
-            { style: { 'text-align': 'center', color: '#000', margin: '30px 0 0 -30px' } },
-            t('maintenance.newworkSettings.dynIpDialogContent'),
-          );
+    // 弹窗显示待应用的 IP 参数 + 确认。bm_set_ip 改 IP 后立即生效（不重启），
+    // 若 IP 变更，当前连接会当场断开，浏览器在途请求收不到响应——故提示用新 IP 重访。
+    const policyText = wan.ipType === 2 ? 'DHCP' : '静态';
+    const row = (label: string, val: string) =>
+      h('div', { style: { display: 'flex', justifyContent: 'space-between', margin: '4px 0' } }, [
+        h('span', { style: { color: '#888' } }, label),
+        h('span', { style: { 'font-family': 'monospace', color: '#000' } }, val || '-'),
+      ]);
+    const content = h('div', { style: { margin: '10px 0' } }, [
+      row(t('maintenance.newworkSettings.netCard'), wan.device),
+      row(t('maintenance.newworkSettings.ipType'), policyText),
+      ...(wan.ipType === 1
+        ? [
+            row(t('maintenance.newworkSettings.ip'), wan.ip),
+            row(t('maintenance.newworkSettings.subnetMask'), wan.subnetMask),
+            row(t('maintenance.newworkSettings.gateway'), wan.gateway),
+            row(t('maintenance.newworkSettings.dns'), wan.dns),
+          ]
+        : []),
+      h(
+        'p',
+        { style: { color: '#fa8c16', margin: '12px 0 4px', 'font-size': '13px' } },
+        '若 IP 变更，应用后当前连接会立即断开（无需重启），请用新 IP 重新访问页面。',
+      ),
+      h('p', { style: { color: '#000', 'font-weight': 550 } }, '确认是否继续设置 IP？'),
+    ]);
     Modal.confirm({
       title: t('sys.tips'),
       icon: h(ExclamationCircleOutlined),
-      width: 600,
+      width: 480,
       content,
       onOk() {
-        try {
-          loading.value = true;
-          const params = {
-            ...netMap[activeKey.value],
-          };
-          ipSet(params)
-            .then((res) => {
-              createMessage.success(res.msg);
-            })
-            .catch(() => {
-              createMessage.error('不支持修改ip');
-            });
-
-          // console.log(params);
-        } catch (error) {
-        } finally {
-          loading.value = false;
-        }
+        loading.value = true;
+        const params = {
+          ...netMap[activeKey.value],
+        };
+        ipSet(params)
+          .then((res) => {
+            // isTransformResponse:false 返回原始信封；code!=0 时按错误提示
+            if (res && res.code === 0) {
+              createMessage.success(res.msg || 'IP 设置成功');
+            } else {
+              createMessage.error(res?.error_message || res?.msg || 'IP 设置失败');
+            }
+          })
+          .catch((e) => {
+            // 多为 IP 变更后连接断开（收不到响应）；少数为参数非法 400。
+            const code = e?.response?.status;
+            if (code === 400 || code === 422) {
+              createMessage.error(e?.response?.data?.error_message || 'IP 参数不合法');
+            } else {
+              createMessage.warning(
+                'IP 设置请求已提交。若 IP 已变更，连接已断开，请用新 IP 重新访问；若未变更，请重试。',
+                5,
+              );
+            }
+          })
+          .finally(() => {
+            loading.value = false;
+          });
       },
       onCancel() {},
     });

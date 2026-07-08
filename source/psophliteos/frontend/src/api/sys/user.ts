@@ -10,11 +10,11 @@ import {
 import { ErrorMessageMode } from '/#/axios';
 
 enum Api {
-  Login = '/login',
-  Logout = '/logout',
-  GetUserInfo = '/getUserInfo',
-  GetPermCode = '/getPermCode',
-  Password = '/device/password',
+  Login = '/v1/login',
+  Logout = '/v1/logout',
+  GetUserInfo = '/v1/user',
+  GetPermCode = '/v1/getPermCode',
+  Password = '/v1/password',
   TestRetry = '/testRetry',
 }
 
@@ -35,14 +35,23 @@ export function loginApi(params: LoginParams, mode: ErrorMessageMode = 'message'
 }
 
 /**
- * @description: getUserInfo
+ * @description: getUserInfo（ssm 无 getUserInfo 端点，前端 mock）
  */
 export function getUserInfo() {
-  return defHttp.get<GetUserInfoModel>({ url: Api.GetUserInfo }, { errorMessageMode: 'none' });
+  return Promise.resolve({
+    userId: '1',
+    username: 'admin',
+    realName: '管理员',
+    avatar: '',
+    desc: 'manager',
+    homePath: '',
+    roles: [{ roleName: 'Super Admin', value: 'super' }],
+  } as GetUserInfoModel);
 }
 
 export function getPermCode() {
-  return defHttp.get<string[]>({ url: Api.GetPermCode });
+  // ssm 无权限码端点，mock
+  return Promise.resolve([] as string[]);
 }
 
 export function doLogout(params: LogoutParams) {

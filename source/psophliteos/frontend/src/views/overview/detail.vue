@@ -29,23 +29,27 @@
         <a-descriptions-item :label="t('overview.device.ip')">{{
           originData.deviceIp
         }}</a-descriptions-item>
-        <a-descriptions-item label="WAN IP">{{ originData.wanIp }}</a-descriptions-item>
+        <a-descriptions-item label="WAN IP">{{ originData.wanIp || '-' }}</a-descriptions-item>
         <a-descriptions-item label="LAN IP">
-          {{ originData.lanIp.split(',')[0] }}
-          <br />
-          {{ originData.lanIp.split(',')[1] }}
+          {{ (originData.lanIp || '').split(',')[0] || '-' }}
+          <br v-if="(originData.lanIp || '').split(',')[1]" />
+          {{ (originData.lanIp || '').split(',')[1] || '' }}
         </a-descriptions-item>
         <a-descriptions-item :label="t('overview.operatingSystem')">{{
           originData.operatingSystem
         }}</a-descriptions-item>
         <a-descriptions-item
-          v-for="item in originData.netCard"
-          :label="t('overview.netCard') + item.name"
-          :key="item.ip"
+          v-for="item in originData.netCard || []"
+          :label="t('overview.netCard') + (item.netCardName || item.name || '')"
+          :key="item.netCardName || item.name || item.ip"
         >
-          {{ t('overview.bandwidth') + '：' + item.bandwidth + t('overview.bandwidthUnit') }}
+          {{
+            t('overview.bandwidth') +
+            '：' +
+            (item.bandwidth > 0 ? item.bandwidth + t('overview.bandwidthUnit') : '未连接')
+          }}
           <br />
-          {{ t('overview.ip') + '：' + item.ip }}
+          {{ t('overview.ip') + '：' + (item.ip || '未分配') }}
           <br />
           {{ t('overview.mac') + '：' + item.mac }}
         </a-descriptions-item>
@@ -64,16 +68,22 @@
             currentBoardInfor.boardType
           }}</a-descriptions-item>
           <a-descriptions-item :label="t('overview.chip') + t('overview.health')">{{
-            chipStatus[currentBoardInfor.chip[0].health]
+            chipStatus[currentBoardInfor.chip?.[0]?.health] ?? '-'
           }}</a-descriptions-item>
           <a-descriptions-item :label="t('overview.ip')">{{
-            currentBoardInfor.netCard[0]?.ip
+            currentBoardInfor.coreSys?.netCard?.[0]?.ip ||
+            currentBoardInfor.netCard?.[0]?.ip
           }}</a-descriptions-item>
           <a-descriptions-item :label="t('overview.bandwidth')">{{
-            currentBoardInfor.netCard[0].bandwidth + t('overview.bandwidthUnit')
+            (currentBoardInfor.coreSys?.netCard?.[0]?.bandwidth ??
+              currentBoardInfor.netCard?.[0]?.bandwidth) > 0
+              ? (currentBoardInfor.coreSys?.netCard?.[0]?.bandwidth ??
+                  currentBoardInfor.netCard?.[0]?.bandwidth) + t('overview.bandwidthUnit')
+              : '未连接'
           }}</a-descriptions-item>
           <a-descriptions-item :label="t('overview.mac')">{{
-            currentBoardInfor.netCard[0].mac
+            currentBoardInfor.coreSys?.netCard?.[0]?.mac ||
+            currentBoardInfor.netCard?.[0]?.mac
           }}</a-descriptions-item>
         </a-descriptions>
       </a-col>
@@ -81,18 +91,10 @@
         <a-row class="w-full">
           <a-col :xs="24" :md="24">
             <GaugeChart
-              :value="currentBoardInfor.chip[0].temperature"
+              :value="currentBoardInfor.chip?.[0]?.temperature ?? 0"
               :unit="t('overview.coreTemperature') + '（℃）'"
             />
           </a-col>
-          <!-- <a-col :xs="24" :md="12">
-            <GaugeChart
-              :value="+(Math.max(0, currentBoardInfor.fanSpeed) / 1000).toFixed(0)"
-              :colors="['#80B1F9', '#0C33F5']"
-              :max="20"
-              :unit="t('overview.fanSpeed') + '（x1000r/min）'"
-            />
-          </a-col> -->
         </a-row>
       </a-col>
     </a-row>
@@ -183,9 +185,11 @@
   // 当前核心板信息
   const currentBoardInfor = computed(() => {
     try {
-      return originData.value.coreComputingUnit.board.find((board) => {
-        return board.boardSn === currentCore.value;
-      });
+      return (
+        originData.value.coreComputingUnit.board.find((board) => {
+          return board.boardSn === currentCore.value;
+        }) || {}
+      );
     } catch (error) {
       console.log(error);
       return {};
@@ -198,47 +202,64 @@
   const gridList = computed(() => {
     let result: any[] = [];
     if (activeKey.value === 'control' && originData.value.cpu) {
+      const cpu = originData.value.cpu || {};
+      const mem = originData.value.memory || {};
+      const disk0 = (originData.value.disk && originData.value.disk[0]) || {};
       result = [
         {
           title: t('overview.cpu'),
-          usage: originData.value.cpu.usage,
-          text: `${originData.value.cpu.cores}${t('overview.core')}${
-            originData.value.cpu.frequency / 1000
+          usage: cpu.utilizationRate ?? cpu.usage ?? 0,
+          text: `${cpu.cores ?? 0}${t('overview.core')}${
+            cpu.frequency ? (cpu.frequency / 1000).toFixed(1) : 0
           }GHz`,
         },
         {
           title: t('overview.memory'),
-          usage: originData.value.memory.usage,
-          total: originData.value.memory.total,
+          usage: mem.total
+            ? +(((mem.total - (mem.free ?? mem.available ?? mem.total)) / mem.total) * 100).toFixed(1)
+            : 0,
+          total: mem.total ?? 0,
         },
         {
           title: t('overview.disk'),
-          usage: originData.value.disk[0].usage,
-          total: originData.value.disk[0].total,
+          usage: disk0.total
+            ? +(((disk0.total - (disk0.free ?? disk0.total)) / disk0.total) * 100).toFixed(1)
+            : 0,
+          total: disk0.total ?? 0,
         },
       ];
-    } else if (activeKey.value === 'core' && currentBoardInfor.value.cpu) {
+    } else if (activeKey.value === 'core' && currentBoardInfor.value.boardSn) {
+      const board = currentBoardInfor.value;
+      const coreSys = board.coreSys || board;
+      const cpu = coreSys.cpu || board.cpu || {};
+      const mem = coreSys.memory || board.memory || {};
+      const disk0 = (board.disk && board.disk[0]) || (originData.value.disk && originData.value.disk[0]) || {};
+      const chip0 = board.chip?.[0] || {};
       result = [
         {
           title: t('overview.cpu'),
-          usage: currentBoardInfor.value.cpu.usage,
-          text: `${currentBoardInfor.value.cpu.cores}${t('overview.core')}${
-            currentBoardInfor.value.cpu.frequency / 1000
+          usage: cpu.utilizationRate ?? cpu.usage ?? 0,
+          text: `${cpu.cores ?? 0}${t('overview.core')}${
+            cpu.frequency ? (cpu.frequency / 1000).toFixed(1) : 0
           }GHz`,
         },
         {
           title: t('overview.memory'),
-          usage: currentBoardInfor.value.memory.usage,
-          total: currentBoardInfor.value.memory.total,
+          usage: mem.total
+            ? +(((mem.total - (mem.available ?? mem.free ?? mem.total)) / mem.total) * 100).toFixed(1)
+            : mem.usage ?? 0,
+          total: mem.total ?? 0,
         },
         {
           title: t('overview.disk'),
-          usage: currentBoardInfor.value.disk[0].usage,
-          total: currentBoardInfor.value.disk[0].total,
+          usage: disk0.total
+            ? +(((disk0.total - (disk0.free ?? disk0.total)) / disk0.total) * 100).toFixed(1)
+            : 0,
+          total: disk0.total ?? 0,
         },
         {
           title: t('overview.tpu'),
-          usage: currentBoardInfor.value.chip[0].tpuUtililizationRate,
+          usage: chip0.utilizationRate ?? chip0.tpuUtililizationRate ?? 0,
           text: computePower.value,
         },
       ];

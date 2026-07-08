@@ -2,7 +2,7 @@
 # aarch64 交叉编译（musl 全静态链接，修复真机 glibc 过旧）
 set -e
 cd "$(dirname "$0")/.."
-VERSION="${1:-1.0.0}"
+VERSION="${1:-2.0.0}"
 bash build/version.sh "$VERSION"
 read VERSION COMMIT BUILDTIME < <(tr '|' ' ' < build/version.txt)
 

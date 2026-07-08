@@ -13,6 +13,7 @@ import (
 	"ssm/config"
 	"ssm/middleware"
 	"ssm/pkg/auth"
+	"ssm/pkg/response"
 )
 
 func init() { gin.SetMode(gin.ReleaseMode) }
@@ -35,7 +36,7 @@ func TestGetIPWithAuth(t *testing.T) {
 	api.GET("/network/ip", ctrl.GetIP)
 
 	secret := config.Conf.GetViper().GetString("server.authSecret")
-	tokenStr, _, _ := auth.IssueToken("admin", secret)
+	tokenStr, _, _ := auth.IssueToken("admin", secret, false)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/network/ip", nil)
@@ -44,6 +45,14 @@ func TestGetIPWithAuth(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+
+	var resp response.Result
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v body=%s", err, w.Body.String())
+	}
+	if resp.Code != 0 {
+		t.Fatalf("expected code=0, got %d body=%s", resp.Code, w.Body.String())
 	}
 }
 
@@ -77,7 +86,7 @@ func TestSetIPWithAuth(t *testing.T) {
 	api.PUT("/network/ip", ctrl.SetIP)
 
 	secret := config.Conf.GetViper().GetString("server.authSecret")
-	tokenStr, _, _ := auth.IssueToken("admin", secret)
+	tokenStr, _, _ := auth.IssueToken("admin", secret, false)
 
 	body, _ := json.Marshal(SetIPRequest{
 		Device:  "eth0",
@@ -96,6 +105,17 @@ func TestSetIPWithAuth(t *testing.T) {
 	if w.Code != http.StatusOK && w.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 200 or 500, got %d body=%s", w.Code, w.Body.String())
 	}
+
+	var resp response.Result
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v body=%s", err, w.Body.String())
+	}
+	if w.Code == http.StatusOK && resp.Code != 0 {
+		t.Fatalf("expected code=0, got %d body=%s", resp.Code, w.Body.String())
+	}
+	if w.Code == http.StatusInternalServerError && resp.Code != 1 {
+		t.Fatalf("expected code=1, got %d body=%s", resp.Code, w.Body.String())
+	}
 }
 
 func TestAddNATWithAuth(t *testing.T) {
@@ -109,7 +129,7 @@ func TestAddNATWithAuth(t *testing.T) {
 	api.POST("/network/nat", ctrl.AddNAT)
 
 	secret := config.Conf.GetViper().GetString("server.authSecret")
-	tokenStr, _, _ := auth.IssueToken("admin", secret)
+	tokenStr, _, _ := auth.IssueToken("admin", secret, false)
 
 	body, _ := json.Marshal(NatRequest{
 		Direction: "in",
@@ -126,5 +146,16 @@ func TestAddNATWithAuth(t *testing.T) {
 	// iptables 在测试环境可能不可用，但 HTTP 层应响应
 	if w.Code != http.StatusOK && w.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 200 or 500, got %d body=%s", w.Code, w.Body.String())
+	}
+
+	var resp response.Result
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v body=%s", err, w.Body.String())
+	}
+	if w.Code == http.StatusOK && resp.Code != 0 {
+		t.Fatalf("expected code=0, got %d body=%s", resp.Code, w.Body.String())
+	}
+	if w.Code == http.StatusInternalServerError && resp.Code != 1 {
+		t.Fatalf("expected code=1, got %d body=%s", resp.Code, w.Body.String())
 	}
 }

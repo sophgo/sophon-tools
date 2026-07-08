@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e
 
 cp scrip/sophliteos.service scrip/install.sh  scrip/uninstall.sh scrip/upgrade.sh .
 

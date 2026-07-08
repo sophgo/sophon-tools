@@ -1,4 +1,3 @@
-import { defHttp } from '/@/utils/http/axios';
 import { getMenuListResultModel } from './model/menuModel';
 
 enum Api {
@@ -7,8 +6,8 @@ enum Api {
 
 /**
  * @description: Get user menu based on id
+ * ssm 无菜单端点，菜单由前端静态路由生成，此处 mock 返回空数组。
  */
-
-export const getMenuList = () => {
-  return defHttp.get<getMenuListResultModel>({ url: Api.GetMenuList });
+export const getMenuList = (): Promise<getMenuListResultModel> => {
+  return Promise.resolve([] as getMenuListResultModel);
 };

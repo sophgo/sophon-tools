@@ -1,8 +1,10 @@
 package initialization
 
 import (
+	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strings"
 	"sophliteos/config"
 	"sophliteos/logger"
 	"sophliteos/middleware"
@@ -18,8 +20,6 @@ func Routers() *gin.Engine {
 	Router := gin.New()
 	Router.Use(gin.Recovery())
 
-	// Router := gin.Default()
-
 	Router.MaxMultipartMemory = 64 << 20
 
 	systemRouter := router.RouterGroupApp.System
@@ -28,7 +28,12 @@ func Routers() *gin.Engine {
 	conf.Lock()
 	v := conf.GetViper()
 	path := v.GetString("server.www")
+	ssmServer := v.GetString("ssm.server")
 	conf.Unlock()
+
+	if ssmServer == "" {
+		ssmServer = "127.0.0.1:9779"
+	}
 
 	Router.StaticFile("/_app.config.js", path+"/_app.config.js")
 	Router.StaticFile("/favicon.ico", path+"/favicon.ico")
@@ -38,34 +43,71 @@ func Routers() *gin.Engine {
 
 	Router.Use(middleware.BlockerMiddleware())
 
-	PublicGroup := Router.Group("")
-	{
-		systemRouter.InitBaseRouter(PublicGroup) // 注册基础功能路由 不做鉴权
-		systemRouter.InitDownRouter(PublicGroup)
+	// 单点登录（单会话）本地端点：查询活跃会话 / 注册新会话（踢旧）/ 注销。
+	// 不反代到 ssm，仅 sophliteos web 层维护。
+	Router.GET("/api/sso/active", func(c *gin.Context) {
+		u, ok := middleware.SSOActive()
+		c.JSON(http.StatusOK, gin.H{"active": ok, "username": u})
+	})
+	Router.POST("/api/sso/register", func(c *gin.Context) {
+		var req struct {
+			Username string `json:"username"`
+			Token    string `json:"token"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil || req.Username == "" || req.Token == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+			return
+		}
+		middleware.SSORegister(req.Username, req.Token)
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+	Router.POST("/api/sso/logout", func(c *gin.Context) {
+		middleware.SSOLogout(middleware.SSORequestToken(c))
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	// /api/v1/* 反代到 ssm（鉴权由 ssm 处理）；前置 SSO 单会话校验
+	ssmTarget, err := url.Parse("http://" + ssmServer)
+	if err == nil {
+		proxy := httputil.NewSingleHostReverseProxy(ssmTarget)
+		// WebSocket 升级支持
+		originalDirector := proxy.Director
+		proxy.Director = func(req *http.Request) {
+			originalDirector(req)
+			// 保留 Host 便于 ssm 识别
+			req.Host = ssmTarget.Host
+		}
+		proxy.Transport = &http.Transport{
+			// 长连接支持（含 WebSocket）
+			MaxIdleConns: 100,
+		}
+		Router.Any("/api/v1/*any", middleware.SSO(), func(c *gin.Context) {
+			proxy.ServeHTTP(c.Writer, c.Request)
+		})
+	} else {
+		logger.Error("ssm server url parse error: %v", err)
 	}
 
-	PrivateGroup := Router.Group("")
-	PrivateGroup.Use(middleware.AuthMiddleware())
+	// 本地 sophliteos 功能路由（无本地 user 系统，依赖 ssm 反代鉴权后的同源访问）
+	LocalGroup := Router.Group("")
 	{
-
-		systemRouter.InitSsmUpgradeRouter(PrivateGroup)
-		systemRouter.InitUpgradeRouter(PrivateGroup)
-		systemRouter.InitVersionRouter(PrivateGroup)
-		systemRouter.InitBasicRouter(PrivateGroup)
-		systemRouter.InitResourceRouter(PrivateGroup)
-		systemRouter.InitPasswordRouter(PrivateGroup)
-		systemRouter.InitIpRouter(PrivateGroup)
-		systemRouter.InitAlarmRouter(PrivateGroup)
-		systemRouter.InitLogRouter(PrivateGroup)
-		systemRouter.InitOtaRouter(PrivateGroup)
-
+		systemRouter.InitOtaRouter(LocalGroup)
+		systemRouter.InitVersionRouter(LocalGroup)
+		systemRouter.InitUpgradeRouter(LocalGroup)
 	}
+
 	logger.Info("Router Init Ok")
 	return Router
 }
 
 // NewProxy 创建一个反向代理
 func NewProxy(target string) *httputil.ReverseProxy {
-	url, _ := url.Parse(target)
-	return httputil.NewSingleHostReverseProxy(url)
+	u, _ := url.Parse(target)
+	return httputil.NewSingleHostReverseProxy(u)
+}
+
+// isWebSocketRequest 判断是否为 WebSocket 升级请求。
+func isWebSocketRequest(r *http.Request) bool {
+	return strings.EqualFold(r.Header.Get("Connection"), "upgrade") &&
+		strings.EqualFold(r.Header.Get("Upgrade"), "websocket")
 }

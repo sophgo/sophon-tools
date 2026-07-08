@@ -3,7 +3,7 @@ import pkg from './package.json';
 import dayjs from 'dayjs';
 import { loadEnv } from 'vite';
 import { resolve } from 'path';
-import { generateModifyVars } from './build/generate/generateModifyVars';
+import { generateModifyVars } from './build/config/themeConfig';
 import { createProxy } from './build/vite/proxy';
 import { wrapperEnv } from './build/utils';
 import { createVitePlugins } from './build/vite/plugin';
@@ -64,7 +64,7 @@ export default ({ command, mode }: ConfigEnv): UserConfig => {
       pure: VITE_DROP_CONSOLE ? ['console.log', 'debugger'] : [],
     },
     build: {
-      target: 'es2015',
+      target: 'es2018',
       cssTarget: 'chrome80',
       outDir: OUTPUT_DIR,
       // minify: 'terser',
@@ -94,6 +94,10 @@ export default ({ command, mode }: ConfigEnv): UserConfig => {
         less: {
           modifyVars: generateModifyVars(),
           javascriptEnabled: true,
+          // 让 less 能从 node_modules 解析 @import（vben design 引用 antd less 变量）
+          paths: [resolve(__dirname, 'node_modules')],
+          // 注入 antd 变量到所有 less 文件（scoped less 也需 @screen-xl/@layout-* 等）
+          additionalData: `@import (reference) 'ant-design-vue/lib/style/themes/default.less';\n@import (reference) '${resolve(__dirname, 'src/design/color.less').replace(/\\/g, '/')}';\n@import (reference) '${resolve(__dirname, 'src/design/var/index.less').replace(/\\/g, '/')}';`,
         },
       },
     },

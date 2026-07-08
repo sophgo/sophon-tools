@@ -100,6 +100,13 @@ type Logger interface {
 	Errorf(format string, v ...interface{})
 }
 
+// Recorder 告警历史落库接口（依赖注入，由 mvc/alarm 实现）。
+// Record 应为 best-effort：失败仅返错，由引擎记日志不阻断。
+// pkg/alarm 不依赖 mvc/alarm，避免循环依赖；wiring 在 initialization。
+type Recorder interface {
+	Record(rec AlarmRec) error
+}
+
 // errPostFailed 测试用哨兵错误。
 var errPostFailed = &postError{}
 

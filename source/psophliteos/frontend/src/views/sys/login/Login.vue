@@ -1,6 +1,10 @@
 <template>
   <div :class="prefixCls" class="relative w-full h-full px-4">
-    <div class="sophgo_logo" v-if="isShowMenuLogo"></div>
+    <div
+      class="sophgo_logo"
+      v-if="isShowMenuLogo"
+      :style="{ backgroundImage: `url(${loginLogo})` }"
+    ></div>
     <div class="flex items-center absolute right-4 top-4">
       <AppDarkModeToggle class="enter-x mr-2" v-if="!sessionTimeout" />
       <AppLocalePicker
@@ -31,7 +35,6 @@
           >
             <span class="-enter-x xl:hidden"
               ><span class="liteos-title">
-                <img src="../../../assets/images/logo.png" />
                 {{ t('sys.login.signInTitle') }}
               </span></span
             >
@@ -74,6 +77,11 @@
   const showLocale = localeStore.getShowPicker;
   const title = computed(() => globSetting?.title ?? '');
   const isShowMenuLogo = computed(() => '' + globSetting.hideMenuLogo !== 'true');
+  // 登录页 LOGO 路径：可经构建期环境变量 VITE_GLOB_LOGIN_LOGO 覆盖（见 README）。
+  // 默认 /resource/img/login_logo.png；置空则不显示 LOGO。
+  const loginLogo = computed(
+    () => (import.meta.env.VITE_GLOB_LOGIN_LOGO as string) || '/resource/img/login_logo.png',
+  );
 </script>
 <style lang="less">
   @prefix-cls: ~'@{namespace}-login';
@@ -93,7 +101,7 @@
     min-height: 35px;
     position: absolute;
     top: 20px;
-    background-image: url(/resource/img/login_logo.png);
+    /* background-image 由 loginLogo 内联注入，便于通过 VITE_GLOB_LOGIN_LOGO 替换 */
     background-size: contain;
     background-repeat: no-repeat;
     background-position: center;

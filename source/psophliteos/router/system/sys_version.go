@@ -10,7 +10,7 @@ import (
 
 type VersionRouter struct{}
 
-func (s *BasicRouter) InitVersionRouter(Router *gin.RouterGroup) (R gin.IRoutes) {
+func (s *VersionRouter) InitVersionRouter(Router *gin.RouterGroup) (R gin.IRoutes) {
 
 	versionRouter := Router.Group("api/device", middleware.TimeoutMiddleware(global.TimeOut))
 	versionApi := v1.ApiGroupApp.SystemApiGroup.VersionApi

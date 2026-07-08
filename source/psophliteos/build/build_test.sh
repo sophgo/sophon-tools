@@ -9,7 +9,7 @@ if [ "$current_directory" != "build" ]; then
   exit 1
 fi
 
-sh version.sh "V1.1.2"
+sh version.sh "V2.0.0"
 mv release_version.txt ../
 
 cp -r ../frontend/dist ../
