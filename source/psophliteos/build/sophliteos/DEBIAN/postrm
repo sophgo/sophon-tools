@@ -1,3 +1,12 @@
 #!/bin/bash
-
-
+# sophliteos deb postrm：卸载后刷新 systemd；purge 时清运行时数据与残留。
+# $1: remove/purge/upgrade/failed-upgrade
+set -e
+systemctl daemon-reload 2>/dev/null || true
+if [ "$1" = "purge" ]; then
+  # 清运行时数据（db/optlog/alarm 本地记录 + 日志）；remove 保留供下次重装
+  rm -rf /var/lib/sophliteos /var/log/sophliteos /etc/sophliteos
+  # 旧版 deb 曾在 /data/sophliteos 中转载荷，此处一并清理
+  rm -rf /data/sophliteos 2>/dev/null || true
+fi
+exit 0

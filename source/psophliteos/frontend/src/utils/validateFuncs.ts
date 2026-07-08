@@ -29,10 +29,10 @@ export const subnetMaskCheck = (_rule, value) => {
   }
 };
 
-// gateway check  粗略校验 {0~255}.{0~255}.{0~255}.{0~255}
+// gateway check  粗略校验 {0~255}.{0~255}.{0~255}.{0~255}；静态 IP 时网关可留空
 export const gatewayCheck = (_rule, value) => {
   if (value.trim() === '') {
-    return Promise.reject(t('maintenance.newworkSettings.inputGateway'));
+    return Promise.resolve();
   } else {
     const gateway = /^((\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.){3}(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])$/;
     if (!gateway.test(value)) {
@@ -43,10 +43,10 @@ export const gatewayCheck = (_rule, value) => {
   }
 };
 
-// dns check, 粗略校验 {0~255}.{0~255}.{0~255}.{0~255}
+// dns check, 粗略校验 {0~255}.{0~255}.{0~255}.{0~255}；静态 IP 时 DNS 可留空
 export const dnsCheck = (_rule, value) => {
   if (value.trim() === '') {
-    return Promise.reject(t('maintenance.newworkSettings.inputDns'));
+    return Promise.resolve();
   } else {
     const dns = /^((\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.){3}(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])$/;
     if (!dns.test(value)) {

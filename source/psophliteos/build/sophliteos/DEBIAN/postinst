@@ -1,4 +1,16 @@
 #!/bin/bash
+# sophliteos deb postinst：装好后建运行时目录、装载并启动 systemd 服务。
+# 文件已由 dpkg 直接安装到最终路径（/bin、/etc、/var/lib），此处不再复制/散布。
+# $1: install/upgrade/configure（dpkg 调用，详见 deb-policy）
+set -e
 
-#chown 1000:1000 -R /data/sophliteos
-cd /data/sophliteos && bash install.sh
+# 运行时目录：db 由 app 首次启动自动创建（/var/lib/sophliteos/db/sophliteos.db），
+# 日志目录由 postinst 确保存在。
+mkdir -p /var/lib/sophliteos/db /var/log/sophliteos
+
+systemctl daemon-reload
+systemctl enable sophliteos 2>/dev/null || true
+# 升级时重启新版本；首次安装时启动。失败不阻断 dpkg（避免卡死包管理）
+systemctl restart sophliteos 2>/dev/null || systemctl start sophliteos 2>/dev/null || true
+
+exit 0

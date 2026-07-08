@@ -145,14 +145,14 @@
           ],
           gateway: [
             {
-              required: true,
+              required: false,
               validator: gatewayCheck,
               trigger: 'blur',
             },
           ],
           dns: [
             {
-              required: true,
+              required: false,
               validator: dnsCheck,
               trigger: 'blur',
             },
