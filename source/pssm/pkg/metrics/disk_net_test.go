@@ -34,8 +34,8 @@ func TestDisks(t *testing.T) {
 	// Free = Avail = 86000000 KB → 86000000/1024 = 83984 MB
 	// usage = (1 - Free/Total)*100 ≈ (1 - 83984/86425)*100 ≈ 2.82% → 与 df Use% 3% 一致（非旧口径 10%）
 	d0 := disks[0]
-	if d0.DiskName != "/dev/mmcblk0p7" {
-		t.Errorf("disk0.DiskName = %q, want /dev/mmcblk0p7", d0.DiskName)
+	if d0.DiskName != "/dev/mmcblk0" {
+		t.Errorf("disk0.DiskName = %q, want /dev/mmcblk0 (aggregated)", d0.DiskName)
 	}
 	{
 		wantTotal := float64((2500000 + 86000000) / 1024) // 86425
@@ -86,6 +86,62 @@ func TestDisks(t *testing.T) {
 	}
 	if d1.ReadOnly != 1 {
 		t.Errorf("disk1.ReadOnly = %d, want 1 (ro)", d1.ReadOnly)
+	}
+}
+
+// TestDisksOverlayRoot 锁定 SE9 场景：/ 是 overlay（upperdir 在 /dev/mmcblk0p5 上），
+// 整片 eMMC 多分区应聚合为单条 /dev/mmcblk0，MountOn="/" 并排首位；overlay 不单独入表。
+// /dev/sda1（外置存储）单独一条。期望"硬盘空间"= 整片 eMMC 而非 overlay 的 8.66GB。
+func TestDisksOverlayRoot(t *testing.T) {
+	dfOut := "Filesystem     Type    1K-blocks    Used Available Use% Mounted on\n" +
+		"overlay        overlay   9079836 1461428   7222796  17% /\n" +
+		"/dev/sda1      ext4    967827868   77856 917723468   1% /media/storage-local-sda1\n" +
+		"/dev/mmcblk0p1 vfat       130798   20264    110534  16% /boot\n" +
+		"/dev/mmcblk0p6 ext4     17476668 1193448  15553672   8% /data\n" +
+		"/dev/mmcblk0p4 ext4      3030800 2727684    129448  96% /media/root-ro\n" +
+		"/dev/mmcblk0p5 ext4      9079836 1461428   7222796  17% /media/root-rw\n" +
+		"/dev/mmcblk0p2 ext4       110576   20940     84940  20% /recovery\n"
+	mounts := "overlay / overlay rw,relatime,lowerdir=/media/root-ro,upperdir=/media/root-rw/overlay,workdir=/media/root-rw/overlay-workdir 0 0\n" +
+		"/dev/sda1 /media/storage-local-sda1 ext4 rw,relatime 0 0\n" +
+		"/dev/mmcblk0p1 /boot vfat rw,relatime 0 0\n" +
+		"/dev/mmcblk0p6 /data ext4 rw,relatime 0 0\n" +
+		"/dev/mmcblk0p4 /media/root-ro ext4 ro,relatime 0 0\n" +
+		"/dev/mmcblk0p5 /media/root-rw ext4 rw,relatime 0 0\n" +
+		"/dev/mmcblk0p2 /recovery ext4 rw,relatime 0 0\n"
+	fr := &fakeFileReader{files: map[string]string{"/proc/mounts": mounts}}
+	cmd := &fakeCmdRunner{responses: map[string]cmdResp{"df": {dfOut, nil}}}
+	c := NewCollector(fr, cmd)
+	disks := c.Disks()
+
+	// 期望两条：/dev/mmcblk0（聚合 p1/p2/p4/p5/p6，MountOn=/）+ /dev/sda（外置）
+	if len(disks) != 2 {
+		t.Fatalf("Disks() len = %d, want 2 (overlay 不单独入表)", len(disks))
+	}
+	root := disks[0]
+	if root.DiskName != "/dev/mmcblk0" {
+		t.Errorf("disk0.DiskName = %q, want /dev/mmcblk0", root.DiskName)
+	}
+	if root.MountOn != "/" {
+		t.Errorf("disk0.MountOn = %q, want / (根设备)", root.MountOn)
+	}
+	// 总 = 各 mmcblk0p 分区 (Used+Avail) 之和 /1024（ssm 口径=Used+Avail，不含 ext4 reserved）
+	// p1:20264+110534 p6:1193448+15553672 p4:2727684+129448 p5:1461428+7222796 p2:20940+84940
+	wantTotalKB := int64(130798 + 16747120 + 2857132 + 8684224 + 105880)
+	wantTotal := float64(wantTotalKB / 1024)
+	if root.Total != wantTotal {
+		t.Errorf("disk0.Total = %v, want %v (整片 eMMC 聚合)", root.Total, wantTotal)
+	}
+	// 整片 eMMC 应明显大于 overlay 单独的 ~8856MB（9079836KB/1024）
+	if root.Total <= 8856 {
+		t.Errorf("disk0.Total = %v, 应大于 overlay 单独的 ~8856MB（整片 eMMC）", root.Total)
+	}
+	// root-ro (p4) 是 ro，但 p5/p6 是 rw → 聚合 ReadOnly=0
+	if root.ReadOnly != 0 {
+		t.Errorf("disk0.ReadOnly = %d, want 0 (p5/p6 rw → 非 all-ro)", root.ReadOnly)
+	}
+	sda := disks[1]
+	if sda.DiskName != "/dev/sda" {
+		t.Errorf("disk1.DiskName = %q, want /dev/sda", sda.DiskName)
 	}
 }
 
