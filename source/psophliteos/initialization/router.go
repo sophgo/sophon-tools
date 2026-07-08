@@ -65,6 +65,8 @@ func Routers() *gin.Engine {
 		middleware.SSOLogout(middleware.SSORequestToken(c))
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
+	// SSE 推送：旧端长连接，被新登录踢掉时主动收 SESSION_OFFLINE
+	Router.GET("/api/sso/events", middleware.SSOEvents)
 
 	// /api/v1/* 反代到 ssm（鉴权由 ssm 处理）；前置 SSO 单会话校验
 	ssmTarget, err := url.Parse("http://" + ssmServer)

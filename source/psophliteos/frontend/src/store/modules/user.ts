@@ -21,6 +21,9 @@ import { Modal } from 'ant-design-vue';
 import { LoginStateEnum, useLoginState } from '/@/views/sys/login/useLogin';
 const { setLoginState } = useLoginState();
 
+// SSO 推送长连接（被新登录踢下线时服务端主动推送，无需刷新）。
+let ssoES: EventSource | null = null;
+
 interface UserState {
   userInfo: Nullable<UserInfo>;
   token?: string;
@@ -119,8 +122,10 @@ export const useUserStore = defineStore({
         const { token, changePass, role } = data as any;
         // save token
         this.setToken(token);
-        // 注册为活跃会话（踢掉之前的会话）。即使 temp token 也注册——该用户已登录。
-        ssoRegister(loginParams.username, token).catch(() => {});
+        // 注册为活跃会话（踢掉之前的会话）。必须 await：register 要先于跳转后 overview
+        // 发出的 /api/v1/* 鉴权请求到达服务端，否则此时活跃会话仍是旧用户，你的请求会被
+        // SSO 中间件判为 401 SESSION_OFFLINE → 被弹回登录页（"登录后 overview 刷新跳登录"）。
+        await ssoRegister(loginParams.username, token).catch(() => {});
         // ssm 返回 changePass 为 boolean 或 1，均视为需改密
         const needChange = changePass === true || changePass === 1;
         this.setFirstLogin(needChange);
@@ -134,6 +139,8 @@ export const useUserStore = defineStore({
           return null;
         }
 
+        // 建立 SSE 长连接，监听"被新登录踢下线"的主动推送（无需刷新即可收到提示）
+        this.openSsoStream(token, loginParams.username);
         return this.afterLoginAction(goHome);
       } catch (error) {
         return Promise.reject(error);
@@ -194,6 +201,8 @@ export const useUserStore = defineStore({
      * @description: logout
      */
     async logout(goLogin = false) {
+      // 关闭 SSO 推送长连接（避免登出后仍持有旧连接）
+      this.closeSsoStream();
       if (this.getToken) {
         try {
           await doLogout({
@@ -226,6 +235,40 @@ export const useUserStore = defineStore({
           await this.logout(true);
         },
       });
+    },
+
+    // 建立 SSO 推送长连接：登录后监听"被新登录踢下线"事件，收到即弹窗并登出。
+    openSsoStream(token: string, username: string) {
+      this.closeSsoStream();
+      const base = (import.meta.env.VITE_GLOB_API_URL || '/api').replace(/\/$/, '');
+      const url = `${base}/sso/events?token=${encodeURIComponent(token)}`;
+      const es = new EventSource(url);
+      ssoES = es;
+      es.addEventListener('SESSION_OFFLINE', () => {
+        // 被踢：关连接 → 清本地登录态 → 弹窗提示 → 跳登录页
+        this.closeSsoStream();
+        this.setToken(undefined);
+        this.setUserInfo(null);
+        Modal.info({
+          title: '账号已在别处登录',
+          content: h(
+            'p',
+            { style: { lineHeight: '1.8' } },
+            `您的账号「${username}」已在另一处登录，本会话已下线。`,
+          ),
+          okText: '重新登录',
+          onOk: () => {
+            router.push(PageEnum.BASE_LOGIN);
+          },
+        });
+      });
+    },
+    // 关闭 SSO 推送长连接。
+    closeSsoStream() {
+      if (ssoES) {
+        ssoES.close();
+        ssoES = null;
+      }
     },
   },
 });
