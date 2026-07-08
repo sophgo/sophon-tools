@@ -5,8 +5,8 @@
 #   soc=arm64（设备，默认）；pcie=amd64（开发机）
 # 产物: release/sophliteos_<PRODUCT>_<VERSION>.deb
 #
-# 规范化打包：数据树按最终路径布局（/bin、/etc、/var/lib），dpkg 直接追踪所有文件；
-# postinst 仅建运行时目录 + systemd enable/restart，不再散布/复制文件。
+# 规范化打包：数据树按最终路径布局（/opt/sophon/sophliteos、/etc/systemd），
+# dpkg 直接追踪所有文件；postinst 仅建运行时目录 + systemd enable/restart，不再散布/复制文件。
 # db 文件由 app 首次启动自动创建（/var/lib/sophliteos/db），属运行时状态，不打包。
 set -e
 
@@ -49,15 +49,15 @@ fi
 STAGE=build/stage
 rm -rf "$STAGE"
 mkdir -p "$STAGE/DEBIAN" \
-         "$STAGE/bin" \
-         "$STAGE/etc/systemd/system" \
-         "$STAGE/etc/sophliteos/config" \
-         "$STAGE/var/lib/sophliteos/dist"
-install -m 0755 sophliteos "$STAGE/bin/sophliteos"
-install -m 0644 scrip/sophliteos.service "$STAGE/etc/systemd/system/sophliteos.service"
-install -m 0644 config/sophliteos.yaml "$STAGE/etc/sophliteos/config/sophliteos.yaml"
-cp -r dist/. "$STAGE/var/lib/sophliteos/dist/"
-install -m 0644 release_version.txt "$STAGE/var/lib/sophliteos/release_version.txt"
+         "$STAGE/opt/sophon/sophliteos/bin" \
+         "$STAGE/opt/sophon/sophliteos/config" \
+         "$STAGE/opt/sophon/sophliteos/dist" \
+         "$STAGE/usr/lib/systemd/system"
+install -m 0755 sophliteos "$STAGE/opt/sophon/sophliteos/bin/sophliteos"
+install -m 0644 scrip/sophliteos.service "$STAGE/usr/lib/systemd/system/sophliteos.service"
+install -m 0644 config/sophliteos.yaml "$STAGE/opt/sophon/sophliteos/config/sophliteos.yaml"
+cp -r dist/. "$STAGE/opt/sophon/sophliteos/dist/"
+install -m 0644 release_version.txt "$STAGE/opt/sophon/sophliteos/release_version.txt"
 
 # 5. DEBIAN 控制信息（模板注入 Version + Architecture）
 SRC_DEBIAN=build/sophliteos/DEBIAN

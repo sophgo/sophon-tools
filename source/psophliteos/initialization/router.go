@@ -28,11 +28,11 @@ func Routers() *gin.Engine {
 	conf.Lock()
 	v := conf.GetViper()
 	path := v.GetString("server.www")
-	ssmServer := v.GetString("ssm.server")
+	bmssmServer := v.GetString("bmssm.server")
 	conf.Unlock()
 
-	if ssmServer == "" {
-		ssmServer = "127.0.0.1:9779"
+	if bmssmServer == "" {
+		bmssmServer = "127.0.0.1:9779"
 	}
 
 	Router.StaticFile("/_app.config.js", path+"/_app.config.js")
@@ -44,7 +44,7 @@ func Routers() *gin.Engine {
 	Router.Use(middleware.BlockerMiddleware())
 
 	// 单点登录（单会话）本地端点：查询活跃会话 / 注册新会话（踢旧）/ 注销。
-	// 不反代到 ssm，仅 sophliteos web 层维护。
+	// 不反代到 bmssm，仅 sophliteos web 层维护。
 	Router.GET("/api/sso/active", func(c *gin.Context) {
 		u, ok := middleware.SSOActive()
 		c.JSON(http.StatusOK, gin.H{"active": ok, "username": u})
@@ -68,16 +68,16 @@ func Routers() *gin.Engine {
 	// SSE 推送：旧端长连接，被新登录踢掉时主动收 SESSION_OFFLINE
 	Router.GET("/api/sso/events", middleware.SSOEvents)
 
-	// /api/v1/* 反代到 ssm（鉴权由 ssm 处理）；前置 SSO 单会话校验
-	ssmTarget, err := url.Parse("http://" + ssmServer)
+	// /api/v1/* 反代到 bmssm（鉴权由 bmssm 处理）；前置 SSO 单会话校验
+	bmssmTarget, err := url.Parse("http://" + bmssmServer)
 	if err == nil {
-		proxy := httputil.NewSingleHostReverseProxy(ssmTarget)
+		proxy := httputil.NewSingleHostReverseProxy(bmssmTarget)
 		// WebSocket 升级支持
 		originalDirector := proxy.Director
 		proxy.Director = func(req *http.Request) {
 			originalDirector(req)
-			// 保留 Host 便于 ssm 识别
-			req.Host = ssmTarget.Host
+			// 保留 Host 便于 bmssm 识别
+			req.Host = bmssmTarget.Host
 		}
 		proxy.Transport = &http.Transport{
 			// 长连接支持（含 WebSocket）
@@ -87,7 +87,7 @@ func Routers() *gin.Engine {
 			proxy.ServeHTTP(c.Writer, c.Request)
 		})
 	} else {
-		logger.Error("ssm server url parse error: %v", err)
+		logger.Error("bmssm server url parse error: %v", err)
 	}
 
 	// 本地 sophliteos 功能路由（无本地 user 系统，依赖 ssm 反代鉴权后的同源访问）

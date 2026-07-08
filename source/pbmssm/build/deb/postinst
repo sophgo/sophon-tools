@@ -1,0 +1,16 @@
+#!/bin/bash
+# bmssm deb postinst：装好后建运行目录、装载并启动 systemd 服务。
+# 文件已由 dpkg 直接安装到最终路径（/opt/sophon/bmssm、/etc/systemd），此处不再复制。
+# 配置 bmssm.yaml 为 conffile（/opt/sophon/bmssm/config/bmssm.yaml），升级保留用户改动。
+# $1: install/upgrade/configure（dpkg 调用，详见 deb-policy）
+set -e
+
+# 运行目录（DB / 日志 / JWT secret 持久化）
+mkdir -p /var/lib/bmssm /var/log/bmssm
+
+systemctl daemon-reload
+systemctl enable bmssm 2>/dev/null || true
+# 升级时重启新版本；首次安装时启动。失败不阻断 dpkg
+systemctl restart bmssm 2>/dev/null || systemctl start bmssm 2>/dev/null || true
+
+exit 0

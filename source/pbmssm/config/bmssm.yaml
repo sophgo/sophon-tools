@@ -1,0 +1,27 @@
+server:
+  listenIP: ""
+  port: 9779
+  auth: true
+  authSecret: "bmssm-dev-secret"
+  defaultPassword: "admin"
+  deviceName: "device_1"
+log:
+  level: info
+  path: /var/log/bmssm
+alarmThreshold:
+  boardTemperature: 90
+  coreTemperature: 90
+  cpuRate: 0.95
+  diskRate: 0.95
+  externalHardDiskRate: 0.95
+  fanSpeed: 9999
+  systemScale: 0.95
+  totalMemoryScale: 0.95
+  tpuRate: 0.95
+  tpuScale: 0.95
+  videoScale: 0.95
+db:
+  driver: sqlite3
+  path: /var/lib/bmssm/bmssm.db
+ota:
+  dryRun: false

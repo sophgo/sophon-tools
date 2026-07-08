@@ -13,7 +13,7 @@ func BlockerMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if global.BlockAllRequests {
 			c.JSON(http.StatusServiceUnavailable, mvc.FailWithMsg(error2.Upgradeing, "服务器升级中，暂不可用"))
-			// c.File("/var/lib/sophliteos/dist/updating.html")
+			// c.File("/opt/sophon/sophliteos/dist/updating.html")
 			c.Abort()
 		}
 	}

@@ -20,7 +20,7 @@ type Module struct {
 
 func VersionInit(versionFile string) BuildInfo {
 	// 读取文件内容
-	fileContent, err := ioutil.ReadFile("/var/lib/sophliteos/release_version.txt")
+	fileContent, err := ioutil.ReadFile("/opt/sophon/sophliteos/release_version.txt")
 	if err != nil {
 		logger.Error("无法读取文件:", err)
 		return BuildInfo{}

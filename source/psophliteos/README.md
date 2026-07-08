@@ -7,7 +7,7 @@
 ## 目录结构
 - `api`: 后端业务控制器（device-mgmt handlers）
 - `router`: 路由定义
-- `client/ssm`: 设备端 SSM(System Service Manager, 127.0.0.1:9779) 接口客户端
+- `client/bmssm`: 设备端 SSM(System Service Manager, 127.0.0.1:9779) 接口客户端
 - `client/httpclient`: 通用 HTTP 封装
 - `mvc`: 参数封装/验证/返回/i18n/异常
 - `middleware`: 鉴权/熔断/超时中间件
@@ -54,16 +54,16 @@ release/
 
 ### 方式一：替换部署后的图片文件（无需重新构建）
 
-sophliteos 静态资源从 `/var/lib/sophliteos/dist/resource/` 提供，登录 LOGO 默认读取 `resource/img/login_logo.png`。
+sophliteos 静态资源从 `/opt/sophon/sophliteos/dist/resource/` 提供，登录 LOGO 默认读取 `resource/img/login_logo.png`。
 
 ```bash
 # 替换为目标 LOGO（建议 PNG，contain 缩放）
-sudo cp /path/to/your_logo.png /var/lib/sophliteos/dist/resource/img/login_logo.png
+sudo cp /path/to/your_logo.png /opt/sophon/sophliteos/dist/resource/img/login_logo.png
 ```
 
 浏览器强刷（Ctrl+Shift+R）即可生效。
 
-> 注意：sophliteos deb 升级会刷新 `/var/lib/sophliteos/dist`，升级后需重新覆盖此文件。
+> 注意：sophliteos deb 升级会刷新 `/opt/sophon/sophliteos/dist`，升级后需重新覆盖此文件。
 
 ### 方式二：构建期注入自定义路径（持久，随升级保留）
 

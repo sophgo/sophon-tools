@@ -4,7 +4,8 @@ After=network.target
 
 [Service]
 User=root
-ExecStart=/bin/sophliteos
+ExecStart=/opt/sophon/sophliteos/bin/sophliteos
+WorkingDirectory=/opt/sophon/sophliteos
 ExecReload=/bin/kill -HUP $MAINPID
 KillMode=control-group
 Restart=on-failure

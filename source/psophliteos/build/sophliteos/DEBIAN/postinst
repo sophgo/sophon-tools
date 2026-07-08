@@ -1,6 +1,6 @@
 #!/bin/bash
 # sophliteos deb postinst：装好后建运行时目录、装载并启动 systemd 服务。
-# 文件已由 dpkg 直接安装到最终路径（/bin、/etc、/var/lib），此处不再复制/散布。
+# 文件已由 dpkg 直接安装到最终路径（/opt/sophon/sophliteos、/etc/systemd），此处不再复制/散布。
 # $1: install/upgrade/configure（dpkg 调用，详见 deb-policy）
 set -e
 

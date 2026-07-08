@@ -1,0 +1,12 @@
+#!/bin/bash
+# bmssm deb postrm：卸载后刷新 systemd；purge 时清运行时数据与残留。
+# $1: remove/purge/upgrade/failed-upgrade
+set -e
+systemctl daemon-reload 2>/dev/null || true
+if [ "$1" = "purge" ]; then
+  # 清运行时数据（告警/审计 DB、JWT secret、日志）；remove 保留供下次重装
+  rm -rf /var/lib/bmssm /var/log/bmssm
+  # 旧版 postinst 曾复制配置到 /etc/sophon/bmssm（未追踪），purge 时清理残留
+  rm -rf /etc/sophon/bmssm 2>/dev/null || true
+fi
+exit 0

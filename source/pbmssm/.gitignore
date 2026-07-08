@@ -1,0 +1,11 @@
+release/
+install/
+bmssm
+bmssm-arm64
+*.db
+*.out
+build/version.txt
+# 构建产物
+/bmssm
+/bmssm-arm64
+/release/

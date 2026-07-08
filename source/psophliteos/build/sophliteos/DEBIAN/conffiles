@@ -1,2 +1,1 @@
-/etc/sophliteos/config/sophliteos.yaml
-/etc/systemd/system/sophliteos.service
+/opt/sophon/sophliteos/config/sophliteos.yaml

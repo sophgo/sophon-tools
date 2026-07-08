@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	configurePath = "/etc/sophliteos/config" // 配置文件所在目录
+	configurePath = "/opt/sophon/sophliteos/config" // 配置文件所在目录
 )
 
 var Conf Config

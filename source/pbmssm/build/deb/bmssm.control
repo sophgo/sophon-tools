@@ -1,0 +1,11 @@
+Package: bmssm
+Source: bmssm
+Version: @VERSION@
+Architecture: @ARCH@
+Maintainer: Sophgo <support@sophgo.com>
+Priority: optional
+Section: admin
+Description: bmssm - Sophon System Management
+ Sophon 设备系统管理后端（bmssm 现代化重构）。
+ 提供 /api/v1/* REST API、WebSocket 实时终端、文件管理、OTA 升级工作流、
+ 告警监控引擎、审计日志。默认监听 :9779，配置 BMSSM_CONF=/opt/sophon/bmssm/config。

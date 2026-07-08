@@ -1,6 +1,6 @@
 server:
   port: 8080
-  www: /var/lib/sophliteos/dist
+  www: /opt/sophon/sophliteos/dist
   admin-password: c3284d0f94606de1fd2af172aba15bf3
   timeout: 12m
 
@@ -12,7 +12,7 @@ db:
   path: /var/lib/sophliteos/db/sophliteos.db
   save-days: 90
 
-ssm:
+bmssm:
   server: '127.0.0.1:9779'
   username: admin
   password: admin
