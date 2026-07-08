@@ -1,10 +1,11 @@
 import { defHttp } from '/@/utils/http/axios';
 
 // 单点登录（单会话）端点——sophliteos web 层本地维护，不经过 ssm。
+// 注意：defHttp 的 apiUrl 已带 /api 前缀（VITE_GLOB_API_URL=/api），此处只写后面的路径。
 enum Api {
-  Active = '/api/sso/active',
-  Register = '/api/sso/register',
-  Logout = '/api/sso/logout',
+  Active = '/sso/active',
+  Register = '/sso/register',
+  Logout = '/sso/logout',
 }
 
 export interface SsoActive {
