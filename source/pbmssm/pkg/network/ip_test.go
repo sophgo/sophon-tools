@@ -253,9 +253,11 @@ type capturedArgs struct {
 func saveAndRestore() func() {
 	origLookPath := lookPath
 	origRunCmd := runCmd
+	origReadFile := readFile
 	return func() {
 		lookPath = origLookPath
 		runCmd = origRunCmd
+		readFile = origReadFile
 	}
 }
 
@@ -597,6 +599,38 @@ nameserver 8.8.4.4
 	}
 	if parseResolvConfDNS("# no nameserver\n") != "" {
 		t.Error("no nameserver should return empty dns")
+	}
+}
+
+// TestParseResolvDNSUpstream 锁定 systemd-resolved 场景：/etc/resolv.conf 是 stub
+// 127.0.0.53，应优先读 /run/systemd/resolve/resolv.conf 的真实上游（8.8.8.8）。
+func TestParseResolvDNSUpstream(t *testing.T) {
+	defer saveAndRestore()()
+	readFile = func(path string) ([]byte, error) {
+		switch path {
+		case resolvConfUpstreamPath:
+			return []byte("nameserver 8.8.8.8\n"), nil
+		case resolvConfPath:
+			return []byte("nameserver 127.0.0.53\n"), nil
+		}
+		return nil, errors.New("not found")
+	}
+	if got := parseResolvDNS(); got != "8.8.8.8" {
+		t.Errorf("parseResolvDNS() = %q, want 8.8.8.8 (upstream preferred over stub)", got)
+	}
+}
+
+// TestParseResolvDNSFallback 上游文件不存在时回退 /etc/resolv.conf（非 systemd-resolved 系统）。
+func TestParseResolvDNSFallback(t *testing.T) {
+	defer saveAndRestore()()
+	readFile = func(path string) ([]byte, error) {
+		if path == resolvConfPath {
+			return []byte("nameserver 1.1.1.1\n"), nil
+		}
+		return nil, errors.New("not found")
+	}
+	if got := parseResolvDNS(); got != "1.1.1.1" {
+		t.Errorf("parseResolvDNS() fallback = %q, want 1.1.1.1", got)
 	}
 }
 

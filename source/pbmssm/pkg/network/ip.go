@@ -16,6 +16,15 @@ import (
 // deviceNameRe 限定网卡名为字母数字加 .:_- 的常见 Linux 接口名。
 var deviceNameRe = regexp.MustCompile(`^[A-Za-z0-9._:-]+$`)
 
+// DNS 解析来源：
+//   - resolvConfUpstreamPath：systemd-resolved 的真实上游 DNS（Ubuntu 等系统
+//     /etc/resolv.conf 指向 stub 127.0.0.53，不是真实 DNS，需读此文件取上游）。
+//   - resolvConfPath：传统 /etc/resolv.conf 回退（非 systemd-resolved 系统）。
+const (
+	resolvConfUpstreamPath = "/run/systemd/resolve/resolv.conf"
+	resolvConfPath         = "/etc/resolv.conf"
+)
+
 // lookPath / runCmd / readFile 为包级变量，便于测试注入。
 var (
 	lookPath = exec.LookPath
@@ -232,9 +241,16 @@ func parseDefaultRoutes(output string) map[string]string {
 	return out
 }
 
-// parseResolvDNS 读取 /etc/resolv.conf，返回首个 nameserver。
+// parseResolvDNS 取首个有效 nameserver。
+// 优先 /run/systemd/resolve/resolv.conf（systemd-resolved 真实上游；/etc/resolv.conf
+// 在 systemd-resolved 系统上是 stub 127.0.0.53，非真实 DNS），回退 /etc/resolv.conf。
 func parseResolvDNS() string {
-	data, err := readFile("/etc/resolv.conf")
+	if data, err := readFile(resolvConfUpstreamPath); err == nil {
+		if dns := parseResolvConfDNS(string(data)); dns != "" {
+			return dns
+		}
+	}
+	data, err := readFile(resolvConfPath)
 	if err != nil {
 		return ""
 	}
