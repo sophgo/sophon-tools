@@ -64,6 +64,7 @@ public:
     ~MainWindow();
     static QString executeLinuxCmd(QString strCmd);
     void _get_ip_info(QNetworkInterface interface);
+    void _detect_iface_names(void);
     bool getDemos(void);
     void ShowDemosInf(bool show);
     QApplication* app;
@@ -161,6 +162,10 @@ private:
 
     QString network_info_eth0;
     QString network_info_eth1;
+
+    /* WAN/LAN 物理网口名, 由 _detect_iface_names() 探测 (ubuntu:eth0/eth1, debian:end0/end1) */
+    QString iface0_name;
+    QString iface1_name;
 
     QSet<QLabel*> runingComToQlabel;
 

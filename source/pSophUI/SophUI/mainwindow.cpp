@@ -110,6 +110,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(ui->lan_gate6, &QLineEdit::editingFinished, this, [=]{ checkIPv6(ui->lan_gate6, "LAN IPv6 GATEWAY"); });
     connect(ui->lan_dns6, &QLineEdit::editingFinished, this, [=]{ checkIPv6(ui->lan_dns6, "LAN IPv6 DNS"); });
 
+    _detect_iface_names();
     _flash_show_info();
 
     ShowDemosInf(getDemos());
@@ -187,6 +188,36 @@ void MainWindow::ShowDemosInf(bool show)
     }
 }
 
+void MainWindow::_detect_iface_names(void)
+{
+    /* 通过 /sys/class/net 枚举物理以太网口，兼容不同发行版的命名
+     * (ubuntu: eth0/eth1, debian: end0/end1)，避免硬编码接口名 */
+    QStringList ethIfaces;
+    QDir netDir("/sys/class/net");
+    foreach (const QString &name, netDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot))
+    {
+        QString ifacePath = "/sys/class/net/" + name;
+        /* 只保留有硬件设备的真实网口，排除 lo/docker0/dummy0/sit0 等虚拟接口 */
+        if (!QFile::exists(ifacePath + "/device"))
+            continue;
+        /* type == 1 (ARPHRD_ETHER) 才是以太网口，排除 can0/can1(type=280) 等 */
+        QFile typeFile(ifacePath + "/type");
+        if (!typeFile.open(QIODevice::ReadOnly | QIODevice::Text))
+            continue;
+        if (typeFile.readAll().trimmed() != "1")
+            continue;
+        /* 排除无线网口 */
+        if (QFile::exists(ifacePath + "/wireless"))
+            continue;
+        ethIfaces << name;
+    }
+    /* 名称排序保证 WAN/LAN 顺序稳定 (eth0<eth1, end0<end1) */
+    ethIfaces.sort();
+    iface0_name = ethIfaces.value(0, "eth0");
+    iface1_name = ethIfaces.value(1, "eth1");
+    qDebug() << "Detected net ifaces -> WAN:" << iface0_name << " LAN:" << iface1_name;
+}
+
 void MainWindow::_get_ip_info(QNetworkInterface interface)
 {
     QList<QString> ip_str_list;
@@ -194,9 +225,9 @@ void MainWindow::_get_ip_info(QNetworkInterface interface)
     QString mac_str;
     QString device_name = interface.name();
     QString *info_str = nullptr;
-    if(interface.name() == "eth0")
+    if(interface.name() == iface0_name)
         info_str = &network_info_eth0;
-    else if(interface.name() == "eth1")
+    else if(interface.name() == iface1_name)
         info_str = &network_info_eth1;
     mac_str = interface.hardwareAddress().toUtf8();
     QList<QNetworkAddressEntry>addressList = interface.addressEntries();
@@ -229,7 +260,7 @@ void MainWindow::_flash_show_info()
     {
         _get_ip_info(netInterface);
     }
-    ui->ip_detail->setText("WAN(eth0):\n" + network_info_eth0 + "\nLAN(eth1):\n" + network_info_eth1);
+    ui->ip_detail->setText("WAN(" + iface0_name + "):\n" + network_info_eth0 + "\nLAN(" + iface1_name + "):\n" + network_info_eth1);
     _show_cmd_to_label(ui->info_detail,"SOPHON_QT_1");
     _show_cmd_to_label(ui->info_detail_2,"SOPHON_QT_2");
 #if GET_BASH_INFO_ASYNC
@@ -313,7 +344,7 @@ bool MainWindow::__set_network(
 
 void MainWindow::_wan_button_click_cb()
 {
-    if(true == __set_network("eth0",
+    if(true == __set_network(iface0_name,
                               ui->wan_ip->text(), ui->wan_net->text(),
                               ui->wan_gate->text(), ui->wan_dns->text(),
                               ui->wan_ip6->text(), ui->wan_net6->text(),
@@ -330,7 +361,7 @@ void MainWindow::_wan_button_click_cb()
 }
 void MainWindow::_lan_button_click_cb()
 {
-    if(true == __set_network("eth1",
+    if(true == __set_network(iface1_name,
                               ui->lan_ip->text(), ui->lan_net->text(),
                               ui->lan_gate->text(), ui->lan_dns->text(),
                               ui->lan_ip6->text(), ui->lan_net6->text(),
