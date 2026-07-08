@@ -1,6 +1,10 @@
 Package: sophliteos
 Source: sophliteos
-Version: 1.1.2
-Maintainer: sophgo
+Version: @VERSION@
+Maintainer: Sophgo <support@sophgo.com>
 Priority: optional
-Description: sophliteos program.
+Section: admin
+Description: sophliteos - Sophon Device Web Console
+ Sophon 设备运维 Web 控制台（vben-admin 重构）。
+ 提供设备概览、运维、OTA、网络、告警/审计日志等前端页面，反代 /api/v1/* 到 ssm。
+ 默认监听 :8080，前端 dist 位于 /var/lib/sophliteos/dist。

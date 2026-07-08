@@ -16,13 +16,13 @@ export interface RoleInfo {
 }
 
 /**
- * @description: Login interface return value
+ * @description: Login interface return value（对齐 ssm /api/v1/login）
  */
 export interface LoginResultModel {
-  userId: string | number;
   token: string;
-  role: RoleInfo;
-  changePass?: number;
+  expiresAt?: string | number;
+  role?: RoleInfo | string;
+  changePass?: boolean | number;
 }
 
 /**
@@ -43,6 +43,6 @@ export interface GetUserInfoModel {
 }
 
 export interface PasswordParams {
-  password: string;
+  oldPassword: string;
   newPassword: string;
 }

@@ -110,6 +110,6 @@
     indexColumnProps: {
       width: 60,
     },
-    rowKey: 'ID',
+    rowKey: 'id',
   });
 </script>

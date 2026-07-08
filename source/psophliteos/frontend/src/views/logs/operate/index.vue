@@ -133,6 +133,6 @@
     indexColumnProps: {
       width: 60,
     },
-    rowKey: 'recordId',
+    rowKey: 'id',
   });
 </script>

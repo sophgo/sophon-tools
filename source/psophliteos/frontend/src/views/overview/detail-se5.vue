@@ -36,12 +36,6 @@
           <a-descriptions-item :label="t('overview.buildTime')">{{
             originData.bmssmVersion
           }}</a-descriptions-item>
-          <a-descriptions-item label="WAN IP">{{ originData.wanIp }}</a-descriptions-item>
-          <a-descriptions-item label="LAN IP">
-            {{ originData.lanIp.split(',')[0] || '' }}
-            <br />
-            {{ originData.lanIp.split(',')[1] || '' }}
-          </a-descriptions-item>
           <a-descriptions-item :label="t('overview.device.runningTime')">
             <a-badge status="processing" :text="dynTime" />
           </a-descriptions-item>
@@ -49,13 +43,17 @@
             originData.operatingSystem
           }}</a-descriptions-item>
           <a-descriptions-item
-            v-for="item in originData.netCard"
-            :label="t('overview.netCard') + item.name"
-            :key="item.ip"
+            v-for="item in originData.netCard || []"
+            :label="t('overview.netCard') + (item.netCardName || item.name || '')"
+            :key="item.netCardName || item.name || item.ip"
           >
-            {{ t('overview.bandwidth') + '：' + item.bandwidth + t('overview.bandwidthUnit') }}
+            {{
+              t('overview.bandwidth') +
+              '：' +
+              (item.bandwidth > 0 ? item.bandwidth + t('overview.bandwidthUnit') : '未连接')
+            }}
             <br />
-            {{ t('overview.ip') + '：' + item.ip }}
+            {{ t('overview.ip') + '：' + (item.ip || '未分配') }}
             <br />
             {{ t('overview.mac') + '：' + item.mac }}
           </a-descriptions-item>
@@ -114,38 +112,39 @@
   }
 
   const gridList = computed(() => {
+    const cpu = originData.value.cpu || {};
+    const mem = originData.value.memory || {};
+    const disk0 = (originData.value.disk && originData.value.disk[0]) || {};
+    const chip0 = originData.value?.coreComputingUnit?.board?.[0]?.chip?.[0] || {};
     if (!originData.value.cpu) {
       return [];
     }
     return [
       {
         title: t('overview.cpu'),
-        usage: originData.value.cpu.usage,
-        text: `${originData.value.cpu.cores}${t('overview.core')}${
-          originData.value.cpu.frequency / 1000
+        usage: cpu.utilizationRate ?? cpu.usage ?? 0,
+        text: `${cpu.cores ?? 0}${t('overview.core')}${
+          cpu.frequency ? (cpu.frequency / 1000).toFixed(1) : 0
         }GHz`,
       },
       {
         title: t('overview.memory'),
-        usage: originData.value.memory.usage,
-        total: originData.value.memory.total,
+        usage: mem.total
+          ? +(((mem.total - (mem.free ?? mem.available ?? mem.total)) / mem.total) * 100).toFixed(1)
+          : 0,
+        total: mem.total ?? 0,
       },
       {
         title: t('overview.disk'),
-        usage: originData.value.disk[0].usage,
-        total: originData.value.disk[0].total,
+        usage: disk0.total
+          ? +(((disk0.total - (disk0.free ?? disk0.total)) / disk0.total) * 100).toFixed(1)
+          : 0,
+        total: disk0.total ?? 0,
       },
       {
         title: t('overview.tpu'),
-        usage: originData.value?.coreComputingUnit?.board
-          ? originData.value?.coreComputingUnit?.board[0].chip[0].tpuUtililizationRate
-          : 0,
-        text:
-          'INT8 ' +
-          (originData.value?.coreComputingUnit?.board
-            ? originData.value?.coreComputingUnit?.board[0].chip[0].theoretialCalculationCapacity
-            : 0) +
-          'TOPS',
+        usage: chip0.utilizationRate ?? chip0.tpuUtililizationRate ?? 0,
+        text: 'INT8 ' + (chip0.calculationCapacityInt8 ?? chip0.theoretialCalculationCapacity ?? 0) + 'TOPS',
       },
     ];
   });

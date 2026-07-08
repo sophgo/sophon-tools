@@ -1,35 +1,48 @@
 #!/bin/bash
-
+# sophliteos .deb 打包：把 tmp/（tgz 解压产物）装入 staging 数据树，dpkg-deb 输出。
+# 用法: bash build/package-deb.sh <soc|pcie> [VERSION]
+#   soc  → arm64（设备）；pcie → amd64（开发机）
+#   VERSION 注入 control（默认 2.0.0）；产物 build/sophliteos_<PRODUCT>_<VERSION>.deb
+#
+# 在 staging 临时目录组装，避免把 control.bak/changelog 等源码模板打进 deb 控制归档。
 set -e
 
 TOP=$(dirname "$0")
-LITEOS_DIR=$TOP/sophliteos
-LITEOS_DATA=$LITEOS_DIR/data
-LITEOS_CTRL=$LITEOS_DIR/DEBIAN
-PRODUCT=$1
+SRC_DEBIAN="$TOP/sophliteos/DEBIAN"
+PRODUCT="$1"
+VERSION="${2:-2.0.0}"
 
-function clean(){
-  rm -rf $LITEOS_DATA
-}
+if [ -z "$PRODUCT" ]; then
+  echo "usage: package-deb.sh <soc|pcie> [VERSION]" >&2
+  exit 1
+fi
 
-clean
+STAGE=$(mktemp -d)
+trap 'rm -rf "$STAGE"' EXIT
+chmod 755 "$STAGE"
+mkdir -p "$STAGE/DEBIAN" "$STAGE/data/sophliteos"
 
-#build a run-time monkey dir
-mkdir -p $LITEOS_DATA $LITEOS_DATA/sophliteos
-
-#copy files from source
-cp -r $TOP/tmp/* $LITEOS_DATA/sophliteos/
-
-#sed Architecture info to control file
-cp $LITEOS_CTRL/control.bak $LITEOS_CTRL/control
-version=$(echo $(cat $LITEOS_CTRL/control | grep Version) | cut -d ' ' -f 2)
-if [[ "soc" == "$1" ]]; then
-  sed -i '$a Architecture: arm64' $LITEOS_CTRL/control
+# 控制文件：模板注入 Version + Architecture；仅拷运行时脚本（control.bak/changelog 不进 deb）
+sed "s/@VERSION@/$VERSION/" "$SRC_DEBIAN/control.bak" > "$STAGE/DEBIAN/control"
+if [ "$PRODUCT" = "soc" ]; then
+  printf 'Architecture: arm64\n' >> "$STAGE/DEBIAN/control"
 else
   PRODUCT=pcie
-  sed -i '$a Architecture: amd64' $LITEOS_CTRL/control
+  printf 'Architecture: amd64\n' >> "$STAGE/DEBIAN/control"
 fi
-#build deb
-dpkg-deb -b $LITEOS_DIR  $TOP/sophliteos_${PRODUCT}_${version}.deb
+cp "$SRC_DEBIAN/postinst" "$SRC_DEBIAN/preinst" "$SRC_DEBIAN/prerm" "$SRC_DEBIAN/postrm" "$STAGE/DEBIAN/"
 
-rm -rf $LITEOS_DATA/sophliteos
+# 数据：tgz 解压产物（sophliteos 二进制/dist/config/service/install.sh 等）
+cp -r "$TOP/tmp/"* "$STAGE/data/sophliteos/"
+
+# md5sums（仅数据文件，路径对齐安装后绝对路径去掉前导 /，即 data/sophliteos/...）
+( cd "$STAGE" && find data -type f -print0 | sort -z | xargs -0 md5sum ) \
+  > "$STAGE/DEBIAN/md5sums"
+
+chmod 0755 "$STAGE/DEBIAN/postinst" "$STAGE/DEBIAN/preinst" "$STAGE/DEBIAN/prerm" "$STAGE/DEBIAN/postrm"
+chmod 0644 "$STAGE/DEBIAN/control" "$STAGE/DEBIAN/md5sums"
+
+# 打包（--root-owner-group 让数据树属主 root:root）
+OUT="$TOP/sophliteos_${PRODUCT}_${VERSION}.deb"
+dpkg-deb --root-owner-group -b "$STAGE" "$OUT"
+echo "✓ built $OUT"

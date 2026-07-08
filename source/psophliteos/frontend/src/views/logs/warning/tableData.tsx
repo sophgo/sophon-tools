@@ -3,11 +3,12 @@ import { useI18n } from '/@/hooks/web/useI18n';
 
 const { t } = useI18n();
 
+// 对齐 ssm /api/v1/alarms 字段：id / code / coreUnitBoardSn / componentType / createdAt / msg
 export function getBasicColumns(): BasicColumn[] {
   return [
     {
       title: t('logs.warning.id'),
-      dataIndex: 'ID',
+      dataIndex: 'id',
       width: 200,
       align: 'center',
     },
@@ -32,8 +33,13 @@ export function getBasicColumns(): BasicColumn[] {
     {
       title: t('logs.warning.time'),
       width: 220,
-      dataIndex: 'dataTime',
+      dataIndex: 'createdAt',
       align: 'left',
+      customRender: ({ text }) => {
+        if (!text) return '-';
+        const d = new Date(text);
+        return isNaN(d.getTime()) ? text : d.toLocaleString();
+      },
     },
     {
       title: t('logs.warning.description'),

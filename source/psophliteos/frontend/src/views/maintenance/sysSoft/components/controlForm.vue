@@ -152,10 +152,10 @@
   import {
     upgradeApi,
     upgradeSoftApi,
-    upgradeSsmApi,
     checkFile,
     uploadPartFile,
     checkFileList,
+    executeUpgradeApi,
   } from '/@/api/maintenance/index';
   import { useDeviceInfo } from '/@/store/modules/overview';
   import { useMessage } from '/@/hooks/web/useMessage';
@@ -497,17 +497,50 @@
   async function uploadApiByItem(item) {
     try {
       item.status = 'uploading';
-      const currentApi = props.isSoftware
-        ? upgradeSoftApi
-        : props.isSsm
-        ? upgradeSsmApi
-        : upgradeApi;
+      const product = deviceInfo.value.deviceType;
+      const flashVal = flashData.value;
+
+      // sysSoft（控制板 OTA）：文件已分片上传到 /data/ota/（与 ssm 共享目录），
+      // "开始升级"只触发 ssm executeUpgradeApi，不再重复上传——
+      // 否则发空 file 字段到 ssm /api/v1/ota/upload 会报 "missing file field"。
+      if (props.isSysSoft && !props.isSsm && !props.isSoftware) {
+        const fileName = filename.value || item?.file?.name || '';
+        if (!fileName) {
+          createMessage.error('请先上传升级包', 4);
+          item.status = 'error';
+          return { success: false, error: 'no uploaded file' };
+        }
+        const execBody = {
+          name: fileName,
+          product,
+          fileName,
+          moduleName: 'ctrl',
+          cmdFlag: '',
+          version: '',
+          flashData: flashVal,
+        };
+        await executeUpgradeApi(execBody);
+        createMessage.success(t('maintenance.systemUpdate.controlStartUpload'), 4);
+        item.status = 'success';
+        return { success: true, error: null };
+      }
+
+      // isSsm / isSoftware：需要上传真实文件
+      // isSsm 走真实 ssm /api/v1/ota/upload（不再用 mock upgradeSsmApi）
+      const currentApi = props.isSoftware ? upgradeSoftApi : upgradeApi;
       const dataParams = props.isSoftware
         ? {}
-        : { module: 'ctrl', flashData: flashData.value ? 'true' : 'false' };
-      const file = show.value ? '' : item.file;
+        : { module: 'ctrl', flashData: flashVal ? 'true' : 'false' };
+      const file = item.file;
 
-      await currentApi(
+      // 守卫：ssm/software 升级必须选文件，否则 ssm 报 "missing file field"
+      if (!file) {
+        createMessage.error(t('maintenance.systemUpdate.selectNeedFile'), 4);
+        item.status = 'error';
+        return { success: false, error: 'no file' };
+      }
+
+      const res = await currentApi(
         {
           data: dataParams,
           file: file,
@@ -516,13 +549,41 @@
           const complete = ((progressEvent.loaded / progressEvent.total) * 100) | 0;
           item.percent = complete;
         },
-      ).then((res) => {
-        if (res.data.code !== 0) {
-          createMessage.error(res.data.msg, 4);
-        } else {
-          createMessage.success(res.data.msg, 4);
+      );
+      // upgradeApi / upgradeSoftApi 均 isReturnNativeResponse，res 为原生响应
+      const body = res?.data ?? res;
+      if (!body || body.code !== 0) {
+        createMessage.error(body?.msg || 'upload failed', 4);
+        item.status = 'error';
+        return { success: false, error: body?.msg };
+      }
+      item.percent = 100;
+
+      // ssm OTA：上传成功后再调 executeUpgradeApi 触发升级 workflow
+      if (props.isSsm) {
+        const uploaded = body.result || {};
+        const fileName = uploaded.fileName || file?.name || '';
+        const execBody = {
+          name: fileName,
+          product,
+          fileName,
+          moduleName: 'ctrl',
+          cmdFlag: '',
+          version: '',
+          flashData: flashVal,
+        };
+        try {
+          await executeUpgradeApi(execBody);
+          createMessage.success(t('maintenance.systemUpdate.controlStartUpload'), 4);
+        } catch (e) {
+          // defHttp 已提示错误
+          item.status = 'error';
+          return { success: false, error: e };
         }
-      });
+      } else {
+        // isSoftware：本地 /api/upgrade 已落盘并自升级
+        createMessage.success(body.msg, 4);
+      }
       item.status = 'success';
       return {
         success: true,

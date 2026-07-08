@@ -110,14 +110,13 @@
   import { Checkbox, CheckboxGroup, Upload, Input, InputPassword } from 'ant-design-vue';
   import { UploadOutlined } from '@ant-design/icons-vue';
   import { useMessage } from '/@/hooks/web/useMessage';
-  import { upgradeApi, upgradeSsmApi } from '/@/api/maintenance/index';
+  import { upgradeApi, executeUpgradeApi } from '/@/api/maintenance/index';
   import { storeToRefs } from 'pinia';
   import { useDeviceInfo } from '/@/store/modules/overview';
   import { buildUUID } from '/@/utils/uuid';
   import { AxiosCanceler } from '/@/utils/http/axios/axiosCancel';
   import { useGlobSetting } from '/@/hooks/setting';
   import { useI18n } from '/@/hooks/web/useI18n';
-  import { encode } from 'js-base64';
 
   const { t } = useI18n();
 
@@ -210,11 +209,10 @@
       uploading.value = true;
       let data: any[] = [];
       if (fileList.value.length === 0) {
-        data = await Promise.all(
-          [{ file: '' }].map((item) => {
-            return uploadApiByItem(item);
-          }),
-        );
+        // 守卫：未选文件时不再发送空 file 字段（ssm 会报 "missing file field"）
+        createMessage.error(t('maintenance.systemUpdate.selectNeedFile'), 3);
+        uploading.value = false;
+        return;
       } else {
         data = await Promise.all(
           fileList.value.map((item) => {
@@ -239,30 +237,55 @@
   async function uploadApiByItem(item) {
     try {
       item.status = 'uploading';
-      const currentApi = props.isSsm ? upgradeSsmApi : upgradeApi;
-      const dataParams = props.isSsm
-        ? {
-            module: 'core',
-            sns: coreFormState.checkedList.join(','),
-            user: encode(encode(coreFormState.username)),
-            pwd: encode(encode(coreFormState.password)),
-          }
-        : {
-            module: 'core',
-            ip: coreFormState.checkedList.join(','),
-          };
-      const { data } = await currentApi(
+      // isSsm 与本地均走真实 ssm /api/v1/ota/upload（不再用 mock upgradeSsmApi）
+      const dataParams = {
+        module: 'core',
+        ip: coreFormState.checkedList.join(','),
+      };
+      const file = item.file;
+      if (!file) {
+        createMessage.error(t('maintenance.systemUpdate.selectNeedFile'), 3);
+        item.status = 'error';
+        return { success: false, error: 'no file' };
+      }
+      const { data } = await upgradeApi(
         {
           data: dataParams,
-          file: item.file,
+          file: file,
         },
         function onUploadProgress(progressEvent: ProgressEvent) {
           const complete = ((progressEvent.loaded / progressEvent.total) * 100) | 0;
           item.percent = complete;
         },
       );
+      const body = data?.data ?? data;
+      if (!body || body.code !== 0) {
+        createMessage.error(body?.msg || 'upload failed', 3);
+        item.status = 'error';
+        return { success: false, error: body?.msg };
+      }
+      item.percent = 100;
+
+      // ssm OTA：上传成功后再调 executeUpgradeApi 触发升级 workflow
+      const uploaded = body.result || {};
+      const fileName = uploaded.fileName || file?.name || '';
+      const execBody = {
+        name: fileName,
+        product: deviceInfo.value.deviceType,
+        fileName,
+        moduleName: 'core',
+        cmdFlag: '',
+        version: '',
+        flashData: false,
+      };
+      try {
+        await executeUpgradeApi(execBody);
+        item.responseData = data;
+      } catch (e) {
+        item.status = 'error';
+        return { success: false, error: e };
+      }
       item.status = 'success';
-      item.responseData = data;
       return {
         success: true,
         error: null,
@@ -284,7 +307,7 @@
     number: Number;
   }
   const deviceInfoStore = useDeviceInfo();
-  const { deviceStatus } = storeToRefs(deviceInfoStore);
+  const { deviceStatus, deviceInfo } = storeToRefs(deviceInfoStore);
   const plainOptions = computed(() => {
     return deviceStatus.value.map((board: Board) => ({
       value: props.isSsm ? board.sn : board.ip,

@@ -8,6 +8,7 @@ import { ROLES_KEY, TOKEN_KEY, USER_INFO_KEY, FIRST_LOGIN_KEY } from '/@/enums/c
 import { getAuthCache, setAuthCache } from '/@/utils/auth';
 import { GetUserInfoModel, LoginParams } from '/@/api/sys/model/userModel';
 import { doLogout, loginApi } from '/@/api/sys/user';
+import { getSsoActive, ssoRegister } from '/@/api/sso';
 import { useI18n } from '/@/hooks/web/useI18n';
 import { useMessage } from '/@/hooks/web/useMessage';
 import { router } from '/@/router';
@@ -16,6 +17,7 @@ import { RouteRecordRaw } from 'vue-router';
 import { PAGE_NOT_FOUND_ROUTE } from '/@/router/routes/basic';
 import { isArray } from '/@/utils/is';
 import { h } from 'vue';
+import { Modal } from 'ant-design-vue';
 import { LoginStateEnum, useLoginState } from '/@/views/sys/login/useLogin';
 const { setLoginState } = useLoginState();
 
@@ -102,15 +104,32 @@ export const useUserStore = defineStore({
       },
     ): Promise<GetUserInfoModel | null> {
       try {
-        const { goHome = true, mode, ...loginParams } = params;
+        const { goHome = true, mode = 'none' as ErrorMessageMode, ...loginParams } = params;
+
+        // 单点登录预检：若已有"另一用户"在线，弹窗确认是否继续（继续将踢掉前者）。
+        // 同用户重复登录不提示（视为刷新）。
+        const sso = await getSsoActive().catch(() => null);
+        if (sso?.active && sso.username && sso.username !== loginParams.username) {
+          const ok = await confirmKickUser(sso.username);
+          if (!ok) return null;
+        }
+
         const data = await loginApi(loginParams, mode);
 
-        const { token, changePass } = data;
+        const { token, changePass, role } = data as any;
         // save token
         this.setToken(token);
-        this.setFirstLogin(changePass === 1);
+        // 注册为活跃会话（踢掉之前的会话）。即使 temp token 也注册——该用户已登录。
+        ssoRegister(loginParams.username, token).catch(() => {});
+        // ssm 返回 changePass 为 boolean 或 1，均视为需改密
+        const needChange = changePass === true || changePass === 1;
+        this.setFirstLogin(needChange);
+        // 保存 role（ssm 无 getUserInfo 端点，role 从 login result 取）
+        if (role) {
+          this.setRoleList([role] as unknown as RoleEnum[]);
+        }
 
-        if (this.isFirstLogin) {
+        if (needChange) {
           setLoginState(LoginStateEnum.CHANGE_PASSWORD);
           return null;
         }
@@ -183,6 +202,9 @@ export const useUserStore = defineStore({
         } catch {
           console.log('注销Token失败');
         }
+        // 同步清除 sophliteos 单点登录活跃会话（仅本 token 匹配时清）
+        const { ssoLogout } = await import('/@/api/sso');
+        ssoLogout().catch(() => {});
       }
       this.setToken(undefined);
       this.setSessionTimeout(false);
@@ -211,4 +233,27 @@ export const useUserStore = defineStore({
 // Need to be used outside the setup
 export function useUserStoreWithOut() {
   return useUserStore(store);
+}
+
+// confirmKickUser 单点登录冲突确认：已有另一用户 online，是否继续登录（踢掉前者）。
+// 返回 true=继续，false=取消。
+export function confirmKickUser(activeUsername: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    Modal.confirm({
+      title: '已有用户在线',
+      content: h(
+        'div',
+        { style: { lineHeight: '1.8' } },
+        [
+          h('p', {}, `当前已有用户「${activeUsername}」在线。`),
+          h('p', { style: { color: '#fa8c16' } }, '继续登录将导致该用户下线。'),
+          h('p', {}, '是否继续登录？'),
+        ],
+      ),
+      okText: '继续登录',
+      cancelText: '取消',
+      onOk: () => resolve(true),
+      onCancel: () => resolve(false),
+    });
+  });
 }

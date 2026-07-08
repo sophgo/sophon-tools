@@ -39,11 +39,11 @@
       <a-descriptions-item :label="t('overview.device.ip')">{{
         deviceInfo.deviceIp
       }}</a-descriptions-item>
-      <a-descriptions-item label="WAN IP">{{ deviceInfo.wanIp }}</a-descriptions-item>
+      <a-descriptions-item label="WAN IP">{{ deviceInfo.wanIp || '-' }}</a-descriptions-item>
       <a-descriptions-item label="LAN IP">
-        {{ deviceInfo.lanIp.split(',')[0] }}
-        <br />
-        {{ deviceInfo.lanIp.split(',')[1] }}
+        {{ (deviceInfo.lanIp || '').split(',')[0] || '-' }}
+        <br v-if="(deviceInfo.lanIp || '').split(',')[1]" />
+        {{ (deviceInfo.lanIp || '').split(',')[1] || '' }}
       </a-descriptions-item>
       <a-descriptions-item :label="t('overview.int8Power')">{{
         formatPower(deviceInfo.int8Count, 'low')
@@ -133,19 +133,25 @@
     return getFormatTime(deviceInfo.value.runTime, t);
   });
   const timer = setInterval(() => {
-    const netValue = deviceInfo.value.runTime + 1;
-    deviceInfoStore.updateDevice('runTime', netValue);
+    const cur = deviceInfo.value.runTime;
+    // 仅对有限数字自增，防止 runTime 异常为字符串时变成 ' '+1 字符串拼接
+    if (typeof cur !== 'number' || !isFinite(cur)) return;
+    deviceInfoStore.updateDevice('runTime', cur + 1);
   }, 1000);
   onUnmounted(() => {
     clearInterval(timer);
   });
 
   // 格式化峰值算力
-  const formatPower = ({ total, unit, desc }, dot = 0) => {
+  const formatPower = (info: any, dot: any = 0) => {
+    if (!info) return '-';
+    const { total, unit, desc } = info;
+    if (total === undefined || total === null) return '-';
     if (dot === 'low') {
-      return `${Math.floor(total)}${unit} ${desc}`;
+      return `${Math.floor(total)}${unit || ''} ${desc || ''}`.trim();
     }
-    return `${total.toFixed(dot)}${unit} ${desc}`;
+    const n = typeof dot === 'number' ? dot : 0;
+    return `${Number(total).toFixed(n)}${unit || ''} ${desc || ''}`.trim();
   };
 </script>
 <style lang="less" scoped>

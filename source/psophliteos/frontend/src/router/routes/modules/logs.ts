@@ -31,14 +31,14 @@ const logs: AppRouteModule = {
         title: t('routes.dashboard.operate'),
       },
     },
-    // {
-    //   path: 'logDownload',
-    //   name: 'logDownload',
-    //   component: () => import('/@/views/logs/logDownload/index.vue'),
-    //   meta: {
-    //     title: t('routes.dashboard.logDownload'),
-    //   },
-    // },
+    {
+      path: 'logDownload',
+      name: 'logDownload',
+      component: () => import('/@/views/logs/logDownload/index.vue'),
+      meta: {
+        title: t('routes.dashboard.logDownload'),
+      },
+    },
   ],
 };
 

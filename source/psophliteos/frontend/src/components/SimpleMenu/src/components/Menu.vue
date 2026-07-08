@@ -1,7 +1,6 @@
 <template>
   <ul :class="getClass">
     <slot></slot>
-    <div v-if="isShowMenuLogo"><img :src="logImge" /></div>
   </ul>
 </template>
 
@@ -25,7 +24,6 @@
   import { useGlobSetting } from '/@/hooks/setting';
   import { createSimpleRootMenuContext } from './useSimpleMenuContext';
   import mitt from '/@/utils/mitt';
-  import logImg from '/resource/img/menu_logo.png';
   export default defineComponent({
     name: 'Menu',
     props: {
@@ -158,7 +156,6 @@
     },
     data() {
       return {
-        logImge: logImg,
       };
     },
   });

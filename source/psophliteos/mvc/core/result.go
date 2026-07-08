@@ -1,10 +1,8 @@
 package mvc
 
 import (
-	"sophliteos/client/ssm"
 	"sophliteos/logger"
 	error2 "sophliteos/mvc/error"
-	"sophliteos/mvc/i18n"
 	"sophliteos/mvc/types"
 )
 
@@ -51,21 +49,4 @@ func HandleError(err error, codes ...interface{}) {
 			// panic(err.Error())
 		}
 	}
-}
-
-func Handle(ssmResult ssm.SsmResult, code int) types.Result {
-	var result types.Result
-	if ssmResult.ErrorCode != error2.Ok {
-		logger.Error("%s %s %s", i18n.GetString(i18n.Zh, code), ssmResult.ErrorCode, ssmResult.ErrorMessage)
-		panic(code)
-	} else {
-		result.Code = ssmResult.Code
-		result.Msg = ssmResult.Msg
-	}
-	return result
-}
-
-func HandleResult(ssmResult ssm.SsmResult, err error, code int) types.Result {
-	HandleError(err, code)
-	return Handle(ssmResult, code)
 }

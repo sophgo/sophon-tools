@@ -59,7 +59,8 @@ const transform: AxiosTransform = {
     }
     //  这里 code，result，message为 后台统一的字段，需要在 types.ts内修改为项目自己的接口返回格式
     const { code, result, msg } = data;
-    const message = msg || data.message;
+    // ssm 信封：error_message 优先，兼容 msg / message
+    const message = msg || data.error_message || data.message;
     // 这里逻辑可以根据项目进行修改
     const hasSuccess = data && Reflect.has(data, 'code') && code === ResultEnum.SUCCESS;
     if (hasSuccess) {
@@ -189,7 +190,13 @@ const transform: AxiosTransform = {
 
     const { response, code, message, config } = error || {};
     const errorMessageMode = config?.requestOptions?.errorMessageMode || 'none';
-    const msg: string = response?.data?.error?.message ?? '';
+    // ssm 信封：error_message 优先，兼容 error.message / msg
+    const msg: string =
+      response?.data?.error_message ||
+      response?.data?.error?.message ||
+      response?.data?.msg ||
+      error?.message ||
+      '';
     const err: string = error?.toString?.() ?? '';
     let errMessage = '';
 
@@ -232,8 +239,7 @@ function createAxios(opt?: Partial<CreateAxiosOptions>) {
       {
         // See https://developer.mozilla.org/en-US/docs/Web/HTTP/Authentication#authentication_schemes
         // authentication schemes，e.g: Bearer
-        // authenticationScheme: 'Bearer',
-        authenticationScheme: '',
+        authenticationScheme: 'Bearer',
         timeout: 100 * 1000,
         // 基础接口地址
         // baseURL: globSetting.apiUrl,
