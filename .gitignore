@@ -68,3 +68,8 @@ source/psophliteos/build/sophliteos/DEBIAN/md5sums
 source/psophliteos/build/sophliteos/data/
 source/psophliteos/build/sophliteos_*.deb
 source/psophliteos/build/sophliteos/DEBIAN/control
+
+# superpowers 开发文档（设计/计划/工作记录）不入库
+docs/superpowers/
+**/docs/superpowers/
+.superpowers/
