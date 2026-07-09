@@ -26,8 +26,14 @@ db:
 ota:
   dryRun: false
 metrics:
-  enabled: true
-  updateIntervalSeconds: 10
+  enabled: true                    # 总开关；false 则不采集 Prometheus 指标、不写存档
+  updateIntervalSeconds: 20        # 采样间隔（秒）。越小越精细但占空间越多；
+                                   # 20s + v3 schema(18字段) 下 100MB 约存 2 年
   temperatureThresholds:
     critical: 90
     warning: 85
+  archive:                         # 性能历史存档（定长二进制 record + gzip 分段）
+    enabled: true                  # 存档开关
+    path: /var/lib/bmssm/metrics   # 存档目录
+    maxSizeMB: 100                # 所占空间淘汰上限（MB）；累计超限按 FIFO 删除最旧分段。无时间淘汰。
+    channelBufferSize: 16          # 异步写入通道大小；满则丢弃最旧样本（不影响 Prometheus 实时更新）
