@@ -27,8 +27,9 @@
 | [autotelecomm](./source/pautotelecomm) | source/pautotelecomm | 是 | 4G/5G自动拨号工具 |
 | [multi_video_qt](./source/pmulti_video_qt) | source/pmulti_video_qt | 否 | QT多路视频解码播放器 |
 | [bm_set_ip](./source/pbm_set_ip) | source/pbm_set_ip | 否 | 配网工具 |
-| [get_info_exporter](./source/pget_info_exporter) | source/pget_info_exporter | 否 | 用于SE5/SE7/SE9的exporter实现 |
-| [sophliteos](./source/psophliteos) | source/psophliteos | 否 | 算力设备管理 Web 平台（Go+Vue），参考源码目录 README/build |
+| [get_info_exporter](./source/pget_info_exporter) | source/pget_info_exporter | 否 | 已并入 bmssm（Prometheus 指标采集） |
+| [bmssm](./source/pbmssm) | source/pbmssm | 否 | 设备端后端（:9779）：鉴权/硬件指标/systemd/端口/网络/OTA/文件。见 [API.md](./API.md) / [USAGE.md](./USAGE.md) / [BUILD.md](./BUILD.md) |
+| [sophliteos](./source/psophliteos) | source/psophliteos | 否 | 算力设备管理 Web 平台（Go+Vue，:8080），反代 bmssm。见 [API.md](./API.md) / [USAGE.md](./USAGE.md) / [BUILD.md](./BUILD.md) |
 
 ## 编译方式
 
