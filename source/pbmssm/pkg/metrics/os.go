@@ -248,3 +248,20 @@ func (c *Collector) driverReleaseVersion() string {
 	}
 	return ""
 }
+
+// BootTime 返回系统启动时间（/proc/uptime 秒，浮点），对齐 pget_info BOOT_TIME。
+func (c *Collector) BootTime() float64 {
+	content := c.readStr(uptimePath)
+	if content == "" {
+		return 0
+	}
+	first := content
+	if idx := strings.Index(content, " "); idx >= 0 {
+		first = content[:idx]
+	}
+	v, err := strconv.ParseFloat(first, 64)
+	if err != nil {
+		return 0
+	}
+	return v
+}

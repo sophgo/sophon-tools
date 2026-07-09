@@ -29,6 +29,16 @@ func (c *Collector) Memory() Memory {
 	return m
 }
 
+// MemoryUsagePercent 计算内存使用百分比 (0-100)，对齐 pget_info。
+// 使用率 = (total - free) / total * 100
+func (c *Collector) MemoryUsagePercent() float64 {
+	m := c.Memory()
+	if m.Total <= 0 {
+		return 0
+	}
+	return (m.Total - m.Free) / m.Total * 100.0
+}
+
 // memLineMB 从形如 "MemTotal:       6427708 kB" 的行提取 kB 并转 MB。
 // 对齐 bmssm/pget_info：整数除法（截断），如 6427708 kB → 6277 MB。
 func memLineMB(line string) float64 {

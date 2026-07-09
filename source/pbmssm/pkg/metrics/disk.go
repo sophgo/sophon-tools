@@ -221,6 +221,37 @@ type partInfo struct {
 	ro               int
 }
 
+// MMC 寿命 sysfs 路径
+const (
+	mmcLifeTimePath = "/sys/class/mmc_host/mmc0/mmc0:0001/life_time"
+	mmcPreEOLPath   = "/sys/class/mmc_host/mmc0/mmc0:0001/pre_eol_info"
+)
+
+// MMCLifetime 读取 eMMC 寿命 (life_time, pre_eol_info)。
+// 对齐 pget_info MMC0_LIFE_TIME / MMC0_PRE_EOL_LIFE。
+// 非 eMMC 设备或文件不存在返 (0, 0)。
+func (c *Collector) MMCLifetime() (lifeTime, preEOL float64) {
+	lt := c.readStr(mmcLifeTimePath)
+	if lt == "" {
+		return 0, 0
+	}
+	// 格式 "0x01 0x02" — 取首值
+	fields := strings.Fields(lt)
+	if len(fields) > 0 {
+		if v, err := strconv.ParseInt(strings.TrimPrefix(fields[0], "0x"), 16, 64); err == nil {
+			lifeTime = float64(v)
+		}
+	}
+	pe := c.readStr(mmcPreEOLPath)
+	if pe == "" {
+		return lifeTime, 0
+	}
+	if v, err := strconv.ParseFloat(pe, 64); err == nil {
+		preEOL = v
+	}
+	return
+}
+
 // diskReadOnly 解析 /proc/mounts 中 dev 对应挂载项的 options 是否含 "ro"。
 func diskReadOnly(mounts, dev string) int {
 	if mounts == "" || dev == "" {

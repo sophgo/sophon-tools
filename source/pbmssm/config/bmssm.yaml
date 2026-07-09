@@ -25,3 +25,9 @@ db:
   path: /var/lib/bmssm/bmssm.db
 ota:
   dryRun: false
+metrics:
+  enabled: true
+  updateIntervalSeconds: 10
+  temperatureThresholds:
+    critical: 90
+    warning: 85

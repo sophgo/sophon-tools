@@ -112,3 +112,35 @@ func TestTPUMemMissing(t *testing.T) {
 		t.Errorf("TPUMem() = %v, want 0 when missing (non-root 降级)", got)
 	}
 }
+
+// ---------------------------------------------------------------
+// TPUAverageUsage — avusage: 字段
+// ---------------------------------------------------------------
+
+func TestTPUAverageUsage(t *testing.T) {
+	fr := &fakeFileReader{files: map[string]string{
+		"/sys/class/bm-tpu/bm-tpu0/device/npu_usage": "usage:0 avusage:0\n",
+	}}
+	c := NewCollector(fr, nil)
+	if got := c.TPUAverageUsage(); got != 0 {
+		t.Errorf("TPUAverageUsage() = %d, want 0", got)
+	}
+}
+
+func TestTPUAverageUsageNonZero(t *testing.T) {
+	fr := &fakeFileReader{files: map[string]string{
+		"/sys/class/bm-tpu/bm-tpu0/device/npu_usage": "usage:42 avusage:40\n",
+	}}
+	c := NewCollector(fr, nil)
+	if got := c.TPUAverageUsage(); got != 40 {
+		t.Errorf("TPUAverageUsage() = %d, want 40", got)
+	}
+}
+
+func TestTPUAverageUsageMissing(t *testing.T) {
+	fr := &fakeFileReader{files: map[string]string{}}
+	c := NewCollector(fr, nil)
+	if got := c.TPUAverageUsage(); got != 0 {
+		t.Errorf("TPUAverageUsage() = %d, want 0 when missing", got)
+	}
+}

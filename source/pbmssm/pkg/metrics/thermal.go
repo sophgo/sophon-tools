@@ -63,6 +63,27 @@ func (c *Collector) TPUUsage() int {
 	return 0
 }
 
+// TPUAverageUsage 读取 TPU 平均利用率（avusage 字段）。
+// 源同 TPUUsage，取 "avusage:" 后数字（百分比）。
+// 失败返 0。
+func (c *Collector) TPUAverageUsage() int {
+	s := c.readStr(npuUsagePath)
+	if s == "" {
+		return 0
+	}
+	for _, tok := range strings.Fields(s) {
+		const prefix = "avusage:"
+		if strings.HasPrefix(tok, prefix) {
+			n, err := strconv.Atoi(tok[len(prefix):])
+			if err != nil {
+				return 0
+			}
+			return n
+		}
+	}
+	return 0
+}
+
 // TPUMem 读取 TPU 显存总量（MB）。
 // 源：/sys/kernel/debug/ion/bm_npu_heap_dump/total_mem（字节，需 root）。
 // 对齐 pget_info：TPU_MEM(MiB) = total_mem/1024/1024。

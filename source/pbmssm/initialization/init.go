@@ -13,6 +13,7 @@ import (
 	"bmssm/pkg/alarm"
 	"bmssm/pkg/auth"
 	"bmssm/pkg/device"
+	"bmssm/pkg/metrics"
 	"bmssm/pkg/ota"
 )
 
@@ -78,6 +79,16 @@ func InitBase() {
 		alarmRecorder = mwalarm.NewRecorderAdapter(mwalarm.NewService(database.DB()))
 	}
 	alarm.Init(alarmRecorder)
+
+	// Prometheus metrics 后台采集：设备信息已就绪，启动周期采集 goroutine。
+	// 每 updateIntervalSeconds 秒采集硬件指标→更新 sophon_* gauge→/metrics 暴露。
+	metrics.StartCollection(conf, metrics.DeviceLabels{
+		DeviceID:  "0",
+		Model:     global.DeviceTypeEx,
+		Serial:    global.DeviceSnEx,
+		ChipType:  global.ModuleType,
+		BoardType: global.ModuleTypeEx,
+	})
 }
 
 // createDefaultAdmin 在 user 表为空时插入默认 admin 用户。

@@ -128,6 +128,19 @@ func parseStatTotal(line string) (total, idle int64) {
 	return total, idle
 }
 
+// CPUFrequency 读取 CPU 频率 (MHz)，公开方法。
+// 内部复用 cpuFrequency。
+func (c *Collector) CPUFrequency() int {
+	return c.cpuFrequency()
+}
+
+// PerCPUUsage 返回 delta 窗口内的 per-core 使用率。
+// 调用方负责在调用 sampleDeltas 后使用其结果。
+func (c *Collector) PerCPUUsage() []PerCPUDelta {
+	ds := c.sampleDeltas()
+	return ds.PerCPU
+}
+
 // mapArch 将 runtime.GOARCH 映射为与 lscpu/uname 一致的架构名。
 func mapArch(goarch string) string {
 	switch goarch {

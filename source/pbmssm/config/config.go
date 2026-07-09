@@ -71,6 +71,18 @@ func LoadFromDir(dir string) bool {
 	// OTA dryRun：true 时只记录不实刷（真机验证用，避免变砖/断 SSH）
 	v.SetDefault("ota.dryRun", false)
 
+	// Prometheus metrics 后台采集
+	v.SetDefault("metrics.enabled", true)
+	v.SetDefault("metrics.updateIntervalSeconds", 20)
+	v.SetDefault("metrics.temperatureThresholds.critical", 90)
+	v.SetDefault("metrics.temperatureThresholds.warning", 85)
+
+	// Metrics 历史存档
+	v.SetDefault("metrics.archive.enabled", true)
+	v.SetDefault("metrics.archive.path", "/var/lib/bmssm/metrics")
+	v.SetDefault("metrics.archive.maxSizeMB", 100)
+	v.SetDefault("metrics.archive.channelBufferSize", 16)
+
 	v.AddConfigPath(dir)
 	v.SetConfigName("bmssm")
 	v.SetConfigType("yaml")

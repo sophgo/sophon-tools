@@ -15,15 +15,24 @@ import (
 	"bmssm/mvc/filemanage"
 	"bmssm/mvc/hardware"
 	"bmssm/mvc/health"
+	metricsCtrl "bmssm/mvc/metrics"
 	"bmssm/mvc/network"
+	portsCtrl "bmssm/mvc/ports"
 	"bmssm/mvc/software"
+	systemdCtrl "bmssm/mvc/systemd"
 	"bmssm/mvc/user"
+	"bmssm/pkg/metrics"
 )
 
 // Register 在 engine 上注册所有路由。
 func Register(r *gin.Engine) {
 	// 公开端点
 	r.GET("/healthz", health.Health)
+
+	// Prometheus metrics 端点（公开，Prometheus scrape 不加 Authorization header）
+	r.GET("/metrics", metrics.PromHandler())
+	// /health JSON 端点（公开）
+	r.GET("/health", metrics.HealthHandler())
 
 	// 用户模块控制器（使用 database.DB()）
 	userCtrl := user.DefaultController()
@@ -36,6 +45,8 @@ func Register(r *gin.Engine) {
 	hwCtrl := hardware.DefaultController()
 	fileCtrl := filemanage.DefaultController()
 	compatCtrl := compat.DefaultController()
+	systemdC := systemdCtrl.DefaultController()
+	portsC := portsCtrl.DefaultController()
 
 	// 公开：仅 login（含独立防爆破限流，约 5 次/12s/IP）
 	public := r.Group("/api/v1")
@@ -75,6 +86,12 @@ func Register(r *gin.Engine) {
 		// 告警历史
 		api.GET("/alarms", alarmCtrl.ListAlarms)
 
+		// 性能指标历史
+		metricsC := metricsCtrl.DefaultController()
+		api.GET("/metrics/fields", metricsC.GetFields)
+		api.GET("/metrics/history", metricsC.GetHistory)
+		api.GET("/metrics/export", metricsC.GetExport)
+
 		// 网络
 		api.GET("/network/ip", netCtrl.GetIP)
 		api.PUT("/network/ip", netCtrl.SetIP)
@@ -82,6 +99,17 @@ func Register(r *gin.Engine) {
 		api.GET("/network/nat", compatCtrl.GetNAT)
 		api.POST("/network/nat", compatCtrl.AddNAT)
 		api.DELETE("/network/nat/:num", compatCtrl.DeleteNAT)
+
+		// 服务管理
+		api.GET("/systemd/services", systemdC.ListServices)
+		api.GET("/systemd/services/:name", systemdC.ShowService)
+		api.POST("/systemd/services/:name/action", systemdC.Action)
+		api.POST("/systemd/daemon-reload", systemdC.DaemonReload)
+		api.GET("/systemd/boot-report", systemdC.BootReport)
+		api.GET("/systemd/boot-report/export", systemdC.ExportReport)
+
+		// 端口状态
+		api.GET("/ports/listening", portsC.Listening)
 
 		// Docker
 		api.GET("/docker/container", dockerCtrl.ListContainers)
