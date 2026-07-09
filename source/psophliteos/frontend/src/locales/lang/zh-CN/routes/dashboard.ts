@@ -6,6 +6,7 @@ export default {
   basicInfor: '基础信息',
   ovewview: '设备概览',
   boardDetail: '板卡详情',
+  metricsHistory: '性能历史',
   logs: '日志管理',
   warning: '告警日志',
   operate: '操作日志',
@@ -22,6 +23,8 @@ export default {
   logDownload: '日志下载',
   terminal: '实时终端',
   fileManage: '文件管理',
+  serviceManage: '服务管理',
+  portStatus: '端口状态',
   content: {
     sysContent: '系统OTA升级,适用于版本升级,不支持降级和跨版本升级,否则可能导致系统损坏。',
     ssmContent:

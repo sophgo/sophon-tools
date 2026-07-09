@@ -95,6 +95,22 @@ const maintenance: AppRouteModule = {
         title: t('routes.dashboard.fileManage'),
       },
     },
+    {
+      path: 'serviceManage',
+      name: 'ServiceManage',
+      component: () => import('/@/views/maintenance/serviceManage/index.vue'),
+      meta: {
+        title: t('routes.dashboard.serviceManage'),
+      },
+    },
+    {
+      path: 'portStatus',
+      name: 'PortStatus',
+      component: () => import('/@/views/maintenance/portStatus/index.vue'),
+      meta: {
+        title: t('routes.dashboard.portStatus'),
+      },
+    },
   ],
 };
 

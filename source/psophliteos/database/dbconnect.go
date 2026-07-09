@@ -66,6 +66,7 @@ func InitDB() {
 	_ = GetDBUtil(DB).CreateTableIfNotExist(&User{}, "user_id", "id")
 	_ = GetDBUtil(DB).CreateTableIfNotExist(&Alarm{}, "alarm_id", "id")
 	_ = GetDBUtil(DB).CreateTableIfNotExist(&OptLog{}, "opt_log_id", "id")
+	_ = GetDBUtil(DB).CreateTableIfNotExist(&MetricSelection{}, "id", "id")
 	_, err = QueryUserWithName(admin)
 	if err != nil && strings.EqualFold(recordNotFound, err.Error()) {
 		SaveUser(&User{

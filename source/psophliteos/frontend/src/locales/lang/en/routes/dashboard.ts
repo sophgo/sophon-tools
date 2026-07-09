@@ -6,6 +6,7 @@ export default {
   basicInfor: 'Information',
   ovewview: 'Overview',
   boardDetail: 'Board Detail',
+  metricsHistory: 'Metrics History',
   logs: 'Logs',
   warning: 'Alarm',
   operate: 'Operation',
@@ -22,6 +23,8 @@ export default {
   logDownload: 'logs Download',
   terminal: 'Terminal',
   fileManage: 'File Manager',
+  serviceManage: 'Service Management',
+  portStatus: 'Port Status',
   content: {
     sysContent:
       'System OTA upgrade, suitable for version upgrade, does not support downgrade and cross version upgrade, otherwise it may cause system damage.',

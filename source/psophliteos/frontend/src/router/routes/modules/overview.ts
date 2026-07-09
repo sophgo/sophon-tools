@@ -27,6 +27,14 @@ const overview: AppRouteModule = {
       },
     },
     {
+      path: 'history',
+      name: 'MetricsHistory',
+      component: () => import('/@/views/overview/history.vue'),
+      meta: {
+        title: t('routes.dashboard.metricsHistory'),
+      },
+    },
+    {
       path: 'detail',
       name: 'OverviewDetail',
       component: () => import('/@/views/overview/detail.vue'),

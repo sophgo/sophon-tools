@@ -96,6 +96,7 @@ func Routers() *gin.Engine {
 		systemRouter.InitOtaRouter(LocalGroup)
 		systemRouter.InitVersionRouter(LocalGroup)
 		systemRouter.InitUpgradeRouter(LocalGroup)
+		systemRouter.InitMetricsSelRouter(LocalGroup)
 	}
 
 	logger.Info("Router Init Ok")

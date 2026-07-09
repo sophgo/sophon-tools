@@ -23,6 +23,9 @@ export function configStyleImportPlugin() {
             'radio-group': 'radio',
             'radio-button': 'radio',
             'button-group': 'button',
+            'range-picker': 'date-picker',
+            'month-picker': 'date-picker',
+            'week-picker': 'date-picker',
           };
           styleName = map[name] || name;
           return `ant-design-vue/es/${styleName}/style/index`;

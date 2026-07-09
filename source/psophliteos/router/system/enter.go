@@ -4,4 +4,5 @@ type RouterGroup struct {
 	OtaRouter
 	VersionRouter
 	UpgradeRouter
+	MetricsSelRouter
 }
