@@ -26,7 +26,7 @@ struct Route {
     table: Option<String>,
 }
 
-/// 路由策略(单,from/to 可选)
+/// 路由策略(from/to 可选,自带 table)
 struct Policy {
     from: Option<(String, u8)>,
     to: Option<(String, u8)>,
@@ -40,7 +40,7 @@ struct Config {
     v4: Option<Family>,
     v6: Option<Family>,
     routes: Vec<Route>,
-    policy: Option<Policy>,
+    policies: Vec<Policy>,
     dry_run: bool,
 }
 
@@ -162,7 +162,7 @@ fn try_old_mode(net_device: &str, rest: &[String]) -> Result<Option<Config>, lex
         v4,
         v6,
         routes: Vec::new(),
-        policy: None,
+        policies: Vec::new(),
         dry_run: false,
     }))
 }
@@ -202,7 +202,7 @@ fn parse_4tuple(net_device: &str, rest: &[String]) -> Result<Config, lexopt::Err
     }
 
     let mut routes: Vec<Route> = Vec::new();
-    let mut policy: Option<Policy> = None;
+    let mut policies: Vec<Policy> = Vec::new();
 
     loop {
         let pos1 = match rest.get(i) {
@@ -248,14 +248,17 @@ fn parse_4tuple(net_device: &str, rest: &[String]) -> Result<Config, lexopt::Err
             }
             i += 4;
         } else if is_dotted_quad(&g3) {
-            // 策略(单):from from_mask to to_mask
-            if policy.is_some() {
-                return Err("only one policy group allowed".into());
-            }
-            let from = (g0, mask_to_prefix(&g1));
-            let to = (g2, mask_to_prefix(&g3));
-            policy = Some(Policy { from: Some(from), to: Some(to), table: None });
-            i += 4;
+            // 策略:from from_mask to to_mask [table](5 元组,table 可省)
+            let from = (g0.clone(), mask_to_prefix(&g1));
+            let to = (g2.clone(), mask_to_prefix(&g3));
+            let g4 = rest.get(i + 4).cloned().unwrap_or_default();
+            let (table, advance) = if !g4.is_empty() && is_table_token(&g4) {
+                (Some(g4), 5)
+            } else {
+                (None, 4)
+            };
+            policies.push(Policy { from: Some(from), to: Some(to), table });
+            i += advance;
         } else if g3.is_empty() || g3.parse::<u32>().is_ok() || is_table_name(&g3) {
             // 路由:to to_mask via table
             routes.push(Route {
@@ -274,11 +277,26 @@ fn parse_4tuple(net_device: &str, rest: &[String]) -> Result<Config, lexopt::Err
         }
     }
 
-    // 策略 table 取最后一条路由的 table
-    if let Some(p) = policy.as_mut() {
-        p.table = routes.last().and_then(|r| r.table.clone());
+    // 4-token 策略(无显式 table)仅在恰好 1 条路由时共享其 table;否则需显式第 5 token
+    for p in policies.iter_mut() {
         if p.table.is_none() {
-            return Err("policy requires a preceding route (for table)".into());
+            p.table = match routes.len() {
+                1 => {
+                    let t = routes[0].table.clone();
+                    if t.is_none() {
+                        return Err(
+                            "policy needs a table: the single route has no table; provide policy's 5th token".into(),
+                        );
+                    }
+                    t
+                }
+                0 => return Err(
+                    "policy needs a table: no route to share; provide policy's 5th token".into(),
+                ),
+                _ => return Err(
+                    "policy needs explicit table (5th token): multiple routes present".into(),
+                ),
+            };
         }
     }
 
@@ -288,7 +306,7 @@ fn parse_4tuple(net_device: &str, rest: &[String]) -> Result<Config, lexopt::Err
         v4,
         v6,
         routes,
-        policy,
+        policies,
         dry_run: false,
     })
 }
@@ -318,6 +336,10 @@ fn is_table_name(s: &str) -> bool {
         && !is_dhcp_token(s)
         && s.parse::<u32>().is_err()
         && s.chars().all(|c| c.is_alphanumeric() || c == '_')
+}
+/// 合法 table token(数字 id 或表名),用于策略第 5 token 识别
+fn is_table_token(s: &str) -> bool {
+    s.parse::<u32>().is_ok() || is_table_name(s)
 }
 
 /// 填充 family1 可选槽(netmask/gateway/dns),返回 (nm,gw,dns,jumped_to_f2)
@@ -428,7 +450,8 @@ fn main() {
             eprintln!("  DHCP IPv4:      bm_set_ip eth0 dhcp");
             eprintln!("  Static IPv4:    bm_set_ip eth0 192.168.1.100 24 192.168.1.1 8.8.8.8");
             eprintln!("  Multi-addr+route(4-tuple): bm_set_ip eth0 192.168.1.100 24 192.168.1.1 8.8.8.8  192.168.1.101 24 '' ''  192.168.2.0 24 192.168.1.1 100");
-            eprintln!("  Route+policy(4-tuple):     bm_set_ip eth0 192.168.1.100 24 '' ''  192.168.2.0 24 192.168.1.1 100  10.0.0.0 24 192.168.3.0 255.255.255.0");
+            eprintln!("  Route+policy(4-tuple):     bm_set_ip eth0 192.168.1.100 24 '' ''  192.168.2.0 24 192.168.1.1 100  10.0.0.0 24 192.168.3.0 255.255.255.0 [table]");
+            eprintln!("  Multi-policy(5-tuple):     bm_set_ip eth0 192.168.1.100 24 '' ''  192.168.2.0 24 192.168.1.1 100  10.0.0.0 24 192.168.3.0 255.255.255.0 100  10.1.0.0 24 192.168.4.0 255.255.255.0 200");
             eprintln!("  Dry-run:        bm_set_ip --dry-run eth0 192.168.1.100 24");
             exit(1);
         }
@@ -510,33 +533,13 @@ fn print_analyzed_config(cfg: &Config) {
         println!("routes[{}].table={}", idx, r.table.as_deref().unwrap_or(""));
     }
 
-    match &cfg.policy {
-        Some(p) => {
-            println!("policy.present=true");
-            if let Some((n, px)) = &p.from {
-                println!("policy.from={}", n);
-                println!("policy.from_prefix={}", px);
-            } else {
-                println!("policy.from=");
-                println!("policy.from_prefix=");
-            }
-            if let Some((n, px)) = &p.to {
-                println!("policy.to={}", n);
-                println!("policy.to_prefix={}", px);
-            } else {
-                println!("policy.to=");
-                println!("policy.to_prefix=");
-            }
-            println!("policy.table={}", p.table.as_deref().unwrap_or(""));
-        }
-        None => {
-            println!("policy.present=false");
-            println!("policy.from=");
-            println!("policy.from_prefix=");
-            println!("policy.to=");
-            println!("policy.to_prefix=");
-            println!("policy.table=");
-        }
+    println!("policies.count={}", cfg.policies.len());
+    for (idx, p) in cfg.policies.iter().enumerate() {
+        println!("policies[{}].from={}", idx, p.from.as_ref().map(|(n, _)| n.as_str()).unwrap_or(""));
+        println!("policies[{}].from_prefix={}", idx, p.from.as_ref().map(|(_, px)| *px).unwrap_or(0));
+        println!("policies[{}].to={}", idx, p.to.as_ref().map(|(n, _)| n.as_str()).unwrap_or(""));
+        println!("policies[{}].to_prefix={}", idx, p.to.as_ref().map(|(_, px)| *px).unwrap_or(0));
+        println!("policies[{}].table={}", idx, p.table.as_deref().unwrap_or(""));
     }
     println!("## bm_set_ip dry-run config end");
 }
@@ -700,24 +703,26 @@ fn configure_with_netplan(cfg: &Config) {
         dev_cfg.insert(Value::String("routes".into()), Value::Sequence(routes_seq));
     }
 
-    // 策略
-    if let Some(p) = &cfg.policy {
+    // 策略(多条)
+    if !cfg.policies.is_empty() {
         let mut policy_seq: Vec<Value> = Vec::new();
-        if let Some((n, px)) = &p.from {
-            let mut m = Mapping::new();
-            m.insert(Value::String("from".into()), Value::String(format!("{}/{}", n, px)));
-            if let Some(t) = &p.table {
-                m.insert(Value::String("table".into()), Value::String(t.clone()));
+        for p in &cfg.policies {
+            if let Some((n, px)) = &p.from {
+                let mut m = Mapping::new();
+                m.insert(Value::String("from".into()), Value::String(format!("{}/{}", n, px)));
+                if let Some(t) = &p.table {
+                    m.insert(Value::String("table".into()), Value::String(t.clone()));
+                }
+                policy_seq.push(Value::Mapping(m));
             }
-            policy_seq.push(Value::Mapping(m));
-        }
-        if let Some((n, px)) = &p.to {
-            let mut m = Mapping::new();
-            m.insert(Value::String("to".into()), Value::String(format!("{}/{}", n, px)));
-            if let Some(t) = &p.table {
-                m.insert(Value::String("table".into()), Value::String(t.clone()));
+            if let Some((n, px)) = &p.to {
+                let mut m = Mapping::new();
+                m.insert(Value::String("to".into()), Value::String(format!("{}/{}", n, px)));
+                if let Some(t) = &p.table {
+                    m.insert(Value::String("table".into()), Value::String(t.clone()));
+                }
+                policy_seq.push(Value::Mapping(m));
             }
-            policy_seq.push(Value::Mapping(m));
         }
         if !policy_seq.is_empty() {
             dev_cfg.insert(Value::String("routing-policy".into()), Value::Sequence(policy_seq));
@@ -840,20 +845,22 @@ fn configure_with_nmcli(cfg: &Config) {
         add_args.push("ipv4.routes".into());
         add_args.push(entries.join(","));
     }
-    // 策略
-    if let Some(p) = &cfg.policy {
-        if let Some(t) = &p.table {
-            let mut rules: Vec<String> = Vec::new();
-            if let Some((n, px)) = &p.from {
-                rules.push(format!("from {}/{} table {}", n, px, t));
+    // 策略(多条)
+    if !cfg.policies.is_empty() {
+        let mut rules: Vec<String> = Vec::new();
+        for p in &cfg.policies {
+            if let Some(t) = &p.table {
+                if let Some((n, px)) = &p.from {
+                    rules.push(format!("from {}/{} table {}", n, px, t));
+                }
+                if let Some((n, px)) = &p.to {
+                    rules.push(format!("to {}/{} table {}", n, px, t));
+                }
             }
-            if let Some((n, px)) = &p.to {
-                rules.push(format!("to {}/{} table {}", n, px, t));
-            }
-            if !rules.is_empty() {
-                add_args.push("ipv4.routing-rules".into());
-                add_args.push(rules.join(", "));
-            }
+        }
+        if !rules.is_empty() {
+            add_args.push("ipv4.routing-rules".into());
+            add_args.push(rules.join(", "));
         }
     }
 
@@ -931,7 +938,7 @@ fn configure_with_networkd(cfg: &Config) {
             writeln!(file, "Table={}", t).unwrap();
         }
     }
-    if let Some(p) = &cfg.policy {
+    for p in &cfg.policies {
         if let Some(t) = &p.table {
             if let Some((n, px)) = &p.from {
                 writeln!(file).unwrap();
@@ -1002,7 +1009,7 @@ fn configure_with_ip(cfg: &Config) {
         }
         let _ = Command::new("ip").args(&args).status();
     }
-    if let Some(p) = &cfg.policy {
+    for p in &cfg.policies {
         if let Some(t) = &p.table {
             if let Some((n, px)) = &p.from {
                 let _ = Command::new("ip").args(["rule", "add", "from", &format!("{}/{}", n, px), "table", t]).status();

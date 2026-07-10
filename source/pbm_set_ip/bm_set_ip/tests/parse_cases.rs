@@ -1,6 +1,6 @@
 //! bm_set_ip 双模式 + 多实例解析器集成测试(通过 --dry-run 驱动)。
-//! 覆盖:IP-only 旧模式(向后兼容)/ 4 元组多地址 / 多路由 / 路由+策略 /
-//!       多地址+路由+v6 / 策略 to_mask 强制点分 / 异常错误 / flag 位置。
+//! 覆盖:IP-only 旧模式(向后兼容)/ 4 元组多地址 / 多路由 / 路由+策略(5 元组)/
+//!       多策略 / 多地址+路由+v6 / 策略 to_mask 强制点分 / 异常错误 / flag 位置。
 //!
 //! 运行:`cargo test --test parse_cases` 或 `bash tests/parse_cases.sh`。
 
@@ -90,7 +90,7 @@ macro_rules! case_err {
 // ============ A. IP-only 旧模式(向后兼容)============
 case!(a1_v4_full, &["eth0","1.1.1.1","24","1.1.1.254","8.8.8.8"], [
     "family1_is_v6=false", "v4.addrs=1.1.1.1/24", "v4.gateway=1.1.1.254", "v4.dns=8.8.8.8",
-    "v4.is_dhcp=false", "v6.present=false", "routes.count=0", "policy.present=false",
+    "v4.is_dhcp=false", "v6.present=false", "routes.count=0", "policies.count=0",
 ]);
 case!(a2_v4_minimal, &["eth0","1.1.1.1","24"], [
     "v4.addrs=1.1.1.1/24", "v4.gateway=", "v4.dns=", "routes.count=0",
@@ -122,7 +122,7 @@ case!(b3_multi_addr_dotted, &["eth0","1.1.1.1","255.255.255.0","","","1.1.1.2","
 case!(c1_multi_route, &["eth0","1.1.1.1","24","","","192.168.2.0","24","1.1.1.254","100","192.168.3.0","24","1.1.1.254","200"], [
     "routes.count=2", "routes[0].to=192.168.2.0", "routes[0].to_prefix=24",
     "routes[0].via=1.1.1.254", "routes[0].table=100",
-    "routes[1].to=192.168.3.0", "routes[1].table=200", "policy.present=false",
+    "routes[1].to=192.168.3.0", "routes[1].table=200", "policies.count=0",
 ]);
 case!(c2_route_no_table, &["eth0","1.1.1.1","24","","","192.168.2.0","24","1.1.1.254",""], [
     "routes[0].table=", "routes[0].via=1.1.1.254",
@@ -131,14 +131,40 @@ case!(c3_route_table_name, &["eth0","1.1.1.1","24","","","192.168.2.0","24","1.1
     "routes[0].table=lan_table",
 ]);
 
-// ============ D. 4 元组路由+策略(策略 to_mask 强制点分)============
+// ============ D. 4 元组路由+策略(5 元组,to_mask 强制点分)============
+// d1:1 路由 + 1 策略(4-token,共享该路由 table)
 case!(d1_route_policy, &["eth0","1.1.1.1","24","","","192.168.2.0","24","1.1.1.254","100","10.0.0.0","24","192.168.3.0","255.255.255.0"], [
     "routes.count=1", "routes[0].table=100",
-    "policy.present=true", "policy.from=10.0.0.0", "policy.from_prefix=24",
-    "policy.to=192.168.3.0", "policy.to_prefix=24", "policy.table=100",
+    "policies.count=1", "policies[0].from=10.0.0.0", "policies[0].from_prefix=24",
+    "policies[0].to=192.168.3.0", "policies[0].to_prefix=24", "policies[0].table=100",
 ]);
+// d2:策略 from/to 掩码均点分(前缀转换)
 case!(d2_policy_to_mask_dotted8, &["eth0","1.1.1.1","24","","","192.168.2.0","24","1.1.1.254","100","10.0.0.0","255.0.0.0","192.168.3.0","255.255.0.0"], [
-    "policy.from_prefix=8", "policy.to_prefix=16",
+    "policies[0].from_prefix=8", "policies[0].to_prefix=16",
+]);
+// d3:5-token 策略显式 table(不共享路由 table)
+case!(d3_policy_explicit_table, &["eth0","1.1.1.1","24","","","192.168.2.0","24","1.1.1.254","100","10.0.0.0","24","192.168.3.0","255.255.255.0","200"], [
+    "routes.count=1", "routes[0].table=100",
+    "policies.count=1", "policies[0].table=200",
+]);
+// d4:5-token 策略显式 table,无路由(策略自带 table,无需路由)
+case!(d4_policy_no_route_explicit_table, &["eth0","1.1.1.1","24","","","10.0.0.0","24","192.168.3.0","255.255.255.0","100"], [
+    "routes.count=0", "policies.count=1", "policies[0].table=100",
+]);
+// d5:多策略(2 条 5-token,各带 table)+ 2 路由
+case!(d5_multi_policy, &["eth0","1.1.1.1","24","","","192.168.2.0","24","1.1.1.254","100","192.168.3.0","24","1.1.1.254","200","10.0.0.0","24","192.168.4.0","255.255.255.0","100","10.1.0.0","24","192.168.5.0","255.255.255.0","200"], [
+    "routes.count=2", "policies.count=2",
+    "policies[0].from=10.0.0.0", "policies[0].table=100",
+    "policies[1].from=10.1.0.0", "policies[1].table=200",
+]);
+// d6:多策略(2 条 4-token,共享唯一路由 table)
+case!(d6_multi_policy_share_one_route, &["eth0","1.1.1.1","24","","","192.168.2.0","24","1.1.1.254","100","10.0.0.0","24","192.168.3.0","255.255.255.0","10.1.0.0","24","192.168.4.0","255.255.255.0"], [
+    "routes.count=1", "routes[0].table=100", "policies.count=2",
+    "policies[0].table=100", "policies[1].table=100",
+]);
+// d7:策略 5-token 表名(非数字)
+case!(d7_policy_table_name, &["eth0","1.1.1.1","24","","","192.168.2.0","24","1.1.1.254","100","10.0.0.0","24","192.168.3.0","255.255.255.0","lan_table"], [
+    "policies.count=1", "policies[0].table=lan_table",
 ]);
 
 // ============ E. 多地址 + 路由 + v6(family2 4 元组)============
@@ -152,16 +178,20 @@ case!(e2_route_then_v6_dhcp, &["eth0","1.1.1.1","24","","","192.168.2.0","24","1
 
 // ============ F. 异常错误 ============
 case_err!(f1_no_4tuple_family1, &["eth0","1.1.1.1","24","192.168.2.0","24","1.1.1.254","100"], "incomplete 4-tuple");
-case_err!(f2_policy_without_route, &["eth0","1.1.1.1","24","","","10.0.0.0","24","192.168.3.0","255.255.255.0"], "policy requires a preceding route");
+case_err!(f2_policy_4token_no_route, &["eth0","1.1.1.1","24","","","10.0.0.0","24","192.168.3.0","255.255.255.0"], "no route to share");
 case_err!(f3_unclassifiable_pos4, &["eth0","1.1.1.1","24","","","192.168.2.0","24","1.1.1.254","2001:db8::1"], "cannot classify");
 case_err!(f4_no_args, &[], "missing required argument: net_device");
 case_err!(f5_only_net_device, &["eth0"], "missing required argument: ip");
 case_err!(f6_unknown_flag, &["--bogus","eth0","1.1.1.1","24"], "invalid option");
 case_err!(f7_extra_addr_not_empty_gw, &["eth0","1.1.1.1","24","1.1.1.254","8.8.8.8","1.1.1.2","24","","8.8.8.8"], "extra address group must be");
+// f8:4-token 策略 + 多路由 → 必须显式第 5 token
+case_err!(f8_policy_4token_multi_route, &["eth0","1.1.1.1","24","","","192.168.2.0","24","1.1.1.254","100","192.168.3.0","24","1.1.1.254","200","10.0.0.0","24","192.168.4.0","255.255.255.0"], "multiple routes present");
+// f9:4-token 策略 + 1 路由但路由无 table → 策略无 table 可共享
+case_err!(f9_policy_4token_route_no_table, &["eth0","1.1.1.1","24","","","192.168.2.0","24","1.1.1.254","","10.0.0.0","24","192.168.3.0","255.255.255.0"], "single route has no table");
 
 // ============ G. 策略 to_mask 前缀数字 → 被当路由(强制点分的代价,记录行为)============
 case!(g1_prefix_policy_tomask_read_as_route, &["eth0","1.1.1.1","24","","","192.168.2.0","24","1.1.1.254","100","10.0.0.0","24","192.168.3.0","24"], [
-    "routes.count=2", "policy.present=false",
+    "routes.count=2", "policies.count=0",
 ]);
 
 // ============ H. --dry-run / -n 位置 ============
