@@ -249,6 +249,7 @@ func (s *CompatService) BuildCtrlResource() []CtrlResource {
 			IP:          n.IP,
 			Mask:        n.Mask,
 			Mac:         n.Mac,
+			IPs:         n.IPs,
 			Dns:         []string{}, // netplan 解析降级，留空
 			Gateway:     "",         // 同上
 			Bandwidth:   n.Bandwidth,
@@ -362,6 +363,7 @@ func (s *CompatService) BuildIPList() ([]Ip, error) {
 			IP:          ipAddr,
 			NetMask:     netMask,
 			Mac:         card.MAC,
+			IPs:         card.IPs, // 全部地址（含 IPv6），供前端多 IP 展示
 			DNS:         []string{},
 			Gateway:     "",
 			Bandwidth:   0,

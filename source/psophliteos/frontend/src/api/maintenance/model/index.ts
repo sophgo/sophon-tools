@@ -5,6 +5,11 @@ export interface IpSetParams {
   subnetMask: string; // 子网掩码
   gateway: string; // 网关
   dns: string; // dns
+  ipv6Type: number; // 0不配置 1静态 2动态
+  ipv6: string; // ipv6地址
+  prefix6: string; // ipv6前缀
+  gateway6: string; // ipv6网关
+  dns6: string; // ipv6 dns
 }
 
 export interface AlarmParams {

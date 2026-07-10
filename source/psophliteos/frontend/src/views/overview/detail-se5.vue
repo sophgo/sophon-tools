@@ -86,7 +86,11 @@
               (item.bandwidth > 0 ? item.bandwidth + t('overview.bandwidthUnit') : '未连接')
             }}
             <br />
-            {{ t('overview.ip') + '：' + (item.ip || '未分配') }}
+            {{ t('overview.ip') + '：' + splitIPs(item.ips, item.ip, false) }}
+            <br v-if="splitIPs(item.ips, item.ip, true)" />
+            <span v-if="splitIPs(item.ips, item.ip, true)">
+              IPv6：{{ splitIPs(item.ips, item.ip, true) }}
+            </span>
             <br />
             {{ t('overview.mac') + '：' + item.mac }}
           </a-descriptions-item>
@@ -156,6 +160,23 @@
     if (pct >= 90) return '#ff4d4f';
     if (pct >= 70) return '#faad14';
     return '#108ee9';
+  };
+
+  // splitIPs 把网卡的 ips（["ip/prefix",…]）按族拆分。
+  //   v6=false → 返回 IPv4 地址逗号串（回退到扁平 item.ip）；无则"未分配"
+  //   v6=true  → 返回 IPv6 地址逗号串；无则空串（前端据此隐藏该行）
+  const splitIPs = (ips: string[] | undefined, fallbackIp: string, v6: boolean): string => {
+    const list: string[] = [];
+    if (Array.isArray(ips)) {
+      for (const s of ips) {
+        const addr = (s || '').split('/')[0];
+        const isV6 = (s || '').includes(':');
+        if (v6 && isV6) list.push(addr);
+        if (!v6 && !isV6 && addr) list.push(addr);
+      }
+    }
+    if (!v6 && list.length === 0) return fallbackIp || '未分配';
+    return list.join('、');
   };
 
   // 动态运行时间

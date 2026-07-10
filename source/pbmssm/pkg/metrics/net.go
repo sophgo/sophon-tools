@@ -37,6 +37,7 @@ func (c *Collector) mapNetCards(cards []network.NetCard) []NetCard {
 		nc := NetCard{
 			Name: card.Name,
 			Mac:  card.MAC,
+			IPs:  card.IPs, // 全部地址（含 IPv6），供前端多 IP 展示
 		}
 		// 取首个 IPv4（去 IPv6）
 		for _, ipStr := range card.IPs {

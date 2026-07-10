@@ -166,12 +166,19 @@ func (ctrl *Controller) SetIP(c *gin.Context) {
 		return
 	}
 
-	var err error
-	if req.Policy == "dhcp" {
-		err = netpkg.SetDynamicIP(req.Device)
-	} else {
-		err = netpkg.SetStaticIP(req.Device, req.IP, req.Mask, req.Gateway, req.DNS)
-	}
+	err := netpkg.SetIP(netpkg.IPConfig{
+		Device:   req.Device,
+		IPType:   req.IPType,
+		IP:       req.IP,
+		Mask:     req.SubnetMask,
+		Gateway:  req.Gateway,
+		DNS:      req.DNS,
+		IPv6Type: req.IPv6Type,
+		IPv6:     req.IPv6,
+		Prefix6:  req.Prefix6,
+		Gateway6: req.Gateway6,
+		DNS6:     req.DNS6,
+	})
 
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, response.Fail(err.Error()))

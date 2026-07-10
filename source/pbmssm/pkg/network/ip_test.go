@@ -738,3 +738,41 @@ func TestEnrichNetCardsEmpty(t *testing.T) {
 		t.Errorf("enrichNetCards([]) should be empty, got %v", empty)
 	}
 }
+func TestBuildBmSetIPArgs(t *testing.T) {
+	cases := []struct {
+		name string
+		c    IPConfig
+		want []string
+	}{
+		{"static4 only", IPConfig{Device: "eth0", IPType: 1, IP: "192.168.1.100", Mask: "24", Gateway: "192.168.1.1", DNS: "8.8.8.8"},
+			[]string{"eth0", "192.168.1.100", "24", "192.168.1.1", "8.8.8.8"}},
+		{"dhcp4 only", IPConfig{Device: "eth0", IPType: 2},
+			[]string{"eth0", "dhcp", ""}},
+		{"static4+static6", IPConfig{Device: "eth0", IPType: 1, IP: "192.168.1.100", Mask: "24", Gateway: "192.168.1.1", DNS: "8.8.8.8", IPv6Type: 1, IPv6: "2001:db8::1", Prefix6: "64", Gateway6: "fe80::1", DNS6: "2001:4860:4860::8888"},
+			[]string{"eth0", "192.168.1.100", "24", "192.168.1.1", "8.8.8.8", "2001:db8::1", "64", "fe80::1", "2001:4860:4860::8888"}},
+		{"dhcp4+static6 (pad gw/dns)", IPConfig{Device: "eth0", IPType: 2, IPv6Type: 1, IPv6: "2001:db8::1", Prefix6: "64", Gateway6: "fe80::1", DNS6: "2001:4860:4860::8888"},
+			[]string{"eth0", "dhcp", "", "", "", "2001:db8::1", "64", "fe80::1", "2001:4860:4860::8888"}},
+		{"static4+dhcp6", IPConfig{Device: "eth0", IPType: 1, IP: "192.168.1.100", Mask: "24", Gateway: "192.168.1.1", DNS: "8.8.8.8", IPv6Type: 2},
+			[]string{"eth0", "192.168.1.100", "24", "192.168.1.1", "8.8.8.8", "dhcp"}},
+		{"dhcp4+dhcp6", IPConfig{Device: "eth0", IPType: 2, IPv6Type: 2},
+			[]string{"eth0", "dhcp", "", "", "", "dhcp"}},
+	}
+	for _, tc := range cases {
+		got := buildBmSetIPArgs(tc.c)
+		if !equalStrSlices(got, tc.want) {
+			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func equalStrSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}

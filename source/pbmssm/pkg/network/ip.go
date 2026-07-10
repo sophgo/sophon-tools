@@ -378,3 +378,91 @@ func SetDynamicIP(device string) error {
 	}
 	return nil
 }
+
+// IPConfig 网卡 IP 配置（IPv4 + 可选 IPv6），对应前端 IPSettings。
+//   - IPType 1=静态 2=DHCP；IPv6Type 0=不配置 1=静态 2=DHCP
+//   - Mask/Prefix6 为 CIDR 或点分掩码（bm_set_ip 两者皆收）
+type IPConfig struct {
+	Device   string
+	IPType   int
+	IP       string
+	Mask     string
+	Gateway  string
+	DNS      string
+	IPv6Type int
+	IPv6     string
+	Prefix6  string
+	Gateway6 string
+	DNS6     string
+}
+
+// buildBmSetIPArgs 按 bm_set_ip 用法构造位置参数（设备 + IPv4 段 + 可选 IPv6 段）。
+// bm_set_ip 按特征自动分组（含 ":" 为 IPv6、dhcp 为 DHCP），故无需空位占位；
+// 但 DHCP4 + IPv6 时需补 gw/dns 空位以到达 IPv6 槽（对齐 readme "dhcp ” ” ” ipv6…"）。
+//
+//	静态4        → device ip mask gw dns
+//	DHCP4        → device dhcp ''
+//	静态4+静态6  → device ip mask gw dns ipv6 prefix6 gw6 dns6
+//	DHCP4+静态6  → device dhcp '' '' '' ipv6 prefix6 gw6 dns6
+//	静态4+DHCP6  → device ip mask gw dns dhcp
+//	DHCP4+DHCP6  → device dhcp '' '' '' dhcp
+func buildBmSetIPArgs(c IPConfig) []string {
+	args := []string{c.Device}
+	// IPv4 段
+	if c.IPType == 2 { // DHCP4
+		args = append(args, "dhcp", "")
+		if c.IPv6Type != 0 { // 需补 gw/dns 空位以达 IPv6 槽
+			args = append(args, "", "")
+		}
+	} else { // 静态4
+		args = append(args, c.IP, c.Mask, c.Gateway, c.DNS)
+	}
+	// IPv6 段（可选）
+	if c.IPv6Type != 0 {
+		if c.IPv6Type == 2 { // DHCP6
+			args = append(args, "dhcp")
+		} else { // 静态6
+			args = append(args, c.IPv6, c.Prefix6, c.Gateway6, c.DNS6)
+		}
+	}
+	return args
+}
+
+// SetIP 配置网卡 IP（IPv4 + 可选 IPv6），调用 bm_set_ip。
+// 校验设备名 + 静态地址合法性（IPv4/IPv6 用 net.ParseIP；掩码/前缀透传给 bm_set_ip）。
+// DHCP 模式跳过地址校验。bm_set_ip 成功时 stderr 的 netplan 弃用警告忽略（仅非零退出为失败）。
+func SetIP(c IPConfig) error {
+	if !deviceNameRe.MatchString(c.Device) {
+		return errors.New("invalid device name")
+	}
+	if c.IPType == 1 { // 静态4 校验
+		if net.ParseIP(c.IP) == nil {
+			return errors.New("invalid ip address")
+		}
+	}
+	if c.IPv6Type == 1 { // 静态6 校验
+		if net.ParseIP(c.IPv6) == nil {
+			return errors.New("invalid ipv6 address")
+		}
+	}
+	// 网关/DNS 若提供则校验为合法 IP（v4/v6 皆可）
+	for _, g := range []string{c.Gateway, c.DNS, c.Gateway6, c.DNS6} {
+		if g != "" && net.ParseIP(g) == nil {
+			return errors.New("invalid gateway/dns address: " + g)
+		}
+	}
+
+	bmPath, err := findBmSetIp()
+	if err != nil {
+		return err
+	}
+	args := buildBmSetIPArgs(c)
+	_, errStr, err := runCmd(bmPath, args...)
+	if err != nil {
+		if errStr != "" {
+			return errors.New(errStr)
+		}
+		return err
+	}
+	return nil
+}

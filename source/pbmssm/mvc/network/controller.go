@@ -41,7 +41,19 @@ func (ctrl *Controller) SetIP(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, response.Fail("invalid request body"))
 		return
 	}
-	if err := ctrl.svc.SetIP(req.Policy, req.Device, req.IP, req.Mask, req.Gateway, req.DNS); err != nil {
+	if err := netpkg.SetIP(netpkg.IPConfig{
+		Device:   req.Device,
+		IPType:   req.IPType,
+		IP:       req.IP,
+		Mask:     req.SubnetMask,
+		Gateway:  req.Gateway,
+		DNS:      req.DNS,
+		IPv6Type: req.IPv6Type,
+		IPv6:     req.IPv6,
+		Prefix6:  req.Prefix6,
+		Gateway6: req.Gateway6,
+		DNS6:     req.DNS6,
+	}); err != nil {
 		// 输入校验错误（非法 ip/mask/gateway/dns/device）返 400，工具执行错误返 500
 		status := http.StatusInternalServerError
 		if isValidationError(err) {

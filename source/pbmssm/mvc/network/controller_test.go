@@ -89,11 +89,12 @@ func TestSetIPWithAuth(t *testing.T) {
 	tokenStr, _, _ := auth.IssueToken("admin", secret, false)
 
 	body, _ := json.Marshal(SetIPRequest{
-		Device:  "eth0",
-		IP:      "192.168.1.100",
-		Mask:    "255.255.255.0",
-		Gateway: "192.168.1.1",
-		DNS:     "8.8.8.8",
+		Device:     "eth0",
+		IPType:     1,
+		IP:         "192.168.1.100",
+		SubnetMask: "255.255.255.0",
+		Gateway:    "192.168.1.1",
+		DNS:        "8.8.8.8",
 	})
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/network/ip", bytes.NewReader(body))
@@ -133,9 +134,9 @@ func TestAddNATWithAuth(t *testing.T) {
 
 	body, _ := json.Marshal(NatRequest{
 		Direction: "in",
-		Op:   "append",
-		Dst:  "192.168.1.100",
-		Src:  "10.0.0.1",
+		Op:        "append",
+		Dst:       "192.168.1.100",
+		Src:       "10.0.0.1",
 	})
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/network/nat", bytes.NewReader(body))

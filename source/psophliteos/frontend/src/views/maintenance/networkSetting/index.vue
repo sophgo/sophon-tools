@@ -28,7 +28,7 @@
               v-if="item.type === 'input'"
               v-model:value="wan[item.field]"
               :placeholder="item.placeholder"
-              :disabled="wan.ipType === 2"
+              :disabled="fieldDisabled(item.field)"
             />
           </a-form-item>
           <a-form-item class="!pl-1/6">
@@ -111,6 +111,11 @@
     subnetMask: '',
     gateway: '',
     dns: '',
+    ipv6Type: 0,
+    ipv6: '',
+    prefix6: '',
+    gateway6: '',
+    dns6: '',
   });
 
   watch(
@@ -123,43 +128,44 @@
         wan.subnetMask = currentNetCard?.netMask || '';
         wan.gateway = currentNetCard?.gateway || '';
         wan.dns = currentNetCard?.dns || '';
+        // 从 ips 解析当前 IPv6（首个），回填到表单
+        const v6List: string[] = (currentNetCard?.ips || []).filter((s: string) =>
+          s.includes(':'),
+        );
+        const firstV6 = v6List[0] || '';
+        wan.ipv6 = firstV6 ? firstV6.split('/')[0] : '';
+        wan.prefix6 = firstV6 ? firstV6.split('/')[1] || '' : '';
+        wan.ipv6Type = wan.ipv6 ? 1 : 0;
+        wan.gateway6 = ''; // netplan 解析降级，不回填
+        wan.dns6 = '';
       }
     },
   );
   const wanRules = computed(() => {
-    return wan.ipType === 1
+    const v4 = wan.ipType === 1
       ? {
-          ip: [
-            {
-              required: true,
-              validator: IpCheck,
-              trigger: 'blur',
-            },
-          ],
-          subnetMask: [
-            {
-              required: true,
-              validator: subnetMaskCheck,
-              trigger: 'blur',
-            },
-          ],
-          gateway: [
-            {
-              required: false,
-              validator: gatewayCheck,
-              trigger: 'blur',
-            },
-          ],
-          dns: [
-            {
-              required: false,
-              validator: dnsCheck,
-              trigger: 'blur',
-            },
-          ],
+          ip: [{ required: true, validator: IpCheck, trigger: 'blur' }],
+          subnetMask: [{ required: true, validator: subnetMaskCheck, trigger: 'blur' }],
+          gateway: [{ required: false, validator: gatewayCheck, trigger: 'blur' }],
+          dns: [{ required: false, validator: dnsCheck, trigger: 'blur' }],
         }
-      : null;
+      : {};
+    const v6 = wan.ipv6Type === 1
+      ? {
+          ipv6: [{ required: true, message: '请输入 IPv6 地址', trigger: 'blur' }],
+          prefix6: [{ required: true, message: '请输入 IPv6 前缀(如 64)', trigger: 'blur' }],
+        }
+      : {};
+    return { ...v4, ...v6 };
   });
+
+  // 字段禁用规则：IPv4 段在 DHCP4 时禁用；IPv6 段在非静态6 时禁用；选择器不禁用。
+  const fieldDisabled = (field: string) => {
+    if (['device', 'ipType', 'ipv6Type'].includes(field)) return false;
+    if (['ip', 'subnetMask', 'gateway', 'dns'].includes(field)) return wan.ipType === 2;
+    if (['ipv6', 'prefix6', 'gateway6', 'dns6'].includes(field)) return wan.ipv6Type !== 1;
+    return false;
+  };
 
   const netMap = {
     wan,
@@ -216,6 +222,42 @@
       placeholder: t('sys.form.placeholder'),
       type: 'input',
     },
+    {
+      label: 'IPv6 模式',
+      field: 'ipv6Type',
+      placeholder: t('sys.form.placeholder'),
+      type: 'select',
+      options: [
+        { value: 0, label: '不配置' },
+        { value: 1, label: t('maintenance.newworkSettings.staticIP') },
+        { value: 2, label: t('maintenance.newworkSettings.dynmicIP') },
+      ],
+      onChange() {},
+    },
+    {
+      label: 'IPv6 地址',
+      field: 'ipv6',
+      placeholder: '2001:db8::1',
+      type: 'input',
+    },
+    {
+      label: 'IPv6 前缀',
+      field: 'prefix6',
+      placeholder: '64',
+      type: 'input',
+    },
+    {
+      label: 'IPv6 网关',
+      field: 'gateway6',
+      placeholder: 'fe80::1',
+      type: 'input',
+    },
+    {
+      label: 'IPv6 DNS',
+      field: 'dns6',
+      placeholder: '2001:4860:4860::8888',
+      type: 'input',
+    },
   ];
 
   const formItemLayout = {
@@ -253,6 +295,7 @@
     // 弹窗显示待应用的 IP 参数 + 确认。bm_set_ip 改 IP 后立即生效（不重启），
     // 若 IP 变更，当前连接会当场断开，浏览器在途请求收不到响应——故提示用新 IP 重访。
     const policyText = wan.ipType === 2 ? 'DHCP' : '静态';
+    const v6PolicyText = wan.ipv6Type === 0 ? '不配置' : wan.ipv6Type === 2 ? 'DHCP' : '静态';
     const row = (label: string, val: string) =>
       h('div', { style: { display: 'flex', justifyContent: 'space-between', margin: '4px 0' } }, [
         h('span', { style: { color: '#888' } }, label),
@@ -267,6 +310,15 @@
             row(t('maintenance.newworkSettings.subnetMask'), wan.subnetMask),
             row(t('maintenance.newworkSettings.gateway'), wan.gateway),
             row(t('maintenance.newworkSettings.dns'), wan.dns),
+          ]
+        : []),
+      row('IPv6 模式', v6PolicyText),
+      ...(wan.ipv6Type === 1
+        ? [
+            row('IPv6 地址', wan.ipv6),
+            row('IPv6 前缀', wan.prefix6),
+            row('IPv6 网关', wan.gateway6),
+            row('IPv6 DNS', wan.dns6),
           ]
         : []),
       h(

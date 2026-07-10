@@ -30,12 +30,13 @@ type Disk struct {
 // NetCard 网卡指标快照。
 type NetCard struct {
 	Name      string
-	IP        string
+	IP        string // 首个 IPv4（扁平，向后兼容）
 	Mask      string
 	Mac       string
 	Bandwidth int
 	NetRx     float64
 	NetTx     float64
+	IPs       []string // 全部地址（"ip/prefix" 形式，含 IPv4+IPv6）
 }
 
 // MemRegion 一个内存区域的总量/已用/使用率（MB / 百分比 0-100）。

@@ -20,14 +20,21 @@ type LoginRequest struct {
 	Password string `json:"password"`
 }
 
-// IPSettings IP 设置请求（对应 sophliteos IPSettings）。
+// IPSettings IP 设置请求（字段名对齐 sophliteos 前端：ipType/subnetMask + ipv6*）。
+//   - IPType 1=静态 2=DHCP；IPv6Type 0=不配置 1=静态 2=DHCP（与 IPv4 独立）
+//   - Mask/Prefix6 为 CIDR 或点分掩码，透传给 bm_set_ip
 type IPSettings struct {
-	Device  string `json:"device" validate:"required"`
-	Policy  string `json:"policy" validate:"required"`
-	IP      string `json:"ip"`
-	Mask    string `json:"mask"`
-	Gateway string `json:"gateway"`
-	DNS     string `json:"dns"`
+	Device     string `json:"device" validate:"required"`
+	IPType     int    `json:"ipType" validate:"required"`
+	IP         string `json:"ip"`
+	SubnetMask string `json:"subnetMask"`
+	Gateway    string `json:"gateway"`
+	DNS        string `json:"dns"`
+	IPv6Type   int    `json:"ipv6Type"`
+	IPv6       string `json:"ipv6"`
+	Prefix6    string `json:"prefix6"`
+	Gateway6   string `json:"gateway6"`
+	DNS6       string `json:"dns6"`
 }
 
 // BasicSettings 基本信息设置请求（对应 sophliteos BasicSettings）。
@@ -108,6 +115,7 @@ type Ip struct {
 	NetRx       float64  `json:"netRx"`
 	NetTx       float64  `json:"netTx"`
 	Rate        int      `json:"rate"`
+	IPs         []string `json:"ips"` // 全部地址（ip/prefix，含 IPv4+IPv6）
 }
 
 // IPInfo IP 信息简单形式（对应 sophliteos IPInfo）。
@@ -232,6 +240,7 @@ type NetCard struct {
 	NetTx       float64  `json:"netTx"`
 	Rate        int      `json:"rate"`
 	NetCardName string   `json:"netCardName"`
+	IPs         []string `json:"ips"` // 全部地址（ip/prefix，含 IPv4+IPv6）
 }
 
 // CoreComputingUnit 核心计算单元（bmlib 依赖，降级为空）。
