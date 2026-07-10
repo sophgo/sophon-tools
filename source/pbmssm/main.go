@@ -14,6 +14,16 @@ import (
 )
 
 func main() {
+	// 子命令：bmssm reset-password [username] —— 把指定用户（默认 admin）密码
+	// 重置为配置的默认密码。服务运行期间也可执行，无需停服重启。
+	if len(os.Args) >= 2 && os.Args[1] == "reset-password" {
+		username := ""
+		if len(os.Args) >= 3 {
+			username = os.Args[2]
+		}
+		os.Exit(initialization.RunResetPassword(username))
+	}
+
 	initialization.InitBase()
 	r := initialization.Routers()
 	s := initialization.InitServer(r)
