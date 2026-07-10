@@ -77,3 +77,7 @@ f2: [addr2] [mask2] [gw2] [dns2]          # IP 配置组2(IPv6)
 - 不需要 `default` 恢复功能。
 - 必须兼容仓库 Rust 版现有的 IPv6 地址/网关/DNS 配置方案(不破坏)。
 - 无新依赖;单文件 `src/main.rs`。
+
+## 无实施模式(--dry-run / -n)
+
+只解析 + 按固定格式 `key=value` 打印分析配置(v4/v6/路由/策略),不应用、不需 root。用于对组模式解析器做自动化测试。测试脚本:`tests/parse_cases.sh`(覆盖 7 模式 + 边缘用例)。

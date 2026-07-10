@@ -83,3 +83,43 @@ Arguments(组顺序):
 
 `TABLE` 为数字 id,netplan/nmcli/networkd/ip 均直接识别。如需命名(如 `100 lan_table`),可手工执行 `echo "100 lan_table" | sudo tee -a /etc/iproute2/rt_tables`,工具不自动写入。
 
+## 无实施模式(--dry-run / -n)
+
+用于解析器自动化测试:只解析参数、按固定格式打印分析出的配置,不应用、不需要 root。
+
+``` bash
+bm_set_ip --dry-run eth0 192.168.1.100 24 192.168.1.1 8.8.8.8 192.168.2.0 24 192.168.1.1 100
+```
+
+输出为 `key=value` 行,首尾用 `## bm_set_ip dry-run config begin/end` 包围,字段缺失输出空值。示例:
+
+```
+## bm_set_ip dry-run config begin
+net_device=eth0
+family1_is_v6=false
+v4.present=true
+v4.addr=192.168.1.100
+v4.netmask=24
+v4.gateway=192.168.1.1
+v4.dns=8.8.8.8
+v4.is_dhcp=false
+v6.present=false
+...
+routes.to=192.168.2.0
+routes.to_prefix=24
+routes.via=192.168.1.1
+routes.table=100
+policy.rule_from=
+...
+## bm_set_ip dry-run config end
+```
+
+## 自动化测试
+
+`tests/parse_cases.sh` 对组模式解析器做回归测试,覆盖 7 种配置模式 + 边缘用例(点分掩码转换、v6+IPv4 路由、仅 table 等):
+
+``` bash
+bash tests/parse_cases.sh            # 自动 cargo build --release 并测试
+bash tests/parse_cases.sh /path/bm_set_ip   # 用指定二进制测试(如交叉编译产物)
+```
+

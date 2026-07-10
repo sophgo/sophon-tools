@@ -46,6 +46,9 @@ struct Args {
 
     /// family1 是否为 IPv6(模式2:仅 IPv6)
     family1_is_v6: bool,
+
+    /// 无实施模式:仅解析 + 打印分析配置,不应用、不需 root
+    dry_run: bool,
 }
 
 impl Args {
@@ -53,10 +56,17 @@ impl Args {
         use lexopt::prelude::*;
 
         let mut positional: Vec<String> = Vec::new();
+        let mut dry_run = false;
         let mut parser = lexopt::Parser::from_env();
         while let Some(arg) = parser.next()? {
-            match arg {
+            match arg.clone() {
                 Value(val) => positional.push(val.into_string()?),
+                Long(name) if name == "dry-run" => {
+                    dry_run = true;
+                }
+                Short('n') => {
+                    dry_run = true;
+                }
                 _ => return Err(arg.unexpected()),
             }
         }
@@ -70,6 +80,7 @@ impl Args {
 
         let mut a = Args::default();
         a.net_device = net_device;
+        a.dry_run = dry_run;
 
         // ---- family1: addr1 必填 ----
         let addr1 = match rest.get(i) {
@@ -241,24 +252,12 @@ struct RoutesPolicy {
 }
 
 fn main() {
-    if !is_root() {
-        let exe = env::current_exe().unwrap();
-        let args: Vec<String> = env::args().skip(1).collect();
-        let status = Command::new("sudo")
-            .arg(exe)
-            .args(&args)
-            .status()
-            .expect("failed to execute sudo");
-        exit(status.code().unwrap_or(1));
-    }
-    println!("bm_set_ip version: {}", concat!(env!("GIT_TAG_COMMIT")));
-
     let args = match Args::parse() {
         Ok(args) => args,
         Err(e) => {
             eprintln!("Error: {}", e);
             eprintln!(
-                "\nUsage: {} <net_device> <ip|dhcp> <netmask> [gateway] [dns] [to] [to_mask] [via] [table] [rule_from] [rule_from_mask] [rule_to] [rule_to_mask] [ipv6|dhcp] [ipv6_prefix] [ipv6_gateway] [ipv6_dns]",
+                "\nUsage: {} [--dry-run|-n] <net_device> <ip|dhcp> <netmask> [gateway] [dns] [to] [to_mask] [via] [table] [rule_from] [rule_from_mask] [rule_to] [rule_to_mask] [ipv6|dhcp] [ipv6_prefix] [ipv6_gateway] [ipv6_dns]",
                 env::args().next().unwrap_or("bm_set_ip".into())
             );
             eprintln!("\nExamples:");
@@ -269,13 +268,32 @@ fn main() {
             eprintln!("  Static IPv4+IPv6:    bm_set_ip eth0 192.168.1.100 24 192.168.1.1 8.8.8.8 2001:db8::1 64 fe80::1");
             eprintln!("  IPv4 + 静态路由:     bm_set_ip eth0 192.168.1.100 24 '' '' 192.168.2.0 24 192.168.1.1 100");
             eprintln!("  IPv4 + 路由+策略:    bm_set_ip eth0 192.168.1.100 24 192.168.1.1 8.8.8.8 192.168.2.0 24 192.168.1.1 100 10.0.0.0 24 192.168.3.0 24");
+            eprintln!("  Dry-run(只解析不应用): bm_set_ip --dry-run eth0 192.168.1.100 24 192.168.1.1 8.8.8.8 192.168.2.0 24 192.168.1.1 100");
             exit(1);
         }
     };
 
-    // 构造 v4 / v6 地址族 + 路由策略
+    // 构造 v4 / v6 地址族 + 路由策略(纯解析,无副作用)
     let (v4, v6) = build_families(&args);
     let rp = build_routes_policy(&args);
+
+    // 无实施模式:仅打印分析配置,不应用、不需 root
+    if args.dry_run {
+        print_analyzed_config(&args.net_device, &v4, &v6, &rp, args.family1_is_v6);
+        return;
+    }
+
+    if !is_root() {
+        let exe = env::current_exe().unwrap();
+        let argv: Vec<String> = env::args().skip(1).collect();
+        let status = Command::new("sudo")
+            .arg(exe)
+            .args(&argv)
+            .status()
+            .expect("failed to execute sudo");
+        exit(status.code().unwrap_or(1));
+    }
+    println!("bm_set_ip version: {}", concat!(env!("GIT_TAG_COMMIT")));
 
     // 校验:v4 静态必须有掩码
     if let Some(v4) = &v4 {
@@ -381,6 +399,79 @@ fn build_routes_policy(a: &Args) -> RoutesPolicy {
         rule_to: norm(&a.rule_to),
         rule_to_prefix,
     }
+}
+
+/// 无实施模式:按固定格式打印解析出的配置,供自动化测试断言。
+/// 格式为 `key=value` 行,缺失字段输出空值;首尾用 `## begin` / `## end` 包围以便截取。
+fn print_analyzed_config(
+    net_device: &str,
+    v4: &Option<IpFamily>,
+    v6: &Option<IpFamily>,
+    rp: &RoutesPolicy,
+    family1_is_v6: bool,
+) {
+    println!("## bm_set_ip dry-run config begin");
+    println!("net_device={}", net_device);
+    println!("family1_is_v6={}", family1_is_v6);
+
+    // IPv4 族
+    match v4 {
+        Some(f) => {
+            println!("v4.present=true");
+            println!("v4.addr={}", f.addr.as_deref().unwrap_or(""));
+            println!("v4.netmask={}", f.netmask.as_deref().unwrap_or(""));
+            println!("v4.gateway={}", f.gateway.as_deref().unwrap_or(""));
+            println!("v4.dns={}", f.dns.as_deref().unwrap_or(""));
+            println!("v4.is_dhcp={}", f.is_dhcp);
+        }
+        None => {
+            println!("v4.present=false");
+            println!("v4.addr=");
+            println!("v4.netmask=");
+            println!("v4.gateway=");
+            println!("v4.dns=");
+            println!("v4.is_dhcp=false");
+        }
+    }
+
+    // IPv6 族(netmask 字段对 v6 持有前缀)
+    match v6 {
+        Some(f) => {
+            println!("v6.present=true");
+            println!("v6.addr={}", f.addr.as_deref().unwrap_or(""));
+            println!("v6.prefix={}", f.netmask.as_deref().unwrap_or(""));
+            println!("v6.gateway={}", f.gateway.as_deref().unwrap_or(""));
+            println!("v6.dns={}", f.dns.as_deref().unwrap_or(""));
+            println!("v6.is_dhcp={}", f.is_dhcp);
+        }
+        None => {
+            println!("v6.present=false");
+            println!("v6.addr=");
+            println!("v6.prefix=");
+            println!("v6.gateway=");
+            println!("v6.dns=");
+            println!("v6.is_dhcp=false");
+        }
+    }
+
+    // IPv4 静态路由(掩码已转前缀)
+    println!("routes.to={}", rp.to.as_deref().unwrap_or(""));
+    println!("routes.to_prefix={}", rp.to_prefix.as_deref().unwrap_or(""));
+    println!("routes.via={}", rp.via.as_deref().unwrap_or(""));
+    println!("routes.table={}", rp.table.as_deref().unwrap_or(""));
+
+    // IPv4 路由策略(掩码已转前缀)
+    println!("policy.rule_from={}", rp.rule_from.as_deref().unwrap_or(""));
+    println!(
+        "policy.rule_from_prefix={}",
+        rp.rule_from_prefix.as_deref().unwrap_or("")
+    );
+    println!("policy.rule_to={}", rp.rule_to.as_deref().unwrap_or(""));
+    println!(
+        "policy.rule_to_prefix={}",
+        rp.rule_to_prefix.as_deref().unwrap_or("")
+    );
+    println!("## bm_set_ip dry-run config end");
 }
 
 /// 检测命令
