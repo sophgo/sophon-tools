@@ -40,4 +40,12 @@
 
 ## 无实施模式(--dry-run / -n)
 
-只解析 + 按固定 `key=value` 格式打印分析配置(列表化:`v4.addrs=`、`routes[N].to=`、`policies[N].from=`),不应用、不需 root。测试融入 `cargo test`(`tests/parse_cases.rs`,37 项);`tests/parse_cases.sh` 为薄包装。
+只解析 + 按固定 `key=value` 格式打印分析配置(列表化:`v4.addrs=`、`routes[N].to=`、`policies[N].from=`),不应用、不需 root。测试融入 `cargo test`(`tests/parse_cases.rs`,59 项);`tests/parse_cases.sh` 为薄包装。
+
+## 输入校验(解析层直接报错)
+
+前缀越界(v4>32/v6>128)、非连续/非法点分掩码、畸形 IP(段越界/不足/含 `/`)、空网卡、DHCP 族加静态额外地址。表名允许 `_`/`-`,含点号报错。边界合法:前缀 0、全 0/全 1 掩码。路由 via 可空(直连路由)。
+
+## 后端
+
+netplan(需 yaml;apply 检测 stderr Error/Conflicting)→ nmcli(routes 用 `table=N`,routing-rules 逗号+固定 priority+数字 table)→ networkd(`networkctl reload`+`reconfigure <dev>`,不波及其他网口)→ ip 兜底(逐条检测失败打印 WARNING;DHCP 不支持)。切换后端前 `rm /etc/systemd/network/10-<dev>.network` 残留。

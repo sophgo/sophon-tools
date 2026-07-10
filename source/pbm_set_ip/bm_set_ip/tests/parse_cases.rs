@@ -183,7 +183,7 @@ case_err!(f3_unclassifiable_pos4, &["eth0","1.1.1.1","24","","","192.168.2.0","2
 case_err!(f4_no_args, &[], "missing required argument: net_device");
 case_err!(f5_only_net_device, &["eth0"], "missing required argument: ip");
 case_err!(f6_unknown_flag, &["--bogus","eth0","1.1.1.1","24"], "invalid option");
-case_err!(f7_extra_addr_not_empty_gw, &["eth0","1.1.1.1","24","1.1.1.254","8.8.8.8","1.1.1.2","24","","8.8.8.8"], "extra address group must be");
+case_err!(f7_extra_addr_not_empty_gw, &["eth0","1.1.1.1","24","1.1.1.254","8.8.8.8","1.1.1.2","24","","8.8.8.8"], "policy 'to' must not be empty");
 // f8:4-token 策略 + 多路由 → 必须显式第 5 token
 case_err!(f8_policy_4token_multi_route, &["eth0","1.1.1.1","24","","","192.168.2.0","24","1.1.1.254","100","192.168.3.0","24","1.1.1.254","200","10.0.0.0","24","192.168.4.0","255.255.255.0"], "multiple routes present");
 // f9:4-token 策略 + 1 路由但路由无 table → 策略无 table 可共享
@@ -199,3 +199,41 @@ case!(h1_dry_run_front, &["--dry-run","eth0","1.1.1.1","24"], ["v4.addrs=1.1.1.1
 case!(h2_dry_run_end, &["eth0","1.1.1.1","24","--dry-run"], ["v4.addrs=1.1.1.1/24"]);
 case!(h3_n_short, &["eth0","-n","1.1.1.1","24"], ["v4.addrs=1.1.1.1/24"]);
 case_sub!(h4_4tuple_dry_run, &["-n","eth0","1.1.1.1","24","","","192.168.2.0","24","1.1.1.254","100"], ["routes.count=1", "routes[0].to=192.168.2.0"]);
+
+// ============ I. 输入校验(畸形/越界/非法掩码与地址)============
+// 前缀越界
+case_err!(i1_prefix_over32, &["eth0","1.1.1.1","33"], "prefix '33' out of range");
+case_err!(i2_prefix_huge, &["eth0","1.1.1.1","999"], "prefix '999' out of range");
+case_err!(i3_v6_prefix_over128, &["eth0","2001:db8::1","200"], "prefix '200' out of range");
+case_err!(i4_v6_prefix_130, &["eth0","2001:db8::1","130"], "prefix '130' out of range");
+// 非连续/非法点分掩码
+case_err!(i5_noncontiguous_mask, &["eth0","1.1.1.1","255.255.0.255"], "non-contiguous mask");
+case_err!(i6_mask_octet_overflow, &["eth0","1.1.1.1","256.0.0.0"], "octet out of range");
+case_err!(i7_mask_bad_segment, &["eth0","1.1.1.1","255.255.255"], "not a prefix nor dotted mask");
+// 畸形 IP 地址
+case_err!(i8_bad_ipv4_octet, &["eth0","999.1.1.1","24"], "invalid IPv4 address");
+case_err!(i9_bad_ipv4_segments, &["eth0","1.1.1","24"], "invalid IPv4 address");
+case_err!(i10_addr_with_slash, &["eth0","1.1.1.1/24","24"], "must not contain '/'");
+case_err!(i11_bad_ipv6, &["eth0","2001:db8::g","64"], "invalid IPv6 address");
+// 空网卡
+case_err!(i12_empty_net_device, &["","1.1.1.1","24"], "net_device must not be empty");
+// 表名含连字符(允许)
+case!(i13_table_name_with_dash, &["eth0","1.1.1.1","24","","","192.168.2.0","24","1.1.1.254","lan-table"], [
+    "routes[0].table=lan-table",
+]);
+// 路由 via 空但 table 有值(直连路由进指定表)
+case!(i14_route_via_empty_with_table, &["eth0","1.1.1.1","24","","","192.168.2.0","24","","100"], [
+    "routes[0].to=192.168.2.0", "routes[0].via=", "routes[0].table=100",
+]);
+// 4 元组里畸形 IP
+case_err!(i15_4tuple_bad_route_to, &["eth0","1.1.1.1","24","","","999.2.0.1","24","1.1.1.254","100"], "invalid IPv4 address");
+case_err!(i16_4tuple_bad_policy_from, &["eth0","1.1.1.1","24","","","192.168.2.0","24","1.1.1.254","100","999.0.0.0","24","192.168.3.0","255.255.255.0"], "invalid IPv4 address");
+// 合法边界:前缀 0 与全 0 掩码
+case!(i17_prefix_zero, &["eth0","1.1.1.1","0"], ["v4.addrs=1.1.1.1/0"]);
+case!(i18_allzero_mask, &["eth0","1.1.1.1","0.0.0.0"], ["v4.addrs=1.1.1.1/0"]);
+case!(i19_full_mask, &["eth0","1.1.1.1","255.255.255.255"], ["v4.addrs=1.1.1.1/32"]);
+// 4 元组额外地址畸形
+case_err!(i20_extra_addr_bad_ip, &["eth0","1.1.1.1","24","","","999.1.1.1","24","",""], "invalid IPv4 address");
+case_err!(i21_extra_addr_bad_mask, &["eth0","1.1.1.1","24","","","1.1.1.2","33","",""], "prefix '33' out of range");
+// dhcp 族不能加静态额外地址(后端会静默丢弃,故解析层拒绝)
+case_err!(i22_dhcp_no_extra_addr, &["eth0","dhcp","1.1.1.2","24","",""], "cannot add static address to a dhcp family");

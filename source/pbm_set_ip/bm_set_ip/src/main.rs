@@ -81,6 +81,9 @@ impl Config {
 /// 旧模式仅处理 IP-only:family1(尾部可省)+ 可选 family2。无路由/策略/额外地址。
 /// 干净消费完所有 token → Some;有剩余 → None(切 4 元组)。
 fn try_old_mode(net_device: &str, rest: &[String]) -> Result<Option<Config>, lexopt::Error> {
+    if net_device.is_empty() {
+        return Err("net_device must not be empty".into());
+    }
     if rest.is_empty() {
         return Err("missing required argument: ip".into());
     }
@@ -122,7 +125,11 @@ fn try_old_mode(net_device: &str, rest: &[String]) -> Result<Option<Config>, lex
 
     // 构造 IP-only Config
     let (v4, v6) = if family1_is_v6 {
-        let prefix = nm.as_deref().map(|m| m.parse::<u8>().unwrap_or(128)).unwrap_or(128);
+        validate_ip(&addr1, true)?;
+        let prefix = match &nm {
+            Some(m) => parse_prefix(m, 128)?,
+            None => 128,
+        };
         let v6f = Family {
             addrs: vec![(addr1, prefix)],
             gateway: gw,
@@ -132,27 +139,37 @@ fn try_old_mode(net_device: &str, rest: &[String]) -> Result<Option<Config>, lex
         (None, Some(v6f))
     } else {
         let is_dhcp4 = is_dhcp_token(&addr1);
-        let prefix = nm.as_deref().map(mask_to_prefix).unwrap_or(32);
-        let v4f = Family {
-            addrs: if is_dhcp4 { vec![] } else { vec![(addr1, prefix)] },
-            gateway: gw,
-            dns,
-            is_dhcp: is_dhcp4,
+        let v4f = if is_dhcp4 {
+            Family { addrs: vec![], gateway: gw, dns, is_dhcp: true }
+        } else {
+            validate_ip(&addr1, false)?;
+            let prefix = match &nm {
+                Some(m) => mask_to_prefix_checked(m, 32)?,
+                None => 32,
+            };
+            Family { addrs: vec![(addr1, prefix)], gateway: gw, dns, is_dhcp: false }
         };
-        let v6f = ipv6.as_ref().map(|_| {
+        let v6f = if ipv6.is_some() {
             let is_dhcp6 = ipv6.as_deref().map(is_dhcp_token).unwrap_or(false);
-            let prefix = ipv6_prefix.as_deref().map(|m| m.parse::<u8>().unwrap_or(128)).unwrap_or(128);
-            Family {
-                addrs: if is_dhcp6 {
-                    vec![]
-                } else {
-                    ipv6.as_ref().map(|a| vec![(a.clone(), prefix)]).unwrap_or_default()
-                },
-                gateway: ipv6_gateway,
-                dns: ipv6_dns,
-                is_dhcp: is_dhcp6,
+            if is_dhcp6 {
+                Some(Family { addrs: vec![], gateway: ipv6_gateway, dns: ipv6_dns, is_dhcp: true })
+            } else {
+                let a = ipv6.as_deref().unwrap();
+                validate_ip(a, true)?;
+                let prefix = match &ipv6_prefix {
+                    Some(m) => parse_prefix(m, 128)?,
+                    None => 128,
+                };
+                Some(Family {
+                    addrs: vec![(a.to_string(), prefix)],
+                    gateway: ipv6_gateway,
+                    dns: ipv6_dns,
+                    is_dhcp: false,
+                })
             }
-        });
+        } else {
+            None
+        };
         (Some(v4f), v6f)
     };
 
@@ -170,6 +187,9 @@ fn try_old_mode(net_device: &str, rest: &[String]) -> Result<Option<Config>, lex
 // ============ 4 元组模式(IP+其它)============
 
 fn parse_4tuple(net_device: &str, rest: &[String]) -> Result<Config, lexopt::Error> {
+    if net_device.is_empty() {
+        return Err("net_device must not be empty".into());
+    }
     if rest.is_empty() {
         return Err("missing required argument: ip".into());
     }
@@ -188,16 +208,24 @@ fn parse_4tuple(net_device: &str, rest: &[String]) -> Result<Config, lexopt::Err
 
     if family1_is_v6 {
         // v6 family1:4 元组(addr1 已消费,读 prefix/gw/dns)
+        validate_ip(&addr1, true)?;
         let (prefix, gw, dns) = read_3slots(rest, &mut i);
-        let p = prefix.as_deref().map(|m| m.parse::<u8>().unwrap_or(128)).unwrap_or(128);
+        let p = match &prefix {
+            Some(m) => parse_prefix(m, 128)?,
+            None => 128,
+        };
         v6 = Some(Family { addrs: vec![(addr1, p)], gateway: gw, dns, is_dhcp: false });
     } else if family1_is_dhcp {
         // dhcp 单 token
         v4 = Some(Family { addrs: vec![], gateway: None, dns: None, is_dhcp: true });
     } else {
         // v4 static family1:4 元组(addr1 已消费,读 mask/gw/dns)
+        validate_ip(&addr1, false)?;
         let (mask, gw, dns) = read_3slots(rest, &mut i);
-        let p = mask.as_deref().map(mask_to_prefix).unwrap_or(32);
+        let p = match &mask {
+            Some(m) => mask_to_prefix_checked(m, 32)?,
+            None => 32,
+        };
         v4 = Some(Family { addrs: vec![(addr1, p)], gateway: gw, dns, is_dhcp: false });
     }
 
@@ -215,8 +243,12 @@ fn parse_4tuple(net_device: &str, rest: &[String]) -> Result<Config, lexopt::Err
             if is_dhcp_token(&pos1) {
                 v6 = Some(Family { addrs: vec![], gateway: None, dns: None, is_dhcp: true });
             } else {
+                validate_ip(&pos1, true)?;
                 let (prefix, gw, dns) = read_3slots(rest, &mut i);
-                let p = prefix.as_deref().map(|m| m.parse::<u8>().unwrap_or(128)).unwrap_or(128);
+                let p = match &prefix {
+                    Some(m) => parse_prefix(m, 128)?,
+                    None => 128,
+                };
                 v6 = Some(Family { addrs: vec![(pos1, p)], gateway: gw, dns, is_dhcp: false });
             }
             break; // family2 末尾
@@ -234,23 +266,37 @@ fn parse_4tuple(net_device: &str, rest: &[String]) -> Result<Config, lexopt::Err
         let g2 = rest[i + 2].clone();
         let g3 = rest[i + 3].clone();
 
-        if g2.is_empty() {
+        if g2.is_empty() && g3.is_empty() {
             // 额外地址:addr mask '' ''
-            if !g3.is_empty() {
-                return Err("extra address group must be 'addr mask '' ''".into());
-            }
-            let p = mask_to_prefix(&g1);
             if family1_is_v6 {
-                let p = if g1.parse::<u8>().is_ok() { g1.parse::<u8>().unwrap() } else { p };
+                if v6.as_ref().map(|f| f.is_dhcp).unwrap_or(false) {
+                    return Err("cannot add static address to a dhcp family".into());
+                }
+                validate_ip(&g0, true)?;
+                let p = parse_prefix(&g1, 128)?;
                 v6.as_mut().unwrap().addrs.push((g0, p));
             } else {
+                if v4.as_ref().map(|f| f.is_dhcp).unwrap_or(false) {
+                    return Err("cannot add static address to a dhcp family".into());
+                }
+                validate_ip(&g0, false)?;
+                let p = mask_to_prefix_checked(&g1, 32)?;
                 v4.as_mut().unwrap().addrs.push((g0, p));
             }
             i += 4;
         } else if is_dotted_quad(&g3) {
-            // 策略:from from_mask to to_mask [table](5 元组,table 可省)
-            let from = (g0.clone(), mask_to_prefix(&g1));
-            let to = (g2.clone(), mask_to_prefix(&g3));
+            // 策略:from from_mask to to_mask [table](5 元组,table 可省;to_mask 强制点分)
+            if g2.is_empty() {
+                return Err(
+                    "policy 'to' must not be empty; for a route use 'to to_mask via table'".into(),
+                );
+            }
+            validate_ip(&g0, false)?;
+            validate_ip(&g2, false)?;
+            let from_prefix = mask_to_prefix_checked(&g1, 32)?;
+            let to_prefix = mask_to_prefix_checked(&g3, 32)?;
+            let from = (g0, from_prefix);
+            let to = (g2, to_prefix);
             let g4 = rest.get(i + 4).cloned().unwrap_or_default();
             let (table, advance) = if !g4.is_empty() && is_table_token(&g4) {
                 (Some(g4), 5)
@@ -260,11 +306,19 @@ fn parse_4tuple(net_device: &str, rest: &[String]) -> Result<Config, lexopt::Err
             policies.push(Policy { from: Some(from), to: Some(to), table });
             i += advance;
         } else if g3.is_empty() || g3.parse::<u32>().is_ok() || is_table_name(&g3) {
-            // 路由:to to_mask via table
+            // 路由:to to_mask via table(via 可空=直连路由)
+            validate_ip(&g0, false)?;
+            let to_prefix = mask_to_prefix_checked(&g1, 32)?;
+            let via = if g2.is_empty() {
+                None
+            } else {
+                validate_ip(&g2, false)?;
+                Some(g2)
+            };
             routes.push(Route {
                 to: g0,
-                to_prefix: mask_to_prefix(&g1),
-                via: Some(g2),
+                to_prefix,
+                via,
                 table: if g3.is_empty() { None } else { Some(g3) },
             });
             i += 4;
@@ -335,11 +389,21 @@ fn is_table_name(s: &str) -> bool {
         && !looks_like_ipv6(s)
         && !is_dhcp_token(s)
         && s.parse::<u32>().is_err()
-        && s.chars().all(|c| c.is_alphanumeric() || c == '_')
+        && s.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-')
 }
 /// 合法 table token(数字 id 或表名),用于策略第 5 token 识别
 fn is_table_token(s: &str) -> bool {
     s.parse::<u32>().is_ok() || is_table_name(s)
+}
+
+/// 合法 IPv4 地址(4 段 0-255)
+fn is_valid_ipv4(s: &str) -> bool {
+    let parts: Vec<&str> = s.split('.').collect();
+    parts.len() == 4 && parts.iter().all(|p| !p.is_empty() && p.parse::<u32>().map(|v| v <= 255).unwrap_or(false))
+}
+/// 合法 IPv6 地址(用 std::net 解析)
+fn is_valid_ipv6(s: &str) -> bool {
+    s.parse::<std::net::Ipv6Addr>().is_ok()
 }
 
 /// 填充 family1 可选槽(netmask/gateway/dns),返回 (nm,gw,dns,jumped_to_f2)
@@ -413,18 +477,61 @@ fn read_3slots(rest: &[String], i: &mut usize) -> (Option<String>, Option<String
     (out[0].clone(), out[1].clone(), out[2].clone())
 }
 
-// ============ 掩码转换 ============
+// ============ 掩码/前缀转换(带校验)============
 
-fn mask_to_prefix(mask: &str) -> u8 {
-    if let Ok(prefix) = mask.parse::<u8>() {
-        if prefix <= 32 {
-            return prefix;
+/// 掩码或前缀 → 前缀(校验)。纯数字 0-32 直接当前缀;点分掩码须 4 段且连续;否则 Err。
+fn mask_to_prefix_checked(mask: &str, max: u8) -> Result<u8, String> {
+    // 纯数字前缀
+    if let Ok(p) = mask.parse::<u32>() {
+        if p <= max as u32 {
+            return Ok(p as u8);
+        }
+        return Err(format!("prefix '{}' out of range (0-{})", mask, max));
+    }
+    // 点分掩码
+    let parts: Vec<&str> = mask.split('.').collect();
+    if parts.len() != 4 {
+        return Err(format!("invalid netmask '{}': not a prefix nor dotted mask", mask));
+    }
+    let mut bits = [0u8; 4];
+    for (k, p) in parts.iter().enumerate() {
+        match p.parse::<u32>() {
+            Ok(v) if v <= 255 => bits[k] = v as u8,
+            _ => return Err(format!("invalid netmask '{}': octet out of range", mask)),
         }
     }
-    mask.split('.')
-        .map(|s| s.parse::<u8>().unwrap_or(0))
-        .map(|b| b.count_ones())
-        .sum::<u32>() as u8
+    let u32mask = ((bits[0] as u32) << 24) | ((bits[1] as u32) << 16) | ((bits[2] as u32) << 8) | (bits[3] as u32);
+    // 连续 1 前缀:mask == !mask >> 1 的掩码形式。即 (mask + (mask & -mask)) == 0(全 1 后接全 0)
+    if u32mask == 0 {
+        return Ok(0);
+    }
+    // 合法网络掩码:从高位连续 1,然后连续 0。等价于 (mask | (mask-1)) == 0xFFFFFFFF
+    if (u32mask | (u32mask.wrapping_sub(1))) != 0xFFFFFFFF {
+        return Err(format!("invalid netmask '{}': non-contiguous mask", mask));
+    }
+    Ok(u32mask.count_ones() as u8)
+}
+
+/// IPv4/IPv6 前缀(纯数字)校验
+fn parse_prefix(s: &str, max: u8) -> Result<u8, String> {
+    match s.parse::<u32>() {
+        Ok(p) if p <= max as u32 => Ok(p as u8),
+        Ok(p) => Err(format!("prefix '{}' out of range (0-{})", p, max)),
+        Err(_) => Err(format!("invalid prefix '{}': not a number", s)),
+    }
+}
+
+/// 校验 IP 地址(按族),返回 Err 描述
+fn validate_ip(s: &str, is_v6: bool) -> Result<(), String> {
+    if s.contains('/') {
+        return Err(format!("invalid address '{}': must not contain '/' (set prefix separately)", s));
+    }
+    let ok = if is_v6 { is_valid_ipv6(s) } else { is_valid_ipv4(s) };
+    if ok {
+        Ok(())
+    } else {
+        Err(format!("invalid {} address '{}'", if is_v6 { "IPv6" } else { "IPv4" }, s))
+    }
 }
 
 // ============ main ============
@@ -581,7 +688,8 @@ fn warn_extra_routes(current_dev: &str) {
 }
 
 fn detect_net_manager() -> NetManager {
-    if is_command_exists("netplan") {
+    // netplan 后端依赖 /etc/netplan/01-netcfg.yaml;命令存在但无 yaml 则跳过(避免直接 exit)
+    if is_command_exists("netplan") && fs::File::open("/etc/netplan/01-netcfg.yaml").is_ok() {
         return NetManager::Netplan;
     }
     if is_command_exists("nmcli") {
@@ -759,15 +867,24 @@ fn configure_with_netplan(cfg: &Config) {
     let new_content = serde_yaml::to_string(&doc).unwrap();
     fs::write(file_path, new_content).expect("Failed to write netplan config");
 
-    let status = Command::new("netplan").arg("apply").status();
-    if let Ok(s) = status {
-        if s.success() {
-            println!("[INFO] Netplan configuration applied successfully");
-        } else {
-            eprintln!("[ERROR] Failed to apply netplan configuration");
+    // netplan apply 在某些校验失败(如 conflicting default route)时退出码仍为 0,
+    // 故除退出码外还需检查 stderr 是否含 Error/Conflicting。
+    let out = Command::new("netplan").arg("apply").output();
+    match out {
+        Ok(o) => {
+            let stderr = String::from_utf8_lossy(&o.stderr);
+            let bad = !o.status.success()
+                || stderr.lines().any(|l| l.starts_with("Error") || l.contains("Conflicting default route"));
+            if bad {
+                eprintln!("[ERROR] Failed to apply netplan configuration");
+                for l in stderr.lines().filter(|l| l.starts_with("Error") || l.contains("Conflicting")) {
+                    eprintln!("[ERROR]     {}", l);
+                }
+            } else {
+                println!("[INFO] Netplan configuration applied successfully");
+            }
         }
-    } else {
-        eprintln!("[ERROR] Could not run netplan");
+        Err(_) => eprintln!("[ERROR] Could not run netplan"),
     }
 }
 
@@ -834,33 +951,49 @@ fn configure_with_nmcli(cfg: &Config) {
             }
         }
     }
-    // 静态路由
+    // 静态路由(nmcli ipv4.routes:逗号分隔多条;字段用空格;table 用 table=N)
     if !cfg.routes.is_empty() {
         let entries: Vec<String> = cfg.routes.iter().map(|r| {
             let mut e = format!("{}/{}", r.to, r.to_prefix);
-            if let Some(via) = &r.via { e.push_str(&format!(" {}", via)); }
-            if let Some(t) = &r.table { e.push_str(&format!(" {}", t)); }
+            if let Some(via) = &r.via {
+                e.push_str(&format!(" {}", via));
+            }
+            if let Some(t) = &r.table {
+                e.push_str(&format!(" table={}", t));
+            }
             e
         }).collect();
         add_args.push("ipv4.routes".into());
         add_args.push(entries.join(","));
     }
-    // 策略(多条)
+    // 策略(nmcli ipv4.routing-rules:逗号分隔,需固定 priority,table 仅数字)
     if !cfg.policies.is_empty() {
         let mut rules: Vec<String> = Vec::new();
+        let mut prio = 32760u32; // 从 32760 起递减,避开 main/default
         for p in &cfg.policies {
-            if let Some(t) = &p.table {
-                if let Some((n, px)) = &p.from {
-                    rules.push(format!("from {}/{} table {}", n, px, t));
-                }
-                if let Some((n, px)) = &p.to {
-                    rules.push(format!("to {}/{} table {}", n, px, t));
-                }
+            let t = p.table.as_deref().unwrap_or("");
+            if t.is_empty() {
+                continue;
             }
+            // 表名转数字 id(nmcli 仅接受数字 table);无法转则跳过并告警
+            let tid = match t.parse::<u32>() {
+                Ok(n) => n,
+                Err(_) => {
+                    eprintln!("[WARNING] nmcli routing-rules only accepts numeric table id; skip rule for table '{}'", t);
+                    continue;
+                }
+            };
+            if let Some((n, px)) = &p.from {
+                rules.push(format!("priority {} from {}/{} table {}", prio, n, px, tid));
+            }
+            if let Some((n, px)) = &p.to {
+                rules.push(format!("priority {} to {}/{} table {}", prio, n, px, tid));
+            }
+            if prio > 100 { prio -= 1; }
         }
         if !rules.is_empty() {
             add_args.push("ipv4.routing-rules".into());
-            add_args.push(rules.join(", "));
+            add_args.push(rules.join(","));
         }
     }
 
@@ -956,15 +1089,20 @@ fn configure_with_networkd(cfg: &Config) {
     }
 
     println!("[INFO] Created systemd-networkd config at {}", file_path);
-    let status = Command::new("systemctl").args(["restart", "systemd-networkd"]).status();
-    if let Ok(s) = status {
-        if s.success() {
-            println!("[INFO] systemd-networkd configuration applied successfully");
-        } else {
-            eprintln!("[ERROR] Failed to restart systemd-networkd");
+    // 用 networkctl reload + reconfigure 仅重载该设备,避免 restart 波及其他网口
+    let _ = Command::new("networkctl").arg("reload").status();
+    let rc = Command::new("networkctl").arg("reconfigure").arg(&cfg.net_device).status();
+    let ok = match rc {
+        Ok(s) => s.success(),
+        Err(_) => {
+            eprintln!("[WARNING] networkctl unavailable, falling back to restart systemd-networkd");
+            Command::new("systemctl").args(["restart", "systemd-networkd"]).status().map(|s| s.success()).unwrap_or(false)
         }
+    };
+    if ok {
+        println!("[INFO] systemd-networkd configuration applied successfully");
     } else {
-        eprintln!("[ERROR] Could not run systemctl");
+        eprintln!("[ERROR] Failed to apply systemd-networkd configuration");
     }
 }
 
@@ -978,22 +1116,55 @@ fn configure_with_ip(cfg: &Config) {
         return;
     }
 
-    let _ = Command::new("ip").args(["addr", "flush", "dev", &cfg.net_device]).status();
+    // 执行 ip 命令,失败时打印 [WARNING](含 stderr),返回是否成功
+    let run = |args: &[&str]| -> bool {
+        let out = Command::new("ip").args(args).output();
+        match out {
+            Ok(o) => {
+                if !o.status.success() {
+                    let err = String::from_utf8_lossy(&o.stderr);
+                    eprintln!("[WARNING] `ip {}` failed: {}", args.join(" "), err.trim_end());
+                    false
+                } else {
+                    true
+                }
+            }
+            Err(_) => {
+                eprintln!("[ERROR] Could not run `ip {}`", args.join(" "));
+                false
+            }
+        }
+    };
+    // flush 后立即 up,避免裸接口
+    run(&["addr", "flush", "dev", &cfg.net_device]);
+    run(&["link", "set", "dev", &cfg.net_device, "up"]);
 
+    let mut addr_ok = 0;
+    let mut addr_total = 0;
     if let Some(v4f) = &cfg.v4 {
         for (a, p) in &v4f.addrs {
-            let _ = Command::new("ip").args(["addr", "add", &format!("{}/{}", a, p), "dev", &cfg.net_device]).status();
+            addr_total += 1;
+            let spec = format!("{}/{}", a, p);
+            if run(&["addr", "add", &spec, "dev", &cfg.net_device]) { addr_ok += 1; }
         }
         if let Some(gw) = &v4f.gateway {
             if !gw.is_empty() {
-                let _ = Command::new("ip").args(["route", "add", "default", "via", gw, "dev", &cfg.net_device]).status();
+                // main 表默认路由:若已存在其他默认路由会失败(File exists),给明确提示
+                if !run(&["route", "add", "default", "via", gw, "dev", &cfg.net_device]) {
+                    eprintln!("[WARNING] default route via {} not added (another default route may exist in table main; use policy routing for multi-gateway)", gw);
+                }
             }
         }
     }
     if let Some(v6f) = &cfg.v6 {
         for (a, p) in &v6f.addrs {
-            let _ = Command::new("ip").args(["addr", "add", &format!("{}/{}", a, p), "dev", &cfg.net_device]).status();
+            addr_total += 1;
+            let spec = format!("{}/{}", a, p);
+            if run(&["addr", "add", &spec, "dev", &cfg.net_device]) { addr_ok += 1; }
         }
+    }
+    if addr_total > 0 && addr_ok == 0 {
+        eprintln!("[ERROR] Failed to add any of the {} address(es) to {}", addr_total, cfg.net_device);
     }
     for r in &cfg.routes {
         let mut args: Vec<String> = vec!["route".into(), "add".into(), format!("{}/{}", r.to, r.to_prefix)];
@@ -1007,27 +1178,23 @@ fn configure_with_ip(cfg: &Config) {
             args.push("table".into());
             args.push(t.clone());
         }
-        let _ = Command::new("ip").args(&args).status();
+        let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        run(&refs);
     }
     for p in &cfg.policies {
         if let Some(t) = &p.table {
             if let Some((n, px)) = &p.from {
-                let _ = Command::new("ip").args(["rule", "add", "from", &format!("{}/{}", n, px), "table", t]).status();
+                let spec = format!("{}/{}", n, px);
+                run(&["rule", "add", "from", &spec, "table", t]);
             }
             if let Some((n, px)) = &p.to {
-                let _ = Command::new("ip").args(["rule", "add", "to", &format!("{}/{}", n, px), "table", t]).status();
+                let spec = format!("{}/{}", n, px);
+                run(&["rule", "add", "to", &spec, "table", t]);
             }
         }
     }
 
-    let status = Command::new("ip").args(["link", "set", "dev", &cfg.net_device, "up"]).status();
-    if let Ok(s) = status {
-        if s.success() {
-            println!("[INFO] Manual IP configuration applied successfully");
-        } else {
-            eprintln!("[ERROR] Failed to bring up the interface");
-        }
-    } else {
-        eprintln!("[ERROR] Could not run ip command to bring up interface");
-    }
+    // 确保 up
+    run(&["link", "set", "dev", &cfg.net_device, "up"]);
+    println!("[INFO] Manual IP configuration applied (addresses: {}/{})", addr_ok, addr_total);
 }

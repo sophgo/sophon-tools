@@ -180,6 +180,30 @@ bm_set_ip --dry-run eth0 192.168.1.100 24 192.168.1.1 8.8.8.8 192.168.2.0 24 192
 ## 测试
 
 ```bash
-cargo test --test parse_cases   # 37 项,覆盖双模式 + 4 元组各场景(含多策略)+ 异常报错
+cargo test --test parse_cases   # 59 项,覆盖双模式 + 4 元组各场景(含多策略)+ 输入校验(畸形IP/越界前缀/非连续掩码)+ 异常报错
 bash tests/parse_cases.sh        # 等价包装
 ```
+
+## 输入校验
+
+解析层对以下非法输入**直接报错**(不生成非法网络配置):
+
+- 前缀越界:IPv4 前缀 `>32`、IPv6 前缀 `>128`(如 `33`、`200`)。
+- 非连续/非法点分掩码:`255.255.0.255`(非连续)、`256.0.0.0`(段越界)、`255.255.255`(段数不足)。
+- 畸形 IP 地址:`999.1.1.1`、`1.1.1`(段不足)、`1.1.1.1/24`(含 `/`)、`2001:db8::g`(非法 v6)。
+- 空网卡名:`bm_set_ip "" 1.1.1.1 24`。
+- DHCP 族加静态额外地址:`bm_set_ip eth0 dhcp 1.1.1.2 24 '' ''`(后端会静默丢弃,故解析层拒绝)。
+- 路由表名允许字母/数字/下划线/连字符(如 `lan_table`、`lan-table`);含点号会被当点分掩码误判,报错。
+
+合法边界:前缀 `0`、全 `0` 掩码 `0.0.0.0`(→ `/0`)、全 `1` 掩码 `255.255.255.255`(→ `/32`)均接受。路由 `via` 可空(直连路由进指定表):`to to_mask '' table`。
+
+## 后端
+
+自动探测:`netplan`(需 `/etc/netplan/01-netcfg.yaml` 存在)→ `NetworkManager(nmcli)` → `systemd-networkd` → `ip` 兜底。
+
+- **netplan**:写 `addresses`/`routes`/`routing-policy` 到 yaml 后 `netplan apply`。默认网关用 `routes: to:0.0.0.0/0`(避开 deprecated `gateway4` 的冲突检测)。apply 退出码 0 但 stderr 含 `Error`/`Conflicting` 时报失败。
+- **nmcli**:`ipv4.routes` 用 `table=N` 语法;`ipv4.routing-rules` 逗号分隔、固定 priority、table 仅数字 id。
+- **systemd-networkd**:写 `/etc/systemd/network/10-<dev>.network`,`networkctl reload` + `reconfigure <dev>`(仅重载该设备,不波及其他网口)。
+- **ip**(兜底):逐条 `ip addr/route/rule add`,失败打印 `[WARNING]`(如 main 表已有默认路由时 `ip route add default` 失败会提示用策略路由);DHCP 不支持,报错退出。
+
+> 切换后端时注意:networkd 后端写的 `/etc/systemd/network/10-<dev>.network` 不会被 `netplan apply` 清除,切回 netplan 前应 `rm` 该文件,否则与 netplan 生成的配置竞争。
