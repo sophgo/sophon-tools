@@ -116,10 +116,13 @@ policy.rule_from=
 
 ## 自动化测试
 
-`tests/parse_cases.sh` 对组模式解析器做回归测试,覆盖 7 种配置模式 + 边缘用例(点分掩码转换、v6+IPv4 路由、仅 table 等):
+用例已融入 `cargo test`(集成测试 `tests/parse_cases.rs`,经 `--dry-run` 子进程断言),覆盖 7 种配置模式 + 边缘/异常用例(family2 门位置、dhcp 大小写、掩码转换、IPv6 格式、部分路由/策略、v6+路由、dns1-v6 边、空 net_device、错误输入、残留参数告警),共 71 项。
 
 ``` bash
-bash tests/parse_cases.sh            # 自动 cargo build --release 并测试
-bash tests/parse_cases.sh /path/bm_set_ip   # 用指定二进制测试(如交叉编译产物)
+cargo test --test parse_cases            # 直接跑
+bash tests/parse_cases.sh                 # 薄包装,等价 cargo test
+bash tests/parse_cases.sh --no-fail-fast   # 透传 cargo test 参数
 ```
+
+新增用例:在 `tests/parse_cases.rs` 用 `case!`/`case_sub!`/`case_err!` 宏添加(分别对应整行断言 / 子串断言 / 错误断言)。
 

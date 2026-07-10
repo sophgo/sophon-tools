@@ -120,6 +120,18 @@ impl Args {
             fill_family2(&rest, &mut i, &mut a);
         }
 
+        // 异常输入:未消费的非空 trailing token(告警,不中断)
+        let mut leftover = 0;
+        while i < rest.len() {
+            if !rest[i].is_empty() {
+                leftover += 1;
+            }
+            i += 1;
+        }
+        if leftover > 0 {
+            eprintln!("[WARNING] {} unexpected trailing argument(s) ignored", leftover);
+        }
+
         Ok(a)
     }
 }

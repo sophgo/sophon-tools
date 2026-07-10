@@ -80,4 +80,6 @@ f2: [addr2] [mask2] [gw2] [dns2]          # IP 配置组2(IPv6)
 
 ## 无实施模式(--dry-run / -n)
 
-只解析 + 按固定格式 `key=value` 打印分析配置(v4/v6/路由/策略),不应用、不需 root。用于对组模式解析器做自动化测试。测试脚本:`tests/parse_cases.sh`(覆盖 7 模式 + 边缘用例)。
+只解析 + 按固定格式 `key=value` 打印分析配置(v4/v6/路由/策略),不应用、不需 root。用于对组模式解析器做自动化测试。
+
+测试融入 `cargo test`(集成测试 `tests/parse_cases.rs`,经 --dry-run 子进程断言,71 项覆盖 7 模式 + 边缘/异常);`tests/parse_cases.sh` 为薄包装。解析器对未消费的非空 trailing token 会打 WARNING。
