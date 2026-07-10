@@ -1,4 +1,4 @@
-// Package logs 提供系统日志下载：流式打包 /var/log/kern* + syslog* 为 tar.gz。
+// Package logs 提供系统日志下载：流式打包整个 /var/log 目录为 tar.gz。
 // tar+gzip 直接写到 http.ResponseWriter，不在设备上落盘整包，避免占用存储。
 package logs
 
@@ -7,6 +7,7 @@ import (
 	"compress/gzip"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
@@ -16,8 +17,8 @@ import (
 	"bmssm/pkg/response"
 )
 
-// 系统日志 glob 模式（kern* + syslog*，与前端"系统日志下载"语义一致）。
-var logGlobs = []string{"/var/log/kern*", "/var/log/syslog*"}
+// 系统日志根目录（整个 /var/log 递归打包）。
+const logRoot = "/var/log"
 
 // Controller 系统日志 gin handler。
 type Controller struct{}
@@ -31,9 +32,10 @@ var defaultCtrl = NewController()
 func DefaultController() *Controller { return defaultCtrl }
 
 // DownloadLogs GET /api/v1/logs/download
-// 流式打包 /var/log/kern* 与 /var/log/syslog* 为 tar.gz 下载。
+// 流式打包整个 /var/log 目录为 tar.gz 下载：递归遍历，保留子目录结构，
+// 符号链接作为 link 存储（不跟随，避免循环/重复）。
 // tar→gzip→ResponseWriter 管道直写，设备端不生成整包临时文件；
-// 单个文件用 io.Copy 流式写入，支持大日志文件。
+// 单个文件用 io.Copy 流式写入，支持大日志文件；单项失败不中断整包。
 func (ctrl *Controller) DownloadLogs(c *gin.Context) {
 	c.Header("Content-Disposition", `attachment; filename="sys_log.tgz"`)
 	c.Header("Content-Type", "application/gzip")
@@ -44,61 +46,70 @@ func (ctrl *Controller) DownloadLogs(c *gin.Context) {
 	tw := tar.NewWriter(gw)
 	defer tw.Close()
 
-	// 收集匹配文件（去重，保持稳定顺序）
-	seen := map[string]bool{}
-	var files []string
-	for _, pattern := range logGlobs {
-		ms, err := filepath.Glob(pattern)
+	wrote := 0
+	_ = filepath.WalkDir(logRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			continue
+			return nil // 不可访问的子项：跳过，不中断整包
 		}
-		for _, f := range ms {
-			if !seen[f] {
-				seen[f] = true
-				files = append(files, f)
+		if path == logRoot {
+			return nil
+		}
+		rel, err := filepath.Rel(logRoot, path)
+		if err != nil {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return nil
+		}
+		hdr, body, skip := tarEntry(path, rel, info)
+		if skip {
+			return nil
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			return nil // 头已写到响应，无法中断
+		}
+		if body != nil {
+			defer body.Close()
+			if _, err := io.Copy(tw, body); err != nil {
+				return nil
 			}
 		}
-	}
-
-	wrote := 0
-	for _, path := range files {
-		st, err := os.Stat(path)
-		if err != nil || st.IsDir() || !st.Mode().IsRegular() {
-			continue
-		}
-		if err := writeTarFile(tw, path, st); err != nil {
-			// 单文件失败不中断整包；响应头已写，只能跳过。
-			continue
-		}
 		wrote++
-	}
+		return nil
+	})
 	if wrote == 0 {
-		// 无可读日志文件时写一个说明文件，避免下载空包让用户困惑。
-		writeReadme(tw, "no readable /var/log/kern* or syslog* files found")
+		// 无可读文件时写说明，避免下载空包让用户困惑。
+		writeReadme(tw, "no readable files under /var/log")
 	}
 }
 
-// writeTarFile 将单个文件流式写入 tar（header + io.Copy 内容）。
-func writeTarFile(tw *tar.Writer, path string, fi os.FileInfo) error {
-	f, err := os.Open(path)
+// tarEntry 为一个路径构造 tar 头；regular 文件返回打开的 body（调用方 Close）。
+// 符号链接存为 link（Linkname=目标），不跟随；目录仅写头；其余（socket/device）跳过。
+func tarEntry(path, rel string, info os.FileInfo) (*tar.Header, io.ReadCloser, bool) {
+	var link string
+	if info.Mode()&os.ModeSymlink != 0 {
+		if l, err := os.Readlink(path); err == nil {
+			link = l
+		}
+	}
+	hdr, err := tar.FileInfoHeader(info, link)
 	if err != nil {
-		return err
+		return nil, nil, true
 	}
-	defer f.Close()
-	hdr := &tar.Header{
-		Name:    filepath.Base(path),
-		Mode:    int64(fi.Mode().Perm()),
-		Size:    fi.Size(),
-		ModTime: fi.ModTime(),
-		Format:  tar.FormatGNU,
+	hdr.Name = filepath.ToSlash(rel)
+	hdr.Format = tar.FormatGNU
+	if info.Mode().IsRegular() {
+		f, err := os.Open(path)
+		if err != nil {
+			return nil, nil, true
+		}
+		return hdr, f, false
 	}
-	if err := tw.WriteHeader(hdr); err != nil {
-		return err
+	if info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return hdr, nil, false // 目录/符号链接：仅头，无 body
 	}
-	if _, err := io.Copy(tw, f); err != nil {
-		return err
-	}
-	return nil
+	return nil, nil, true // socket/device/pipe 等跳过
 }
 
 // writeReadme 写一个文本说明文件到 tar。

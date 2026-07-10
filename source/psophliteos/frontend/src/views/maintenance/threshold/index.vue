@@ -65,13 +65,6 @@
 
   const activeKey = ref('wan');
   const formItemList = [
-    // {
-    //   label: t('maintenance.threshold.fanSpeed'),
-    //   field: 'fanSpeed',
-    //   unit: 'r/min',
-    //   placeholder: t('sys.form.placeholder'),
-    //   max: 1000000,
-    // }, 去掉风扇
     {
       label: t('maintenance.threshold.boardTemperature'),
       field: 'boardTemperature',
@@ -90,22 +83,10 @@
       label: t('maintenance.threshold.totalMemoryScale'),
       field: 'totalMemoryScale',
     },
-    // {
-    //   label: t('maintenance.threshold.memoryScale'),
-    //   field: 'systemScale',
-    // },
-    // {
-    //   label: t('maintenance.threshold.videoScale'),
-    //   field: 'videoScale',
-    // },
     {
       label: t('maintenance.threshold.tpuScale'),
       field: 'tpuScale',
     },
-    // {
-    //   label: t('maintenance.threshold.externalHardDiskRate'),
-    //   field: 'externalHardDiskRate',
-    // },
     {
       label: t('maintenance.threshold.diskRate'),
       field: 'diskRate',
@@ -116,15 +97,11 @@
     },
   ];
   const formState: UnwrapRef<AlarmParams> = reactive({
-    fanSpeed: 0,
     boardTemperature: 0,
     coreTemperature: 0,
     cpuRate: 90,
     totalMemoryScale: 90,
-    // systemScale: 90,
-    // videoScale: 90,
     tpuScale: 90,
-    // externalHardDiskRate: 90,
     diskRate: 90,
     tpuRate: 90,
   });
@@ -138,7 +115,6 @@
     const result = await getAlarm();
     pageLoading.value = false;
     if (result) {
-      formState.fanSpeed = 9999;
       formState.boardTemperature = result.boardTemperature;
       formState.coreTemperature = result.coreTemperature;
       // cpuRate/diskRate/tpuRate ssm 已是百分比（0-100），不再 *100
@@ -153,7 +129,7 @@
   const loading = ref(false);
   function areAllPropertyValuesValid(obj) {
     for (var key in obj) {
-      if (obj.hasOwnProperty(key) && key !== 'fanSpeed') {
+      if (obj.hasOwnProperty(key)) {
         var value = obj[key];
 
         // 使用正则表达式判断是否是整数
@@ -185,7 +161,6 @@
         }
         // 不需要 /100 的字段：已是百分比或绝对值
         const staticFields = [
-          'fanSpeed',
           'boardTemperature',
           'coreTemperature',
           'cpuRate',

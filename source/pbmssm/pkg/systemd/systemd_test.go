@@ -26,12 +26,12 @@ func TestProtectedMatch(t *testing.T) {
 		name string
 		want bool
 	}{
-		{"bmssm.service", true},       // 精确 + bm*
-		{"bmrt_watchdog.service", true}, // bm*
-		{"bmDeviceDetect.service", true}, // bm*
+		{"bmssm.service", true},                   // 精确 + bm*
+		{"bmrt_watchdog.service", true},           // bm*
+		{"bmDeviceDetect.service", true},          // bm*
 		{"bm-se7-powerkey-monitor.service", true}, // bm*
-		{"getty@tty1.service", true},  // getty@*
-		{"systemd-journald.service", true}, // systemd-*
+		{"getty@tty1.service", true},              // getty@*
+		{"systemd-journald.service", true},        // systemd-*
 		{"nginx.service", false},
 		{"cron.service", false},
 		{"ssh.service", false},

@@ -102,13 +102,9 @@ func TestAlarmThresholdDefaults(t *testing.T) {
 		{"alarmThreshold.coreTemperature", 90, true, 90},
 		{"alarmThreshold.cpuRate", 0.95, false, 0},
 		{"alarmThreshold.diskRate", 0.95, false, 0},
-		{"alarmThreshold.externalHardDiskRate", 0.95, false, 0},
-		{"alarmThreshold.fanSpeed", 9999, true, 9999},
-		{"alarmThreshold.systemScale", 0.95, false, 0},
 		{"alarmThreshold.totalMemoryScale", 0.95, false, 0},
 		{"alarmThreshold.tpuRate", 0.95, false, 0},
 		{"alarmThreshold.tpuScale", 0.95, false, 0},
-		{"alarmThreshold.videoScale", 0.95, false, 0},
 	}
 
 	for _, tt := range tests {

@@ -58,11 +58,11 @@ var DefaultProtectedServices = []string{
 	"getty@*.service",
 	"serial-getty@*.service",
 	// 功能关键（禁用虽不开机失败，但会让设备失去核心功能）：
-	"docker.service",            // 容器化 AI 推理负载
-	"containerd.service",        // docker 依赖
-	"upd72020x-fwload.service",  // USB3 主控固件
-	"apparmor.service",          // 安全框架，snap/AppArmor 依赖
-	"ubuntu-fan.service",        // Fan overlay 网络
+	"docker.service",           // 容器化 AI 推理负载
+	"containerd.service",       // docker 依赖
+	"upd72020x-fwload.service", // USB3 主控固件
+	"apparmor.service",         // 安全框架，snap/AppArmor 依赖
+	"ubuntu-fan.service",       // Fan overlay 网络
 	// Sophon 厂商硬件/运行时（一个通配覆盖全部 bm 开头服务）
 	"bm*.service",
 }

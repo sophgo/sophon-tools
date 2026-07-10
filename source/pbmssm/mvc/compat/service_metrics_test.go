@@ -11,17 +11,19 @@ import (
 
 // fakeMetrics 测试用 MetricProvider，返回夹具预置值。
 type fakeMetrics struct {
-	os     string
-	rt     string
-	sdk    string
-	cpu    metrics.CPU
-	mem    metrics.Memory
-	disks  []metrics.Disk
-	nets   []metrics.NetCard
-	chipT  int
-	boardT int
-	tpuU   int
-	tpuMem float64
+	os         string
+	rt         string
+	sdk        string
+	cpu        metrics.CPU
+	mem        metrics.Memory
+	disks      []metrics.Disk
+	nets       []metrics.NetCard
+	chipT      int
+	boardT     int
+	tpuU       int
+	tpuMem     float64
+	memLayout  metrics.MemoryLayout
+	diskLayout metrics.DiskLayout
 }
 
 func (f *fakeMetrics) OSVersion() string           { return f.os }
@@ -35,6 +37,12 @@ func (f *fakeMetrics) ChipTemp() int               { return f.chipT }
 func (f *fakeMetrics) BoardTemp() int              { return f.boardT }
 func (f *fakeMetrics) TPUUsage() int               { return f.tpuU }
 func (f *fakeMetrics) TPUMem() float64             { return f.tpuMem }
+func (f *fakeMetrics) MemoryLayout() metrics.MemoryLayout {
+	return f.memLayout
+}
+func (f *fakeMetrics) DiskLayout() metrics.DiskLayout {
+	return f.diskLayout
+}
 
 // defaultFakeMetrics 返回真机夹具值（SE7 / BM1684X）。
 func defaultFakeMetrics() *fakeMetrics {
@@ -50,6 +58,22 @@ func defaultFakeMetrics() *fakeMetrics {
 		boardT: 42,
 		tpuU:   0,
 		tpuMem: 3950,
+		memLayout: metrics.MemoryLayout{
+			ChipType: "bm1684x",
+			System:   metrics.MemRegion{TotalMB: 6277, UsedMB: 2691, UsagePct: 42.875824},
+			TPU:      metrics.MemRegion{TotalMB: 2414, UsedMB: 0, UsagePct: 0},
+			VPU:      metrics.MemRegion{TotalMB: 2943, UsedMB: 0, UsagePct: 0},
+			VPP:      metrics.MemRegion{TotalMB: 3072, UsedMB: 0, UsagePct: 0},
+		},
+		diskLayout: metrics.DiskLayout{
+			EmmcOverall: metrics.MemRegion{TotalMB: 27866, UsedMB: 5297, UsagePct: 19.0},
+			Partitions: []metrics.DiskPart{
+				{Device: "/dev/mmcblk0p1", MountOn: "/boot", MemRegion: metrics.MemRegion{TotalMB: 128, UsedMB: 20, UsagePct: 15.6}},
+				{Device: "/dev/mmcblk0p2", MountOn: "/recovery", MemRegion: metrics.MemRegion{TotalMB: 104, UsedMB: 20, UsagePct: 19.7}},
+				{Device: "/dev/mmcblk0p5", MountOn: "/media/root-rw", MemRegion: metrics.MemRegion{TotalMB: 8481, UsedMB: 1427, UsagePct: 16.8}},
+				{Device: "/dev/mmcblk0p6", MountOn: "/data", MemRegion: metrics.MemRegion{TotalMB: 16355, UsedMB: 1165, UsagePct: 7.1}},
+			},
+		},
 	}
 }
 

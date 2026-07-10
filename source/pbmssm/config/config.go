@@ -57,13 +57,9 @@ func LoadFromDir(dir string) bool {
 	v.SetDefault("alarmThreshold.coreTemperature", 90)
 	v.SetDefault("alarmThreshold.cpuRate", 0.95)
 	v.SetDefault("alarmThreshold.diskRate", 0.95)
-	v.SetDefault("alarmThreshold.externalHardDiskRate", 0.95)
-	v.SetDefault("alarmThreshold.fanSpeed", 9999)
-	v.SetDefault("alarmThreshold.systemScale", 0.95)
 	v.SetDefault("alarmThreshold.totalMemoryScale", 0.95)
 	v.SetDefault("alarmThreshold.tpuRate", 0.95)
 	v.SetDefault("alarmThreshold.tpuScale", 0.95)
-	v.SetDefault("alarmThreshold.videoScale", 0.95)
 
 	v.SetDefault("db.driver", "sqlite3")
 	v.SetDefault("db.path", "/var/lib/bmssm/bmssm.db")

@@ -19,21 +19,24 @@ import (
 // ---------------------------------------------------------------
 //
 // 负 code = 告警；正 code = 恢复。ComponentType = Abs(code/100000)：
-//   101xxx/102xxx/103xxx → 1（中央处理单元）
-//   201xxx/202xxx        → 2（核心计算单元）
+//
+//	101xxx/102xxx/103xxx → 1（中央处理单元）
+//	201xxx/202xxx        → 2（核心计算单元）
 const (
-	CodeCPURateAlarm    = -101001
-	CodeCPURateRecover  = 101001
-	CodeMemRateAlarm    = -102001
-	CodeMemRateRecover  = 102001
-	CodeDiskRateAlarm   = -103001
-	CodeDiskRateRecover = 103001
-	CodeBoardTempAlarm  = -201001
+	CodeCPURateAlarm     = -101001
+	CodeCPURateRecover   = 101001
+	CodeMemRateAlarm     = -102001
+	CodeMemRateRecover   = 102001
+	CodeDiskRateAlarm    = -103001
+	CodeDiskRateRecover  = 103001
+	CodeBoardTempAlarm   = -201001
 	CodeBoardTempRecover = 201001
-	CodeChipTempAlarm   = -202001
-	CodeChipTempRecover = 202001
-	CodeTPURateAlarm    = -202003
-	CodeTPURateRecover  = 202003
+	CodeChipTempAlarm    = -202001
+	CodeChipTempRecover  = 202001
+	CodeTPURateAlarm     = -202003
+	CodeTPURateRecover   = 202003
+	CodeTPUMemAlarm      = -202004
+	CodeTPUMemRecover    = 202004
 )
 
 // EventId 告警类别（边沿检测用）。
@@ -46,6 +49,7 @@ const (
 	BOARD_TEMP
 	TPU_TEMP
 	TPU_RATE
+	TPU_MEM
 	numEventIds
 )
 
@@ -71,6 +75,7 @@ type Thresholds struct {
 	BoardTemperature int // ℃
 	CoreTemperature  int // ℃
 	TpuRate          int // %
+	TpuScale         int // % TPU 内存使用率
 }
 
 // MetricsReader 告警引擎所需的指标采集子集（*metrics.Collector 实现之）。
@@ -81,6 +86,7 @@ type MetricsReader interface {
 	ChipTemp() int
 	BoardTemp() int
 	TPUUsage() int
+	TpuMemUsage() int
 }
 
 // SubscriptionLister 提供告警订阅 callback URL 列表。

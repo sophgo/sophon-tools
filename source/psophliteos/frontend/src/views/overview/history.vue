@@ -26,7 +26,7 @@
       message="结果超过 10000 点，已截断。请缩小时间范围。"
     />
 
-    <!-- 每个指标独立卡片：动态→折线图，静态→文字 -->
+    <!-- 每个指标独立卡片：折线图（恒定值显示为平线） -->
     <div v-if="loading" class="text-center py-40px">
       <Spin tip="加载中..." />
     </div>
@@ -34,32 +34,14 @@
       v-else-if="cards.length"
       class="grid grid-cols-1 lg:grid-cols-2 gap-16px"
     >
-      <template v-for="card in cards" :key="card.field">
-        <!-- 静态指标：恒定值，显示文字卡片 -->
-        <Card
-          v-if="card.isStatic"
-          :bordered="true"
-          size="small"
-          class="!mb-0"
-        >
-          <template #title>
-            <span class="text-sm">{{ card.label }}</span>
-            <Tag color="default" class="ml-8px">静态</Tag>
-          </template>
-          <div class="py-12px text-center">
-            <span class="text-2xl font-bold">{{ card.value }}</span>
-            <span class="ml-4px text-gray-500">{{ card.unit }}</span>
-          </div>
-        </Card>
-        <!-- 动态指标：折线图 -->
-        <MetricsChart
-          v-else
-          :field="card.field"
-          :label="card.label"
-          :fields="card.fields"
-          :points="card.points"
-        />
-      </template>
+      <MetricsChart
+        v-for="card in cards"
+        :key="card.field"
+        :field="card.field"
+        :label="card.label"
+        :fields="card.fields"
+        :points="card.points"
+      />
     </div>
     <Empty v-else description="无数据，请选择指标" class="py-40px" />
 
@@ -75,7 +57,7 @@
 <script lang="ts" setup>
   // @ts-nocheck
   import { ref, computed, onMounted } from 'vue';
-  import { Spin, Alert, Empty, Card, Tag, message } from 'ant-design-vue';
+  import { Spin, Alert, Empty, message } from 'ant-design-vue';
   import MetricsToolbar from './history/components/MetricsToolbar.vue';
   import MetricsSelector from './history/components/MetricsSelector.vue';
   import MetricsChart from './history/components/MetricsChart.vue';
@@ -166,22 +148,7 @@
     onQuery();
   }
 
-  // 字段单位推断（用于静态卡片显示）
-  function fieldUnit(field: string): string {
-    if (field.endsWith('_pct')) return '%';
-    if (field.endsWith('_c')) return '°C';
-    if (field.endsWith('_w')) return 'W';
-    if (field.endsWith('_mv')) return 'mV';
-    if (field.endsWith('_mw')) return 'mW';
-    if (field.endsWith('_mhz')) return 'MHz';
-    if (field.endsWith('_mib')) return 'MiB';
-    if (field.endsWith('_kibps')) return 'KiB/s';
-    if (field.endsWith('_hz')) return 'Hz';
-    if (field.endsWith('_s')) return 's';
-    return '';
-  }
-
-  // 每个选中字段一张卡片：动态→折线，静态(恒定值)→文字
+  // 每个选中字段一张折线图卡片（恒定值→平线，不再用静态文字）
   const cards = computed(() => {
     if (!result.value || !result.value.fields.length) return [];
     const resFields = result.value.fields; // [timestamp, ...selected]
@@ -190,30 +157,12 @@
     for (const f of selectedFields.value) {
       const idx = resFields.indexOf(f);
       if (idx < 0) continue; // 该字段不在本次结果（跨版本缺失）
-      const label = fieldLabel(f);
-      const values = result.value.points.map((row) => row[idx]);
-      // 静态判定：所有值相等（含 null 视为相等）→ 恒定
-      const nonNull = values.filter((v) => v !== null && v !== undefined);
-      const isStatic =
-        nonNull.length > 0 &&
-        nonNull.every((v) => Math.abs(v - nonNull[0]) < 1e-9);
-      if (isStatic) {
-        out.push({
-          field: f,
-          label,
-          isStatic: true,
-          value: nonNull[0],
-          unit: fieldUnit(f),
-        });
-      } else {
-        out.push({
-          field: f,
-          label,
-          isStatic: false,
-          fields: ['timestamp', f],
-          points: result.value.points.map((row) => [row[tsIdx], row[idx]]),
-        });
-      }
+      out.push({
+        field: f,
+        label: fieldLabel(f),
+        fields: ['timestamp', f],
+        points: result.value.points.map((row) => [row[tsIdx], row[idx]]),
+      });
     }
     return out;
   });

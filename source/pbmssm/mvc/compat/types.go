@@ -8,6 +8,8 @@
 // 推荐新客户端使用受 JWT 保护的正路 /api/v1/*。
 package compat
 
+import "bmssm/pkg/metrics"
+
 // ---------------------------------------------------------------
 // 请求类型
 // ---------------------------------------------------------------
@@ -36,17 +38,13 @@ type BasicSettings struct {
 
 // AlarmThreshold 告警阈值配置（对应 sophliteos AlarmThreshold）。
 type AlarmThreshold struct {
-	BoardTemperature     int     `json:"boardTemperature"`
-	CoreTemperature      int     `json:"coreTemperature"`
-	CpuRate              float64 `json:"cpuRate"`
-	DiskRate             float64 `json:"diskRate"`
-	ExternalHardDiskRate float64 `json:"externalHardDiskRate"`
-	FanSpeed             int     `json:"fanSpeed"`
-	SystemScale          float64 `json:"systemScale"`
-	TotalMemoryScale     float64 `json:"totalMemoryScale"`
-	TpuScale             float64 `json:"tpuScale"`
-	TpuRate              float64 `json:"tpuRate"`
-	VideoScale           float64 `json:"videoScale"`
+	BoardTemperature int     `json:"boardTemperature"`
+	CoreTemperature  int     `json:"coreTemperature"`
+	CpuRate          float64 `json:"cpuRate"`
+	DiskRate         float64 `json:"diskRate"`
+	TotalMemoryScale float64 `json:"totalMemoryScale"`
+	TpuScale         float64 `json:"tpuScale"`
+	TpuRate          float64 `json:"tpuRate"`
 }
 
 // SubscribeRequest 告警订阅请求（对应 sophliteos AlarmSubscribe）。
@@ -181,6 +179,8 @@ type CtrlResource struct {
 	Sslots                []interface{}         `json:"sslots"`
 	CentralProcessingUnit CentralProcessingUnit `json:"centralProcessingUnit"`
 	CoreComputingUnit     CoreComputingUnit     `json:"coreComputingUnit"`
+	MemoryLayout          metrics.MemoryLayout  `json:"memoryLayout"`
+	DiskLayout            metrics.DiskLayout    `json:"diskLayout"`
 }
 
 // CentralProcessingUnit 中央处理单元。

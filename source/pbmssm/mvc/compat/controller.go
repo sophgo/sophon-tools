@@ -364,13 +364,9 @@ func (ctrl *Controller) SetAlarm(c *gin.Context) {
 	v.Set("alarmThreshold.coreTemperature", req.CoreTemperature)
 	v.Set("alarmThreshold.cpuRate", req.CpuRate)
 	v.Set("alarmThreshold.diskRate", req.DiskRate)
-	v.Set("alarmThreshold.externalHardDiskRate", req.ExternalHardDiskRate)
-	v.Set("alarmThreshold.fanSpeed", req.FanSpeed)
-	v.Set("alarmThreshold.systemScale", req.SystemScale)
 	v.Set("alarmThreshold.totalMemoryScale", req.TotalMemoryScale)
 	v.Set("alarmThreshold.tpuRate", req.TpuRate)
 	v.Set("alarmThreshold.tpuScale", req.TpuScale)
-	v.Set("alarmThreshold.videoScale", req.VideoScale)
 
 	if err := v.WriteConfig(); err != nil {
 		// WriteConfig 失败时降级为仅内存更新（例如无配置文件路径）
@@ -390,17 +386,13 @@ func (ctrl *Controller) GetAlarm(c *gin.Context) {
 	config.Conf.RLock()
 	v := config.Conf.GetViper()
 	at := AlarmThreshold{
-		BoardTemperature:     int(v.GetFloat64("alarmThreshold.boardTemperature")),
-		CoreTemperature:      int(v.GetFloat64("alarmThreshold.coreTemperature")),
-		CpuRate:              v.GetFloat64("alarmThreshold.cpuRate"),
-		DiskRate:             v.GetFloat64("alarmThreshold.diskRate"),
-		ExternalHardDiskRate: v.GetFloat64("alarmThreshold.externalHardDiskRate"),
-		FanSpeed:             v.GetInt("alarmThreshold.fanSpeed"),
-		SystemScale:          v.GetFloat64("alarmThreshold.systemScale"),
-		TotalMemoryScale:     v.GetFloat64("alarmThreshold.totalMemoryScale"),
-		TpuRate:              v.GetFloat64("alarmThreshold.tpuRate"),
-		TpuScale:             v.GetFloat64("alarmThreshold.tpuScale"),
-		VideoScale:           v.GetFloat64("alarmThreshold.videoScale"),
+		BoardTemperature: int(v.GetFloat64("alarmThreshold.boardTemperature")),
+		CoreTemperature:  int(v.GetFloat64("alarmThreshold.coreTemperature")),
+		CpuRate:          v.GetFloat64("alarmThreshold.cpuRate"),
+		DiskRate:         v.GetFloat64("alarmThreshold.diskRate"),
+		TotalMemoryScale: v.GetFloat64("alarmThreshold.totalMemoryScale"),
+		TpuRate:          v.GetFloat64("alarmThreshold.tpuRate"),
+		TpuScale:         v.GetFloat64("alarmThreshold.tpuScale"),
 	}
 	config.Conf.RUnlock()
 	c.JSON(http.StatusOK, response.OK(at))

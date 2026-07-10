@@ -71,6 +71,7 @@ func loadThresholds() Thresholds {
 		BoardTemperature: int(v.GetFloat64("alarmThreshold.boardTemperature")),
 		CoreTemperature:  int(v.GetFloat64("alarmThreshold.coreTemperature")),
 		TpuRate:          rateToPercent(v.GetFloat64("alarmThreshold.tpuRate")),
+		TpuScale:         rateToPercent(v.GetFloat64("alarmThreshold.tpuScale")),
 	}
 }
 

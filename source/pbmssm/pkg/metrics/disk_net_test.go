@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"strings"
 	"testing"
 
 	"bmssm/pkg/network"
@@ -164,6 +165,77 @@ func TestDisksDfFails(t *testing.T) {
 	c := NewCollector(fr, cmd)
 	if got := c.Disks(); len(got) != 0 {
 		t.Errorf("Disks() len = %d, want 0 when df fails", len(got))
+	}
+}
+
+// TestDiskLayout 覆盖 eMMC 整体 + 各分区（排除 p3/p4，按分区号升序）。
+func TestDiskLayout(t *testing.T) {
+	dfOut := "Filesystem     Type    1K-blocks    Used Available Use% Mounted on\n" +
+		"overlay        overlay   9079836 1461428   7222796  17% /\n" +
+		"/dev/sda1      ext4    967827868   77856 917723468   1% /media/storage-local-sda1\n" +
+		"/dev/mmcblk0p1 vfat       130798   20264    110534  16% /boot\n" +
+		"/dev/mmcblk0p6 ext4     17476668 1193448  15553672   8% /data\n" +
+		"/dev/mmcblk0p4 ext4      3030800 2727684    129448  96% /media/root-ro\n" +
+		"/dev/mmcblk0p5 ext4      9079836 1461428   7222796  17% /media/root-rw\n" +
+		"/dev/mmcblk0p2 ext4       110576   20940     84940  20% /recovery\n"
+	cmd := &fakeCmdRunner{responses: map[string]cmdResp{"df": {dfOut, nil}}}
+	c := NewCollector(&fakeFileReader{files: map[string]string{}}, cmd)
+	lay := c.DiskLayout()
+
+	// eMMC 整体 = p1+p2+p4+p5+p6 的 (used,avail) 之和（含被排除的 p4）
+	// usedKB = 20264+20940+2727684+1461428+1193448 = 5423764 → 5296.6 MB
+	// totalKB = 5423764 + (110534+84940+129448+7222796+15553672) = 28525154 → 27856.6 MB
+	if !approxEqual(lay.EmmcOverall.UsedMB, 5296.6, 1) {
+		t.Errorf("EmmcOverall.UsedMB = %v, want ~5296.6", lay.EmmcOverall.UsedMB)
+	}
+	if !approxEqual(lay.EmmcOverall.TotalMB, 27856.6, 1) {
+		t.Errorf("EmmcOverall.TotalMB = %v, want ~27856", lay.EmmcOverall.TotalMB)
+	}
+	if !approxEqual(lay.EmmcOverall.UsagePct, 19.0, 0.5) {
+		t.Errorf("EmmcOverall.UsagePct = %v, want ~19", lay.EmmcOverall.UsagePct)
+	}
+	// 分区列表：p1/p2/p5/p6（排除 p3/p4，overlay 不入列表），按分区号升序
+	if len(lay.Partitions) != 4 {
+		t.Fatalf("Partitions len = %d, want 4 (p1/p2/p5/p6)", len(lay.Partitions))
+	}
+	want := []struct {
+		dev, mount  string
+		used, total float64
+	}{
+		{"/dev/mmcblk0p1", "/boot", 19.8, 128.1},
+		{"/dev/mmcblk0p2", "/recovery", 20.4, 103.5},
+		{"/dev/mmcblk0p5", "/media/root-rw", 1427.2, 8480.7},
+		{"/dev/mmcblk0p6", "/data", 1165.5, 16354.6},
+	}
+	for i, w := range want {
+		p := lay.Partitions[i]
+		if p.Device != w.dev || p.MountOn != w.mount {
+			t.Errorf("part[%d] = %s %s, want %s %s", i, p.Device, p.MountOn, w.dev, w.mount)
+		}
+		if !approxEqual(p.UsedMB, w.used, 0.5) {
+			t.Errorf("part[%s].UsedMB = %v, want ~%v", w.mount, p.UsedMB, w.used)
+		}
+		if !approxEqual(p.TotalMB, w.total, 0.5) {
+			t.Errorf("part[%s].TotalMB = %v, want ~%v", w.mount, p.TotalMB, w.total)
+		}
+	}
+	// 关键：p4(root-ro) 被排除
+	for _, p := range lay.Partitions {
+		if strings.HasSuffix(p.Device, "p4") || strings.HasSuffix(p.Device, "p3") {
+			t.Errorf("p3/p4 不应在分区列表：%s", p.Device)
+		}
+	}
+}
+
+func TestDiskLayoutNoData(t *testing.T) {
+	// 无 mmcblk0 分区 → 整体全 0、列表空
+	dfOut := "Filesystem Type 1K-blocks Used Available Use% Mounted on\n" +
+		"overlay overlay 100 10 90 10% /\n"
+	cmd := &fakeCmdRunner{responses: map[string]cmdResp{"df": {dfOut, nil}}}
+	c := NewCollector(&fakeFileReader{files: map[string]string{}}, cmd)
+	lay := c.DiskLayout()
+	if lay.EmmcOverall.TotalMB != 0 || len(lay.Partitions) != 0 {
+		t.Errorf("无 eMMC 时应整体 0 + 空列表，got %+v", lay)
 	}
 }
 

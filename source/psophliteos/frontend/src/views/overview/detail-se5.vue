@@ -1,6 +1,39 @@
 <template>
   <div class="p-24px">
-    <CircleGrid :grid-list="gridList" class="se5-grid" />
+    <a-row :gutter="20" class="top-cards">
+      <a-col :xs="24" :sm="12" :xl="6">
+        <div class="metric-card">
+          <p class="card-title">{{ t('overview.cpu') }}</p>
+          <a-progress
+            type="circle"
+            :percent="cpuCard.usage"
+            :stroke-color="cardColor(cpuCard.usage)"
+            :format="() => cpuCard.usage.toFixed(1) + '%'"
+            class="circle"
+          />
+          <p class="card-text">{{ cpuCard.text }}</p>
+        </div>
+      </a-col>
+      <a-col :xs="24" :sm="12" :xl="6">
+        <div class="metric-card">
+          <p class="card-title">{{ t('overview.tpu') }}</p>
+          <a-progress
+            type="circle"
+            :percent="tpuCard.usage"
+            :stroke-color="cardColor(tpuCard.usage)"
+            :format="() => tpuCard.usage.toFixed(1) + '%'"
+            class="circle"
+          />
+          <p class="card-text">{{ tpuCard.text }}</p>
+        </div>
+      </a-col>
+      <a-col :xs="24" :sm="12" :xl="6">
+        <MemoryLayout :layout="originData.memoryLayout" />
+      </a-col>
+      <a-col :xs="24" :sm="12" :xl="6">
+        <DiskLayout :layout="originData.diskLayout" />
+      </a-col>
+    </a-row>
     <a-row class="se5-row">
       <a-col :xs="24" :lg="12">
         <a-descriptions :title="t('overview.basicInfor')" bordered :column="1">
@@ -60,34 +93,23 @@
         </a-descriptions>
       </a-col>
       <a-col :xs="24" :lg="12" class="!flex items-center">
-        <a-row class="w-full">
-          <a-col :xs="24" :md="24" :xl="24">
-            <GaugeChart
-              :value="deviceInfo.temperature"
-              :unit="t('overview.coreTemperature') + '（℃）'"
-            />
-          </a-col>
-          <!-- <a-col :xs="24" :md="24" :xl="12">
-            <GaugeChart
-              :value="+(Math.max(0, deviceInfo.fanSpeed || 0) / 1000).toFixed(0)"
-              :colors="['#80B1F9', '#0C33F5']"
-              :max="20"
-              :unit="t('overview.fanSpeed') + '（x1000r/min）'"
-            />
-          </a-col> -->
-        </a-row>
+        <GaugeChart
+          :value="deviceInfo.temperature"
+          :unit="t('overview.coreTemperature') + '（℃）'"
+        />
       </a-col>
     </a-row>
   </div>
 </template>
 <script lang="ts" setup>
   import { ref, computed, onUnmounted, nextTick } from 'vue';
-  import { Descriptions, Row, Col, Badge, Tooltip } from 'ant-design-vue';
+  import { Descriptions, Row, Col, Badge, Tooltip, Progress } from 'ant-design-vue';
   import { storeToRefs } from 'pinia';
   import { useDeviceInfo } from '/@/store/modules/overview';
   import { useI18n } from '/@/hooks/web/useI18n';
-  import CircleGrid from './components/CircleGrid.vue';
   import GaugeChart from './components/Gauge.vue';
+  import MemoryLayout from './components/MemoryLayout.vue';
+  import DiskLayout from './components/DiskLayout.vue';
   import { getFormatTime } from '/@/utils/dateUtil';
   import { EditOutlined } from '@ant-design/icons-vue';
   import { setDeviceInfoApi } from '/@/api/overview/index';
@@ -100,6 +122,7 @@
   const ARow = Row;
   const ACol = Col;
   const ABadge = Badge;
+  const AProgress = Progress;
   const title = t('overview.device.editType');
   const loading = ref(false);
   const deviceInfoStore = useDeviceInfo();
@@ -111,43 +134,29 @@
     });
   }
 
-  const gridList = computed(() => {
+  const cpuCard = computed(() => {
     const cpu = originData.value.cpu || {};
-    const mem = originData.value.memory || {};
-    const disk0 = (originData.value.disk && originData.value.disk[0]) || {};
-    const chip0 = originData.value?.coreComputingUnit?.board?.[0]?.chip?.[0] || {};
-    if (!originData.value.cpu) {
-      return [];
-    }
-    return [
-      {
-        title: t('overview.cpu'),
-        usage: cpu.utilizationRate ?? cpu.usage ?? 0,
-        text: `${cpu.cores ?? 0}${t('overview.core')}${
-          cpu.frequency ? (cpu.frequency / 1000).toFixed(1) : 0
-        }GHz`,
-      },
-      {
-        title: t('overview.memory'),
-        usage: mem.total
-          ? +(((mem.total - (mem.free ?? mem.available ?? mem.total)) / mem.total) * 100).toFixed(1)
-          : 0,
-        total: mem.total ?? 0,
-      },
-      {
-        title: t('overview.disk'),
-        usage: disk0.total
-          ? +(((disk0.total - (disk0.free ?? disk0.total)) / disk0.total) * 100).toFixed(1)
-          : 0,
-        total: disk0.total ?? 0,
-      },
-      {
-        title: t('overview.tpu'),
-        usage: chip0.utilizationRate ?? chip0.tpuUtililizationRate ?? 0,
-        text: 'INT8 ' + (chip0.calculationCapacityInt8 ?? chip0.theoretialCalculationCapacity ?? 0) + 'TOPS',
-      },
-    ];
+    return {
+      usage: +(cpu.utilizationRate ?? cpu.usage ?? 0).toFixed(1),
+      text: `${cpu.cores ?? 0}${t('overview.core')}${
+        cpu.frequency ? (cpu.frequency / 1000).toFixed(1) : 0
+      }GHz`,
+    };
   });
+
+  const tpuCard = computed(() => {
+    const chip0 = originData.value?.coreComputingUnit?.board?.[0]?.chip?.[0] || {};
+    return {
+      usage: +(chip0.utilizationRate ?? chip0.tpuUtililizationRate ?? 0).toFixed(1),
+      text: 'INT8 ' + (chip0.calculationCapacityInt8 ?? chip0.theoretialCalculationCapacity ?? 0) + 'TOPS',
+    };
+  });
+
+  const cardColor = (pct: number) => {
+    if (pct >= 90) return '#ff4d4f';
+    if (pct >= 70) return '#faad14';
+    return '#108ee9';
+  };
 
   // 动态运行时间
   const dynTime = computed(() => {
@@ -196,29 +205,35 @@
   };
 </script>
 <style lang="less" scoped>
-  .se5-grid {
+  .top-cards {
     margin-bottom: 24px;
-    height: 240px;
-    @media (min-width: 2200px) {
-      height: 200px !important;
+  }
+
+  .metric-card {
+    background-color: white;
+    padding: 24px;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+
+    .card-title {
+      font-weight: bold;
+      font-size: 16px;
+      margin-bottom: 12px;
+      align-self: flex-start;
     }
 
-    :deep(.statics) {
-      width: calc(100% - 48px);
-      top: 190px !important;
+    .circle {
+      display: flex;
+      justify-content: center;
+      margin-bottom: 8px;
     }
 
-    :deep(.ant-divider) {
-      display: none;
-    }
-
-    :deep(.container) {
-      padding: 10px 24px;
-
-      & > p {
-        border-bottom: 1px solid #ececec;
-        padding-bottom: 4px;
-      }
+    .card-text {
+      font-size: 12px;
+      color: #999;
+      text-align: center;
     }
   }
 

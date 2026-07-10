@@ -612,17 +612,13 @@ func TestCompatSetAlarmPersistence(t *testing.T) {
 
 	// Step 2: POST /configure/alarm 修改阈值
 	newAT := AlarmThreshold{
-		BoardTemperature:     88,
-		CoreTemperature:      88,
-		CpuRate:              0.88,
-		DiskRate:             0.88,
-		ExternalHardDiskRate: 0.88,
-		FanSpeed:             8888,
-		SystemScale:          0.88,
-		TotalMemoryScale:     0.88,
-		TpuRate:              0.88,
-		TpuScale:             0.88,
-		VideoScale:           0.88,
+		BoardTemperature: 88,
+		CoreTemperature:  88,
+		CpuRate:          0.88,
+		DiskRate:         0.88,
+		TotalMemoryScale: 0.88,
+		TpuRate:          0.88,
+		TpuScale:         0.88,
 	}
 	body, _ := json.Marshal(newAT)
 	w2 := httptest.NewRecorder()
@@ -657,13 +653,9 @@ func TestCompatSetAlarmPersistence(t *testing.T) {
 	checkFloat("coreTemperature", 88)
 	checkFloat("cpuRate", 0.88)
 	checkFloat("diskRate", 0.88)
-	checkFloat("externalHardDiskRate", 0.88)
-	checkFloat("fanSpeed", 8888)
-	checkFloat("systemScale", 0.88)
 	checkFloat("totalMemoryScale", 0.88)
 	checkFloat("tpuRate", 0.88)
 	checkFloat("tpuScale", 0.88)
-	checkFloat("videoScale", 0.88)
 }
 
 // ---------------------------------------------------------------

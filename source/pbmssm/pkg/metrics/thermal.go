@@ -84,7 +84,17 @@ func (c *Collector) TPUAverageUsage() int {
 	return 0
 }
 
-// TPUMem 读取 TPU 显存总量（MB）。
+// TpuMemUsage 读取 TPU 显存使用率（%）：used/total*100，四舍五入。
+// 源 ion heap（bm_npu_heap_dump/cvi_npu_heap_dump）。total≤0 返 0。
+// 供告警引擎 TpuScale 阈值比对。
+func (c *Collector) TpuMemUsage() int {
+	total, used := c.TpuMemory(c.ChipType())
+	if total <= 0 {
+		return 0
+	}
+	return int(float64(used)*100.0/float64(total) + 0.5)
+}
+
 // 源：/sys/kernel/debug/ion/bm_npu_heap_dump/total_mem（字节，需 root）。
 // 对齐 pget_info：TPU_MEM(MiB) = total_mem/1024/1024。
 // 非 root 读不到 debugfs，降级返 0。

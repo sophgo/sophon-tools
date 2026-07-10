@@ -33,6 +33,8 @@ type MetricProvider interface {
 	BoardTemp() int
 	TPUUsage() int
 	TPUMem() float64
+	MemoryLayout() metrics.MemoryLayout
+	DiskLayout() metrics.DiskLayout
 }
 
 // CompatService 提供 bmssm 旧路径兼容所需的业务逻辑。
@@ -153,17 +155,13 @@ func (s *CompatService) BuildCtrlBasic() (CtrlBasic, error) {
 	v := config.Conf.GetViper()
 	deviceName := v.GetString("server.deviceName")
 	at := AlarmThreshold{
-		BoardTemperature:     int(v.GetFloat64("alarmThreshold.boardTemperature")),
-		CoreTemperature:      int(v.GetFloat64("alarmThreshold.coreTemperature")),
-		CpuRate:              v.GetFloat64("alarmThreshold.cpuRate"),
-		DiskRate:             v.GetFloat64("alarmThreshold.diskRate"),
-		ExternalHardDiskRate: v.GetFloat64("alarmThreshold.externalHardDiskRate"),
-		FanSpeed:             v.GetInt("alarmThreshold.fanSpeed"),
-		SystemScale:          v.GetFloat64("alarmThreshold.systemScale"),
-		TotalMemoryScale:     v.GetFloat64("alarmThreshold.totalMemoryScale"),
-		TpuRate:              v.GetFloat64("alarmThreshold.tpuRate"),
-		TpuScale:             v.GetFloat64("alarmThreshold.tpuScale"),
-		VideoScale:           v.GetFloat64("alarmThreshold.videoScale"),
+		BoardTemperature: int(v.GetFloat64("alarmThreshold.boardTemperature")),
+		CoreTemperature:  int(v.GetFloat64("alarmThreshold.coreTemperature")),
+		CpuRate:          v.GetFloat64("alarmThreshold.cpuRate"),
+		DiskRate:         v.GetFloat64("alarmThreshold.diskRate"),
+		TotalMemoryScale: v.GetFloat64("alarmThreshold.totalMemoryScale"),
+		TpuRate:          v.GetFloat64("alarmThreshold.tpuRate"),
+		TpuScale:         v.GetFloat64("alarmThreshold.tpuScale"),
 	}
 	config.Conf.RUnlock()
 	if deviceName == "" {
@@ -284,13 +282,15 @@ func (s *CompatService) BuildCtrlResource() []CtrlResource {
 
 	return []CtrlResource{
 		{
-			DeviceSn:        global.DeviceSnEx,
-			DeviceType:      deviceType,
+			DeviceSn:   global.DeviceSnEx,
+			DeviceType: deviceType,
 			// DEVICE_MODEL 对齐 get_info.sh "PRODUCT MODULE_TYPE"（如 "SE9 16-BP1-11"）。
 			// i2c 分支 ModuleTypeEx 为空 → 保持 DeviceTypeEx（如 "SE7 V1"）不变。
 			DeviceModel:     buildDeviceModel(global.DeviceTypeEx, global.ModuleTypeEx),
 			CollectDateTime: time.Now().Format("2006-01-02 15:04:05"),
 			Sslots:          []interface{}{},
+			MemoryLayout:    m.MemoryLayout(),
+			DiskLayout:      m.DiskLayout(),
 			CentralProcessingUnit: CentralProcessingUnit{
 				BmssmVersion: global.Version.String(),
 				BuildTime:    global.Version.BuildTime,

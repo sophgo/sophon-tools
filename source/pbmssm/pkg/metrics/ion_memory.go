@@ -9,6 +9,7 @@ import (
 const (
 	ionNpuHeapV1 = "/sys/kernel/debug/ion/bm_npu_heap_dump/summary"
 	ionVppHeapV1 = "/sys/kernel/debug/ion/bm_vpp_heap_dump/summary"
+	ionVpuHeapV1 = "/sys/kernel/debug/ion/bm_vpu_heap_dump/summary"
 	ionNpuHeapV2 = "/sys/kernel/debug/ion/cvi_npu_heap_dump/summary"
 	ionVppHeapV2 = "/sys/kernel/debug/ion/cvi_vpp_heap_dump/summary"
 )
@@ -50,11 +51,12 @@ func (c *Collector) VppMemory(chip string) (total, used int64) {
 	return 0, 0
 }
 
-// VpuMemory 读取 VPU 堆内存（bytes）。仅 BM1684/BM1684X 支持。
+// VpuMemory 读取 VPU 堆内存（bytes）。仅 BM1684/BM1684X 支持（BM1688/CV186AH 无 vpu heap）。
+// 读 bm_vpu_heap_dump/summary 的 [2] 行（曾误读 vpp heap，已修正）。
 func (c *Collector) VpuMemory(chip string) (total, used int64) {
 	switch chip {
 	case "bm1684x", "bm1684":
-		return c.parseIonHeapLine(ionVppHeapV1, "[1]")
+		return c.parseIonHeapLine(ionVpuHeapV1, "[2]")
 	}
 	return 0, 0
 }

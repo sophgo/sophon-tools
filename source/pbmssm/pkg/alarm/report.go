@@ -39,6 +39,10 @@ func parseAlarmCode(code, value int) string {
 		return fmt.Sprintf("tpu使用率过高,值为:%s%%", strconv.Itoa(value))
 	case CodeTPURateRecover:
 		return "tpu使用率过高恢复"
+	case CodeTPUMemAlarm:
+		return fmt.Sprintf("tpu内存使用率过高,值为:%s%%", strconv.Itoa(value))
+	case CodeTPUMemRecover:
+		return "tpu内存使用率过高恢复"
 	default:
 		return "未知代码: " + strconv.Itoa(code)
 	}
@@ -79,7 +83,7 @@ func buildPayload(code, value int, deviceSn, boardSn, chipSn, diskName string, n
 		rec.DiskName = diskName
 	case CodeBoardTempAlarm:
 		rec.BoardSn = boardSn // 板温定位到板卡
-	case CodeChipTempAlarm, CodeTPURateAlarm:
+	case CodeChipTempAlarm, CodeTPURateAlarm, CodeTPUMemAlarm:
 		rec.BoardSn = boardSn
 		rec.ChipSn = chipSn
 	}

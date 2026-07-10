@@ -283,15 +283,6 @@ func TestBuildCtrlBasicAlarmThreshold(t *testing.T) {
 	if at.DiskRate != 0.95 {
 		t.Errorf("DiskRate = %v, want 0.95", at.DiskRate)
 	}
-	if at.ExternalHardDiskRate != 0.95 {
-		t.Errorf("ExternalHardDiskRate = %v, want 0.95", at.ExternalHardDiskRate)
-	}
-	if at.FanSpeed != 9999 {
-		t.Errorf("FanSpeed = %d, want 9999", at.FanSpeed)
-	}
-	if at.SystemScale != 0.95 {
-		t.Errorf("SystemScale = %v, want 0.95", at.SystemScale)
-	}
 	if at.TotalMemoryScale != 0.95 {
 		t.Errorf("TotalMemoryScale = %v, want 0.95", at.TotalMemoryScale)
 	}
@@ -300,9 +291,6 @@ func TestBuildCtrlBasicAlarmThreshold(t *testing.T) {
 	}
 	if at.TpuScale != 0.95 {
 		t.Errorf("TpuScale = %v, want 0.95", at.TpuScale)
-	}
-	if at.VideoScale != 0.95 {
-		t.Errorf("VideoScale = %v, want 0.95", at.VideoScale)
 	}
 }
 

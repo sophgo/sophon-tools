@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	dfCmd     = "df"
+	dfCmd      = "df"
 	mountsPath = "/proc/mounts"
 )
 
@@ -226,6 +226,70 @@ const (
 	mmcLifeTimePath = "/sys/class/mmc_host/mmc0/mmc0:0001/life_time"
 	mmcPreEOLPath   = "/sys/class/mmc_host/mmc0/mmc0:0001/pre_eol_info"
 )
+
+// DiskLayout 采集磁盘布局：eMMC 整体 + 各 eMMC 分区（MB + 使用率）。
+// 源 df -Tk：
+//   - eMMC 整体 = 所有 /dev/mmcblk0* 分区 (used,avail) 求和（含 p3/p4）；
+//   - Partitions = 各 mmcblk0pN 分区，排除 p3、p4，按分区号升序。
+//
+// overlay / 不入分区列表（非物理分区）。失败返全 0/空列表。
+func (c *Collector) DiskLayout() DiskLayout {
+	lay := DiskLayout{}
+	if c.cmd == nil {
+		return lay
+	}
+	out, err := c.cmd.Run(dfCmd, "-Tk")
+	if err != nil || out == "" {
+		return lay
+	}
+	var emmcUsed, emmcAvail int64
+	var parts []DiskPart
+	for _, line := range strings.Split(out, "\n") {
+		f := strings.Fields(line)
+		if len(f) < 7 {
+			continue
+		}
+		dev := f[0]
+		mountOn := strings.Join(f[6:], " ")
+		usedKB, e1 := strconv.ParseInt(f[3], 10, 64)
+		availKB, e2 := strconv.ParseInt(f[4], 10, 64)
+		if e1 != nil || e2 != nil {
+			continue
+		}
+		isDev := strings.HasPrefix(dev, "/dev") && !strings.Contains(dev, "loop")
+		if !isDev || !strings.HasPrefix(dev, "/dev/mmcblk0p") {
+			continue // 仅 eMMC 分区行；overlay/外置盘不计
+		}
+		// eMMC 整体：累加所有 mmcblk0 分区（含 p3/p4）
+		emmcUsed += usedKB
+		emmcAvail += availKB
+		// 分区列表：排除 p3 / p4
+		suf := strings.TrimPrefix(dev, "/dev/mmcblk0p")
+		if suf == "3" || suf == "4" {
+			continue
+		}
+		parts = append(parts, DiskPart{
+			Device:    dev,
+			MountOn:   mountOn,
+			MemRegion: memRegionKB(usedKB, availKB),
+		})
+	}
+	sort.SliceStable(parts, func(i, j int) bool {
+		return partNumber(parts[i].Device) < partNumber(parts[j].Device)
+	})
+	lay.EmmcOverall = memRegionKB(emmcUsed, emmcAvail)
+	lay.Partitions = parts
+	return lay
+}
+
+// partNumber 取 /dev/mmcblk0pN 的分区号 N（如 p7→7）；解析失败返 1<<30 排末尾。
+func partNumber(dev string) int {
+	s := strings.TrimPrefix(dev, "/dev/mmcblk0p")
+	if n, err := strconv.Atoi(s); err == nil {
+		return n
+	}
+	return 1 << 30
+}
 
 // MMCLifetime 读取 eMMC 寿命 (life_time, pre_eol_info)。
 // 对齐 pget_info MMC0_LIFE_TIME / MMC0_PRE_EOL_LIFE。

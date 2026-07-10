@@ -10,20 +10,20 @@ import (
 
 // Engine 告警监控引擎。周期采集指标、对比阈值、边沿检测、POST 到订阅 callback。
 type Engine struct {
-	metrics     MetricsReader
-	subs        SubscriptionLister
-	poster      Poster
-	thresholds  Thresholds
+	metrics    MetricsReader
+	subs       SubscriptionLister
+	poster     Poster
+	thresholds Thresholds
 	// thresholdsLoader 可选：每 tick 重新从配置加载阈值。注入后 SetAlarm 改配置
 	// 可在不重启进程的情况下生效（≤ interval）。nil 时用构造时传入的 thresholds 快照。
 	thresholdsLoader func() Thresholds
 	deviceSn         string
-	boardSn         string
-	chipSn          string
-	eventStatus     map[EventId]bool
-	logger          Logger
-	recorder        Recorder
-	now             func() time.Time
+	boardSn          string
+	chipSn           string
+	eventStatus      map[EventId]bool
+	logger           Logger
+	recorder         Recorder
+	now              func() time.Time
 }
 
 // NewEngine 创建引擎。deviceSn=设备 SN，boardSn=板卡 SN（SOC 单板=主控），
@@ -189,6 +189,18 @@ func (e *Engine) evaluate() []AlarmRec {
 	if e.eventStatus[TPU_RATE] && !tpuAlarm {
 		e.eventStatus[TPU_RATE] = false
 		out = append(out, buildPayload(CodeTPURateRecover, -1, e.deviceSn, e.boardSn, e.chipSn, "", now))
+	}
+
+	// --- TPU 内存使用率 ---
+	tpuMem := m.TpuMemUsage()
+	tpuMemAlarm := tpuMem > th.TpuScale
+	if tpuMemAlarm {
+		e.eventStatus[TPU_MEM] = true
+		out = append(out, buildPayload(CodeTPUMemAlarm, tpuMem, e.deviceSn, e.boardSn, e.chipSn, "", now))
+	}
+	if e.eventStatus[TPU_MEM] && !tpuMemAlarm {
+		e.eventStatus[TPU_MEM] = false
+		out = append(out, buildPayload(CodeTPUMemRecover, -1, e.deviceSn, e.boardSn, e.chipSn, "", now))
 	}
 
 	return out

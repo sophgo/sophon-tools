@@ -20,14 +20,16 @@ type fakeMetrics struct {
 	chipTemp  int
 	boardTemp int
 	tpuUsage  int
+	tpuMem    int
 }
 
-func (f *fakeMetrics) CPUInfo() metrics.CPU          { return f.cpu }
-func (f *fakeMetrics) Memory() metrics.Memory        { return f.mem }
-func (f *fakeMetrics) Disks() []metrics.Disk         { return f.disks }
-func (f *fakeMetrics) ChipTemp() int                 { return f.chipTemp }
-func (f *fakeMetrics) BoardTemp() int                { return f.boardTemp }
-func (f *fakeMetrics) TPUUsage() int                 { return f.tpuUsage }
+func (f *fakeMetrics) CPUInfo() metrics.CPU   { return f.cpu }
+func (f *fakeMetrics) Memory() metrics.Memory { return f.mem }
+func (f *fakeMetrics) Disks() []metrics.Disk  { return f.disks }
+func (f *fakeMetrics) ChipTemp() int          { return f.chipTemp }
+func (f *fakeMetrics) BoardTemp() int         { return f.boardTemp }
+func (f *fakeMetrics) TPUUsage() int          { return f.tpuUsage }
+func (f *fakeMetrics) TpuMemUsage() int       { return f.tpuMem }
 
 type fakeSubs struct {
 	urls []string
@@ -63,6 +65,7 @@ func baseThresholds() Thresholds {
 		BoardTemperature: 90,
 		CoreTemperature:  90,
 		TpuRate:          95,
+		TpuScale:         95,
 	}
 }
 
@@ -191,9 +194,9 @@ func TestTick_NoSubscriptions_NoPost(t *testing.T) {
 func TestTick_DiskOverThreshold_PostsWithDiskName_SkipsBootAndReadOnly(t *testing.T) {
 	m := &fakeMetrics{
 		disks: []metrics.Disk{
-			{DiskName: "/dev/sda1", Total: 1000, Free: 10, MountOn: "/"},          // 99% → 告警
-			{DiskName: "/dev/sda2", Total: 1000, Free: 10, MountOn: "/boot"},      // 跳过
-			{DiskName: "/dev/sda3", Total: 1000, Free: 10, MountOn: "/recovery"},  // 跳过
+			{DiskName: "/dev/sda1", Total: 1000, Free: 10, MountOn: "/"},                  // 99% → 告警
+			{DiskName: "/dev/sda2", Total: 1000, Free: 10, MountOn: "/boot"},              // 跳过
+			{DiskName: "/dev/sda3", Total: 1000, Free: 10, MountOn: "/recovery"},          // 跳过
 			{DiskName: "/dev/sda4", Total: 1000, Free: 10, MountOn: "/data", ReadOnly: 1}, // 跳过
 		},
 	}
@@ -272,6 +275,39 @@ func TestTick_MemoryOverThreshold(t *testing.T) {
 	}
 }
 
+// TestTick_TpuMemOverThreshold：TPU 内存超限 → -202004，ComponentType=2、带 chipSn。
+func TestTick_TpuMemOverThreshold(t *testing.T) {
+	m := &fakeMetrics{tpuMem: 99}
+	e, fp := newTestEngine(m, []string{"http://cb/alarm"}, nil)
+
+	e.Tick()
+
+	if len(fp.posts) != 1 {
+		t.Fatalf("expect 1 post, got %d: %+v", len(fp.posts), fp.posts)
+	}
+	if fp.posts[0].payload.Code != CodeTPUMemAlarm {
+		t.Errorf("code: got %d want %d", fp.posts[0].payload.Code, CodeTPUMemAlarm)
+	}
+	if fp.posts[0].payload.ComponentType != 2 {
+		t.Errorf("componentType: got %d want 2", fp.posts[0].payload.ComponentType)
+	}
+	if fp.posts[0].payload.ChipSn != "CHIP-SN-001" {
+		t.Errorf("tpu mem alarm should carry chipSn: %s", fp.posts[0].payload.ChipSn)
+	}
+	// 恢复：tpuMem 回落 → +202004
+	m.tpuMem = 0
+	e.Tick()
+	recoverFound := false
+	for _, p := range fp.posts {
+		if p.payload.Code == CodeTPUMemRecover {
+			recoverFound = true
+		}
+	}
+	if !recoverFound {
+		t.Errorf("expect tpu mem recover post, got: %+v", fp.posts)
+	}
+}
+
 // TestTick_PostErrorDoesNotBlock：Poster 返回错误时不 panic、不阻断后续。
 func TestTick_PostErrorDoesNotBlock(t *testing.T) {
 	m := &fakeMetrics{cpu: metrics.CPU{UtilizationRate: 99}}
@@ -317,10 +353,10 @@ func TestRateToPercent(t *testing.T) {
 		in   float64
 		want int
 	}{
-		{0.95, 95},  // 0-1 小数（旧默认值 / *Scale 字段）
+		{0.95, 95}, // 0-1 小数（旧默认值 / *Scale 字段）
 		{0, 0},
-		{1, 100},    // 边界：视为 100%
-		{90, 90},    // 前端 threshold 页直接发 0-100 百分比
+		{1, 100}, // 边界：视为 100%
+		{90, 90}, // 前端 threshold 页直接发 0-100 百分比
 		{10, 10},
 		{0.05, 5},
 	}
