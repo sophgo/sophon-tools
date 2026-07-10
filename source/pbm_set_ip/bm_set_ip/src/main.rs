@@ -126,6 +126,8 @@ fn try_old_mode(net_device: &str, rest: &[String]) -> Result<Option<Config>, lex
     // 构造 IP-only Config
     let (v4, v6) = if family1_is_v6 {
         validate_ip(&addr1, true)?;
+        validate_opt_gateway(&gw, true)?;
+        validate_opt_dns(&dns)?;
         let prefix = match &nm {
             Some(m) => parse_prefix(m, 128)?,
             None => 128,
@@ -140,9 +142,13 @@ fn try_old_mode(net_device: &str, rest: &[String]) -> Result<Option<Config>, lex
     } else {
         let is_dhcp4 = is_dhcp_token(&addr1);
         let v4f = if is_dhcp4 {
+            validate_opt_gateway(&gw, false)?;
+            validate_opt_dns(&dns)?;
             Family { addrs: vec![], gateway: gw, dns, is_dhcp: true }
         } else {
             validate_ip(&addr1, false)?;
+            validate_opt_gateway(&gw, false)?;
+            validate_opt_dns(&dns)?;
             let prefix = match &nm {
                 Some(m) => mask_to_prefix_checked(m, 32)?,
                 None => 32,
@@ -152,10 +158,14 @@ fn try_old_mode(net_device: &str, rest: &[String]) -> Result<Option<Config>, lex
         let v6f = if ipv6.is_some() {
             let is_dhcp6 = ipv6.as_deref().map(is_dhcp_token).unwrap_or(false);
             if is_dhcp6 {
+                validate_opt_gateway(&ipv6_gateway, true)?;
+                validate_opt_dns(&ipv6_dns)?;
                 Some(Family { addrs: vec![], gateway: ipv6_gateway, dns: ipv6_dns, is_dhcp: true })
             } else {
                 let a = ipv6.as_deref().unwrap();
                 validate_ip(a, true)?;
+                validate_opt_gateway(&ipv6_gateway, true)?;
+                validate_opt_dns(&ipv6_dns)?;
                 let prefix = match &ipv6_prefix {
                     Some(m) => parse_prefix(m, 128)?,
                     None => 128,
@@ -210,6 +220,8 @@ fn parse_4tuple(net_device: &str, rest: &[String]) -> Result<Config, lexopt::Err
         // v6 family1:4 元组(addr1 已消费,读 prefix/gw/dns)
         validate_ip(&addr1, true)?;
         let (prefix, gw, dns) = read_3slots(rest, &mut i);
+        validate_opt_gateway(&gw, true)?;
+        validate_opt_dns(&dns)?;
         let p = match &prefix {
             Some(m) => parse_prefix(m, 128)?,
             None => 128,
@@ -222,6 +234,8 @@ fn parse_4tuple(net_device: &str, rest: &[String]) -> Result<Config, lexopt::Err
         // v4 static family1:4 元组(addr1 已消费,读 mask/gw/dns)
         validate_ip(&addr1, false)?;
         let (mask, gw, dns) = read_3slots(rest, &mut i);
+        validate_opt_gateway(&gw, false)?;
+        validate_opt_dns(&dns)?;
         let p = match &mask {
             Some(m) => mask_to_prefix_checked(m, 32)?,
             None => 32,
@@ -245,6 +259,8 @@ fn parse_4tuple(net_device: &str, rest: &[String]) -> Result<Config, lexopt::Err
             } else {
                 validate_ip(&pos1, true)?;
                 let (prefix, gw, dns) = read_3slots(rest, &mut i);
+                validate_opt_gateway(&gw, true)?;
+                validate_opt_dns(&dns)?;
                 let p = match &prefix {
                     Some(m) => parse_prefix(m, 128)?,
                     None => 128,
@@ -531,6 +547,28 @@ fn validate_ip(s: &str, is_v6: bool) -> Result<(), String> {
         Ok(())
     } else {
         Err(format!("invalid {} address '{}'", if is_v6 { "IPv6" } else { "IPv4" }, s))
+    }
+}
+
+/// 校验可选网关(空则跳过);is_v6 决定族
+fn validate_opt_gateway(opt: &Option<String>, is_v6: bool) -> Result<(), String> {
+    match opt {
+        Some(s) if !s.is_empty() => validate_ip(s, is_v6),
+        _ => Ok(()),
+    }
+}
+
+/// 校验可选 DNS(空则跳过);可为 IPv4 或 IPv6
+fn validate_opt_dns(opt: &Option<String>) -> Result<(), String> {
+    match opt {
+        Some(s) if !s.is_empty() => {
+            if is_valid_ipv4(s) || is_valid_ipv6(s) {
+                Ok(())
+            } else {
+                Err(format!("invalid DNS server '{}'", s))
+            }
+        }
+        _ => Ok(()),
     }
 }
 

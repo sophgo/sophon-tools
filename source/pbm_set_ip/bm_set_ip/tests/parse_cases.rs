@@ -177,7 +177,7 @@ case!(e2_route_then_v6_dhcp, &["eth0","1.1.1.1","24","","","192.168.2.0","24","1
 ]);
 
 // ============ F. 异常错误 ============
-case_err!(f1_no_4tuple_family1, &["eth0","1.1.1.1","24","192.168.2.0","24","1.1.1.254","100"], "incomplete 4-tuple");
+case_err!(f1_no_4tuple_family1, &["eth0","1.1.1.1","24","192.168.2.0","24","1.1.1.254","100"], "invalid DNS server");
 case_err!(f2_policy_4token_no_route, &["eth0","1.1.1.1","24","","","10.0.0.0","24","192.168.3.0","255.255.255.0"], "no route to share");
 case_err!(f3_unclassifiable_pos4, &["eth0","1.1.1.1","24","","","192.168.2.0","24","1.1.1.254","2001:db8::1"], "cannot classify");
 case_err!(f4_no_args, &[], "missing required argument: net_device");
@@ -237,3 +237,9 @@ case_err!(i20_extra_addr_bad_ip, &["eth0","1.1.1.1","24","","","999.1.1.1","24",
 case_err!(i21_extra_addr_bad_mask, &["eth0","1.1.1.1","24","","","1.1.1.2","33","",""], "prefix '33' out of range");
 // dhcp 族不能加静态额外地址(后端会静默丢弃,故解析层拒绝)
 case_err!(i22_dhcp_no_extra_addr, &["eth0","dhcp","1.1.1.2","24","",""], "cannot add static address to a dhcp family");
+// 网关/DNS 校验
+case_err!(i23_bad_gw_v4, &["eth0","1.1.1.1","24","999.999.999.999","8.8.8.8"], "invalid IPv4 address");
+case_err!(i24_bad_dns, &["eth0","1.1.1.1","24","1.1.1.254","not.an.ip"], "invalid DNS server");
+case_err!(i25_bad_gw_v6, &["eth0","2001:db8::1","64","notipv6","2001:4860:4860::8888"], "invalid IPv6 address");
+case_err!(i26_gw_with_slash, &["eth0","1.1.1.1","24","1.1.1.254/24","8.8.8.8"], "must not contain '/'");
+case_err!(i27_4tuple_bad_gw, &["eth0","1.1.1.1","24","999.1.1.1","","192.168.2.0","24","1.1.1.254","100"], "invalid IPv4 address");
