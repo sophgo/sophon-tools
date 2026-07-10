@@ -128,9 +128,11 @@
         wan.subnetMask = currentNetCard?.netMask || '';
         wan.gateway = currentNetCard?.gateway || '';
         wan.dns = currentNetCard?.dns || '';
-        // 从 ips 解析当前 IPv6（首个），回填到表单
-        const v6List: string[] = (currentNetCard?.ips || []).filter((s: string) =>
-          s.includes(':'),
+        // 从 ips 解析当前全局 IPv6（过滤链路本地 fe80::/10），回填到表单
+        const isLinkLocalV6 = (s: string) =>
+          /^fe[89ab][0-9a-f]:/i.test((s || '').split('/')[0]);
+        const v6List: string[] = (currentNetCard?.ips || []).filter(
+          (s: string) => s.includes(':') && !isLinkLocalV6(s),
         );
         const firstV6 = v6List[0] || '';
         wan.ipv6 = firstV6 ? firstV6.split('/')[0] : '';
