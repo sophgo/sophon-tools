@@ -42,6 +42,7 @@ struct Config {
     routes: Vec<Route>,
     policies: Vec<Policy>,
     dry_run: bool,
+    force: bool,
 }
 
 impl Config {
@@ -50,12 +51,22 @@ impl Config {
 
         let mut positional: Vec<String> = Vec::new();
         let mut dry_run = false;
+        let mut force = false;
         let mut parser = lexopt::Parser::from_env();
         while let Some(arg) = parser.next()? {
             match arg.clone() {
                 Value(val) => positional.push(val.into_string()?),
                 Long(name) if name == "dry-run" => dry_run = true,
+                Long(name) if name == "force" => force = true,
+                Long(name) if name == "help" => {
+                    print_usage();
+                    exit(0);
+                }
                 Short('n') => dry_run = true,
+                Short('h') => {
+                    print_usage();
+                    exit(0);
+                }
                 _ => return Err(arg.unexpected()),
             }
         }
@@ -72,6 +83,7 @@ impl Config {
             None => parse_4tuple(&net_device, &rest)?,
         };
         cfg.dry_run = dry_run;
+        cfg.force = force;
         Ok(cfg)
     }
 }
@@ -191,6 +203,7 @@ fn try_old_mode(net_device: &str, rest: &[String]) -> Result<Option<Config>, lex
         routes: Vec::new(),
         policies: Vec::new(),
         dry_run: false,
+        force: false,
     }))
 }
 
@@ -228,7 +241,14 @@ fn parse_4tuple(net_device: &str, rest: &[String]) -> Result<Config, lexopt::Err
         };
         v6 = Some(Family { addrs: vec![(addr1, p)], gateway: gw, dns, is_dhcp: false });
     } else if family1_is_dhcp {
-        // dhcp 单 token
+        // dhcp 单 token。若紧跟 3 个空槽('' '' '')则消费之(对齐 4 元组),
+        // 否则不动(向后兼容 dhcp 直接接路由/策略/family2)。
+        if rest.get(i).map(|s| s.is_empty()).unwrap_or(false)
+            && rest.get(i + 1).map(|s| s.is_empty()).unwrap_or(false)
+            && rest.get(i + 2).map(|s| s.is_empty()).unwrap_or(false)
+        {
+            i += 3;
+        }
         v4 = Some(Family { addrs: vec![], gateway: None, dns: None, is_dhcp: true });
     } else {
         // v4 static family1:4 元组(addr1 已消费,读 mask/gw/dns)
@@ -378,6 +398,7 @@ fn parse_4tuple(net_device: &str, rest: &[String]) -> Result<Config, lexopt::Err
         routes,
         policies,
         dry_run: false,
+        force: false,
     })
 }
 
@@ -412,10 +433,14 @@ fn is_table_token(s: &str) -> bool {
     s.parse::<u32>().is_ok() || is_table_name(s)
 }
 
-/// 合法 IPv4 地址(4 段 0-255)
+/// 合法 IPv4 地址(4 段 0-255,拒绝前导零)
 fn is_valid_ipv4(s: &str) -> bool {
     let parts: Vec<&str> = s.split('.').collect();
-    parts.len() == 4 && parts.iter().all(|p| !p.is_empty() && p.parse::<u32>().map(|v| v <= 255).unwrap_or(false))
+    parts.len() == 4 && parts.iter().all(|p| {
+        !p.is_empty()
+            && (*p == "0" || !p.starts_with('0'))
+            && p.parse::<u32>().map(|v| v <= 255).unwrap_or(false)
+    })
 }
 /// 合法 IPv6 地址(用 std::net 解析)
 fn is_valid_ipv6(s: &str) -> bool {
@@ -574,6 +599,20 @@ fn validate_opt_dns(opt: &Option<String>) -> Result<(), String> {
 
 // ============ main ============
 
+fn print_usage() {
+    eprintln!(
+        "\nUsage: {} [--dry-run|-n] [--force] <net_device> <ip|dhcp> <netmask> [gw] [dns] ...\n  IP-only: old trailing-optional syntax (compatible). IP+routes/policy/extras: 4-tuple groups.\n  --force: allow ip-fallback to flush the device carrying the default route.",
+        env::args().next().unwrap_or("bm_set_ip".into())
+    );
+    eprintln!("\nExamples:");
+    eprintln!("  DHCP IPv4:      bm_set_ip eth0 dhcp");
+    eprintln!("  Static IPv4:    bm_set_ip eth0 192.168.1.100 24 192.168.1.1 8.8.8.8");
+    eprintln!("  Multi-addr+route(4-tuple): bm_set_ip eth0 192.168.1.100 24 192.168.1.1 8.8.8.8  192.168.1.101 24 '' ''  192.168.2.0 24 192.168.1.1 100");
+    eprintln!("  Route+policy(4-tuple):     bm_set_ip eth0 192.168.1.100 24 '' ''  192.168.2.0 24 192.168.1.1 100  10.0.0.0 24 192.168.3.0 255.255.255.0 [table]");
+    eprintln!("  Multi-policy(5-tuple):     bm_set_ip eth0 192.168.1.100 24 '' ''  192.168.2.0 24 192.168.1.1 100  10.0.0.0 24 192.168.3.0 255.255.255.0 100  10.1.0.0 24 192.168.4.0 255.255.255.0 200");
+    eprintln!("  Dry-run:        bm_set_ip --dry-run eth0 192.168.1.100 24");
+}
+
 #[derive(Debug)]
 enum NetManager {
     Netplan,
@@ -587,17 +626,7 @@ fn main() {
         Ok(c) => c,
         Err(e) => {
             eprintln!("Error: {}", e);
-            eprintln!(
-                "\nUsage: {} [--dry-run|-n] <net_device> <ip|dhcp> <netmask> [gw] [dns] ...\n  IP-only: old trailing-optional syntax (compatible). IP+routes/policy/extras: 4-tuple groups.",
-                env::args().next().unwrap_or("bm_set_ip".into())
-            );
-            eprintln!("\nExamples:");
-            eprintln!("  DHCP IPv4:      bm_set_ip eth0 dhcp");
-            eprintln!("  Static IPv4:    bm_set_ip eth0 192.168.1.100 24 192.168.1.1 8.8.8.8");
-            eprintln!("  Multi-addr+route(4-tuple): bm_set_ip eth0 192.168.1.100 24 192.168.1.1 8.8.8.8  192.168.1.101 24 '' ''  192.168.2.0 24 192.168.1.1 100");
-            eprintln!("  Route+policy(4-tuple):     bm_set_ip eth0 192.168.1.100 24 '' ''  192.168.2.0 24 192.168.1.1 100  10.0.0.0 24 192.168.3.0 255.255.255.0 [table]");
-            eprintln!("  Multi-policy(5-tuple):     bm_set_ip eth0 192.168.1.100 24 '' ''  192.168.2.0 24 192.168.1.1 100  10.0.0.0 24 192.168.3.0 255.255.255.0 100  10.1.0.0 24 192.168.4.0 255.255.255.0 200");
-            eprintln!("  Dry-run:        bm_set_ip --dry-run eth0 192.168.1.100 24");
+            print_usage();
             exit(1);
         }
     };
@@ -726,9 +755,14 @@ fn warn_extra_routes(current_dev: &str) {
 }
 
 fn detect_net_manager() -> NetManager {
-    // netplan 后端依赖 /etc/netplan/01-netcfg.yaml;命令存在但无 yaml 则跳过(避免直接 exit)
-    if is_command_exists("netplan") && fs::File::open("/etc/netplan/01-netcfg.yaml").is_ok() {
-        return NetManager::Netplan;
+    // B2:netplan 命令存在 且 /etc/netplan/ 下任一 *.yaml 存在
+    if is_command_exists("netplan") {
+        let has_yaml = fs::read_dir("/etc/netplan")
+            .map(|entries| entries.flatten().any(|e| e.path().extension().map(|x| x == "yaml").unwrap_or(false)))
+            .unwrap_or(false);
+        if has_yaml {
+            return NetManager::Netplan;
+        }
     }
     if is_command_exists("nmcli") {
         let status = Command::new("systemctl").arg("is-active").arg("NetworkManager").output();
@@ -751,7 +785,7 @@ fn is_root() -> bool {
     unsafe { libc::geteuid() == 0 }
 }
 
-fn get_or_create_mapping<'a>(map: &'a mut Mapping, key: &str) -> &'a mut Mapping {
+fn get_or_create_mapping<'a>(map: &'a mut Mapping, key: &str) -> Result<&'a mut Mapping, String> {
     let entry = map
         .entry(Value::String(key.to_string()))
         .or_insert_with(|| Value::Mapping(Mapping::new()));
@@ -760,38 +794,61 @@ fn get_or_create_mapping<'a>(map: &'a mut Mapping, key: &str) -> &'a mut Mapping
     }
     entry
         .as_mapping_mut()
-        .expect(&format!("[ERROR] '{}' is not a mapping", key))
+        .ok_or_else(|| format!("[ERROR] '{}' is not a mapping", key))
 }
 
 // ============ netplan 后端 ============
 
-fn configure_with_netplan(cfg: &Config) {
-    let file_path = "/etc/netplan/01-netcfg.yaml";
-    if fs::File::open(file_path).is_err() {
-        eprintln!("[ERROR] Cannot read {}", file_path);
-        std::process::exit(1);
-    }
-    let content = fs::read_to_string(file_path).expect("[ERROR] Cannot read netplan config file");
-    let mut doc: serde_yaml::Value = match serde_yaml::from_str(&content) {
-        Ok(doc) => doc,
-        Err(e) => {
-            eprintln!("[ERROR] YAML parsing failed: {}\nError location: {:?}", e, e.location());
-            panic!("[ERROR] YAML parsing aborted");
+fn select_netplan_file() -> String {
+    if let Ok(f) = std::env::var("BM_SET_IP_NETPLAN_FILE") {
+        if !f.is_empty() {
+            return f;
         }
+    }
+    let mut yamls: Vec<String> = Vec::new();
+    if let Ok(entries) = fs::read_dir("/etc/netplan") {
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.extension().map(|x| x == "yaml").unwrap_or(false) {
+                if let Some(name) = p.file_name().and_then(|s| s.to_str()) {
+                    yamls.push(name.to_string());
+                }
+            }
+        }
+    }
+    yamls.sort();
+    if let Some(last) = yamls.last() {
+        format!("/etc/netplan/{}", last)
+    } else {
+        eprintln!("[WARNING] no /etc/netplan/*.yaml found, falling back to 01-netcfg.yaml");
+        "/etc/netplan/01-netcfg.yaml".to_string()
+    }
+}
+
+fn netplan_render(cfg: &Config, existing_yaml: &str, target_file: &str) -> Result<String, String> {
+    let _ = target_file;
+    let mut doc: serde_yaml::Value = serde_yaml::from_str(existing_yaml)
+        .map_err(|e| format!("YAML parsing failed: {}", e))?;
+    let network_map = doc.as_mapping_mut().ok_or_else(|| "netplan yaml top-level is not a mapping".to_string())?;
+    let ethernets_map = get_or_create_mapping(network_map, "network")?;
+    let ethernets = get_or_create_mapping(ethernets_map, "ethernets")?;
+
+    // B3:若设备已存在且为 mapping,在其上更新;否则新建
+    let dev_key = Value::String(cfg.net_device.clone());
+    let mut dev_cfg = match ethernets.get(&dev_key) {
+        Some(Value::Mapping(m)) => m.clone(),
+        _ => serde_yaml::Mapping::new(),
     };
+    // 本工具管理的键(更新前移除,再按当前配置写入)
+    for k in ["dhcp4", "dhcp6", "addresses", "routes", "routing-policy", "nameservers", "optional"] {
+        dev_cfg.remove(Value::String(k.into()));
+    }
 
-    let network_map = doc.as_mapping_mut().unwrap();
-    let ethernets_map = get_or_create_mapping(network_map, "network");
-    let ethernets = get_or_create_mapping(ethernets_map, "ethernets");
-
-    let mut dev_cfg = serde_yaml::Mapping::new();
     let mut addresses_seq: Vec<Value> = Vec::new();
     let mut routes_seq: Vec<Value> = Vec::new();
 
-    // IPv4
     if let Some(v4f) = &cfg.v4 {
         if v4f.is_dhcp {
-            warn_extra_routes(&cfg.net_device);
             dev_cfg.insert(Value::String("dhcp4".into()), Value::Bool(true));
         } else {
             dev_cfg.insert(Value::String("dhcp4".into()), Value::Bool(false));
@@ -800,7 +857,6 @@ fn configure_with_netplan(cfg: &Config) {
             }
             if let Some(gw) = &v4f.gateway {
                 if !gw.is_empty() {
-                    warn_extra_routes(&cfg.net_device);
                     let mut r = Mapping::new();
                     r.insert(Value::String("to".into()), Value::String("0.0.0.0/0".into()));
                     r.insert(Value::String("via".into()), Value::String(gw.clone()));
@@ -809,8 +865,6 @@ fn configure_with_netplan(cfg: &Config) {
             }
         }
     }
-
-    // IPv6
     if let Some(v6f) = &cfg.v6 {
         if v6f.is_dhcp {
             dev_cfg.insert(Value::String("dhcp6".into()), Value::Bool(true));
@@ -829,8 +883,6 @@ fn configure_with_netplan(cfg: &Config) {
             }
         }
     }
-
-    // 静态路由
     for r in &cfg.routes {
         let mut m = Mapping::new();
         m.insert(Value::String("to".into()), Value::String(format!("{}/{}", r.to, r.to_prefix)));
@@ -848,25 +900,21 @@ fn configure_with_netplan(cfg: &Config) {
     if !routes_seq.is_empty() {
         dev_cfg.insert(Value::String("routes".into()), Value::Sequence(routes_seq));
     }
-
-    // 策略(多条)
+    // A3:from+to 同存 → 单个 routing-policy 项
     if !cfg.policies.is_empty() {
         let mut policy_seq: Vec<Value> = Vec::new();
         for p in &cfg.policies {
+            let mut m = Mapping::new();
             if let Some((n, px)) = &p.from {
-                let mut m = Mapping::new();
                 m.insert(Value::String("from".into()), Value::String(format!("{}/{}", n, px)));
-                if let Some(t) = &p.table {
-                    m.insert(Value::String("table".into()), Value::String(t.clone()));
-                }
-                policy_seq.push(Value::Mapping(m));
             }
             if let Some((n, px)) = &p.to {
-                let mut m = Mapping::new();
                 m.insert(Value::String("to".into()), Value::String(format!("{}/{}", n, px)));
-                if let Some(t) = &p.table {
-                    m.insert(Value::String("table".into()), Value::String(t.clone()));
-                }
+            }
+            if let Some(t) = &p.table {
+                m.insert(Value::String("table".into()), Value::String(t.clone()));
+            }
+            if !m.is_empty() {
                 policy_seq.push(Value::Mapping(m));
             }
         }
@@ -874,41 +922,62 @@ fn configure_with_netplan(cfg: &Config) {
             dev_cfg.insert(Value::String("routing-policy".into()), Value::Sequence(policy_seq));
         }
     }
-
-    // DNS
     let mut dns_list = Vec::new();
     if let Some(v4f) = &cfg.v4 {
-        if let Some(d) = &v4f.dns {
-            if !d.is_empty() {
-                dns_list.push(Value::String(d.clone()));
-            }
-        }
+        if let Some(d) = &v4f.dns { if !d.is_empty() { dns_list.push(Value::String(d.clone())); } }
     }
     if let Some(v6f) = &cfg.v6 {
-        if let Some(d) = &v6f.dns {
-            if !d.is_empty() {
-                dns_list.push(Value::String(d.clone()));
-            }
-        }
+        if let Some(d) = &v6f.dns { if !d.is_empty() { dns_list.push(Value::String(d.clone())); } }
     }
     if !dns_list.is_empty() {
         let mut dns_map = serde_yaml::Mapping::new();
         dns_map.insert(Value::String("addresses".into()), Value::Sequence(dns_list));
         dev_cfg.insert(Value::String("nameservers".into()), Value::Mapping(dns_map));
     }
-
     dev_cfg.insert(Value::String("optional".into()), Value::Bool(true));
-    println!("[INFO] Add config: {:?}", dev_cfg);
 
-    ethernets.insert(Value::String(cfg.net_device.clone()), Value::Mapping(dev_cfg));
+    ethernets.insert(dev_key, Value::Mapping(dev_cfg));
+    serde_yaml::to_string(&doc).map_err(|e| format!("YAML serialize failed: {}", e))
+}
 
-    let new_content = serde_yaml::to_string(&doc).unwrap();
-    fs::write(file_path, new_content).expect("Failed to write netplan config");
+fn configure_with_netplan(cfg: &Config) {
+    let file_path = select_netplan_file();
+    let content = match fs::read_to_string(&file_path) {
+        Ok(c) => c,
+        Err(_) => {
+            eprintln!("[ERROR] Cannot read {}", file_path);
+            std::process::exit(1);
+        }
+    };
 
-    // netplan apply 在某些校验失败(如 conflicting default route)时退出码仍为 0,
-    // 故除退出码外还需检查 stderr 是否含 Error/Conflicting。
+    // C5:与 networkd/nmcli/ip 对齐,多默认网关时告警
+    if let Some(v4f) = &cfg.v4 {
+        if !v4f.is_dhcp {
+            if let Some(gw) = &v4f.gateway {
+                if !gw.is_empty() {
+                    warn_extra_routes(&cfg.net_device);
+                }
+            }
+        }
+    }
+
+    let new_content = match netplan_render(cfg, &content, &file_path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[ERROR] {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    // B1:写前备份
+    let bak = format!("{}.bm_set_ip.bak", file_path);
+    let _ = fs::copy(&file_path, &bak);
+
+    fs::write(&file_path, &new_content).expect("Failed to write netplan config");
+    println!("[INFO] Wrote {} (backup at {})", file_path, bak);
+
     let out = Command::new("netplan").arg("apply").output();
-    match out {
+    let apply_ok = match out {
         Ok(o) => {
             let stderr = String::from_utf8_lossy(&o.stderr);
             let bad = !o.status.success()
@@ -918,12 +987,25 @@ fn configure_with_netplan(cfg: &Config) {
                 for l in stderr.lines().filter(|l| l.starts_with("Error") || l.contains("Conflicting")) {
                     eprintln!("[ERROR]     {}", l);
                 }
+                false
             } else {
-                println!("[INFO] Netplan configuration applied successfully");
+                true
             }
         }
-        Err(_) => eprintln!("[ERROR] Could not run netplan"),
+        Err(_) => {
+            eprintln!("[ERROR] Could not run netplan");
+            false
+        }
+    };
+
+    // B1:apply 失败 → 恢复备份
+    if !apply_ok {
+        let _ = fs::copy(&bak, &file_path);
+        eprintln!("[ERROR] Restored {} from backup", file_path);
+        let _ = Command::new("netplan").arg("apply").output();
+        std::process::exit(1);
     }
+    println!("[INFO] Netplan configuration applied successfully");
 }
 
 /// 解析 /etc/iproute2/rt_tables,返回 表名→数字id 的映射
@@ -948,32 +1030,59 @@ fn load_rt_tables() -> std::collections::HashMap<String, u32> {
 }
 
 /// 表名 → 数字 id(用于 nmcli 后端)
-/// 先尝试解析数字,再查 rt_tables,都不行则自动分配空闲 id
-/// 返回值: (id, 是否新分配)
-fn resolve_table_id(t: &str, name_to_id: &std::collections::HashMap<String, u32>) -> (u32, bool) {
-    // 直接数字
+/// 1. 直接数字 → 返回 2. allocated 已有该名 → 返回 3. 自动分配空闲 id(从 100 起)并写入 allocated
+/// 返回 (id, 是否新分配)
+fn resolve_table_id(t: &str, allocated: &mut std::collections::HashMap<String, u32>) -> (u32, bool) {
     if let Ok(n) = t.parse::<u32>() {
         return (n, false);
     }
-    // 查 rt_tables
-    if let Some(n) = name_to_id.get(t) {
-        return (*n, false);
+    if let Some(&n) = allocated.get(t) {
+        return (n, false);
     }
-    // 自动分配: 从 100 开始找第一个没被占用的 id
     let mut alloc = 100u32;
-    while name_to_id.values().any(|v| *v == alloc) {
+    while allocated.values().any(|&v| v == alloc) {
         alloc += 1;
     }
+    allocated.insert(t.to_string(), alloc);
     (alloc, true)
+}
+
+/// 把 allocated 中比 initial 多出的条目追加写回 /etc/iproute2/rt_tables(去重)
+fn writeback_rt_tables(allocated: &std::collections::HashMap<String, u32>, initial: &std::collections::HashMap<String, u32>) {
+    let existing = {
+        let mut base = initial.clone();
+        if let Ok(content) = fs::read_to_string("/etc/iproute2/rt_tables") {
+            for line in content.lines() {
+                let line = line.trim();
+                if line.is_empty() || line.starts_with('#') { continue; }
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 2 {
+                    if let Ok(id) = parts[0].parse::<u32>() {
+                        base.insert(parts[1].to_string(), id);
+                    }
+                }
+            }
+        }
+        base
+    };
+    let mut to_write: Vec<(u32, String)> = allocated.iter()
+        .filter(|(name, _)| !existing.contains_key(*name))
+        .map(|(name, &id)| (id, name.clone()))
+        .collect();
+    to_write.sort_by_key(|(id, _)| *id);
+    if to_write.is_empty() { return; }
+    if let Ok(mut f) = fs::OpenOptions::new().append(true).open("/etc/iproute2/rt_tables") {
+        for (id, name) in &to_write {
+            let _ = writeln!(f, "{} {}", id, name);
+        }
+    }
 }
 
 // ============ nmcli 后端 ============
 
-fn configure_with_nmcli(cfg: &Config) {
+fn nmcli_render(cfg: &Config, allocated: &mut std::collections::HashMap<String, u32>) -> Vec<String> {
     let con_name = format!("static-{}", &cfg.net_device);
-    let _ = Command::new("nmcli").args(["con", "delete", &con_name]).output();
-
-    let mut add_args: Vec<String> = vec![
+    let mut args: Vec<String> = vec![
         "con".into(), "add".into(), "type".into(), "ethernet".into(),
         "ifname".into(), cfg.net_device.clone().into(),
         "con-name".into(), con_name.clone().into(),
@@ -982,55 +1091,53 @@ fn configure_with_nmcli(cfg: &Config) {
 
     if let Some(v4f) = &cfg.v4 {
         if v4f.is_dhcp {
-            warn_extra_routes(&cfg.net_device);
-            add_args.push("ipv4.method".into());
-            add_args.push("auto".into());
+            args.push("ipv4.method".into());
+            args.push("auto".into());
         } else if !v4f.addrs.is_empty() {
             let addrs: Vec<String> = v4f.addrs.iter().map(|(a, p)| format!("{}/{}", a, p)).collect();
-            add_args.push("ipv4.addresses".into());
-            add_args.push(addrs.join(","));
-            add_args.push("ipv4.method".into());
-            add_args.push("manual".into());
+            args.push("ipv4.addresses".into());
+            args.push(addrs.join(","));
+            args.push("ipv4.method".into());
+            args.push("manual".into());
             if let Some(gw) = &v4f.gateway {
                 if !gw.is_empty() {
-                    warn_extra_routes(&cfg.net_device);
-                    add_args.push("ipv4.gateway".into());
-                    add_args.push(gw.clone());
+                    args.push("ipv4.gateway".into());
+                    args.push(gw.clone());
                 }
             }
             if let Some(dns) = &v4f.dns {
                 if !dns.is_empty() {
-                    add_args.push("ipv4.dns".into());
-                    add_args.push(dns.clone());
+                    args.push("ipv4.dns".into());
+                    args.push(dns.clone());
                 }
             }
         }
     }
     if let Some(v6f) = &cfg.v6 {
         if v6f.is_dhcp {
-            add_args.push("ipv6.method".into());
-            add_args.push("auto".into());
+            args.push("ipv6.method".into());
+            args.push("auto".into());
         } else if !v6f.addrs.is_empty() {
             let addrs: Vec<String> = v6f.addrs.iter().map(|(a, p)| format!("{}/{}", a, p)).collect();
-            add_args.push("ipv6.addresses".into());
-            add_args.push(addrs.join(","));
-            add_args.push("ipv6.method".into());
-            add_args.push("manual".into());
+            args.push("ipv6.addresses".into());
+            args.push(addrs.join(","));
+            args.push("ipv6.method".into());
+            args.push("manual".into());
             if let Some(gw) = &v6f.gateway {
                 if !gw.is_empty() {
-                    add_args.push("ipv6.gateway".into());
-                    add_args.push(gw.clone());
+                    args.push("ipv6.gateway".into());
+                    args.push(gw.clone());
                 }
             }
             if let Some(dns) = &v6f.dns {
                 if !dns.is_empty() {
-                    add_args.push("ipv6.dns".into());
-                    add_args.push(dns.clone());
+                    args.push("ipv6.dns".into());
+                    args.push(dns.clone());
                 }
             }
         }
     }
-    // 静态路由(nmcli ipv4.routes:逗号分隔多条;字段用空格;table 用 table=N)
+    // A4:路由 table=表名 → 数字 id
     if !cfg.routes.is_empty() {
         let entries: Vec<String> = cfg.routes.iter().map(|r| {
             let mut e = format!("{}/{}", r.to, r.to_prefix);
@@ -1038,28 +1145,25 @@ fn configure_with_nmcli(cfg: &Config) {
                 e.push_str(&format!(" {}", via));
             }
             if let Some(t) = &r.table {
-                e.push_str(&format!(" table={}", t));
+                let (tid, _) = resolve_table_id(t, allocated);
+                e.push_str(&format!(" table={}", tid));
             }
             e
         }).collect();
-        add_args.push("ipv4.routes".into());
-        add_args.push(entries.join(","));
+        args.push("ipv4.routes".into());
+        args.push(entries.join(","));
     }
-    // 策略(nmcli ipv4.routing-rules:逗号分隔,需固定 priority,table 仅数字 id)
-    // 若表名为非数字,则从 /etc/iproute2/rt_tables 查找映射
+    // A1+A3:routing-rules,表名→id,from+to 单条
     if !cfg.policies.is_empty() {
-        let name_to_id = load_rt_tables();
         let mut rules: Vec<String> = Vec::new();
-        let mut prio = 32760u32; // 从 32760 起递减,避开 main/default
+        let mut prio = 32760u32;
         for p in &cfg.policies {
             let t = p.table.as_deref().unwrap_or("");
-            if t.is_empty() {
-                continue;
-            }
+            if t.is_empty() { continue; }
             let tid = match t.parse::<u32>() {
                 Ok(n) => n,
                 Err(_) => {
-                    let (id, alloced) = resolve_table_id(t, &name_to_id);
+                    let (id, alloced) = resolve_table_id(t, allocated);
                     if alloced {
                         eprintln!("[INFO] nmcli: auto-assigned table id {} for name '{}'", id, t);
                     } else {
@@ -1068,19 +1172,38 @@ fn configure_with_nmcli(cfg: &Config) {
                     id
                 }
             };
+            let mut rule = format!("priority {}", prio);
             if let Some((n, px)) = &p.from {
-                rules.push(format!("priority {} from {}/{} table {}", prio, n, px, tid));
+                rule.push_str(&format!(" from {}/{}", n, px));
             }
             if let Some((n, px)) = &p.to {
-                rules.push(format!("priority {} to {}/{} table {}", prio, n, px, tid));
+                rule.push_str(&format!(" to {}/{}", n, px));
             }
+            rule.push_str(&format!(" table {}", tid));
+            rules.push(rule);
             if prio > 100 { prio -= 1; }
         }
         if !rules.is_empty() {
-            add_args.push("ipv4.routing-rules".into());
-            add_args.push(rules.join(","));
+            args.push("ipv4.routing-rules".into());
+            args.push(rules.join(","));
         }
     }
+    args
+}
+
+fn configure_with_nmcli(cfg: &Config) {
+    let con_name = format!("static-{}", &cfg.net_device);
+    let _ = Command::new("nmcli").args(["con", "delete", &con_name]).output();
+
+    let initial = load_rt_tables();
+    let mut allocated = initial.clone();
+    if let Some(v4f) = &cfg.v4 {
+        if v4f.is_dhcp || (!v4f.addrs.is_empty() && v4f.gateway.as_deref().map(|g| !g.is_empty()).unwrap_or(false)) {
+            warn_extra_routes(&cfg.net_device);
+        }
+    }
+    let add_args = nmcli_render(cfg, &mut allocated);
+    writeback_rt_tables(&allocated, &initial);
 
     let status = Command::new("nmcli").args(&add_args).status();
     if let Ok(s) = status {
@@ -1097,39 +1220,36 @@ fn configure_with_nmcli(cfg: &Config) {
 
 // ============ systemd-networkd 后端 ============
 
-fn configure_with_networkd(cfg: &Config) {
+fn networkd_render(cfg: &Config) -> (String, String) {
     let file_path = format!("/etc/systemd/network/10-{}.network", cfg.net_device);
-    let mut file = fs::File::create(&file_path).expect("[ERROR] Failed to create networkd config file");
-
-    writeln!(file, "[Match]").unwrap();
-    writeln!(file, "Name={}", cfg.net_device).unwrap();
-    writeln!(file).unwrap();
-    writeln!(file, "[Network]").unwrap();
-
+    let mut s = String::new();
+    s.push_str("[Match]\n");
+    s.push_str(&format!("Name={}\n\n", cfg.net_device));
+    s.push_str("[Network]\n");
     if let Some(v4f) = &cfg.v4 {
         if v4f.is_dhcp {
-            writeln!(file, "DHCP=ipv4").unwrap();
+            s.push_str("DHCP=ipv4\n");
         } else {
             for (a, p) in &v4f.addrs {
-                writeln!(file, "Address={}/{}", a, p).unwrap();
+                s.push_str(&format!("Address={}/{}\n", a, p));
             }
             if let Some(gw) = &v4f.gateway {
                 if !gw.is_empty() {
-                    writeln!(file, "Gateway={}", gw).unwrap();
+                    s.push_str(&format!("Gateway={}\n", gw));
                 }
             }
         }
     }
     if let Some(v6f) = &cfg.v6 {
         if v6f.is_dhcp {
-            writeln!(file, "DHCP=ipv6").unwrap();
+            s.push_str("DHCP=ipv6\n");
         } else {
             for (a, p) in &v6f.addrs {
-                writeln!(file, "Address={}/{}", a, p).unwrap();
+                s.push_str(&format!("Address={}/{}\n", a, p));
             }
             if let Some(gw) = &v6f.gateway {
                 if !gw.is_empty() {
-                    writeln!(file, "Gateway={}", gw).unwrap();
+                    s.push_str(&format!("Gateway={}\n", gw));
                 }
             }
         }
@@ -1142,39 +1262,51 @@ fn configure_with_networkd(cfg: &Config) {
         if let Some(d) = &v6f.dns { if !d.is_empty() { dns_list.push(d.clone()); } }
     }
     if !dns_list.is_empty() {
-        writeln!(file, "DNS={}", dns_list.join(" ")).unwrap();
+        s.push_str(&format!("DNS={}\n", dns_list.join(" ")));
     }
-
     for r in &cfg.routes {
-        writeln!(file).unwrap();
-        writeln!(file, "[Route]").unwrap();
-        writeln!(file, "Destination={}/{}", r.to, r.to_prefix).unwrap();
+        s.push_str("\n[Route]\n");
+        s.push_str(&format!("Destination={}/{}\n", r.to, r.to_prefix));
         if let Some(via) = &r.via {
-            writeln!(file, "Gateway={}", via).unwrap();
+            s.push_str(&format!("Gateway={}\n", via));
         }
         if let Some(t) = &r.table {
-            writeln!(file, "Table={}", t).unwrap();
+            s.push_str(&format!("Table={}\n", t));
         }
     }
     for p in &cfg.policies {
         if let Some(t) = &p.table {
+            // A3:from+to 同存 → 单个 [RoutingPolicyRule] 段
+            s.push_str("\n[RoutingPolicyRule]\n");
             if let Some((n, px)) = &p.from {
-                writeln!(file).unwrap();
-                writeln!(file, "[RoutingPolicyRule]").unwrap();
-                writeln!(file, "From={}/{}", n, px).unwrap();
-                writeln!(file, "Table={}", t).unwrap();
+                s.push_str(&format!("From={}/{}\n", n, px));
             }
             if let Some((n, px)) = &p.to {
-                writeln!(file).unwrap();
-                writeln!(file, "[RoutingPolicyRule]").unwrap();
-                writeln!(file, "To={}/{}", n, px).unwrap();
-                writeln!(file, "Table={}", t).unwrap();
+                s.push_str(&format!("To={}/{}\n", n, px));
+            }
+            s.push_str(&format!("Table={}\n", t));
+        }
+    }
+    (file_path, s)
+}
+
+fn configure_with_networkd(cfg: &Config) {
+    // C5:与 netplan/nmcli/ip 对齐,多默认网关时告警
+    if let Some(v4f) = &cfg.v4 {
+        if !v4f.is_dhcp {
+            if let Some(gw) = &v4f.gateway {
+                if !gw.is_empty() {
+                    warn_extra_routes(&cfg.net_device);
+                }
             }
         }
     }
 
+    let (file_path, content) = networkd_render(cfg);
+    let mut file = fs::File::create(&file_path).expect("[ERROR] Failed to create networkd config file");
+    file.write_all(content.as_bytes()).unwrap();
+
     println!("[INFO] Created systemd-networkd config at {}", file_path);
-    // 用 networkctl reload + reconfigure 仅重载该设备,避免 restart 波及其他网口
     let _ = Command::new("networkctl").arg("reload").status();
     let rc = Command::new("networkctl").arg("reconfigure").arg(&cfg.net_device).status();
     let ok = match rc {
@@ -1193,6 +1325,83 @@ fn configure_with_networkd(cfg: &Config) {
 
 // ============ ip 兜底后端 ============
 
+/// 返回当前 main 表默认路由所在设备(解析 `ip route show default` 的 `dev X`)
+fn default_route_dev() -> Option<String> {
+    let out = Command::new("ip").args(["route", "show", "default"]).output().ok()?;
+    let s = String::from_utf8_lossy(&out.stdout);
+    for line in s.lines() {
+        if line.starts_with("default ") {
+            let mut dev = None;
+            let mut iter = line.split_whitespace();
+            while let Some(tok) = iter.next() {
+                if tok == "dev" {
+                    dev = iter.next().map(|x| x.to_string());
+                    break;
+                }
+            }
+            if dev.is_some() {
+                return dev;
+            }
+        }
+    }
+    None
+}
+
+/// 生成 ip 兜底要执行的命令参数序列(纯函数,不执行)
+fn ip_render(cfg: &Config) -> Vec<Vec<String>> {
+    let mut cmds: Vec<Vec<String>> = Vec::new();
+    cmds.push(vec!["addr".into(), "flush".into(), "dev".into(), cfg.net_device.clone()]);
+    cmds.push(vec!["link".into(), "set".into(), "dev".into(), cfg.net_device.clone(), "up".into()]);
+    if let Some(v4f) = &cfg.v4 {
+        for (a, p) in &v4f.addrs {
+            cmds.push(vec!["addr".into(), "add".into(), format!("{}/{}", a, p), "dev".into(), cfg.net_device.clone()]);
+        }
+        if let Some(gw) = &v4f.gateway {
+            if !gw.is_empty() {
+                cmds.push(vec!["route".into(), "add".into(), "default".into(), "via".into(), gw.clone(), "dev".into(), cfg.net_device.clone()]);
+            }
+        }
+    }
+    if let Some(v6f) = &cfg.v6 {
+        for (a, p) in &v6f.addrs {
+            cmds.push(vec!["addr".into(), "add".into(), format!("{}/{}", a, p), "dev".into(), cfg.net_device.clone()]);
+        }
+    }
+    for r in &cfg.routes {
+        let mut c: Vec<String> = vec!["route".into(), "add".into(), format!("{}/{}", r.to, r.to_prefix)];
+        if let Some(via) = &r.via {
+            c.push("via".into());
+            c.push(via.clone());
+        }
+        c.push("dev".into());
+        c.push(cfg.net_device.clone());
+        if let Some(t) = &r.table {
+            c.push("table".into());
+            c.push(t.clone());
+        }
+        cmds.push(c);
+    }
+    for p in &cfg.policies {
+        if let Some(t) = &p.table {
+            // A3:from+to 同存 → 单条 rule
+            let mut c: Vec<String> = vec!["rule".into(), "add".into()];
+            if let Some((n, px)) = &p.from {
+                c.push("from".into());
+                c.push(format!("{}/{}", n, px));
+            }
+            if let Some((n, px)) = &p.to {
+                c.push("to".into());
+                c.push(format!("{}/{}", n, px));
+            }
+            c.push("table".into());
+            c.push(t.clone());
+            cmds.push(c);
+        }
+    }
+    cmds.push(vec!["link".into(), "set".into(), "dev".into(), cfg.net_device.clone(), "up".into()]);
+    cmds
+}
+
 fn configure_with_ip(cfg: &Config) {
     let any_dhcp = cfg.v4.as_ref().map(|f| f.is_dhcp).unwrap_or(false)
         || cfg.v6.as_ref().map(|f| f.is_dhcp).unwrap_or(false);
@@ -1201,9 +1410,33 @@ fn configure_with_ip(cfg: &Config) {
         return;
     }
 
-    // 执行 ip 命令,失败时打印 [WARNING](含 stderr),返回是否成功
-    let run = |args: &[&str]| -> bool {
-        let out = Command::new("ip").args(args).output();
+    // C6:保护当前默认路由所在设备(通常是管理口),避免 flush 断 SSH
+    if !cfg.force {
+        if let Some(dev) = default_route_dev() {
+            if dev == cfg.net_device {
+                eprintln!(
+                    "[ERROR] refusing to flush {}: it carries the default route (likely management iface); use --force to override",
+                    cfg.net_device
+                );
+                std::process::exit(1);
+            }
+        }
+    }
+
+    // C5:与 netplan/networkd/nmcli 对齐,多默认网关时告警
+    if let Some(v4f) = &cfg.v4 {
+        if !v4f.is_dhcp {
+            if let Some(gw) = &v4f.gateway {
+                if !gw.is_empty() {
+                    warn_extra_routes(&cfg.net_device);
+                }
+            }
+        }
+    }
+
+    let run = |args: &[String]| -> bool {
+        let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        let out = Command::new("ip").args(&refs).output();
         match out {
             Ok(o) => {
                 if !o.status.success() {
@@ -1220,66 +1453,195 @@ fn configure_with_ip(cfg: &Config) {
             }
         }
     };
-    // flush 后立即 up,避免裸接口
-    run(&["addr", "flush", "dev", &cfg.net_device]);
-    run(&["link", "set", "dev", &cfg.net_device, "up"]);
 
-    let mut addr_ok = 0;
-    let mut addr_total = 0;
-    if let Some(v4f) = &cfg.v4 {
-        for (a, p) in &v4f.addrs {
+    let cmds = ip_render(cfg);
+    // 统计地址成功数(地址命令在 flush/link 之后、最后 link 之前)
+    let mut addr_ok = 0usize;
+    let mut addr_total = 0usize;
+    for c in &cmds {
+        if c.len() >= 2 && c[0] == "addr" && c[1] == "add" {
             addr_total += 1;
-            let spec = format!("{}/{}", a, p);
-            if run(&["addr", "add", &spec, "dev", &cfg.net_device]) { addr_ok += 1; }
-        }
-        if let Some(gw) = &v4f.gateway {
-            if !gw.is_empty() {
-                // main 表默认路由:若已存在其他默认路由会失败(File exists),给明确提示
-                if !run(&["route", "add", "default", "via", gw, "dev", &cfg.net_device]) {
-                    eprintln!("[WARNING] default route via {} not added (another default route may exist in table main; use policy routing for multi-gateway)", gw);
-                }
+            if run(c) {
+                addr_ok += 1;
             }
-        }
-    }
-    if let Some(v6f) = &cfg.v6 {
-        for (a, p) in &v6f.addrs {
-            addr_total += 1;
-            let spec = format!("{}/{}", a, p);
-            if run(&["addr", "add", &spec, "dev", &cfg.net_device]) { addr_ok += 1; }
+        } else if c.len() >= 3 && c[0] == "route" && c[1] == "add" && c[2] == "default" {
+            if !run(c) {
+                eprintln!("[WARNING] default route not added (another default route may exist in table main; use policy routing for multi-gateway)");
+            }
+        } else {
+            run(c);
         }
     }
     if addr_total > 0 && addr_ok == 0 {
         eprintln!("[ERROR] Failed to add any of the {} address(es) to {}", addr_total, cfg.net_device);
     }
-    for r in &cfg.routes {
-        let mut args: Vec<String> = vec!["route".into(), "add".into(), format!("{}/{}", r.to, r.to_prefix)];
-        if let Some(via) = &r.via {
-            args.push("via".into());
-            args.push(via.clone());
-        }
-        args.push("dev".into());
-        args.push(cfg.net_device.clone());
-        if let Some(t) = &r.table {
-            args.push("table".into());
-            args.push(t.clone());
-        }
-        let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-        run(&refs);
-    }
-    for p in &cfg.policies {
-        if let Some(t) = &p.table {
-            if let Some((n, px)) = &p.from {
-                let spec = format!("{}/{}", n, px);
-                run(&["rule", "add", "from", &spec, "table", t]);
-            }
-            if let Some((n, px)) = &p.to {
-                let spec = format!("{}/{}", n, px);
-                run(&["rule", "add", "to", &spec, "table", t]);
-            }
+    println!("[INFO] Manual IP configuration applied (addresses: {}/{})", addr_ok, addr_total);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn cfg_ip(routes: Vec<Route>, policies: Vec<Policy>, force: bool) -> Config {
+        Config {
+            net_device: "eth1".into(),
+            family1_is_v6: false,
+            v4: Some(Family {
+                addrs: vec![("1.1.1.1".into(), 24)],
+                gateway: Some("1.1.1.254".into()),
+                dns: None,
+                is_dhcp: false,
+            }),
+            v6: None,
+            routes,
+            policies,
+            dry_run: false,
+            force,
         }
     }
 
-    // 确保 up
-    run(&["link", "set", "dev", &cfg.net_device, "up"]);
-    println!("[INFO] Manual IP configuration applied (addresses: {}/{})", addr_ok, addr_total);
+    #[test]
+    fn ip_render_policy_from_to_single_rule() {
+        let p = Policy {
+            from: Some(("10.0.0.0".into(), 24)),
+            to: Some(("192.168.3.0".into(), 24)),
+            table: Some("100".into()),
+        };
+        let cfg = cfg_ip(vec![], vec![p], false);
+        let cmds = ip_render(&cfg);
+        // 应只有一条 rule,同时带 from + to
+        let rules: Vec<&Vec<String>> = cmds.iter().filter(|c| c.first().map(|s| s == "rule").unwrap_or(false)).collect();
+        assert_eq!(rules.len(), 1, "from+to 应生成单条 rule,实际: {:?}", rules);
+        let joined = rules[0].join(" ");
+        assert!(joined.contains("from 10.0.0.0/24"), "缺 from: {}", joined);
+        assert!(joined.contains("to 192.168.3.0/24"), "缺 to: {}", joined);
+        assert!(joined.contains("table 100"), "缺 table: {}", joined);
+    }
+
+    #[test]
+    fn ip_render_flush_and_addr() {
+        let cfg = cfg_ip(vec![], vec![], false);
+        let cmds = ip_render(&cfg);
+        let joined: Vec<String> = cmds.iter().map(|c| c.join(" ")).collect();
+        assert!(joined.iter().any(|s| s == "addr flush dev eth1"), "缺 flush: {:?}", joined);
+        assert!(joined.iter().any(|s| s == "addr add 1.1.1.1/24 dev eth1"), "缺 addr add: {:?}", joined);
+        assert!(joined.iter().any(|s| s == "route add default via 1.1.1.254 dev eth1"), "缺默认路由: {:?}", joined);
+    }
+
+    #[test]
+    fn networkd_render_policy_from_to_single_section() {
+        let p = Policy {
+            from: Some(("10.0.0.0".into(), 24)),
+            to: Some(("192.168.3.0".into(), 24)),
+            table: Some("100".into()),
+        };
+        let cfg = cfg_ip(vec![], vec![p], false);
+        let (path, content) = networkd_render(&cfg);
+        assert!(path.ends_with("10-eth1.network"), "路径错: {}", path);
+        // 单个 [RoutingPolicyRule] 段同时含 From= 和 To=
+        let sections: Vec<&str> = content.split("[RoutingPolicyRule]").collect();
+        assert_eq!(sections.len(), 2, "from+to 应单个段,实际:\n{}", content);
+        let rule = sections[1];
+        assert!(rule.contains("From=10.0.0.0/24"), "缺 From: {}", rule);
+        assert!(rule.contains("To=192.168.3.0/24"), "缺 To: {}", rule);
+        assert!(rule.contains("Table=100"), "缺 Table: {}", rule);
+    }
+
+    #[test]
+    fn networkd_render_multi_addr_and_route() {
+        let cfg = cfg_ip(
+            vec![Route { to: "192.168.2.0".into(), to_prefix: 24, via: Some("1.1.1.254".into()), table: Some("100".into()) }],
+            vec![],
+            false,
+        );
+        let (_path, content) = networkd_render(&cfg);
+        assert!(content.contains("Address=1.1.1.1/24"), "缺地址: {}", content);
+        assert!(content.contains("Gateway=1.1.1.254"), "缺网关: {}", content);
+        assert!(content.contains("[Route]"), "缺 Route 段: {}", content);
+        assert!(content.contains("Destination=192.168.2.0/24"), "缺 Destination: {}", content);
+    }
+
+    #[test]
+    fn nmcli_render_two_unknown_tables_distinct_ids() {
+        // A1:两个未知表名应分到不同 id
+        let p1 = Policy { from: Some(("10.0.0.0".into(), 24)), to: None, table: Some("mystery_a".into()) };
+        let p2 = Policy { from: Some(("10.1.0.0".into(), 24)), to: None, table: Some("mystery_b".into()) };
+        let cfg = cfg_ip(vec![], vec![p1, p2], false);
+        let mut allocated = HashMap::new(); // 空 rt_tables
+        let args = nmcli_render(&cfg, &mut allocated);
+        // nmcli_render joins rules with comma in a single arg; split to inspect
+        let rules_joined = args.iter().find(|a| a.starts_with("priority ")).unwrap();
+        let rules: Vec<&str> = rules_joined.split(',').collect();
+        assert_eq!(rules.len(), 2, "应有 2 条 rule: {:?}", rules_joined);
+        let id_a: u32 = rules[0].rsplit("table ").next().unwrap().parse().unwrap();
+        let id_b: u32 = rules[1].rsplit("table ").next().unwrap().parse().unwrap();
+        assert_ne!(id_a, id_b, "两个未知表名不应分到同一 id: {} vs {}", id_a, id_b);
+        // allocated 应记录两个名字
+        assert_eq!(allocated.get("mystery_a"), Some(&id_a));
+        assert_eq!(allocated.get("mystery_b"), Some(&id_b));
+    }
+
+    #[test]
+    fn nmcli_render_route_table_name_to_id() {
+        // A4:路由 table=表名 应解析为数字
+        let r = Route { to: "192.168.2.0".into(), to_prefix: 24, via: Some("1.1.1.254".into()), table: Some("lan_table".into()) };
+        let cfg = cfg_ip(vec![r], vec![], false);
+        let mut allocated = HashMap::from([("lan_table".to_string(), 101u32)]);
+        let args = nmcli_render(&cfg, &mut allocated);
+        let routes_arg = args.iter().find(|a| a.contains("table=")).unwrap();
+        assert!(routes_arg.contains("table=101"), "路由表名应解析为数字 101: {}", routes_arg);
+        assert!(!routes_arg.contains("table=lan_table"), "不应保留表名: {}", routes_arg);
+    }
+
+    #[test]
+    fn nmcli_render_policy_from_to_single_rule() {
+        // A3:from+to 单条 rule
+        let p = Policy { from: Some(("10.0.0.0".into(), 24)), to: Some(("192.168.3.0".into(), 24)), table: Some("100".into()) };
+        let cfg = cfg_ip(vec![], vec![p], false);
+        let mut allocated = HashMap::new();
+        let args = nmcli_render(&cfg, &mut allocated);
+        // nmcli_render joins rules with comma in a single arg
+        let rules_joined = args.iter().find(|a| a.starts_with("priority ")).unwrap();
+        let rules: Vec<&str> = rules_joined.split(',').collect();
+        assert_eq!(rules.len(), 1, "from+to 应单条 rule: {:?}", rules_joined);
+        let joined = rules[0];
+        assert!(joined.contains("from 10.0.0.0/24") && joined.contains("to 192.168.3.0/24"), "缺 from/to: {}", joined);
+    }
+
+    #[test]
+    fn netplan_render_policy_from_to_single_item() {
+        // A3:from+to 单个 routing-policy 项
+        let p = Policy { from: Some(("10.0.0.0".into(), 24)), to: Some(("192.168.3.0".into(), 24)), table: Some("100".into()) };
+        let cfg = cfg_ip(vec![], vec![p], false);
+        let existing = "network:\n  version: 2\n  ethernets:\n    eth1:\n      mtu: 9000\n";
+        let out = netplan_render(&cfg, existing, "/etc/netplan/01-netcfg.yaml");
+        assert!(out.is_ok(), "render 失败: {:?}", out);
+        let yaml = out.unwrap();
+        // 应保留 mtu(B3)
+        assert!(yaml.contains("mtu: 9000"), "B3:应保留原 mtu:\n{}", yaml);
+        // routing-policy 应只有一项含 from+to
+        let pol_count = yaml.matches("from: 10.0.0.0/24").count();
+        assert_eq!(pol_count, 1, "A3:from 应只出现一次:\n{}", yaml);
+        assert!(yaml.contains("to: 192.168.3.0/24"), "A3:缺 to:\n{}", yaml);
+    }
+
+    #[test]
+    fn netplan_render_preserves_unmanaged_fields() {
+        // B3:保留 match/set-name/receive-checksum-offload
+        let cfg = cfg_ip(vec![], vec![], false);
+        let existing = "network:\n  version: 2\n  ethernets:\n    eth1:\n      mtu: 1500\n      match:\n        macaddress: 00:11:22:33:44:55\n      set-name: eth1\n      receive-checksum-offload: false\n";
+        let yaml = netplan_render(&cfg, existing, "/etc/netplan/01-netcfg.yaml").unwrap();
+        assert!(yaml.contains("macaddress: 00:11:22:33:44:55"), "B3:丢 match:\n{}", yaml);
+        assert!(yaml.contains("set-name: eth1"), "B3:丢 set-name:\n{}", yaml);
+        assert!(yaml.contains("receive-checksum-offload: false"), "B3:丢 checksum:\n{}", yaml);
+    }
+
+    #[test]
+    fn netplan_render_non_mapping_top_errors() {
+        // C8:顶层非 mapping → Err 而非 panic
+        let cfg = cfg_ip(vec![], vec![], false);
+        let out = netplan_render(&cfg, "not a mapping\n", "/etc/netplan/01-netcfg.yaml");
+        assert!(out.is_err(), "C8:非 mapping 应 Err");
+    }
 }

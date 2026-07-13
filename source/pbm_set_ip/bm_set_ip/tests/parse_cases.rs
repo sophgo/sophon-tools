@@ -243,3 +243,22 @@ case_err!(i24_bad_dns, &["eth0","1.1.1.1","24","1.1.1.254","not.an.ip"], "invali
 case_err!(i25_bad_gw_v6, &["eth0","2001:db8::1","64","notipv6","2001:4860:4860::8888"], "invalid IPv6 address");
 case_err!(i26_gw_with_slash, &["eth0","1.1.1.1","24","1.1.1.254/24","8.8.8.8"], "must not contain '/'");
 case_err!(i27_4tuple_bad_gw, &["eth0","1.1.1.1","24","999.1.1.1","","192.168.2.0","24","1.1.1.254","100"], "invalid IPv4 address");
+// 前导零 IPv4 拒绝(ip 命令按八进制会拒,解析层先拒)
+case_err!(i28_leading_zero_ipv4, &["eth0","01.1.1.1","24"], "invalid IPv4 address");
+case_err!(i29_leading_zero_extra, &["eth0","1.1.1.1","24","","","01.1.1.2","24","",""], "invalid IPv4 address");
+
+// ============ J. dhcp family1 补槽(A2)============
+case!(j1_dhcp_padded_then_route, &["eth0","dhcp","","","","192.168.2.0","24","1.1.1.254","100"], [
+    "v4.is_dhcp=true", "routes.count=1", "routes[0].to=192.168.2.0", "routes[0].table=100",
+]);
+case!(j2_dhcp_padded_then_policy, &["eth0","dhcp","","","","10.0.0.0","24","192.168.3.0","255.255.255.0","100"], [
+    "v4.is_dhcp=true", "policies.count=1", "policies[0].table=100",
+]);
+case!(j3_dhcp_no_pad_then_route, &["eth0","dhcp","192.168.2.0","24","1.1.1.254","100"], [
+    "v4.is_dhcp=true", "routes.count=1", "routes[0].to=192.168.2.0", "routes[0].table=100",
+]);
+
+// ============ K. --force / -h / --help(Task 1)============
+// --force 被接受,dry-run 正常输出
+case!(k1_force_accepted, &["--force","eth0","1.1.1.1","24"], ["v4.addrs=1.1.1.1/24"]);
+case!(k2_force_after_pos, &["eth0","1.1.1.1","24","--force"], ["v4.addrs=1.1.1.1/24"]);
