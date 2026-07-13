@@ -926,6 +926,47 @@ fn configure_with_netplan(cfg: &Config) {
     }
 }
 
+/// 解析 /etc/iproute2/rt_tables,返回 表名→数字id 的映射
+fn load_rt_tables() -> std::collections::HashMap<String, u32> {
+    let mut map = std::collections::HashMap::new();
+    if let Ok(content) = fs::read_to_string("/etc/iproute2/rt_tables") {
+        for line in content.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 2 {
+                if let Ok(id) = parts[0].parse::<u32>() {
+                    let name = parts[1].to_string();
+                    map.insert(name, id);
+                }
+            }
+        }
+    }
+    map
+}
+
+/// 表名 → 数字 id(用于 nmcli 后端)
+/// 先尝试解析数字,再查 rt_tables,都不行则自动分配空闲 id
+/// 返回值: (id, 是否新分配)
+fn resolve_table_id(t: &str, name_to_id: &std::collections::HashMap<String, u32>) -> (u32, bool) {
+    // 直接数字
+    if let Ok(n) = t.parse::<u32>() {
+        return (n, false);
+    }
+    // 查 rt_tables
+    if let Some(n) = name_to_id.get(t) {
+        return (*n, false);
+    }
+    // 自动分配: 从 100 开始找第一个没被占用的 id
+    let mut alloc = 100u32;
+    while name_to_id.values().any(|v| *v == alloc) {
+        alloc += 1;
+    }
+    (alloc, true)
+}
+
 // ============ nmcli 后端 ============
 
 fn configure_with_nmcli(cfg: &Config) {
@@ -1004,8 +1045,10 @@ fn configure_with_nmcli(cfg: &Config) {
         add_args.push("ipv4.routes".into());
         add_args.push(entries.join(","));
     }
-    // 策略(nmcli ipv4.routing-rules:逗号分隔,需固定 priority,table 仅数字)
+    // 策略(nmcli ipv4.routing-rules:逗号分隔,需固定 priority,table 仅数字 id)
+    // 若表名为非数字,则从 /etc/iproute2/rt_tables 查找映射
     if !cfg.policies.is_empty() {
+        let name_to_id = load_rt_tables();
         let mut rules: Vec<String> = Vec::new();
         let mut prio = 32760u32; // 从 32760 起递减,避开 main/default
         for p in &cfg.policies {
@@ -1013,12 +1056,16 @@ fn configure_with_nmcli(cfg: &Config) {
             if t.is_empty() {
                 continue;
             }
-            // 表名转数字 id(nmcli 仅接受数字 table);无法转则跳过并告警
             let tid = match t.parse::<u32>() {
                 Ok(n) => n,
                 Err(_) => {
-                    eprintln!("[WARNING] nmcli routing-rules only accepts numeric table id; skip rule for table '{}'", t);
-                    continue;
+                    let (id, alloced) = resolve_table_id(t, &name_to_id);
+                    if alloced {
+                        eprintln!("[INFO] nmcli: auto-assigned table id {} for name '{}'", id, t);
+                    } else {
+                        eprintln!("[INFO] nmcli: resolved table name '{}' → id {}", t, id);
+                    }
+                    id
                 }
             };
             if let Some((n, px)) = &p.from {
