@@ -180,7 +180,7 @@ bm_set_ip --dry-run eth0 192.168.1.100 24 192.168.1.1 8.8.8.8 192.168.2.0 24 192
 ## 测试
 
 ```bash
-cargo test --test parse_cases   # 59 项,覆盖双模式 + 4 元组各场景(含多策略)+ 输入校验(畸形IP/越界前缀/非连续掩码)+ 异常报错
+cargo test --test parse_cases   # 69 项,覆盖双模式 + 4 元组各场景(含多策略)+ 输入校验(畸形IP/越界前缀/非连续掩码)+ 异常报错
 bash tests/parse_cases.sh        # 等价包装
 ```
 
@@ -207,3 +207,11 @@ bash tests/parse_cases.sh        # 等价包装
 - **ip**(兜底):逐条 `ip addr/route/rule add`,失败打印 `[WARNING]`(如 main 表已有默认路由时 `ip route add default` 失败会提示用策略路由);DHCP 不支持,报错退出。
 
 > 切换后端时注意:networkd 后端写的 `/etc/systemd/network/10-<dev>.network` 不会被 `netplan apply` 清除,切回 netplan 前应 `rm` 该文件,否则与 netplan 生成的配置竞争。
+
+## 2026-07-13 review 修复
+
+- **策略 from+to 单条语义**:策略同时指定源(`from`)和目的(`to`)时,生成单条规则(源且目的同时匹配),四后端一致:netplan `routing-policy` 项含两者;networkd `[RoutingPolicyRule]` 段含 From=/To=;nmcli 单条带 `from X to Y`;ip 单条 `from X to Y`。
+- **--force 标志**:仅长选项。ip 兜底后端默认保护当前默认路由所在设备(通常管理口,避免 SSH 断连);`--force` 覆盖该保护。
+- **环境变量 BM_SET_IP_NETPLAN_FILE**:netplan 后端优先使用此变量指定配置文件;未设则在 `/etc/netplan/` 取字典序最后一个 `*.yaml`;都无则回退 `01-netcfg.yaml` 并告警。
+- **netplan 合并与备份**:设备已存在时更新本工具管理的键(dhcp4/dhcp6/addresses/routes/routing-policy/nameservers/optional),保留其余(mtu/match/set-name 等);写前自动备份为 `<file>.bm_set_ip.bak`,apply 失败则恢复。
+- **nmcli 表名解析**:路由与策略的 table 参数统一解析为数字:直接数字用之;`/etc/iproute2/rt_tables` 已有的名字查表;未知名自动从 100 起分配空闲 id 并写回 rt_tables。

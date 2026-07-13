@@ -40,7 +40,7 @@
 
 ## 无实施模式(--dry-run / -n)
 
-只解析 + 按固定 `key=value` 格式打印分析配置(列表化:`v4.addrs=`、`routes[N].to=`、`policies[N].from=`),不应用、不需 root。测试融入 `cargo test`(`tests/parse_cases.rs`,59 项);`tests/parse_cases.sh` 为薄包装。
+只解析 + 按固定 `key=value` 格式打印分析配置(列表化:`v4.addrs=`、`routes[N].to=`、`policies[N].from=`),不应用、不需 root。测试融入 `cargo test`(`tests/parse_cases.rs`,69 项);`tests/parse_cases.sh` 为薄包装。
 
 ## 输入校验(解析层直接报错)
 
@@ -49,3 +49,21 @@
 ## 后端
 
 netplan(需 yaml;apply 检测 stderr Error/Conflicting)→ nmcli(routes 用 `table=N`,routing-rules 逗号+固定 priority+数字 table)→ networkd(`networkctl reload`+`reconfigure <dev>`,不波及其他网口)→ ip 兜底(逐条检测失败打印 WARNING;DHCP 不支持)。切换后端前 `rm /etc/systemd/network/10-<dev>.network` 残留。
+
+## 策略 from+to 语义
+
+`Policy { from, to, table }` 中 from 与 to 同时存在时,生成**单条**规则(源且目的同时匹配),而非拆成两条。四后端一致:netplan 单个 `routing-policy` 项含 from+to;networkd 单个 `[RoutingPolicyRule]` 段含 From=/To=;nmcli 单条 `priority P from X to Y table N`;ip 单条 `ip rule add from X to Y table N`。
+
+## --force
+
+仅长选项 `--force`。ip 兜底后端默认拒绝 flush「当前默认路由所在设备」(通常是管理口,避免断 SSH);`--force` 覆盖该保护。
+
+## netplan 文件选择与合并
+
+- 目标文件:环境变量 `BM_SET_IP_NETPLAN_FILE` 优先;否则取 `/etc/netplan/` 下字典序最后一个 `*.yaml`;都没有则回退 `01-netcfg.yaml` 并告警。
+- 写前备份为 `<file>.bm_set_ip.bak`;`netplan apply` 失败(退出码非 0 或 stderr 含 Error/Conflicting)自动恢复备份后退出。
+- 设备已存在时**合并**:更新本工具管理的键(dhcp4/dhcp6/addresses/routes/routing-policy/nameservers/optional),保留其余(mtu/match/set-name/receive-checksum-offload 等)。
+
+## nmcli 表名解析
+
+routes 与 routing-rules 的 table 表名统一解析为数字 id:直接数字 → 用之;`/etc/iproute2/rt_tables` 已有名 → 查表;未知名 → 从 100 起自动分配空闲 id 并追加写回 `/etc/iproute2/rt_tables`。同一次运行内多个未知名分到不同 id。
