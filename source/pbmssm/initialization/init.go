@@ -9,10 +9,12 @@ import (
 	"bmssm/global"
 	"bmssm/logger"
 	mwalarm "bmssm/mvc/alarm"
+	mwfirewall "bmssm/mvc/firewall"
 	mwuser "bmssm/mvc/user"
 	"bmssm/pkg/alarm"
 	"bmssm/pkg/auth"
 	"bmssm/pkg/device"
+	"bmssm/pkg/firewall"
 	"bmssm/pkg/metrics"
 	"bmssm/pkg/ota"
 )
@@ -63,6 +65,9 @@ func InitBase() {
 		if err := database.Migrate(db); err != nil {
 			logger.Warn("migrate failed: %v", err)
 		}
+		// firewall 崩溃恢复：回滚未确认的过期 apply。使用与 HTTP handlers 共享的
+		// 单例 Applier（mwfirewall.DefaultApplier），使 resume timer 受同一 mu 串行化。
+		firewall.CrashRecover(mwfirewall.DefaultApplier())
 		// 若 user 表为空，创建默认 admin 用户
 		createDefaultAdmin(conf)
 		// 启动 OTA workflow 引擎（RegisterModel 由 pkg/ota init() 注册）

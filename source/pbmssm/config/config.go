@@ -73,6 +73,12 @@ func LoadFromDir(dir string) bool {
 	v.SetDefault("metrics.temperatureThresholds.critical", 90)
 	v.SetDefault("metrics.temperatureThresholds.warning", 85)
 
+	// Firewall 防火墙管理
+	v.SetDefault("firewall.enabled", true)
+	v.SetDefault("firewall.persistPath", "/etc/iptables/rules.v4")
+	v.SetDefault("firewall.rollbackSeconds", 300)
+	v.SetDefault("firewall.protectPorts", []int{})
+
 	// Metrics 历史存档
 	v.SetDefault("metrics.archive.enabled", true)
 	v.SetDefault("metrics.archive.path", "/var/lib/bmssm/metrics")

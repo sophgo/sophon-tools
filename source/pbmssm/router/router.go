@@ -13,6 +13,7 @@ import (
 	"bmssm/mvc/compat"
 	"bmssm/mvc/docker"
 	"bmssm/mvc/filemanage"
+	firewallCtrl "bmssm/mvc/firewall"
 	"bmssm/mvc/hardware"
 	"bmssm/mvc/health"
 	metricsCtrl "bmssm/mvc/metrics"
@@ -47,6 +48,7 @@ func Register(r *gin.Engine) {
 	compatCtrl := compat.DefaultController()
 	systemdC := systemdCtrl.DefaultController()
 	portsC := portsCtrl.DefaultController()
+	fwCtrl := firewallCtrl.DefaultController()
 
 	// 公开：仅 login（含独立防爆破限流，约 5 次/12s/IP）
 	public := r.Group("/api/v1")
@@ -164,5 +166,20 @@ func Register(r *gin.Engine) {
 		api.POST("/files/mkdir", fileCtrl.Mkdir)
 		api.POST("/files/rename", fileCtrl.Rename)
 		api.DELETE("/files", fileCtrl.Delete)
+
+			// 防火墙
+			api.GET("/firewall/status", fwCtrl.Status)
+			api.GET("/firewall/intent", fwCtrl.ListIntents)
+			api.POST("/firewall/intent", fwCtrl.AddIntent)
+			api.DELETE("/firewall/intent/:id", fwCtrl.DeleteIntent)
+			api.GET("/firewall/docker-user", fwCtrl.ListDockerRules)
+			api.POST("/firewall/docker-user", fwCtrl.AddDockerRule)
+			api.DELETE("/firewall/docker-user/:id", fwCtrl.DeleteDockerRule)
+			api.GET("/firewall/raw", fwCtrl.ListRaw)
+			api.POST("/firewall/raw", fwCtrl.AddRaw)
+			api.DELETE("/firewall/raw/:chain/:num", fwCtrl.DeleteRaw)
+			api.POST("/firewall/apply", fwCtrl.Apply)
+			api.POST("/firewall/confirm", fwCtrl.Confirm)
+			api.POST("/firewall/rollback", fwCtrl.Rollback)
+		}
 	}
-}

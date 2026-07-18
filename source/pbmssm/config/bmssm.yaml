@@ -33,3 +33,8 @@ metrics:
     path: /var/lib/bmssm/metrics   # 存档目录
     maxSizeMB: 100                # 所占空间淘汰上限（MB）；累计超限按 FIFO 删除最旧分段。无时间淘汰。
     channelBufferSize: 16          # 异步写入通道大小；满则丢弃最旧样本（不影响 Prometheus 实时更新）
+firewall:
+  enabled: true
+  persistPath: /etc/iptables/rules.v4
+  rollbackSeconds: 300
+  protectPorts: []
