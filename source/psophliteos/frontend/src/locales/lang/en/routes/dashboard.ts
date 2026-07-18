@@ -25,6 +25,7 @@ export default {
   fileManage: 'File Manager',
   serviceManage: 'Service Management',
   portStatus: 'Port Status',
+  firewall: 'Firewall',
   content: {
     sysContent:
       'System OTA upgrade, suitable for version upgrade, does not support downgrade and cross version upgrade, otherwise it may cause system damage.',

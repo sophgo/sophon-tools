@@ -111,6 +111,14 @@ const maintenance: AppRouteModule = {
         title: t('routes.dashboard.portStatus'),
       },
     },
+    {
+      path: 'firewall',
+      name: 'Firewall',
+      component: () => import('/@/views/maintenance/firewall/index.vue'),
+      meta: {
+        title: t('routes.dashboard.firewall'),
+      },
+    },
   ],
 };
 

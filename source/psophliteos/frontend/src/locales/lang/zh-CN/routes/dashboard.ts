@@ -25,6 +25,7 @@ export default {
   fileManage: '文件管理',
   serviceManage: '服务管理',
   portStatus: '端口状态',
+  firewall: '防火墙',
   content: {
     sysContent: '系统OTA升级,适用于版本升级,不支持降级和跨版本升级,否则可能导致系统损坏。',
     ssmContent:
