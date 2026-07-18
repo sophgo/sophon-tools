@@ -11,6 +11,7 @@
       >
         <div class="py-4 px-4 flex flex-col items-center">
           <Progress
+            v-if="index < 2"
             class="text-center"
             type="circle"
             :format="(percent) => percent + '%'"
