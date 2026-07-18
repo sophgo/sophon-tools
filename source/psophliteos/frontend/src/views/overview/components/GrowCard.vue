@@ -18,8 +18,8 @@
             :percent="item.value"
             :strokeColor="item.color"
           />
-          <div v-if="item.description" class="lg:mt-8 mt-4">
-            <div v-for="des in item.description" :key="des.label" class="text-left text-xs">
+          <div v-if="item.description" class="lg:mt-8 mt-4 w-full">
+            <div v-for="des in item.description" :key="des.label" class="text-left text-xs whitespace-nowrap overflow-hidden text-ellipsis">
               <label>{{ des.label }}</label>
               :
               <span>{{ des.value }}</span>
