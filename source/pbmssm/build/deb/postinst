@@ -8,6 +8,16 @@ set -e
 # 运行目录（DB / 日志 / JWT secret 持久化）
 mkdir -p /var/lib/bmssm /var/log/bmssm
 
+# 确保 iptables + iptables-persistent 已装（firewall 规则持久化依赖）
+if ! command -v iptables >/dev/null 2>&1; then
+    DEBIAN_FRONTEND=noninteractive apt-get update -qq
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq iptables || true
+fi
+if ! dpkg -s iptables-persistent >/dev/null 2>&1; then
+    DEBIAN_FRONTEND=noninteractive apt-get update -qq
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq iptables-persistent || true
+fi
+
 systemctl daemon-reload
 systemctl enable bmssm 2>/dev/null || true
 # 升级时重启新版本；首次安装时启动。失败不阻断 dpkg

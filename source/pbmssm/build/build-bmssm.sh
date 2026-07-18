@@ -2,7 +2,7 @@
 # x86 构建
 set -e
 cd "$(dirname "$0")/.."
-VERSION="${1:-2.0.0}"
+VERSION="${1:-2.1.0}"
 bash build/version.sh "$VERSION"
 read VERSION COMMIT BUILDTIME < <(tr '|' ' ' < build/version.txt)
 

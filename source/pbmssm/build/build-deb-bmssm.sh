@@ -1,13 +1,13 @@
 #!/bin/bash
 # bmssm .deb 打包：交叉编译 arm64 静态二进制 + 组装 deb 数据树 + dpkg-deb。
 # 用法: bash build/build-deb-bmssm.sh [VERSION] [ARCH]
-#   VERSION 默认 2.0.0（与 build/version.sh 一致）
+#   VERSION 默认 2.1.0（与 build/version.sh 一致）
 #   ARCH   默认 arm64（设备）；amd64 用于 PCIE/开发机
 # 产物: release/bmssm_${VERSION}_${ARCH}.deb
 set -e
 
 cd "$(dirname "$0")/.."
-VERSION="${1:-2.0.0}"
+VERSION="${1:-2.1.0}"
 ARCH="${2:-arm64}"
 
 # 1. 交叉编译静态二进制 + 打包 bmssm.yaml 到 release/
