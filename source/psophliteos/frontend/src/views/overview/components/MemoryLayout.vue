@@ -3,7 +3,6 @@
     <p class="font-bold text-base title">{{ t('overview.memoryLayout') }}</p>
     <div class="rrow" v-for="r in regions" :key="r.label">
       <span class="lab">{{ r.label }}</span>
-      <span class="bar"><i :style="{ width: r.usagePct + '%', background: barColor(r.usagePct) }"></i></span>
       <span class="num">{{ unitSize(r.usedMB) }} / {{ unitSize(r.totalMB) }}</span>
       <span class="pct">{{ r.usagePct.toFixed(1) }}%</span>
     </div>
@@ -30,7 +29,6 @@
 
   const props = defineProps<{ layout: MemoryLayout | null | undefined }>();
 
-  // BM1688/CV186AH 无 VPU（VPU total 为 0），且 VPP 称 VPSS。
   const isVPSS = (chip: string) => chip === 'bm1688' || chip === 'cv186ah';
 
   const regions = computed(() => {
@@ -45,7 +43,6 @@
       { label: t('overview.vpuMemory'), r: lay.vpu },
       { label: vppLabel, r: lay.vpp },
     ];
-    // total<=0 的区域不展示（SE9 无 VPU → 隐藏 VPU 行）
     return list
       .filter((x) => (x.r?.totalMB ?? 0) > 0)
       .map((x) => ({
@@ -56,17 +53,10 @@
       }));
   });
 
-  // MB → 人类可读（MB/GB）。
   const unitSize = (mb: number) => {
     if (!mb && mb !== 0) return '';
     if (mb < 1024) return mb.toFixed(0) + 'MB';
     return (mb / 1024).toFixed(1) + 'GB';
-  };
-
-  const barColor = (pct: number) => {
-    if (pct >= 90) return '#ff4d4f';
-    if (pct >= 70) return '#faad14';
-    return '#108ee9';
   };
 </script>
 <style lang="less" scoped>
@@ -89,19 +79,6 @@
         width: 72px;
         color: #555;
         flex-shrink: 0;
-      }
-
-      .bar {
-        flex: 1;
-        height: 6px;
-        background: #f0f0f0;
-        border-radius: 3px;
-        overflow: hidden;
-
-        & > i {
-          display: block;
-          height: 100%;
-        }
       }
 
       .num {

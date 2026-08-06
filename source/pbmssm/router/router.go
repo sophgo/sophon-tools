@@ -9,13 +9,13 @@ import (
 	"bmssm/middleware"
 	"bmssm/mvc/alarm"
 	"bmssm/mvc/audit"
-	"bmssm/mvc/logs"
 	"bmssm/mvc/compat"
 	"bmssm/mvc/docker"
 	"bmssm/mvc/filemanage"
 	firewallCtrl "bmssm/mvc/firewall"
 	"bmssm/mvc/hardware"
 	"bmssm/mvc/health"
+	"bmssm/mvc/logs"
 	metricsCtrl "bmssm/mvc/metrics"
 	"bmssm/mvc/network"
 	portsCtrl "bmssm/mvc/ports"
@@ -167,19 +167,11 @@ func Register(r *gin.Engine) {
 		api.POST("/files/rename", fileCtrl.Rename)
 		api.DELETE("/files", fileCtrl.Delete)
 
-			// 防火墙
-			api.GET("/firewall/status", fwCtrl.Status)
-			api.GET("/firewall/intent", fwCtrl.ListIntents)
-			api.POST("/firewall/intent", fwCtrl.AddIntent)
-			api.DELETE("/firewall/intent/:id", fwCtrl.DeleteIntent)
-			api.GET("/firewall/docker-user", fwCtrl.ListDockerRules)
-			api.POST("/firewall/docker-user", fwCtrl.AddDockerRule)
-			api.DELETE("/firewall/docker-user/:id", fwCtrl.DeleteDockerRule)
-			api.GET("/firewall/raw", fwCtrl.ListRaw)
-			api.POST("/firewall/raw", fwCtrl.AddRaw)
-			api.DELETE("/firewall/raw/:chain/:num", fwCtrl.DeleteRaw)
-			api.POST("/firewall/apply", fwCtrl.Apply)
-			api.POST("/firewall/confirm", fwCtrl.Confirm)
-			api.POST("/firewall/rollback", fwCtrl.Rollback)
-		}
+		// 防火墙
+		api.GET("/firewall/status", fwCtrl.Status)
+		api.GET("/firewall/intent", fwCtrl.ListIntents)
+		api.POST("/firewall/intent", fwCtrl.AddIntent)
+		api.DELETE("/firewall/intent/:id", fwCtrl.DeleteIntent)
+		api.POST("/firewall/rebuild", fwCtrl.Rebuild)
 	}
+}

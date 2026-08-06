@@ -20,11 +20,6 @@
     </a-card>
 
     <BasicTable @register="registerTable">
-      <template #toolbar>
-        <a-button type="primary" :loading="applying" @click="handleApply">
-          {{ t('maintenance.firewall.apply') }}
-        </a-button>
-      </template>
       <template #bodyCell="{ column, record }">
         <template v-if="column.dataIndex === 'enabled'">
           <a-switch
@@ -49,22 +44,6 @@
         </template>
       </template>
     </BasicTable>
-
-    <BasicModal
-      @register="registerRiskModal"
-      :title="t('maintenance.firewall.riskTitle')"
-      width="560px"
-      :ok-text="t('maintenance.firewall.forceApply')"
-      :cancel-text="t('maintenance.firewall.cancel')"
-      @ok="handleForceApply"
-    >
-      <a-alert type="warning" show-icon :message="t('maintenance.firewall.riskDetected')" />
-      <ul class="mt-2">
-        <li v-for="(r, i) in risks" :key="i">
-          <span class="font-medium">[{{ r.mode }}]</span> {{ r.description }}
-        </li>
-      </ul>
-    </BasicModal>
   </div>
 </template>
 
@@ -73,7 +52,6 @@
   import { Card, Select, Switch, message } from 'ant-design-vue';
   import { BasicTable, useTable, TableAction } from '/@/components/Table';
   import { BasicForm, useForm } from '/@/components/Form/index';
-  import { BasicModal, useModal } from '/@/components/Modal';
   import { useI18n } from '/@/hooks/web/useI18n';
   import {
     getIntentColumns,
@@ -84,12 +62,8 @@
     getIntents,
     addIntent,
     deleteIntent,
-    applyFirewall,
-    isRiskEnvelope,
-    envelopeErr,
-    extractRisks,
+    rebuildFirewall,
     type Intent,
-    type Risk,
   } from '/@/api/maintenance/firewall';
 
   const ACard = Card;
@@ -97,14 +71,8 @@
   const ASwitch = Switch;
 
   const { t } = useI18n();
-  const emit = defineEmits<{
-    (e: 'apply', payload: { token: string; rollbackSeconds?: number }): void;
-  }>();
 
   const adding = ref(false);
-  const applying = ref(false);
-  const risks = ref<Risk[]>([]);
-
   const currentPreset = ref<string>('port_allow');
 
   const [registerForm, { setProps: setFormProps, resetFields, validate }] = useForm({
@@ -132,9 +100,6 @@
     },
   });
 
-  const [registerRiskModal, { openModal: openRiskModal, setModalProps: setRiskModalProps, closeModal: closeRiskModal }] =
-    useModal();
-
   function buildParams(values: any): string {
     return JSON.stringify(values);
   }
@@ -148,6 +113,7 @@
         params: buildParams(values),
         enabled: true,
       });
+      await rebuildFirewall();
       message.success(t('maintenance.firewall.addOk'));
       await resetFields();
       reload();
@@ -165,6 +131,7 @@
   async function handleToggle(record: Intent, checked: boolean) {
     try {
       await addIntent({ ...record, enabled: checked });
+      await rebuildFirewall();
       message.success(checked ? t('maintenance.firewall.enabledOk') : t('maintenance.firewall.disabledOk'));
       reload();
     } catch (e: any) {
@@ -177,49 +144,11 @@
     if (!record.id) return;
     try {
       await deleteIntent(record.id);
+      await rebuildFirewall();
       message.success(t('maintenance.firewall.deleteOk'));
       reload();
     } catch (e: any) {
       message.error(e?.message || t('maintenance.firewall.deleteFail'));
-    }
-  }
-
-  async function handleApply() {
-    applying.value = true;
-    try {
-      const data = await applyFirewall({ force: false });
-      if (data.code === 0 && data.result) {
-        emit('apply', { token: data.result.token, rollbackSeconds: data.result.rollbackSeconds ?? 300 });
-      } else if (isRiskEnvelope(data)) {
-        risks.value = extractRisks(data);
-        openRiskModal(true);
-      } else {
-        message.error(envelopeErr(data) || t('maintenance.firewall.applyFail'));
-      }
-    } catch (e: any) {
-      message.error(e?.message || t('maintenance.firewall.applyFail'));
-    } finally {
-      applying.value = false;
-    }
-  }
-
-  async function handleForceApply() {
-    try {
-      setRiskModalProps({ confirmLoading: true });
-      const data = await applyFirewall({ force: true });
-      if (data.code === 0 && data.result) {
-        closeRiskModal();
-        emit('apply', { token: data.result.token, rollbackSeconds: data.result.rollbackSeconds ?? 300 });
-      } else if (isRiskEnvelope(data)) {
-        // force 后仍有风险（理论上不应发生）→ 刷新风险列表
-        risks.value = extractRisks(data);
-      } else {
-        message.error(envelopeErr(data) || t('maintenance.firewall.applyFail'));
-      }
-    } catch (e: any) {
-      message.error(e?.message || t('maintenance.firewall.applyFail'));
-    } finally {
-      setRiskModalProps({ confirmLoading: false });
     }
   }
 </script>

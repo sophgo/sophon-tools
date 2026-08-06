@@ -28,7 +28,7 @@ type Intent struct {
 
 // IptablesRule 一条 iptables 规则的参数化表示（不经 shell）。
 type IptablesRule struct {
-	Table   string   // 默认 "filter"
+	Table   string // 默认 "filter"
 	Chain   string
 	Args    []string // 完整参数（含 -m comment --comment）
 	Comment string   // 注释值（便于 rebuild 按注释定位）
@@ -56,7 +56,7 @@ func (it Intent) Validate() error {
 			return wrapInvalid(fmt.Errorf("port out of range"))
 		}
 		if p.Src != "" {
-			if _, n, err := net.ParseCIDR(p.Src); err != nil || n == nil {
+			if _, err := parseIPv4CIDR(p.Src); err != nil {
 				return wrapInvalid(fmt.Errorf("bad src cidr"))
 			}
 		}
@@ -143,7 +143,7 @@ func (it Intent) Translate() ([]IptablesRule, error) {
 		}
 		rn := it.recentName()
 		r1 := []string{"-p", "tcp", "--dport", strconv.Itoa(p.Port), "-m", "recent", "--set", "--name", rn, "-m", "comment", "--comment", c}
-		r2 := []string{"-p", "tcp", "--dport", strconv.Itoa(p.Port), "-m", "recent", "--update", "--seconds", strconv.Itoa(sec), "--hitcount", strconv.Itoa(p.Rate+1), "--name", rn, "-j", "DROP", "-m", "comment", "--comment", c}
+		r2 := []string{"-p", "tcp", "--dport", strconv.Itoa(p.Port), "-m", "recent", "--update", "--seconds", strconv.Itoa(sec), "--hitcount", strconv.Itoa(p.Rate + 1), "--name", rn, "-j", "DROP", "-m", "comment", "--comment", c}
 		return []IptablesRule{
 			{Table: "filter", Chain: "INPUT", Args: r1, Comment: c},
 			{Table: "filter", Chain: "INPUT", Args: r2, Comment: c},
@@ -172,7 +172,10 @@ func (it Intent) Translate() ([]IptablesRule, error) {
 		if p.Allow {
 			j = "ACCEPT"
 		}
-		args := []string{"-p", "icmp", "-j", j, "-m", "comment", "--comment", c}
+		// 只作用于 ICMP 回显（echo request/reply），不误伤 SSH/PMTU 依赖的
+		// 分片、destination-unreachable 等"非回显"ICMP——那些类型不携带
+		// 完整传输头，不受 -p icmp 外的端口规则约束，被 DROP 会挂起 SSH 大块。
+		args := []string{"-p", "icmp", "--icmp-type", "8", "-j", j, "-m", "comment", "--comment", c}
 		return []IptablesRule{{Table: "filter", Chain: "INPUT", Args: args, Comment: c}}, nil
 	}
 	return nil, wrapInvalid(fmt.Errorf("unreachable"))
@@ -187,6 +190,73 @@ func parseIPv4CIDR(s string) (*net.IPNet, error) {
 		return nil, fmt.Errorf("only ipv4 supported")
 	}
 	return n, nil
+}
+
+// isBroadMatch 判断 src 是否覆盖所有 IPv4 源：空（缺省=匹配全部）、0.0.0.0/0、0.0.0.0。
+// 空字符串必须视为全网段——Translate 对空 src 不输出 -s 参数，等价 -s 0.0.0.0/0。
+func isBroadMatch(src string) bool {
+	if src == "" || src == "0.0.0.0/0" || src == "0.0.0.0" {
+		return true
+	}
+	// 归一化后比较：0.0.0.0/0 的 IPNet 掩码位为 0，覆盖全部。
+	if ip, n, err := net.ParseCIDR(src); err == nil && n != nil {
+		ones, bits := n.Mask.Size()
+		return ip.To4() != nil && bits == 32 && ones == 0
+	}
+	return false
+}
+
+// CheckProtectDeny 拒绝屏蔽保护端口/全网段保护主机的意图。返回 ErrInvalidInput。
+// 覆盖三种绕过路径：
+//  1. port_deny + 全网段 src（空/0.0.0.0/0/0.0.0.0）且端口命中 protect → 拒绝
+//  2. ip_blacklist + 全网段 cidr → 拒绝（黑名单无端口维度，全内网封禁即锁死保护主机）
+//  3. rate_limit 作用于保护端口 → 拒绝（recent+DROP 超限丢弃，等效拒绝）
+//
+// 与 Translate 语义对齐：src 缺省即匹配所有源，绝非"仅匹配自己"。
+func CheckProtectDeny(it *Intent, protect []int) error {
+	if len(protect) == 0 {
+		return nil
+	}
+	switch it.Type {
+	case IntentPortDeny:
+		var p struct {
+			Port int    `json:"port"`
+			Src  string `json:"src"`
+		}
+		if err := json.Unmarshal([]byte(it.Params), &p); err != nil {
+			return nil // params 格式不匹配，由 Validate 负责报错
+		}
+		if isBroadMatch(p.Src) {
+			for _, port := range protect {
+				if p.Port == port {
+					return fmt.Errorf("%w: 不能拒绝保护端口 %d 的全网段流量", ErrInvalidInput, port)
+				}
+			}
+		}
+	case IntentIPBlacklist:
+		var p struct {
+			CIDR string `json:"cidr"`
+		}
+		if err := json.Unmarshal([]byte(it.Params), &p); err != nil {
+			return nil
+		}
+		if isBroadMatch(p.CIDR) {
+			return fmt.Errorf("%w: 不能将保护主机加入全网段黑名单", ErrInvalidInput)
+		}
+	case IntentRateLimit:
+		var p struct {
+			Port int `json:"port"`
+		}
+		if err := json.Unmarshal([]byte(it.Params), &p); err != nil {
+			return nil
+		}
+		for _, port := range protect {
+			if p.Port == port {
+				return fmt.Errorf("%w: 不能对保护端口 %d 设置速率限制（可能丢弃管理连接）", ErrInvalidInput, port)
+			}
+		}
+	}
+	return nil
 }
 
 func wrapInvalid(e error) error { return fmt.Errorf("%w: %v", ErrInvalidInput, e) }
