@@ -20,7 +20,9 @@
       >
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'proto'">
-            <a-tag :color="record.proto === 'tcp' || record.proto === 'tcp6' ? 'green' : 'blue'">{{ record.proto }}</a-tag>
+            <a-tag :color="record.proto === 'tcp' || record.proto === 'tcp6' ? 'green' : 'blue'">{{
+              record.proto
+            }}</a-tag>
           </template>
         </template>
       </a-table>
@@ -59,7 +61,14 @@
     loading.value = true;
     try {
       const p = proto.value === 'all' ? undefined : (proto.value as 'tcp' | 'udp');
-      sockets.value = await getListeningPorts(p);
+      const list = await getListeningPorts(p);
+      // 按 协议 → 本地地址 → 端口 → PID 升序排序
+      sockets.value = (list || []).sort((a, b) => {
+        if (a.proto !== b.proto) return a.proto < b.proto ? -1 : 1;
+        if (a.local_ip !== b.local_ip) return a.local_ip < b.local_ip ? -1 : 1;
+        if (a.local_port !== b.local_port) return a.local_port - b.local_port;
+        return a.pid - b.pid;
+      });
     } catch (e: any) {
       message.error(e?.message || '加载端口列表失败');
     } finally {
