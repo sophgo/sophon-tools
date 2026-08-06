@@ -262,3 +262,23 @@ case!(j3_dhcp_no_pad_then_route, &["eth0","dhcp","192.168.2.0","24","1.1.1.254",
 // --force 被接受,dry-run 正常输出
 case!(k1_force_accepted, &["--force","eth0","1.1.1.1","24"], ["v4.addrs=1.1.1.1/24"]);
 case!(k2_force_after_pos, &["eth0","1.1.1.1","24","--force"], ["v4.addrs=1.1.1.1/24"]);
+
+// ============ L. 解析层静默丢弃修复(review)============
+// L1:family2 之后跟随路由 → 报错而非静默丢弃
+case_err!(l1_family2_then_route, &["eth0","1.1.1.1","24","","","2001:db8::1","64","","","192.168.2.0","24","1.1.1.254","100"], "unexpected tokens after IPv6 family");
+// L2:任意 4 元组组之间出现前导空串 → 报错而非 break 静默丢弃
+case_err!(l2_stray_empty_between_groups, &["eth0","1.1.1.1","24","","","","192.168.2.0","24","1.1.1.254","100"], "unexpected empty token");
+// L3:DHCP 补槽少 1 个空串(只剩 2 个) → 报错而非静默丢弃路由
+case_err!(l3_dhcp_pad_short, &["eth0","dhcp","","","192.168.2.0","24","1.1.1.254","100"], "unexpected empty token");
+// L4:net_device 含 '/' 被拒(防 networkd 路径穿越)
+case_err!(l4_net_device_slash, &["x/../foo","1.1.1.1","24"], "invalid net_device");
+// L5:net_device 含换行被拒(防 networkd 配置注入)
+case_err!(l5_net_device_newline, &["eth0\n[Network]","1.1.1.1","24"], "invalid net_device");
+// L6:net_device 超过 16 字符被拒(内核 IFNAMSIZ)
+case_err!(l6_net_device_too_long, &["abcdefghijklmnopqrstuvwxyz0","1.1.1.1","24"], "invalid net_device");
+// L7:net_device 合法带点/冒号(如 eth0.100 / bond0)仍接受
+case!(l7_net_device_dot_ok, &["eth0.100","1.1.1.1","24"], ["net_device=eth0.100"]);
+// L8:IPv4 + IPv6 + 路由(正确的组顺序 family2 在最后)正常解析
+case!(l8_family2_last_ok, &["eth0","1.1.1.1","24","","","192.168.2.0","24","1.1.1.254","100","2001:db8::1","64","fe80::1",""], [
+    "v4.addrs=1.1.1.1/24", "routes.count=1", "routes[0].table=100", "v6.addrs=2001:db8::1/64",
+]);

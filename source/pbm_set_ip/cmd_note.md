@@ -48,7 +48,7 @@
 
 ## 后端
 
-netplan(需 yaml;apply 检测 stderr Error/Conflicting)→ nmcli(routes 用 `table=N`,routing-rules 逗号+固定 priority+数字 table)→ networkd(`networkctl reload`+`reconfigure <dev>`,不波及其他网口)→ ip 兜底(逐条检测失败打印 WARNING;DHCP 不支持)。切换后端前 `rm /etc/systemd/network/10-<dev>.network` 残留。
+netplan(需 yaml;apply 检测 stderr Error/Conflicting;写入前清除旧 gateway4/gateway6;routes/routing-policy 表名须数字或 rt_tables 已注册)→ nmcli(routes 用 `table=N`,routing-rules 逗号+固定 priority+数字 table;缺席 family 显式 method=disabled;先 add 后删旧,add/up 失败不丢旧配置)→ networkd(`networkctl reload`+`reconfigure <dev>`,不波及其他网口;写前备份、失败恢复)→ ip 兜底(逐条检测失败打印 WARNING;DHCP 不支持报错退出;支持 v6 默认路由与 DNS(resolvconf/resolvectl/resolv.conf))。切换后端前 `rm /etc/systemd/network/10-<dev>.network` 残留。
 
 ## 策略 from+to 语义
 

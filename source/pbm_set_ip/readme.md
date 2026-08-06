@@ -155,7 +155,7 @@ bm_set_ip eth0 192.168.1.100 24 192.168.1.1 8.8.8.8  192.168.1.101 24 '' ''  192
 - 策略第 5 token(table)可选:省略时仅在**恰好 1 条路由**时共享该路由的 table(该路由须有 table);否则须显式给出第 5 token。多条策略各自独立。
 - family1 不足 4 参数又有路由/策略 → 报错(补 `''`)。
 
-> 路由表为数字 id(如 `100`),四后端直接识别;如需命名,手工 `echo "100 lan_table" | sudo tee -a /etc/iproute2/rt_tables`。路由与策略仅 IPv4。
+> 路由表为数字 id(如 `100`),四后端直接识别;如需命名,手工 `echo "100 lan_table" | sudo tee -a /etc/iproute2/rt_tables`。netplan 后端只接受数字表 id(表名须已在 rt_tables 注册);nmcli 后端对未知名自动分配 id 并写回。路由与策略仅 IPv4。
 
 ## 为啥需要路由表(策略路由原理)
 
@@ -180,7 +180,7 @@ bm_set_ip --dry-run eth0 192.168.1.100 24 192.168.1.1 8.8.8.8 192.168.2.0 24 192
 ## 测试
 
 ```bash
-cargo test --test parse_cases   # 69 项,覆盖双模式 + 4 元组各场景(含多策略)+ 输入校验(畸形IP/越界前缀/非连续掩码)+ 异常报错
+cargo test --test parse_cases   # 80 项,覆盖双模式 + 4 元组各场景(含多策略)+ 输入校验(畸形IP/越界前缀/非连续掩码)+ 异常报错 + 解析层防静默丢弃(review 修复)
 bash tests/parse_cases.sh        # 等价包装
 ```
 
@@ -201,10 +201,10 @@ bash tests/parse_cases.sh        # 等价包装
 
 自动探测:`netplan`(需 `/etc/netplan/01-netcfg.yaml` 存在)→ `NetworkManager(nmcli)` → `systemd-networkd` → `ip` 兜底。
 
-- **netplan**:写 `addresses`/`routes`/`routing-policy` 到 yaml 后 `netplan apply`。默认网关用 `routes: to:0.0.0.0/0`(避开 deprecated `gateway4` 的冲突检测)。apply 退出码 0 但 stderr 含 `Error`/`Conflicting` 时报失败。
-- **nmcli**:`ipv4.routes` 用 `table=N` 语法;`ipv4.routing-rules` 逗号分隔、固定 priority、table 仅数字 id。
-- **systemd-networkd**:写 `/etc/systemd/network/10-<dev>.network`,`networkctl reload` + `reconfigure <dev>`(仅重载该设备,不波及其他网口)。
-- **ip**(兜底):逐条 `ip addr/route/rule add`,失败打印 `[WARNING]`(如 main 表已有默认路由时 `ip route add default` 失败会提示用策略路由);DHCP 不支持,报错退出。
+- **netplan**:写 `addresses`/`routes`/`routing-policy` 到 yaml 后 `netplan apply`。默认网关用 `routes: to:0.0.0.0/0`(避开 deprecated `gateway4` 的冲突检测);写入前清除设备上旧的 `gateway4`/`gateway6` 键,避免与新 routes 默认路由冲突。apply 退出码 0 但 stderr 含 `Error`/`Conflicting` 时报失败。路由/策略的表名须为数字或已在 `/etc/iproute2/rt_tables` 注册(netplan 的 `table` 只接受数字),否则报错。
+- **nmcli**:`ipv4.routes` 用 `table=N` 语法;`ipv4.routing-rules` 逗号分隔、固定 priority、table 仅数字 id。未指定的 family 显式 `method=disabled`(避免默认 auto 意外启用 DHCP)。先 `con add` 新连接、成功后才删旧连接,add/激活失败不丢旧配置。
+- **systemd-networkd**:写 `/etc/systemd/network/10-<dev>.network`,`networkctl reload` + `reconfigure <dev>`(仅重载该设备,不波及其他网口)。写前备份 `<file>.bm_set_ip.bak`,reconfigure 失败自动恢复备份。
+- **ip**(兜底):逐条 `ip addr/route/rule add`,失败打印 `[WARNING]`(如 main 表已有默认路由时 `ip route add default` 失败会提示用策略路由);DHCP 不支持,报错退出。支持 IPv6 默认路由(`-6 route add default`)与 DNS(优先 `resolvconf`/`resolvectl`,否则直写 `/etc/resolv.conf` 并备份)。
 
 > 切换后端时注意:networkd 后端写的 `/etc/systemd/network/10-<dev>.network` 不会被 `netplan apply` 清除,切回 netplan 前应 `rm` 该文件,否则与 netplan 生成的配置竞争。
 

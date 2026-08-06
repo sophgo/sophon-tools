@@ -75,6 +75,16 @@ impl Config {
             return Err("missing required argument: net_device".into());
         }
         let net_device = positional[0].clone();
+        if net_device.is_empty() {
+            return Err("net_device must not be empty".into());
+        }
+        if !is_valid_net_device(&net_device) {
+            return Err(format!(
+                "invalid net_device '{}': interface name must be 1-16 chars of letters/digits/._:- (no '/' or whitespace)",
+                net_device
+            )
+            .into());
+        }
         let rest: Vec<String> = positional[1..].to_vec();
 
         // 双模式:先旧模式,有剩余 token 则切 4 元组
@@ -269,7 +279,14 @@ fn parse_4tuple(net_device: &str, rest: &[String]) -> Result<Config, lexopt::Err
     loop {
         let pos1 = match rest.get(i) {
             Some(s) if !s.is_empty() => s.clone(),
-            _ => break,
+            Some(_) => {
+                return Err(format!(
+                    "unexpected empty token at position {}: each 4-tuple group must start with a non-empty address; remove stray '' tokens",
+                    i
+                )
+                .into());
+            }
+            None => break,
         };
         // family2 门:family1 为 v4 且 pos1 为 v6/dhcp
         if !family1_is_v6 && jumps_to_family2(&pos1) {
@@ -286,6 +303,15 @@ fn parse_4tuple(net_device: &str, rest: &[String]) -> Result<Config, lexopt::Err
                     None => 128,
                 };
                 v6 = Some(Family { addrs: vec![(pos1, p)], gateway: gw, dns, is_dhcp: false });
+            }
+            // family2 之后不允许再有 token(组顺序:[family2] 必须是最后一个)
+            if i < rest.len() {
+                return Err(format!(
+                    "unexpected tokens after IPv6 family: {} trailing token(s) starting at '{}' (group order is [family1] [extra-addr]* [route]* [policy]* [family2])",
+                    rest.len() - i,
+                    rest[i]
+                )
+                .into());
             }
             break; // family2 末尾
         }
@@ -406,6 +432,13 @@ fn parse_4tuple(net_device: &str, rest: &[String]) -> Result<Config, lexopt::Err
 
 fn looks_like_ipv6(s: &str) -> bool {
     s.contains(':')
+}
+/// Linux 接口名约束:1-16 字符,允许字母/数字/./_/-(无 '/'、空白)。
+fn is_valid_net_device(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 16
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-' || c == ':')
 }
 fn is_dhcp_token(s: &str) -> bool {
     let l = s.to_lowercase();
@@ -840,9 +873,23 @@ fn netplan_render(cfg: &Config, existing_yaml: &str, target_file: &str) -> Resul
         _ => serde_yaml::Mapping::new(),
     };
     // 本工具管理的键(更新前移除,再按当前配置写入)
-    for k in ["dhcp4", "dhcp6", "addresses", "routes", "routing-policy", "nameservers", "optional"] {
+    for k in ["dhcp4", "dhcp6", "addresses", "routes", "routing-policy", "nameservers", "optional", "gateway4", "gateway6"] {
         dev_cfg.remove(Value::String(k.into()));
     }
+    // 表名 → 数字 id(netplan routes/routing-policy 的 table 只接受数字)
+    let rt = load_rt_tables();
+    let resolve_t = |t: &str| -> Result<String, String> {
+        if t.parse::<u32>().is_ok() {
+            return Ok(t.to_string());
+        }
+        match rt.get(t) {
+            Some(&id) => Ok(id.to_string()),
+            None => Err(format!(
+                "table name '{}' not found in /etc/iproute2/rt_tables; netplan requires a numeric table (add '{} <id>' to rt_tables, or use a numeric table)",
+                t, t
+            )),
+        }
+    };
 
     let mut addresses_seq: Vec<Value> = Vec::new();
     let mut routes_seq: Vec<Value> = Vec::new();
@@ -890,7 +937,7 @@ fn netplan_render(cfg: &Config, existing_yaml: &str, target_file: &str) -> Resul
             m.insert(Value::String("via".into()), Value::String(via.clone()));
         }
         if let Some(t) = &r.table {
-            m.insert(Value::String("table".into()), Value::String(t.clone()));
+            m.insert(Value::String("table".into()), Value::String(resolve_t(t)?));
         }
         routes_seq.push(Value::Mapping(m));
     }
@@ -912,7 +959,7 @@ fn netplan_render(cfg: &Config, existing_yaml: &str, target_file: &str) -> Resul
                 m.insert(Value::String("to".into()), Value::String(format!("{}/{}", n, px)));
             }
             if let Some(t) = &p.table {
-                m.insert(Value::String("table".into()), Value::String(t.clone()));
+                m.insert(Value::String("table".into()), Value::String(resolve_t(t)?));
             }
             if !m.is_empty() {
                 policy_seq.push(Value::Mapping(m));
@@ -971,9 +1018,15 @@ fn configure_with_netplan(cfg: &Config) {
 
     // B1:写前备份
     let bak = format!("{}.bm_set_ip.bak", file_path);
-    let _ = fs::copy(&file_path, &bak);
+    if let Err(e) = fs::copy(&file_path, &bak) {
+        eprintln!("[WARNING] could not back up {} to {}: {}", file_path, bak, e);
+    }
 
-    fs::write(&file_path, &new_content).expect("Failed to write netplan config");
+    if let Err(e) = fs::write(&file_path, &new_content) {
+        eprintln!("[ERROR] Failed to write {}: {}", file_path, e);
+        let _ = fs::copy(&bak, &file_path);
+        std::process::exit(1);
+    }
     println!("[INFO] Wrote {} (backup at {})", file_path, bak);
 
     let out = Command::new("netplan").arg("apply").output();
@@ -1000,9 +1053,13 @@ fn configure_with_netplan(cfg: &Config) {
 
     // B1:apply 失败 → 恢复备份
     if !apply_ok {
-        let _ = fs::copy(&bak, &file_path);
-        eprintln!("[ERROR] Restored {} from backup", file_path);
-        let _ = Command::new("netplan").arg("apply").output();
+        match fs::copy(&bak, &file_path) {
+            Ok(_) => {
+                eprintln!("[ERROR] Restored {} from backup", file_path);
+                let _ = Command::new("netplan").arg("apply").output();
+            }
+            Err(e) => eprintln!("[ERROR] Failed to restore {} from {}: {}; config may be broken", file_path, bak, e),
+        }
         std::process::exit(1);
     }
     println!("[INFO] Netplan configuration applied successfully");
@@ -1034,6 +1091,8 @@ fn load_rt_tables() -> std::collections::HashMap<String, u32> {
 /// 返回 (id, 是否新分配)
 fn resolve_table_id(t: &str, allocated: &mut std::collections::HashMap<String, u32>) -> (u32, bool) {
     if let Ok(n) = t.parse::<u32>() {
+        // 注册进 allocated,避免后续表名自动分配与此数字撞 id
+        allocated.entry(t.to_string()).or_insert(n);
         return (n, false);
     }
     if let Some(&n) = allocated.get(t) {
@@ -1066,7 +1125,7 @@ fn writeback_rt_tables(allocated: &std::collections::HashMap<String, u32>, initi
         base
     };
     let mut to_write: Vec<(u32, String)> = allocated.iter()
-        .filter(|(name, _)| !existing.contains_key(*name))
+        .filter(|(name, _)| name.parse::<u32>().is_err() && !existing.contains_key(*name))
         .map(|(name, &id)| (id, name.clone()))
         .collect();
     to_write.sort_by_key(|(id, _)| *id);
@@ -1093,6 +1152,12 @@ fn nmcli_render(cfg: &Config, allocated: &mut std::collections::HashMap<String, 
         if v4f.is_dhcp {
             args.push("ipv4.method".into());
             args.push("auto".into());
+            if let Some(dns) = &v4f.dns {
+                if !dns.is_empty() {
+                    args.push("ipv4.dns".into());
+                    args.push(dns.clone());
+                }
+            }
         } else if !v4f.addrs.is_empty() {
             let addrs: Vec<String> = v4f.addrs.iter().map(|(a, p)| format!("{}/{}", a, p)).collect();
             args.push("ipv4.addresses".into());
@@ -1117,6 +1182,12 @@ fn nmcli_render(cfg: &Config, allocated: &mut std::collections::HashMap<String, 
         if v6f.is_dhcp {
             args.push("ipv6.method".into());
             args.push("auto".into());
+            if let Some(dns) = &v6f.dns {
+                if !dns.is_empty() {
+                    args.push("ipv6.dns".into());
+                    args.push(dns.clone());
+                }
+            }
         } else if !v6f.addrs.is_empty() {
             let addrs: Vec<String> = v6f.addrs.iter().map(|(a, p)| format!("{}/{}", a, p)).collect();
             args.push("ipv6.addresses".into());
@@ -1136,6 +1207,14 @@ fn nmcli_render(cfg: &Config, allocated: &mut std::collections::HashMap<String, 
                 }
             }
         }
+    } else {
+        // 缺席的 family 显式 disabled,避免 nmcli 默认 method=auto 意外启用 DHCP/SLAAC
+        args.push("ipv6.method".into());
+        args.push("disabled".into());
+    }
+    if cfg.v4.is_none() {
+        args.push("ipv4.method".into());
+        args.push("disabled".into());
     }
     // A4:路由 table=表名 → 数字 id
     if !cfg.routes.is_empty() {
@@ -1193,8 +1272,7 @@ fn nmcli_render(cfg: &Config, allocated: &mut std::collections::HashMap<String, 
 
 fn configure_with_nmcli(cfg: &Config) {
     let con_name = format!("static-{}", &cfg.net_device);
-    let _ = Command::new("nmcli").args(["con", "delete", &con_name]).output();
-
+    // 先建新连接;成功后再删旧连接,避免 add 失败时旧配置已丢
     let initial = load_rt_tables();
     let mut allocated = initial.clone();
     if let Some(v4f) = &cfg.v4 {
@@ -1203,18 +1281,34 @@ fn configure_with_nmcli(cfg: &Config) {
         }
     }
     let add_args = nmcli_render(cfg, &mut allocated);
-    writeback_rt_tables(&allocated, &initial);
 
-    let status = Command::new("nmcli").args(&add_args).status();
-    if let Ok(s) = status {
-        if s.success() {
-            let _ = Command::new("nmcli").args(["con", "up", &con_name]).status();
-            println!("[INFO] nmcli configuration applied successfully");
-        } else {
-            eprintln!("[ERROR] Failed to apply nmcli configuration");
+    let add_ok = match Command::new("nmcli").args(&add_args).output() {
+        Ok(o) => {
+            if !o.status.success() {
+                let err = String::from_utf8_lossy(&o.stderr);
+                eprintln!("[ERROR] Failed to add nmcli connection '{}': {}", con_name, err.trim_end());
+                false
+            } else {
+                true
+            }
         }
+        Err(e) => {
+            eprintln!("[ERROR] Could not run nmcli: {}", e);
+            false
+        }
+    };
+    if !add_ok {
+        return;
+    }
+    // con add 成功,此时才删除旧连接(避免旧配置在 add 失败时丢失)
+    let _ = Command::new("nmcli").args(["con", "delete", &con_name]).output();
+    let up_ok = Command::new("nmcli").args(["con", "up", &con_name]).status().map(|s| s.success()).unwrap_or(false);
+    if up_ok {
+        // 仅在连接成功激活后才回写自动分配的表 id,避免 add/up 失败时留下孤儿条目
+        writeback_rt_tables(&allocated, &initial);
+        println!("[INFO] nmcli configuration applied successfully");
     } else {
-        eprintln!("[ERROR] Could not run nmcli");
+        eprintln!("[ERROR] nmcli connection '{}' added but failed to activate; check `nmcli con up {}`", con_name, con_name);
     }
 }
 
@@ -1226,10 +1320,18 @@ fn networkd_render(cfg: &Config) -> (String, String) {
     s.push_str("[Match]\n");
     s.push_str(&format!("Name={}\n\n", cfg.net_device));
     s.push_str("[Network]\n");
+    // DHCP= 是单值选项:先收集 v4/v6 是否 dhcp,再统一写一行(双 dhcp → yes)
+    let v4_dhcp = cfg.v4.as_ref().map(|f| f.is_dhcp).unwrap_or(false);
+    let v6_dhcp = cfg.v6.as_ref().map(|f| f.is_dhcp).unwrap_or(false);
+    if v4_dhcp && v6_dhcp {
+        s.push_str("DHCP=yes\n");
+    } else if v4_dhcp {
+        s.push_str("DHCP=ipv4\n");
+    } else if v6_dhcp {
+        s.push_str("DHCP=ipv6\n");
+    }
     if let Some(v4f) = &cfg.v4 {
-        if v4f.is_dhcp {
-            s.push_str("DHCP=ipv4\n");
-        } else {
+        if !v4f.is_dhcp {
             for (a, p) in &v4f.addrs {
                 s.push_str(&format!("Address={}/{}\n", a, p));
             }
@@ -1241,9 +1343,7 @@ fn networkd_render(cfg: &Config) -> (String, String) {
         }
     }
     if let Some(v6f) = &cfg.v6 {
-        if v6f.is_dhcp {
-            s.push_str("DHCP=ipv6\n");
-        } else {
+        if !v6f.is_dhcp {
             for (a, p) in &v6f.addrs {
                 s.push_str(&format!("Address={}/{}\n", a, p));
             }
@@ -1303,10 +1403,20 @@ fn configure_with_networkd(cfg: &Config) {
     }
 
     let (file_path, content) = networkd_render(cfg);
-    let mut file = fs::File::create(&file_path).expect("[ERROR] Failed to create networkd config file");
-    file.write_all(content.as_bytes()).unwrap();
-
-    println!("[INFO] Created systemd-networkd config at {}", file_path);
+    // 写前备份(与 netplan 后端对齐,失败可回滚)
+    let bak = format!("{}.bm_set_ip.bak", file_path);
+    if let Err(e) = fs::copy(&file_path, &bak) {
+        eprintln!("[WARNING] could not back up {} to {}: {}", file_path, bak, e);
+    }
+    let write_ok = (|| -> std::io::Result<()> {
+        fs::write(&file_path, &content)
+    })();
+    if let Err(e) = write_ok {
+        eprintln!("[ERROR] Failed to write {}: {}", file_path, e);
+        let _ = fs::copy(&bak, &file_path);
+        std::process::exit(1);
+    }
+    println!("[INFO] Created systemd-networkd config at {} (backup at {})", file_path, bak);
     let _ = Command::new("networkctl").arg("reload").status();
     let rc = Command::new("networkctl").arg("reconfigure").arg(&cfg.net_device).status();
     let ok = match rc {
@@ -1319,7 +1429,11 @@ fn configure_with_networkd(cfg: &Config) {
     if ok {
         println!("[INFO] systemd-networkd configuration applied successfully");
     } else {
-        eprintln!("[ERROR] Failed to apply systemd-networkd configuration");
+        eprintln!("[ERROR] Failed to apply systemd-networkd configuration, restoring previous config");
+        let _ = fs::copy(&bak, &file_path);
+        let _ = Command::new("networkctl").arg("reload").status();
+        let _ = Command::new("networkctl").arg("reconfigure").arg(&cfg.net_device).status();
+        std::process::exit(1);
     }
 }
 
@@ -1366,6 +1480,11 @@ fn ip_render(cfg: &Config) -> Vec<Vec<String>> {
         for (a, p) in &v6f.addrs {
             cmds.push(vec!["addr".into(), "add".into(), format!("{}/{}", a, p), "dev".into(), cfg.net_device.clone()]);
         }
+        if let Some(gw) = &v6f.gateway {
+            if !gw.is_empty() {
+                cmds.push(vec!["-6".into(), "route".into(), "add".into(), "default".into(), "via".into(), gw.clone(), "dev".into(), cfg.net_device.clone()]);
+            }
+        }
     }
     for r in &cfg.routes {
         let mut c: Vec<String> = vec!["route".into(), "add".into(), format!("{}/{}", r.to, r.to_prefix)];
@@ -1407,7 +1526,27 @@ fn configure_with_ip(cfg: &Config) {
         || cfg.v6.as_ref().map(|f| f.is_dhcp).unwrap_or(false);
     if any_dhcp {
         eprintln!("[ERROR] DHCP is not supported when using manual IP configuration");
-        return;
+        std::process::exit(1);
+    }
+
+    // DNS:ip 兜底无声明式后端,收集 v4/v6 的 DNS 应用之(resolvconf 优先,否则直写 resolv.conf)
+    let mut dns_list: Vec<String> = Vec::new();
+    if let Some(v4f) = &cfg.v4 {
+        if let Some(d) = &v4f.dns {
+            if !d.is_empty() && !dns_list.contains(d) {
+                dns_list.push(d.clone());
+            }
+        }
+    }
+    if let Some(v6f) = &cfg.v6 {
+        if let Some(d) = &v6f.dns {
+            if !d.is_empty() && !dns_list.contains(d) {
+                dns_list.push(d.clone());
+            }
+        }
+    }
+    if !dns_list.is_empty() {
+        apply_dns(&dns_list);
     }
 
     // C6:保护当前默认路由所在设备(通常是管理口),避免 flush 断 SSH
@@ -1476,6 +1615,26 @@ fn configure_with_ip(cfg: &Config) {
         eprintln!("[ERROR] Failed to add any of the {} address(es) to {}", addr_total, cfg.net_device);
     }
     println!("[INFO] Manual IP configuration applied (addresses: {}/{})", addr_ok, addr_total);
+}
+
+/// 应用 DNS:优先 resolvconf(resolvconf/resolvectl 二选一),否则直写 /etc/resolv.conf(先备份)。
+fn apply_dns(servers: &[String]) {
+    let nameserver_lines: Vec<String> = servers.iter().map(|s| format!("nameserver {}", s)).collect();
+    if is_command_exists("resolvconf") {
+        let _ = Command::new("resolvconf").args(["-a", "bm_set_ip"]).stdin(std::process::Stdio::piped()).spawn();
+    } else if is_command_exists("resolvectl") {
+        for s in servers {
+            let _ = Command::new("resolvectl").args(["dns", "bm_set_ip", s]).status();
+        }
+    } else {
+        let path = "/etc/resolv.conf";
+        let bak = format!("{}.bm_set_ip.bak", path);
+        let _ = fs::copy(path, &bak);
+        match fs::write(path, nameserver_lines.join("\n") + "\n") {
+            Ok(_) => println!("[INFO] Wrote {} (backup at {})", path, bak),
+            Err(e) => eprintln!("[ERROR] Failed to write {}: {} (previous file kept at {})", path, e, bak),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1643,5 +1802,111 @@ mod tests {
         let cfg = cfg_ip(vec![], vec![], false);
         let out = netplan_render(&cfg, "not a mapping\n", "/etc/netplan/01-netcfg.yaml");
         assert!(out.is_err(), "C8:非 mapping 应 Err");
+    }
+
+    fn cfg_v4_dhcp_v6_dhcp() -> Config {
+        Config {
+            net_device: "eth1".into(),
+            family1_is_v6: false,
+            v4: Some(Family { addrs: vec![], gateway: None, dns: None, is_dhcp: true }),
+            v6: Some(Family { addrs: vec![], gateway: None, dns: Some("2001:4860:4860::8888".into()), is_dhcp: true }),
+            routes: vec![],
+            policies: vec![],
+            dry_run: false,
+            force: false,
+        }
+    }
+
+    fn cfg_v6_only() -> Config {
+        Config {
+            net_device: "eth1".into(),
+            family1_is_v6: true,
+            v4: None,
+            v6: Some(Family {
+                addrs: vec![("2001:db8::1".into(), 64)],
+                gateway: Some("fe80::1".into()),
+                dns: Some("2001:4860:4860::8888".into()),
+                is_dhcp: false,
+            }),
+            routes: vec![],
+            policies: vec![],
+            dry_run: false,
+            force: false,
+        }
+    }
+
+    #[test]
+    fn networkd_render_dual_dhcp_single_line() {
+        // F6:双 DHCP 应合并为单行 DHCP=yes,而非两行互相覆盖
+        let cfg = cfg_v4_dhcp_v6_dhcp();
+        let (_path, content) = networkd_render(&cfg);
+        assert_eq!(content.matches("DHCP=").count(), 1, "DHCP= 应只有一行:\n{}", content);
+        assert!(content.contains("DHCP=yes"), "双 dhcp 应为 DHCP=yes:\n{}", content);
+    }
+
+    #[test]
+    fn networkd_render_v4_dhcp_v6_static() {
+        // v4 dhcp + v6 static:DHCP=ipv4 一行,另加 v6 地址
+        let cfg = cfg_ip(vec![], vec![], false);
+        let mut cfg = cfg;
+        cfg.v4 = Some(Family { addrs: vec![], gateway: None, dns: None, is_dhcp: true });
+        cfg.v6 = Some(Family { addrs: vec![("2001:db8::1".into(), 64)], gateway: Some("fe80::1".into()), dns: None, is_dhcp: false });
+        let (_path, content) = networkd_render(&cfg);
+        assert_eq!(content.matches("DHCP=").count(), 1, "DHCP= 应只有一行:\n{}", content);
+        assert!(content.contains("DHCP=ipv4"), "应为 DHCP=ipv4:\n{}", content);
+        assert!(content.contains("Address=2001:db8::1/64"), "缺 v6 地址:\n{}", content);
+    }
+
+    #[test]
+    fn ip_render_v6_gateway_default_route() {
+        // F4:ip 兜底后端应为 v6 网关生成默认路由
+        let cfg = cfg_v6_only();
+        let cmds = ip_render(&cfg);
+        let joined: Vec<String> = cmds.iter().map(|c| c.join(" ")).collect();
+        assert!(joined.iter().any(|s| s.contains("-6 route add default via fe80::1 dev eth1")), "缺 v6 默认路由: {:?}", joined);
+    }
+
+    #[test]
+    fn nmcli_render_missing_family_method_disabled() {
+        // F8:缺席 family 应显式 method=disabled,避免默认 auto 意外启用 DHCP
+        let cfg = cfg_v6_only();
+        let mut allocated = HashMap::new();
+        let args = nmcli_render(&cfg, &mut allocated);
+        let joined = args.join(" ");
+        assert!(joined.contains("ipv4.method disabled"), "v6-only 应显式 ipv4.method disabled: {}", joined);
+        assert!(joined.contains("ipv6.method manual"), "v6 应为 manual: {}", joined);
+    }
+
+    #[test]
+    fn nmcli_render_dual_dhcp_methods_auto() {
+        // F8:双 DHCP 时两族 method 均 auto,且 v6 dhcp 的 dns 保留
+        let cfg = cfg_v4_dhcp_v6_dhcp();
+        let mut allocated = HashMap::new();
+        let args = nmcli_render(&cfg, &mut allocated);
+        let joined = args.join(" ");
+        assert!(joined.contains("ipv4.method auto"), "缺 ipv4.method auto: {}", joined);
+        assert!(joined.contains("ipv6.method auto"), "缺 ipv6.method auto: {}", joined);
+        assert!(joined.contains("ipv6.dns 2001:4860:4860::8888"), "v6 dhcp 的 dns 应保留: {}", joined);
+    }
+
+    #[test]
+    fn resolve_table_id_digit_blocks_automatic() {
+        // F8:数字 id 注册进 allocated,后续表名自动分配不与数字撞车
+        let mut allocated = HashMap::new();
+        let (id_a, _) = resolve_table_id("100", &mut allocated);
+        let (id_b, _) = resolve_table_id("lan_table", &mut allocated);
+        assert_eq!(id_a, 100);
+        assert_ne!(id_b, 100, "表名自动分配不应与已用数字 id 100 撞车");
+        assert_eq!(allocated.get("100"), Some(&100u32));
+    }
+
+    #[test]
+    fn netplan_render_removes_gateway4() {
+        // F12:受管理键应清除旧 gateway4,避免与 routes 默认路由冲突
+        let cfg = cfg_ip(vec![], vec![], false);
+        let existing = "network:\n  version: 2\n  ethernets:\n    eth1:\n      gateway4: 192.168.1.1\n      dhcp4: false\n";
+        let yaml = netplan_render(&cfg, existing, "/etc/netplan/01-netcfg.yaml").unwrap();
+        assert!(!yaml.contains("gateway4"), "应清除旧 gateway4:\n{}", yaml);
+        assert!(yaml.contains("to: 0.0.0.0/0"), "应生成 routes 默认路由:\n{}", yaml);
     }
 }
