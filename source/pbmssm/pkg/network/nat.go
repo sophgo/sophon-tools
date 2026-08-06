@@ -13,13 +13,13 @@ import (
 
 // NatRule NAT 规则请求。
 type NatRule struct {
-	Direction string `json:"direction"`           // "in" (PREROUTING) or "out" (POSTROUTING)
-	Operation string `json:"op"`                  // "append" or "delete"
-	Src       string `json:"src"`                  // 源/目标 IP
-	Dst       string `json:"dst"`                  // 目标 IP
+	Direction string `json:"direction"` // "in" (PREROUTING) or "out" (POSTROUTING)
+	Operation string `json:"op"`        // "append" or "delete"
+	Src       string `json:"src"`       // 源/目标 IP
+	Dst       string `json:"dst"`       // 目标 IP
 	SrcPort   string `json:"srcPort,omitempty"`
 	DstPort   string `json:"dstPort,omitempty"`
-	Protocol  string `json:"protocol,omitempty"`  // tcp/udp
+	Protocol  string `json:"protocol,omitempty"` // tcp/udp
 	Flags     string `json:"flags,omitempty"`
 }
 
@@ -111,9 +111,9 @@ func (rule NatRule) buildArgs() []string {
 			args[len(args)-1] = rule.Src + ":" + rule.SrcPort
 		}
 	}
-	if rule.Flags != "" {
-		args = append(args, rule.Flags)
-	}
+	// Flags 不再透传：安全字符集内仍可单 token 破坏规则语义（如 -j），且前端无人使用，
+	// 移除自由透传，避免被用于注入任意 iptables 选项。
+	_ = rule.Flags
 	return args
 }
 

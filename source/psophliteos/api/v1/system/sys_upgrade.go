@@ -20,8 +20,6 @@ import (
 
 type UpgradeApi struct{}
 
-var filename string
-
 func init() {
 	i18n.SetString(i18n.Zh, "upgrade", "sophliteos 升级")
 	i18n.SetString(i18n.En, "upgrade", "sophliteos upgrade")
@@ -30,14 +28,15 @@ func init() {
 func (b *UpgradeApi) Upgrade(c *gin.Context) {
 	var err error
 
-	filename, err = saveFile(c.Request, "/data/sophliteos/")
+	// filename 保存为局部变量：全局变量在并发请求下会被覆盖，导致校验/清理错乱。
+	savedName, err := saveFile(c.Request, "/data/sophliteos/")
 	if err != nil {
 		logger.Error("update failed", err)
 		c.JSON(http.StatusOK, mvc.FailWithMsg(-1, "操作失败"))
 		return
 	}
 
-	if filename != "sophliteos-linux_arm64.tgz" {
+	if savedName != "sophliteos-linux_arm64.tgz" {
 		logger.Error("升级包上传错误")
 		c.JSON(http.StatusOK, mvc.FailWithMsg(-1, "升级包上传错误"))
 		return
@@ -53,7 +52,7 @@ func (b *UpgradeApi) Upgrade(c *gin.Context) {
 	services.SaveOptLog(c.Request, i18n.GetString(mvc.GetLang(c.Request), "upgrade"))
 
 	// 重新执行更新后的程序
-	go restartUpgradedProgram()
+	go restartUpgradedProgram(savedName)
 	c.JSON(http.StatusOK, mvc.OkWithMsg("升级成功，LiteOS正在重启，请一分钟后刷新页面重新进入"))
 }
 
@@ -106,14 +105,14 @@ func upgradeLiteOs() error {
 	return nil
 }
 
-func restartUpgradedProgram() {
+func restartUpgradedProgram(savedName string) {
 	time.Sleep(5 * time.Second)
 	// 启动新进程
 	if err := syscall.Exec(os.Args[0], os.Args, os.Environ()); err != nil {
 		logger.Error("Failed to restart: %v", err)
 	}
 
-	cmd := exec.Command("rm", "-f", filename)
+	cmd := exec.Command("rm", "-f", savedName)
 	cmd.Dir = "/data/sophliteos"
 
 	// 执行命令
@@ -145,18 +144,22 @@ func saveFile(request *http.Request, dir string) (string, error) {
 		return "", errors.New("file name error")
 	}
 
-	f, err := os.OpenFile(dir+handler.Filename, os.O_WRONLY|os.O_CREATE, 0777)
+	// 保存路径用绝对路径；清理时删除同一路径，避免相对路径（进程 CWD）删错文件。
+	dstPath := dir + handler.Filename
+	f, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
 		return "", err
 	}
 	_, err = io.Copy(f, file)
 	if err != nil {
+		_ = f.Close()
 		return "", err
 	}
 	defer func() {
 		_ = f.Close()
-		_ = os.Remove(handler.Filename)
+		// 清理上传文件：用实际保存路径，而非 handler.Filename（相对 CWD 可能删到别的文件）。
+		_ = os.Remove(dstPath)
 		_ = request.MultipartForm.RemoveAll()
 	}()
-	return handler.Filename, err
+	return handler.Filename, nil
 }

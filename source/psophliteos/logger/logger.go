@@ -62,36 +62,57 @@ func InitLogging(dir, filename string, level string) {
 
 // Error 默认日志对象方法，记录一条错误日志，需要先初始化
 func Error(format string, v ...interface{}) {
+	if logging == nil {
+		return
+	}
 	logging.Error(format, v...)
 }
 
 // Errorln 默认日志对象方法，记录一条消息日志，需要先初始化
 func Errorln(args ...interface{}) {
+	if logging == nil {
+		return
+	}
 	logging.Errorln(args...)
 }
 
 // Info 默认日志对象方法，记录一条消息日志，需要先初始化
 func Info(format string, v ...interface{}) {
+	if logging == nil {
+		return
+	}
 	logging.Info(format, v...)
 }
 
 // Infoln 默认日志对象方法，记录一条消息日志，需要先初始化
 func Infoln(args ...interface{}) {
+	if logging == nil {
+		return
+	}
 	logging.Infoln(args...)
 }
 
 // IsDebugEnable 日志级别
 func IsDebugEnable() bool {
+	if logging == nil {
+		return false
+	}
 	return logging.level == DEBUG
 }
 
 // Debug 默认日志对象方法，记录一条消息日志，需要先初始化
 func Debug(format string, v ...interface{}) {
+	if logging == nil {
+		return
+	}
 	logging.Debug(format, v...)
 }
 
 // Debugln 默认日志对象方法，记录一条调试日志，需要先初始化
 func Debugln(args ...interface{}) {
+	if logging == nil {
+		return
+	}
 	logging.Debugln(args...)
 }
 
@@ -190,7 +211,7 @@ func (logObj *Logger) getFormat(prefix, format string) string {
 
 // Error 记录一条错误日志
 func (logObj *Logger) Error(format string, v ...interface{}) {
-	if logging.level > 5 {
+	if logObj.level > 5 {
 		return
 	}
 
@@ -200,7 +221,7 @@ func (logObj *Logger) Error(format string, v ...interface{}) {
 
 // Errorln 打印一行错误日志
 func (logObj *Logger) Errorln(args ...interface{}) {
-	if logging.level > 5 {
+	if logObj.level > 5 {
 		return
 	}
 
@@ -210,7 +231,7 @@ func (logObj *Logger) Errorln(args ...interface{}) {
 
 // Info 记录一条消息日志
 func (logObj *Logger) Info(format string, v ...interface{}) {
-	if logging.level > 3 {
+	if logObj.level > 3 {
 		return
 	}
 
@@ -220,7 +241,7 @@ func (logObj *Logger) Info(format string, v ...interface{}) {
 
 // Infoln 打印一行消息日志
 func (logObj *Logger) Infoln(args ...interface{}) {
-	if logging.level > 3 {
+	if logObj.level > 3 {
 		return
 	}
 
@@ -230,7 +251,7 @@ func (logObj *Logger) Infoln(args ...interface{}) {
 
 // Debug 记录一条消息日志
 func (logObj *Logger) Debug(format string, v ...interface{}) {
-	if logging.level > 0 {
+	if logObj.level > 0 {
 		return
 	}
 
@@ -240,7 +261,7 @@ func (logObj *Logger) Debug(format string, v ...interface{}) {
 
 // Debugln 打印一行调试日志
 func (logObj *Logger) Debugln(args ...interface{}) {
-	if logging.level > 0 {
+	if logObj.level > 0 {
 		return
 	}
 

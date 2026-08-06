@@ -171,7 +171,7 @@ func TestLogout(t *testing.T) {
 	api.Use(middleware.Auth())
 	api.POST("/logout", ctrl.Logout)
 
-	secret := config.Conf.GetViper().GetString("server.authSecret")
+	secret := auth.EffectiveSecret(config.Conf.GetViper().GetString("server.authSecret"))
 	tokenStr, _, _ := auth.IssueToken("admin", secret, false)
 
 	w := httptest.NewRecorder()
@@ -197,7 +197,7 @@ func TestListUsersWithAuth(t *testing.T) {
 	api.GET("/user", ctrl.ListUsers)
 
 	// 签发 token
-	secret := config.Conf.GetViper().GetString("server.authSecret")
+	secret := auth.EffectiveSecret(config.Conf.GetViper().GetString("server.authSecret"))
 	tokenStr, _, _ := auth.IssueToken("alice", secret, false)
 
 	w := httptest.NewRecorder()
@@ -255,7 +255,7 @@ func TestCreateUser(t *testing.T) {
 	api.Use(middleware.Auth())
 	api.POST("/user", ctrl.CreateUser)
 
-	secret := config.Conf.GetViper().GetString("server.authSecret")
+	secret := auth.EffectiveSecret(config.Conf.GetViper().GetString("server.authSecret"))
 	tokenStr, _, _ := auth.IssueToken("admin", secret, false)
 
 	body, _ := json.Marshal(CreateUserRequest{Username: "newuser", Password: "newpass", Role: "user"})
@@ -288,7 +288,7 @@ func TestControllerDeleteUser(t *testing.T) {
 	api.Use(middleware.Auth())
 	api.DELETE("/user/:name", ctrl.DeleteUser)
 
-	secret := config.Conf.GetViper().GetString("server.authSecret")
+	secret := auth.EffectiveSecret(config.Conf.GetViper().GetString("server.authSecret"))
 	tokenStr, _, _ := auth.IssueToken("admin", secret, false)
 
 	w := httptest.NewRecorder()

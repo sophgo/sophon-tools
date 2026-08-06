@@ -48,7 +48,7 @@ func LoadFromDir(dir string) bool {
 	v.SetDefault("server.port", "9779")
 	v.SetDefault("server.auth", true)
 	v.SetDefault("server.listenIP", "")
-	v.SetDefault("server.authSecret", "bmssm-dev-secret")
+	v.SetDefault("server.authSecret", "") // 空 → 启动时随机生成并持久化（pkg/auth.EnsureSecret）
 	v.SetDefault("server.defaultPassword", "admin")
 	v.SetDefault("server.deviceName", "device_1")
 	v.SetDefault("log.level", "info")

@@ -82,9 +82,15 @@
     };
     ws.onmessage = (e) => {
       if (term) {
-        const data =
-          e.data instanceof ArrayBuffer ? new Uint8Array(e.data) : new Uint8Array([]);
-        term.write(data);
+        // 二进制帧按字节写；文本帧（如后端错误/提示）转 UTF-8 写入，避免静默丢弃。
+        if (e.data instanceof ArrayBuffer) {
+          term.write(new Uint8Array(e.data));
+        } else if (typeof e.data === 'string') {
+          term.write(e.data);
+        } else if (e.data && e.data.byteLength !== undefined) {
+          // Blob 等二进制对象
+          e.data.arrayBuffer().then((buf: ArrayBuffer) => term.write(new Uint8Array(buf)));
+        }
       }
     };
     ws.onclose = () => {
@@ -101,6 +107,10 @@
     });
     term.onResize(({ cols, rows }) => sendResize(cols, rows));
 
+    // 重新连接前断开旧的 observer，避免多次 connect 累积多个观察器（内存泄漏 + fit 重复触发）
+    if (resizeObserver) {
+      resizeObserver.disconnect();
+    }
     resizeObserver = new ResizeObserver(() => {
       try {
         fit?.fit();

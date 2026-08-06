@@ -50,7 +50,9 @@
               <a-popconfirm title="确定停止该服务？" @confirm="doAction(record, 'stop')">
                 <a-button size="small" danger :disabled="record.protected">停止</a-button>
               </a-popconfirm>
-              <a-button size="small" :disabled="record.protected" @click="doAction(record, 'restart')">重启</a-button>
+              <a-popconfirm title="确定重启该服务？可能造成短暂服务中断" @confirm="doAction(record, 'restart')">
+                <a-button size="small" :disabled="record.protected">重启</a-button>
+              </a-popconfirm>
               <a-button size="small" :disabled="record.protected" @click="doAction(record, 'reload')">重载</a-button>
               <a-popconfirm v-if="record.enabled_state === 'enabled'" title="确定禁用开机自启？" @confirm="doAction(record, 'disable')">
                 <a-button size="small" :disabled="record.protected">禁用自启</a-button>

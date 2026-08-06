@@ -185,8 +185,10 @@
   });
 
   const timer = setInterval(() => {
-    const netValue = deviceInfo.value.runTime + 1;
-    deviceInfoStore.updateDevice('runTime', netValue);
+    // 守卫 runTime 为有限数字，避免字符串拼接（'0'+1='01'）或 NaN 传播
+    const cur = Number(deviceInfo.value.runTime);
+    const next = Number.isFinite(cur) ? cur + 1 : 0;
+    deviceInfoStore.updateDevice('runTime', next);
   }, 1000);
   onUnmounted(() => {
     clearInterval(timer);

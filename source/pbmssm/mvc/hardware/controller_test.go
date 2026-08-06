@@ -47,7 +47,7 @@ func setupHardwareTest(t *testing.T) {
 // makeAuthToken 签发测试用 JWT token。
 func makeAuthToken(t *testing.T) string {
 	t.Helper()
-	secret := config.Conf.GetViper().GetString("server.authSecret")
+	secret := auth.EffectiveSecret(config.Conf.GetViper().GetString("server.authSecret"))
 	tokenStr, _, err := auth.IssueToken("admin", secret, false)
 	if err != nil {
 		t.Fatalf("issue token: %v", err)

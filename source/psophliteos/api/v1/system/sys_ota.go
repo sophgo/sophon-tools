@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	"sophliteos/logger"
 	mvc "sophliteos/mvc/core"
@@ -26,6 +27,10 @@ const (
 	Core = "core"
 )
 
+// otaMu 串行化 OTA 上传/合并流程：全局 ctrlFileName 等变量非并发安全，
+// 并发上传（ctrl/core 同时或双浏览器）会互相覆盖导致分片串扰。
+var otaMu sync.Mutex
+
 var (
 	ctrlFileName string
 	coreFileName string
@@ -34,6 +39,10 @@ var (
 )
 
 func (b *OtaApi) OtaFileChunked(c *gin.Context) {
+	// 串行化分片上传（防并发上传覆盖全局文件名/分片交叉）
+	otaMu.Lock()
+	defer otaMu.Unlock()
+
 	chunkIndex := c.Request.FormValue("chunkIndex") // 分片的索引
 	totalChunks := c.Request.FormValue("totalChunks")
 	ctrlFileName = c.Request.FormValue("fileName")
@@ -135,6 +144,10 @@ func MergeChunked(total int, md5Value string) (string, error) {
 }
 
 func (b *OtaApi) OtaFile(c *gin.Context) {
+	// 串行化上传（防并发覆盖全局文件名）
+	otaMu.Lock()
+	defer otaMu.Unlock()
+
 	// 参数判断
 	md5Value := strings.ToLower(c.Request.FormValue("md5"))
 	module := c.Request.FormValue("module")
@@ -197,6 +210,8 @@ func (b *OtaApi) OtaFile(c *gin.Context) {
 }
 
 func (b *OtaApi) OtaFileList(c *gin.Context) {
+	otaMu.Lock()
+	defer otaMu.Unlock()
 	fileInfo := getFileName()
 	c.JSON(http.StatusOK, mvc.Success(fileInfo))
 

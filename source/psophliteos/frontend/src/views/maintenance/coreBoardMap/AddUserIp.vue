@@ -42,7 +42,7 @@
     setModalProps({ confirmLoading: false });
     setFieldsValue({
       target: 'DNAT',
-      src: data.res[0].sourceIP,
+      src: data?.res?.[0]?.sourceIP || '',
     });
   });
   async function handleSubmit() {

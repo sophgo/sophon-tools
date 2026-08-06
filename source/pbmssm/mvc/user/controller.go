@@ -14,8 +14,8 @@ import (
 
 // Controller 用户模块 gin handler 集合（需要 db 指针）。
 type Controller struct {
-	svc  *UserService
-	aud  *audit.AuditService
+	svc *UserService
+	aud *audit.AuditService
 }
 
 // NewController 创建用户控制器。
@@ -29,16 +29,12 @@ func DefaultController() *Controller {
 	return NewController(NewService(db), audit.NewService(db))
 }
 
-// getSecret 从配置获取 JWT secret。
+// getSecret 从配置获取 JWT secret（与 Auth 中间件同源，空则回退 DefaultSecret）。
 func getSecret() string {
 	conf := &config.Conf
 	conf.RLock()
 	defer conf.RUnlock()
-	secret := conf.GetViper().GetString("server.authSecret")
-	if secret == "" {
-		secret = auth.DefaultSecret
-	}
-	return secret
+	return auth.EffectiveSecret(conf.GetViper().GetString("server.authSecret"))
 }
 
 // getDefaultPassword 返回配置中的默认密码（仅用于判定是否首次登录、是否需强制改密）。
@@ -101,8 +97,12 @@ func (ctrl *Controller) Logout(c *gin.Context) {
 	c.JSON(http.StatusOK, response.OK(gin.H{"message": "logged out", "user": username}))
 }
 
-// ListUsers 处理 GET /api/v1/user（受保护）。
+// ListUsers 处理 GET /api/v1/user（受保护，仅 superuser/admin）。
 func (ctrl *Controller) ListUsers(c *gin.Context) {
+	if !ctrl.isAdmin(c) {
+		c.JSON(http.StatusForbidden, response.Fail("admin role required"))
+		return
+	}
 	users, err := ctrl.svc.ListUsers()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, response.Fail("failed to list users"))
@@ -111,8 +111,27 @@ func (ctrl *Controller) ListUsers(c *gin.Context) {
 	c.JSON(http.StatusOK, response.OK(users))
 }
 
-// CreateUser 处理 POST /api/v1/user（受保护）。
+// isAdmin 判断当前请求用户是否具备用户管理权限（superuser 或 admin）。
+// 取 c.Set("user") 的用户名查库角色；查询失败/非管理员返回 false。
+func (ctrl *Controller) isAdmin(c *gin.Context) bool {
+	actor, _ := c.Get("user")
+	actorStr, _ := actor.(string)
+	if actorStr == "" {
+		return false
+	}
+	u, err := ctrl.svc.FindUser(actorStr)
+	if err != nil {
+		return false
+	}
+	return u.Role == "superuser" || u.Role == "admin"
+}
+
+// CreateUser 处理 POST /api/v1/user（受保护，仅 superuser/admin）。
 func (ctrl *Controller) CreateUser(c *gin.Context) {
+	if !ctrl.isAdmin(c) {
+		c.JSON(http.StatusForbidden, response.Fail("admin role required"))
+		return
+	}
 	var req CreateUserRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, response.Fail("invalid request body"))
@@ -120,6 +139,16 @@ func (ctrl *Controller) CreateUser(c *gin.Context) {
 	}
 	if req.Role == "" {
 		req.Role = "user"
+	}
+	// 仅 superuser 可创建管理员级账号；admin 只能创建普通 user。
+	if req.Role == "superuser" || req.Role == "admin" {
+		actor, _ := c.Get("user")
+		actorStr, _ := actor.(string)
+		u, err := ctrl.svc.FindUser(actorStr)
+		if err != nil || u.Role != "superuser" {
+			c.JSON(http.StatusForbidden, response.Fail("superuser role required to create admin"))
+			return
+		}
 	}
 	actor, _ := c.Get("user")
 	actorStr, _ := actor.(string)
@@ -132,8 +161,12 @@ func (ctrl *Controller) CreateUser(c *gin.Context) {
 	c.JSON(http.StatusOK, response.OK(gin.H{"message": "user created", "username": req.Username}))
 }
 
-// DeleteUser 处理 DELETE /api/v1/user/:name（受保护）。
+// DeleteUser 处理 DELETE /api/v1/user/:name（受保护，仅 superuser/admin）。
 func (ctrl *Controller) DeleteUser(c *gin.Context) {
+	if !ctrl.isAdmin(c) {
+		c.JSON(http.StatusForbidden, response.Fail("admin role required"))
+		return
+	}
 	name := c.Param("name")
 	if name == "" {
 		c.JSON(http.StatusBadRequest, response.Fail("missing user name"))
@@ -153,6 +186,7 @@ func (ctrl *Controller) DeleteUser(c *gin.Context) {
 // ChangePassword 处理 POST /api/v1/password（受保护，临时 token 可调）。
 //   - 临时 token（c.Get("temp")==true）：不校验旧密码，直接设新密码（首次改密场景）。
 //   - 正式 token：必须校验旧密码（svc.Login 验证），通过后才改。
+//
 // 改密成功后签发新的正式 token 返回。
 func (ctrl *Controller) ChangePassword(c *gin.Context) {
 	var req ChangePasswordRequest

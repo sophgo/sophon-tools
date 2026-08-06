@@ -59,8 +59,9 @@ export const UserSchema: FormSchema[] = [
     field: 'src',
     label: t('maintenance.coreBoardMap.ControlBoardIP'),
     component: 'Input',
+    // 源 IP 用户可自定义；不再 disabled + 恒空（此前预填空值且不可改，导致提交空 src）。
     componentProps: {
-      disabled: true,
+      placeholder: '如 0.0.0.0 或 192.168.1.10',
     },
   },
   {

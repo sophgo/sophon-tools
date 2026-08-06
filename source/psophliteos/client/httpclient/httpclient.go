@@ -41,8 +41,9 @@ func NewRequest(url string, method string, header map[string]string, content []b
 	}
 	req, err := http.NewRequest(method, urlBuild(url), body)
 	if err != nil {
-		logger.Error("构建请求失败：%s，%v", err, request)
-		panic(err)
+		// 构建请求失败不 panic，返回错误让调用方处理（生产环境不应因单次请求构造失败崩溃）。
+		logger.Error("构建请求失败：%s，%v", url, err)
+		return nil, err
 	}
 	trace := fmt.Sprintf("请求地址：%s，方法：%s，参数：%s", url, method, string(content))
 	return request(req, header, trace)

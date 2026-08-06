@@ -114,6 +114,7 @@ export default {
     // memoryScale: '内存使用率',
     // videoScale: 'video内存使用率',
     tpuScale: 'TPU Memory Usage',
+    tpuRate: 'TPU Usage',
     // externalHardDiskRate: '外挂存储使用率',
     diskRate: 'Disk Usage',
     title: 'Alarm Threshold',

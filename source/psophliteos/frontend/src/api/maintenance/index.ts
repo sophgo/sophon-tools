@@ -173,9 +173,9 @@ export function parseNatLines(lines: string[]): NatRow[] {
       const parts = rest.split(/\s+/).filter(Boolean);
       const target = parts[0] || '';
       const protocol = parts.find((p) => /^(tcp|udp|icmp|all)$/i.test(p)) || '';
-      // dpt:80 / to:1.2.3.4:5
+      // dpt:80 / to:1.2.3.4:5 或 to:[2001:db8::1]:8080 / to:hostname:port
       const dptMatch = raw.match(/dpt:(\d+)/);
-      const toMatch = raw.match(/to:([0-9.]+):?(\d+)?/);
+      const toMatch = raw.match(/to:(\[[0-9a-fA-F:]+\]|[0-9.]+|[a-zA-Z0-9.-]+):?(\d+)?/);
       return {
         key: num,
         num,

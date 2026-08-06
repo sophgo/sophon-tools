@@ -111,22 +111,31 @@
     // 不自动查询：用户改时间范围后需点"查询"（手动刷新，存档历史数据）
   }
 
+  let querySeq = 0; // 查询序号：丢弃过期响应，避免快速连点/切换指标时旧数据覆盖新结果
   async function onQuery() {
     if (!fromTs.value || !toTs.value) return;
     if (toTs.value - fromTs.value > SEVEN_DAYS) {
       message.warning('时间范围超过 7 天，查询可能较慢');
     }
+    const seq = ++querySeq;
     loading.value = true;
     try {
-      result.value = await historyApi({
+      const res = await historyApi({
         from: fromTs.value,
         to: toTs.value,
         fields: selectedFields.value,
       });
+      if (seq === querySeq) {
+        result.value = res;
+      }
     } catch (e) {
-      message.error('查询失败');
+      if (seq === querySeq) {
+        message.error('查询失败');
+      }
     } finally {
-      loading.value = false;
+      if (seq === querySeq) {
+        loading.value = false;
+      }
     }
   }
 

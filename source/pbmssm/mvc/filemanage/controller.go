@@ -10,28 +10,26 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"bmssm/config"
+	"bmssm/database"
 	"bmssm/pkg/auth"
 	"bmssm/pkg/response"
 )
 
-// getSecret 从配置获取 JWT secret（与 compat.getSecret 同源）。
-// 配置未加载（如测试）时回退 auth.DefaultSecret。
+// getSecret 从配置获取 JWT secret（与 compat.getSecret 同源，空则回退 DefaultSecret）。
 func getSecret() string {
 	conf := &config.Conf
 	conf.RLock()
 	defer conf.RUnlock()
 	v := conf.GetViper()
-	if v != nil {
-		if s := v.GetString("server.authSecret"); s != "" {
-			return s
-		}
+	if v == nil {
+		return auth.DefaultSecret
 	}
-	return auth.DefaultSecret
+	return auth.EffectiveSecret(v.GetString("server.authSecret"))
 }
 
-// authToken 校验 query ?token= 或 Authorization: Bearer 头。
+// authToken 校验 query ?token= 或 Authorization: Bearer 头，且要求 admin 角色。
 // <a download> 无法带 Authorization 头，故支持 query token；其余调用仍可用头。
-// 与 Auth 中间件一致：临时 token（temp=true，默认密码登录态）拒绝，需先改密。
+// 文件操作涉及设备敏感文件，仅 superuser/admin 可访问。
 func authToken(c *gin.Context) bool {
 	tokenStr := c.Query("token")
 	if tokenStr == "" {
@@ -43,7 +41,7 @@ func authToken(c *gin.Context) bool {
 		c.JSON(http.StatusUnauthorized, response.Fail("missing token"))
 		return false
 	}
-	_, temp, err := auth.ParseToken(tokenStr, getSecret())
+	username, temp, err := auth.ParseToken(tokenStr, getSecret())
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, response.Fail("invalid token"))
 		return false
@@ -51,6 +49,25 @@ func authToken(c *gin.Context) bool {
 	if temp {
 		c.JSON(http.StatusForbidden, response.Fail("must change password first"))
 		return false
+	}
+	// 角色校验：文件管理仅 superuser/admin 可用。
+	// DB 不可用（如单元测试）时放行 token 校验，生产环境 DB 必可用。
+	db := database.DB()
+	if db != nil {
+		// GORM v1 Pluck 目标必须是 slice。
+		var roles []string
+		if err := db.Table("users").Where("username = ?", username).Pluck("role", &roles).Error; err != nil {
+			c.JSON(http.StatusForbidden, response.Fail("admin role required"))
+			return false
+		}
+		role := ""
+		if len(roles) > 0 {
+			role = roles[0]
+		}
+		if role != "superuser" && role != "admin" {
+			c.JSON(http.StatusForbidden, response.Fail("admin role required"))
+			return false
+		}
 	}
 	return true
 }
@@ -118,12 +135,12 @@ func (ctrl *Controller) Upload(c *gin.Context) {
 	dir := c.Query("path")
 	fileHeader, err := c.FormFile("file")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, response.Fail("missing file: " + err.Error()))
+		c.JSON(http.StatusBadRequest, response.Fail("missing file: "+err.Error()))
 		return
 	}
 	src, err := fileHeader.Open()
 	if err != nil {
-		c.JSON(http.StatusBadRequest, response.Fail("open upload: " + err.Error()))
+		c.JSON(http.StatusBadRequest, response.Fail("open upload: "+err.Error()))
 		return
 	}
 	defer src.Close()

@@ -35,7 +35,7 @@ func TestGetIPWithAuth(t *testing.T) {
 	api.Use(middleware.Auth())
 	api.GET("/network/ip", ctrl.GetIP)
 
-	secret := config.Conf.GetViper().GetString("server.authSecret")
+	secret := auth.EffectiveSecret(config.Conf.GetViper().GetString("server.authSecret"))
 	tokenStr, _, _ := auth.IssueToken("admin", secret, false)
 
 	w := httptest.NewRecorder()
@@ -85,7 +85,7 @@ func TestSetIPWithAuth(t *testing.T) {
 	api.Use(middleware.Auth())
 	api.PUT("/network/ip", ctrl.SetIP)
 
-	secret := config.Conf.GetViper().GetString("server.authSecret")
+	secret := auth.EffectiveSecret(config.Conf.GetViper().GetString("server.authSecret"))
 	tokenStr, _, _ := auth.IssueToken("admin", secret, false)
 
 	body, _ := json.Marshal(SetIPRequest{
@@ -129,7 +129,7 @@ func TestAddNATWithAuth(t *testing.T) {
 	api.Use(middleware.Auth())
 	api.POST("/network/nat", ctrl.AddNAT)
 
-	secret := config.Conf.GetViper().GetString("server.authSecret")
+	secret := auth.EffectiveSecret(config.Conf.GetViper().GetString("server.authSecret"))
 	tokenStr, _, _ := auth.IssueToken("admin", secret, false)
 
 	body, _ := json.Marshal(NatRequest{

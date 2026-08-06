@@ -17,14 +17,12 @@ const PasswordChangePath = "/api/v1/password"
 // 从 Authorization: Bearer <token> 提取 token，ParseToken 校验，
 // 失败返回 401；成功将 username 写入 c.Set("user", username)、temp 写入 c.Set("temp", temp)。
 // 临时 token（temp=true）只允许访问 PasswordChangePath，其余端点返回 403。
+// 角色级权限由 RequireAdmin 等后续中间件校验（查库）。
 func Auth() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		conf := &config.Conf
 		conf.RLock()
-		secret := conf.GetViper().GetString("server.authSecret")
-		if secret == "" {
-			secret = auth.DefaultSecret
-		}
+		secret := auth.EffectiveSecret(conf.GetViper().GetString("server.authSecret"))
 		conf.RUnlock()
 
 		authHeader := c.GetHeader("Authorization")

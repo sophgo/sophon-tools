@@ -20,11 +20,14 @@ func AuthMiddleware() gin.HandlerFunc {
 			user := mvc.GetUser(token)
 			if user != nil {
 				now := time.Now()
-				if now.Before(user.ExpireTime) {
-					if user.ExpireTime.After(user.ExpireTime.Add(time.Minute * 10)) {
-						user.ExpireTime = now.Add(time.Hour * 2)
-						database.UpdateUser(user)
-					}
+				// 距过期不足 10 分钟则续期 2 小时（修复原恒 false 判断：
+				// t.After(t.Add(10m)) 对任何 t 都为 false）。
+				if now.After(user.ExpireTime) {
+					user.ExpireTime = now.Add(time.Hour * 2)
+					database.UpdateUser(user)
+				} else if user.ExpireTime.Sub(now) < 10*time.Minute {
+					user.ExpireTime = now.Add(time.Hour * 2)
+					database.UpdateUser(user)
 				}
 				if mvc.IsMultiPartRequest(c.Request) {
 					err := c.Request.ParseMultipartForm(32 << 20)

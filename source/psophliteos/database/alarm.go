@@ -76,7 +76,7 @@ func QueryAlarms(alarm *Alarm, pageNo, pageSize int, startTime, endTime *time.Ti
 
 // 删除日期前数据
 func DeleteAlarmByCreatedAt(createdAt time.Time) error {
-	db := DB.Model(&Alarm{}).Debug().Where(" created_time <= ? ", createdAt).Delete(&Alarm{})
+	db := DB.Model(&Alarm{}).Debug().Where(" created_at <= ? ", createdAt).Delete(&Alarm{})
 	if err := db.Error; err != nil {
 		return err
 	}

@@ -58,7 +58,7 @@ func setupDockerTest(t *testing.T) {
 
 // makeToken 签发测试 token。
 func makeToken() string {
-	secret := config.Conf.GetViper().GetString("server.authSecret")
+	secret := auth.EffectiveSecret(config.Conf.GetViper().GetString("server.authSecret"))
 	tokenStr, _, _ := auth.IssueToken("admin", secret, false)
 	return tokenStr
 }

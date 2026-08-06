@@ -598,7 +598,8 @@
     }
   }
   //以下是文件上传超时逻辑
-  // 监听 fileList[0]?.percent 变化
+  // 监听 fileList[0]?.percent 变化。注意：percent 是 0~1 的小数
+  //（model.percent = successTrunks/chunks），并非 0~100 百分比。
   watch(
     () => fileList.value[0]?.percent,
     (newVal, oldVal) => {
@@ -608,8 +609,8 @@
         timerId = setTimeout(() => {
           handleTimeout(newVal);
         }, timeoutDuration);
-      } else if (newVal === 100) {
-        // 清空计时器
+      } else if (newVal >= 1 || progressStatus.value === 'success') {
+        // 上传完成（percent 达 1）或已标记成功，清空计时器
         clearTimeout(timerId);
       }
     },

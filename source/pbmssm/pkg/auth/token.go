@@ -21,6 +21,14 @@ const TokenTTL = 12 * time.Hour
 // 配置里 server.authSecret 留空或为此值时，启动会生成随机 secret 持久化使用。
 const DefaultSecret = "ssm-dev-secret"
 
+// DevSecrets 是已知的公开开发占位 secret。无论配置里出现哪个，都不应作为
+// 生产 JWT 签名密钥直接采用，而应生成随机 secret 并持久化（出厂镜像若携带
+// 这些值，等于是公开的签名密钥，攻击者可伪造任意 token）。
+var DevSecrets = map[string]bool{
+	DefaultSecret:      true,
+	"bmssm-dev-secret": true,
+}
+
 // secretFilePath 持久化随机 secret 的文件路径。
 var secretFilePath = "/var/lib/bmssm/jwt_secret"
 
@@ -30,14 +38,23 @@ func SecretFilePath() string { return secretFilePath }
 // SetSecretFilePath 覆盖持久化 secret 文件路径（仅测试使用）。
 func SetSecretFilePath(p string) { secretFilePath = p }
 
+// EffectiveSecret 返回当前生效的 JWT secret：配置非空则用配置值，否则回退 DefaultSecret。
+// 供 Auth 中间件与各 getSecret 统一使用，保证签发与校验使用同一 secret。
+func EffectiveSecret(configured string) string {
+	if configured == "" {
+		return DefaultSecret
+	}
+	return configured
+}
+
 // EnsureSecret 返回生效的 JWT secret。
-//   - configured 非空且非 DefaultSecret：视为用户显式配置，直接返回，usedRandom=false。
+//   - configured 非空且非任何已知开发占位值：视为用户显式配置，直接返回，usedRandom=false。
 //   - 否则尝试读取持久化文件；存在则复用，避免重启后 token 全部失效。
 //   - 文件不存在则生成 32 字节随机 secret（crypto/rand，hex 编码）写入文件 0600。
 //
 // 返回 (secret, usedRandom, err)。usedRandom=true 时调用方应 WARN 日志提示。
 func EnsureSecret(configured string) (secret string, usedRandom bool, err error) {
-	if configured != "" && configured != DefaultSecret {
+	if configured != "" && !DevSecrets[configured] {
 		return configured, false, nil
 	}
 	// 复用持久化 secret

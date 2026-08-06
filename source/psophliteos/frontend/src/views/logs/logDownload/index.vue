@@ -32,39 +32,42 @@
   });
   async function loading(fileName) {
     compState.loading = true;
-    const ret = await LogDownload();
-    // 守卫：ssm 无日志下载端点时 ret 可能直接是 Blob 或无 data/headers
-    const blobData = ret?.data ?? ret;
-    const blob = new Blob([blobData || []], { type: 'application/x-compressed-tar' });
-    let filename = fileName || 'sys_log.tgz';
     try {
-      const cd = ret?.headers?.['content-disposition'];
-      if (cd) {
-        filename = decodeURI(cd.split(';')[1].split('filename=')[1]);
+      const ret = await LogDownload();
+      // 守卫：ssm 无日志下载端点时 ret 可能直接是 Blob 或无 data/headers
+      const blobData = ret?.data ?? ret;
+      const blob = new Blob([blobData || []], { type: 'application/x-compressed-tar' });
+      let filename = fileName || 'sys_log.tgz';
+      try {
+        const cd = ret?.headers?.['content-disposition'];
+        if (cd) {
+          filename = decodeURI(cd.split(';')[1].split('filename=')[1]);
+        }
+      } catch (e) {
+        console.log(e);
+      }
+
+      //  @ts-ignore
+      if (typeof window.navigator.msSaveBlob !== 'undefined') {
+        //  @ts-ignore
+        window.navigator.msSaveBlob(blob, filename);
+      } else {
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.style.display = 'none';
+        link.href = url;
+        link.setAttribute('download', filename);
+        document.body.appendChild(link);
+        link.click();
+        //  @ts-ignore
+        URL.revokeObjectURL(url.href);
+        document.body.removeChild(link);
       }
     } catch (e) {
-      console.log(e);
+      console.error('log download failed', e);
+    } finally {
+      compState.loading = false;
     }
-    filename = 'sys_log.tgz';
-
-    //  @ts-ignore
-    if (typeof window.navigator.msSaveBlob !== 'undefined') {
-      //  @ts-ignore
-      window.navigator.msSaveBlob(blob, filename);
-    } else {
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.style.display = 'none';
-      link.href = url;
-      link.setAttribute('download', filename);
-      document.body.appendChild(link);
-      link.click();
-      //  @ts-ignore
-      URL.revokeObjectURL(url.href);
-      document.body.removeChild(link);
-    }
-
-    compState.loading = false;
   }
 </script>
 <style lang="less" scoped>

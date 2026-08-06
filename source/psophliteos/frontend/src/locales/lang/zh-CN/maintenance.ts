@@ -119,6 +119,7 @@ export default {
     // memoryScale: '内存使用率',
     // videoScale: 'video内存使用率',
     tpuScale: 'tpu芯片内存使用率',
+    tpuRate: 'tpu使用率',
     // externalHardDiskRate: '外挂存储使用率',
     diskRate: '磁盘使用率',
     title: '告警阈值配置',

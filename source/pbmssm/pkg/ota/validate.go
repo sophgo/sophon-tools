@@ -5,35 +5,31 @@ import (
 	"strings"
 )
 
-// allowedCmdPrefixes 白名单命令前缀，防止通过 CmdFlag 注入任意命令（RCE）。
-// 仅允许已知升级命令，攻击者即使绕过 Auth 也无法执行恶意代码。
+// allowedCmdPrefixes 白名单命令名，防止通过 CmdFlag 注入任意命令（RCE）。
+// 只允许已知升级命令。命令经参数化执行（splitCmdFlag → runner(name, args...)），
+// 不经 bash -c，因此即使白名单含 ssh 也不会被解释器展开任意字符串。
 var allowedCmdPrefixes = []string{
 	"/data/ota/local_update.sh",
 	"bm_firmware_update",
 	"mk_bootscr.sh",
-	"ssh ",
-	"bash ",
+	"ssh",
 }
 
-// validateCmdFlag 校验 CmdFlag 是否在白名单内且不含 shell 元字符。
+// validateCmdFlag 校验 CmdFlag 是否合法（供依赖旧 API 的调用方/测试使用）。
 // 空串通过（调用方使用默认命令）。非法返回 error。
 func validateCmdFlag(cmd string) error {
-	cmd = strings.TrimSpace(cmd)
-	if cmd == "" {
+	if strings.TrimSpace(cmd) == "" {
 		return nil
 	}
+	_, err := splitCmdFlag(cmd)
+	return err
+}
 
-	// 拒绝 shell 注入元字符（defense in depth）
-	if strings.ContainsAny(cmd, ";&|`$\\\n\r") {
-		return fmt.Errorf("cmdFlag contains forbidden shell characters")
-	}
-
-	for _, prefix := range allowedCmdPrefixes {
-		if strings.HasPrefix(cmd, prefix) {
-			return nil
-		}
-	}
-	return fmt.Errorf("cmdFlag %q is not in the allowed command whitelist", cmd)
+// isSafeFlagRune 允许 CmdFlag 参数中的字符：字母数字、下划线、点、斜杠、等号、短横线、@（ssh user@host）。
+func isSafeFlagRune(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+		(r >= '0' && r <= '9') || r == '_' || r == '.' || r == '/' ||
+		r == '=' || r == '-' || r == '@'
 }
 
 // knownPCIEFlags pcie CmdFlag 允许的标志集合（defense in depth，即使 CmdFlag 不传给命令）。

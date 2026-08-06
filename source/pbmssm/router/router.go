@@ -74,7 +74,7 @@ func Register(r *gin.Engine) {
 		api.POST("/logout", userCtrl.Logout)
 		api.POST("/password", userCtrl.ChangePassword)
 
-		// 用户管理
+		// 用户管理（仅 superuser/admin）
 		api.GET("/user", userCtrl.ListUsers)
 		api.POST("/user", userCtrl.CreateUser)
 		api.DELETE("/user/:name", userCtrl.DeleteUser)
@@ -96,17 +96,12 @@ func Register(r *gin.Engine) {
 
 		// 网络
 		api.GET("/network/ip", netCtrl.GetIP)
-		api.PUT("/network/ip", netCtrl.SetIP)
 		// NAT（compat 形态：sophliteos 使用 AddTable/Dirt）
 		api.GET("/network/nat", compatCtrl.GetNAT)
-		api.POST("/network/nat", compatCtrl.AddNAT)
-		api.DELETE("/network/nat/:num", compatCtrl.DeleteNAT)
 
 		// 服务管理
 		api.GET("/systemd/services", systemdC.ListServices)
 		api.GET("/systemd/services/:name", systemdC.ShowService)
-		api.POST("/systemd/services/:name/action", systemdC.Action)
-		api.POST("/systemd/daemon-reload", systemdC.DaemonReload)
 		api.GET("/systemd/boot-report", systemdC.BootReport)
 		api.GET("/systemd/boot-report/export", systemdC.ExportReport)
 
@@ -115,63 +110,89 @@ func Register(r *gin.Engine) {
 
 		// Docker
 		api.GET("/docker/container", dockerCtrl.ListContainers)
-		api.POST("/docker/container/:name/start", dockerCtrl.StartContainer)
-		api.POST("/docker/container/:name/stop", dockerCtrl.StopContainer)
-		api.DELETE("/docker/container/:name", dockerCtrl.RemoveContainer)
 		api.GET("/docker/image", dockerCtrl.ListImages)
-		api.DELETE("/docker/image/:id", dockerCtrl.RemoveImage)
 		api.GET("/docker/logs/:name", dockerCtrl.GetLogs)
 
-		// 软件/OTA
+		// 软件/OTA（列表读操作）
 		api.GET("/software", softwareCtrl.ListSoftware)
-		api.POST("/software/install", softwareCtrl.Install)
-		api.POST("/software/upgrade", softwareCtrl.Upgrade)
-		// OTA（compat 工作流：upload→upgrade→list/get workflow→rollback）
-		api.POST("/ota/upload", compatCtrl.UploadFirmware)
-		api.POST("/ota/upgrade", compatCtrl.ExecuteUpgrade)
-		api.GET("/ota/workflow", compatCtrl.ListWorkflows)
-		api.GET("/ota/workflow/:id", compatCtrl.GetWorkflow)
-		api.POST("/ota/rollback", compatCtrl.Rollback)
 		// 保留旧 uploadId 查询端点（不破坏既有调用方）
 		api.GET("/ota/download/:id", softwareCtrl.OTADownload)
+		api.GET("/ota/workflow", compatCtrl.ListWorkflows)
+		api.GET("/ota/workflow/:id", compatCtrl.GetWorkflow)
 
 		// 硬件
 		api.GET("/hardware/health", hwCtrl.GetHealth)
-		api.POST("/hardware/reboot", hwCtrl.Reboot)
-		api.POST("/hardware/shutdown", compatCtrl.Shutdown)
 		api.GET("/hardware/led", hwCtrl.GetLED)
-		api.PUT("/hardware/led", hwCtrl.SetLED)
 		api.GET("/hardware/card", hwCtrl.GetCard)
-		api.POST("/hardware/exec", compatCtrl.Exec)
-		api.POST("/hardware/scp", compatCtrl.SCP)
 
-		// 设备信息 / 配置（原 compat /bitmain/v1/ssm/* 迁移）
+		// 设备信息 / 配置（读）
 		api.GET("/device/basic", compatCtrl.GetCtrlBasic)
 		api.GET("/device/resource", compatCtrl.GetCtrlResource)
-		api.POST("/device/configure/basic", compatCtrl.SetBasic)
 		api.GET("/device/configure/alarm", compatCtrl.GetAlarm)
-		api.POST("/device/configure/alarm", compatCtrl.SetAlarm)
 
 		// 告警订阅
-		api.POST("/software/notify/subscribe", compatCtrl.SubscribeAlarm)
-		api.POST("/software/notify/unsubscribe", compatCtrl.UnsubscribeAlarm)
 		api.GET("/software/notify/subscribe/:name", compatCtrl.GetSubscription)
-
-		// 文件管理（download 已上移至公开路由，支持 query token）
-		api.GET("/files", fileCtrl.List)
-		api.GET("/files/content", fileCtrl.ReadContent)
-		api.POST("/files/upload", fileCtrl.Upload)
-		api.POST("/files/chmod", fileCtrl.Chmod)
-		api.POST("/files/chown", fileCtrl.Chown)
-		api.POST("/files/mkdir", fileCtrl.Mkdir)
-		api.POST("/files/rename", fileCtrl.Rename)
-		api.DELETE("/files", fileCtrl.Delete)
 
 		// 防火墙
 		api.GET("/firewall/status", fwCtrl.Status)
 		api.GET("/firewall/intent", fwCtrl.ListIntents)
-		api.POST("/firewall/intent", fwCtrl.AddIntent)
-		api.DELETE("/firewall/intent/:id", fwCtrl.DeleteIntent)
-		api.POST("/firewall/rebuild", fwCtrl.Rebuild)
+	}
+
+	// adminOnly：高风险写/执行操作，仅 superuser/admin 可调。
+	admin := r.Group("/api/v1")
+	admin.Use(middleware.Auth(), middleware.RequireAdmin())
+	{
+		// 网络（写）
+		admin.PUT("/network/ip", netCtrl.SetIP)
+		admin.POST("/network/nat", compatCtrl.AddNAT)
+		admin.DELETE("/network/nat/:num", compatCtrl.DeleteNAT)
+
+		// 服务管理（写）
+		admin.POST("/systemd/services/:name/action", systemdC.Action)
+		admin.POST("/systemd/daemon-reload", systemdC.DaemonReload)
+
+		// Docker（写）
+		admin.POST("/docker/container/:name/start", dockerCtrl.StartContainer)
+		admin.POST("/docker/container/:name/stop", dockerCtrl.StopContainer)
+		admin.DELETE("/docker/container/:name", dockerCtrl.RemoveContainer)
+		admin.DELETE("/docker/image/:id", dockerCtrl.RemoveImage)
+
+		// 软件/OTA（写）
+		admin.POST("/software/install", softwareCtrl.Install)
+		admin.POST("/software/upgrade", softwareCtrl.Upgrade)
+		admin.POST("/ota/upload", compatCtrl.UploadFirmware)
+		admin.POST("/ota/upgrade", compatCtrl.ExecuteUpgrade)
+		admin.POST("/ota/rollback", compatCtrl.Rollback)
+
+		// 硬件（写）
+		admin.POST("/hardware/reboot", hwCtrl.Reboot)
+		admin.POST("/hardware/shutdown", compatCtrl.Shutdown)
+		admin.PUT("/hardware/led", hwCtrl.SetLED)
+		admin.POST("/hardware/exec", compatCtrl.Exec)
+		admin.POST("/hardware/scp", compatCtrl.SCP)
+
+		// 设备配置（写）
+		admin.POST("/device/configure/basic", compatCtrl.SetBasic)
+		admin.POST("/device/configure/alarm", compatCtrl.SetAlarm)
+
+		// 告警订阅（写）
+		admin.POST("/software/notify/subscribe", compatCtrl.SubscribeAlarm)
+		admin.POST("/software/notify/unsubscribe", compatCtrl.UnsubscribeAlarm)
+
+		// 文件管理（读 + 写均需 admin：涉及设备敏感文件）
+		// 注：download 保留在公开区（<a download> 需 query token 鉴权），见 public 段。
+		admin.GET("/files", fileCtrl.List)
+		admin.GET("/files/content", fileCtrl.ReadContent)
+		admin.POST("/files/upload", fileCtrl.Upload)
+		admin.POST("/files/chmod", fileCtrl.Chmod)
+		admin.POST("/files/chown", fileCtrl.Chown)
+		admin.POST("/files/mkdir", fileCtrl.Mkdir)
+		admin.POST("/files/rename", fileCtrl.Rename)
+		admin.DELETE("/files", fileCtrl.Delete)
+
+		// 防火墙（写）
+		admin.POST("/firewall/intent", fwCtrl.AddIntent)
+		admin.DELETE("/firewall/intent/:id", fwCtrl.DeleteIntent)
+		admin.POST("/firewall/rebuild", fwCtrl.Rebuild)
 	}
 }

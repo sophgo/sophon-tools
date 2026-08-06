@@ -2,7 +2,8 @@ server:
   listenIP: ""
   port: 9779
   auth: true
-  authSecret: "bmssm-dev-secret"
+  # authSecret 留空：启动时生成随机 32 字节 JWT secret 持久化到
+  # /var/lib/bmssm/jwt_secret（见 pkg/auth.EnsureSecret）。显式配置会覆盖。
   defaultPassword: "admin"
   deviceName: "device_1"
 log:

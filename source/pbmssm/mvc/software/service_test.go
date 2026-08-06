@@ -365,9 +365,9 @@ func TestExtractTarGzRejectsSymlink(t *testing.T) {
 
 func TestInstallPackageTarGz(t *testing.T) {
 	src := createTestTarGz(t, map[string]string{
-		"bin/":     "",
-		"bin/app":  "#!/bin/sh\necho hello",
-		"VERSION":  "1.0.0\n",
+		"bin/":    "",
+		"bin/app": "#!/bin/sh\necho hello",
+		"VERSION": "1.0.0\n",
 	})
 	root := t.TempDir()
 	svc := NewSoftwareService(root, t.TempDir(), t.TempDir(), DefaultMaxSize)
@@ -401,6 +401,11 @@ func TestInstallPackageTarGz(t *testing.T) {
 }
 
 func TestInstallPackageTarGzWithInstallScript(t *testing.T) {
+	// 测试显式开启包内脚本自动执行
+	old := autoRunScript
+	autoRunScript = func() bool { return true }
+	defer func() { autoRunScript = old }()
+
 	src := createTestTarGz(t, map[string]string{
 		"install.sh": "#!/bin/sh\necho 'install script ran'",
 	})
@@ -561,6 +566,11 @@ func TestGetFirmwareInfoNotFound(t *testing.T) {
 // ----------------------------------------------------------------
 
 func TestExecuteUpgradeWithScript(t *testing.T) {
+	// 测试显式开启固件脚本自动执行
+	old := autoRunScript
+	autoRunScript = func() bool { return true }
+	defer func() { autoRunScript = old }()
+
 	// 创建含 upgrade.sh 的固件 tar.gz
 	fwContent := map[string]string{
 		"upgrade.sh": "#!/bin/sh\necho 'upgrade done'",
@@ -624,9 +634,14 @@ func TestExecuteUpgradeNoScriptDegraded(t *testing.T) {
 }
 
 func TestExecuteUpgradeWithInstallShInSubdir(t *testing.T) {
+	// 测试显式开启固件脚本自动执行
+	old := autoRunScript
+	autoRunScript = func() bool { return true }
+	defer func() { autoRunScript = old }()
+
 	// 固件包中 install.sh 在子目录中
 	fwContent := map[string]string{
-		"bootloader/":          "",
+		"bootloader/":           "",
 		"bootloader/install.sh": "#!/bin/sh\necho 'bootloader install ok'",
 	}
 	fwPath := createTestTarGz(t, fwContent)

@@ -64,7 +64,7 @@ func setupSoftwareTest(t *testing.T) {
 }
 
 func makeToken() string {
-	secret := config.Conf.GetViper().GetString("server.authSecret")
+	secret := auth.EffectiveSecret(config.Conf.GetViper().GetString("server.authSecret"))
 	if secret == "" {
 		secret = "ssm-dev-secret"
 	}
@@ -354,6 +354,9 @@ func TestControllerOTADownloadNotFound(t *testing.T) {
 
 func TestControllerOTAUpgrade(t *testing.T) {
 	setupSoftwareTest(t)
+	old := autoRunScript
+	autoRunScript = func() bool { return true }
+	defer func() { autoRunScript = old }()
 	svc, ctrl := setupTestService(t)
 
 	// 创建含 upgrade.sh 的固件
@@ -599,6 +602,9 @@ func TestControllerInstallWithTarGzBytes(t *testing.T) {
 // TestControllerOTAUpgradeWithScriptInBody 上传含脚本的固件，然后升级。
 func TestControllerOTAUpgradeWithScriptInBody(t *testing.T) {
 	setupSoftwareTest(t)
+	old := autoRunScript
+	autoRunScript = func() bool { return true }
+	defer func() { autoRunScript = old }()
 	svc, ctrl := setupTestService(t)
 	r := setupSoftwareRouter(ctrl)
 

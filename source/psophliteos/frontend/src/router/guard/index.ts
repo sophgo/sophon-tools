@@ -14,8 +14,10 @@ import projectSetting from '/@/settings/projectSetting';
 import { createParamMenuGuard } from './paramMenuGuard';
 import { useDeviceInfo } from '/@/store/modules/overview';
 import { storeToRefs } from 'pinia';
-import { useUserStore } from '/@/store/modules/user';
+import { useUserStoreWithOut } from '/@/store/modules/user';
 import { PageEnum } from '/@/enums/pageEnum';
+import { FIRST_LOGIN_KEY } from '/@/enums/cacheEnum';
+import { getAuthCache } from '/@/utils/auth';
 
 // Don't change the order of creation
 export function setupRouterGuard(router: Router) {
@@ -32,14 +34,21 @@ export function setupRouterGuard(router: Router) {
 }
 
 /**
- * Hooks for handling page state
+ * 首次登录（需强制改密）守卫。
+ * 注意：isFirstLogin 的"内存初始值 true"只是 Pinia 未登录态占位，不代表用户需要改密。
+ * 刷新页面后内存态重置，但真实状态存在 localStorage（FIRST_LOGIN_KEY）。
+ * 若这里用 isFirstLogin 初值判断，会导致每个已登录用户在刷新时被误登出。
+ * 因此只以持久化缓存为准；需要改密时重定向到登录页（改密在登录页内由 useLoginState 引导），
+ * 但绝不调用 logout（那会清掉 token 把正常用户登出）。
  */
 function createFirstLoginGuard(router: Router) {
   router.beforeEach(async (to) => {
-    const userStore = useUserStore();
-    const isFirstLogin = userStore.getIsFirstLogin;
-    if (to.path !== PageEnum.BASE_LOGIN && isFirstLogin) {
-      userStore.logout(true);
+    if (to.path === PageEnum.BASE_LOGIN) {
+      return true;
+    }
+    const needChange = getAuthCache<boolean>(FIRST_LOGIN_KEY);
+    if (needChange) {
+      return PageEnum.BASE_LOGIN;
     }
     return true;
   });

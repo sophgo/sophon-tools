@@ -42,7 +42,7 @@ func TestListAuditLogsWithAuth(t *testing.T) {
 	api.Use(middleware.Auth())
 	api.GET("/audit", ctrl.ListLogs)
 
-	secret := config.Conf.GetViper().GetString("server.authSecret")
+	secret := auth.EffectiveSecret(config.Conf.GetViper().GetString("server.authSecret"))
 	tokenStr, _, _ := auth.IssueToken("admin", secret, false)
 
 	w := httptest.NewRecorder()

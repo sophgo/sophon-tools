@@ -47,11 +47,16 @@ func (e *Engine) EnqueueFlow(flow *Workflow) error {
 		return fmt.Errorf("create workflow: %w", err)
 	}
 
-	// 非阻塞入队（cap 32 充足）；满则报错，调用方决定重试。
+	// 非阻塞入队（cap 32 充足）；满则删除刚写入的 DB 行并报错，避免状态悬挂
+	// （DB 已落 Commit 但 worker 永不消费）。
 	select {
 	case e.worker <- *flow:
 		return nil
 	default:
+		delErr := e.db.Where("workflow_id = ?", flow.WorkflowID).Delete(&Workflow{}).Error
+		if delErr != nil {
+			logger.Error("rollback orphan workflow %s after enqueue failure: %v", flow.WorkflowID, delErr)
+		}
 		return errWorkerFull
 	}
 }

@@ -2,7 +2,7 @@
   <BasicTable @register="registerTable">
     <template #bodyCell="{ column, record }">
       <template v-if="column.key === 'componentType'">
-        {{ t(`logs.${record.componentType}`) }}
+        {{ typeLabel(record.componentType) }}
       </template>
     </template>
   </BasicTable>
@@ -112,4 +112,12 @@
     },
     rowKey: 'id',
   });
+
+  // 告警类型展示：已知类型走 i18n，未知类型回退原始值（避免显示 logs.xxx 字面量）。
+  function typeLabel(ct: string) {
+    if (!ct) return '-';
+    const key = `logs.${ct}`;
+    const s = t(key);
+    return s === key ? ct : s;
+  }
 </script>

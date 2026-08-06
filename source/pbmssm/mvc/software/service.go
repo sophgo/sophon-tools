@@ -55,8 +55,8 @@ type SoftwareService struct {
 	otaDir       string
 	maxSize      int64
 
-	mu          sync.RWMutex
-	otaRecords  map[string]*otaRecord // uploadID -> record
+	mu         sync.RWMutex
+	otaRecords map[string]*otaRecord // uploadID -> record
 }
 
 // DefaultService 包级懒初始化单例。
@@ -181,7 +181,8 @@ func readVersionFile(dir string) string {
 // ---------------------------------------------------------------
 
 // InstallPackage 安装上传的软件包。
-// 支持 .deb（dpkg -i）、.tar.gz/.tgz（解包，如有 install.sh 则执行）、.zip（解包）。
+// 支持 .deb（dpkg -i）、.tar.gz/.tgz（解包）、.zip（解包）。
+// 若配置 software.autoRunScript 为 true，解包后自动执行 install.sh/setup.sh；否则不执行。
 // filePath 是上传落盘后的路径，origName 是原始文件名。
 func (s *SoftwareService) InstallPackage(filePath, origName string) (*InstallResponse, error) {
 	lower := strings.ToLower(origName)
@@ -196,6 +197,18 @@ func (s *SoftwareService) InstallPackage(filePath, origName string) (*InstallRes
 	default:
 		return nil, fmt.Errorf("unsupported package format: %s (supported: .deb, .tar.gz, .tgz, .zip)", origName)
 	}
+}
+
+// autoRunScript 是否自动执行包内安装脚本。默认关闭（防止上传恶意脚本即 root RCE）。
+// 以函数变量暴露，测试可覆盖。
+var autoRunScript = func() bool {
+	c := &config.Conf
+	c.RLock()
+	defer c.RUnlock()
+	if c.GetViper() == nil {
+		return false
+	}
+	return c.GetViper().GetBool("software.autoRunScript")
 }
 
 // installDeb 用 dpkg -i 安装 deb 包。
@@ -232,11 +245,13 @@ func (s *SoftwareService) installTarGz(filePath, origName string) (*InstallRespo
 		return nil, fmt.Errorf("extract tar.gz: %w", err)
 	}
 
-	// 尝试执行 install.sh
+	// 仅当显式开启 autoRunScript 才执行包内脚本；否则仅提示，避免上传即 root 执行。
 	output := ""
-	if installScript := findInstallScript(destDir); installScript != "" {
-		stdout, stderr, _ := system.RunCommandArgs("/bin/bash", installScript)
-		output = stdout + stderr
+	if autoRunScript() {
+		if installScript := findInstallScript(destDir); installScript != "" {
+			stdout, stderr, _ := system.RunCommandArgs("/bin/bash", installScript)
+			output = stdout + stderr
+		}
 	}
 
 	return &InstallResponse{
@@ -261,9 +276,11 @@ func (s *SoftwareService) installZip(filePath, origName string) (*InstallRespons
 	}
 
 	output := ""
-	if installScript := findInstallScript(destDir); installScript != "" {
-		stdout, stderr, _ := system.RunCommandArgs("/bin/bash", installScript)
-		output = stdout + stderr
+	if autoRunScript() {
+		if installScript := findInstallScript(destDir); installScript != "" {
+			stdout, stderr, _ := system.RunCommandArgs("/bin/bash", installScript)
+			output = stdout + stderr
+		}
 	}
 
 	return &InstallResponse{
@@ -379,6 +396,16 @@ func (s *SoftwareService) ExecuteUpgrade(uploadID string) (*OTAUpgradeResponse, 
 			Available: false,
 			Message:   "no upgrade script found",
 			Reason:    "no upgrade script found",
+		}, nil
+	}
+
+	// 固件内脚本自动执行默认关闭（防上传恶意固件即 root RCE），仅配置显式开启时执行。
+	if !autoRunScript() {
+		return &OTAUpgradeResponse{
+			Success:   false,
+			Available: false,
+			Message:   "auto-run of firmware scripts is disabled",
+			Reason:    "set software.autoRunScript=true to enable",
 		}, nil
 	}
 
@@ -569,7 +596,10 @@ func isSafePath(destDir, entryPath string) bool {
 	return strings.HasPrefix(absResolved, absDest+string(filepath.Separator)) || absResolved == absDest
 }
 
-// extractTarGz 解压 tar.gz 到 destDir，含 zip-slip 防护。
+// maxExtractBytes 单次解包累计解压上限（防 tar/zip 炸弹撑爆磁盘）。
+const maxExtractBytes = 2 << 30 // 2GiB
+
+// extractTarGz 解压 tar.gz 到 destDir，含 zip-slip 防护与总量限制。
 func extractTarGz(filePath, destDir string) error {
 	f, err := os.Open(filePath)
 	if err != nil {
@@ -583,6 +613,7 @@ func extractTarGz(filePath, destDir string) error {
 	}
 	defer gzReader.Close()
 
+	var total int64
 	tarReader := tar.NewReader(gzReader)
 	for {
 		header, err := tarReader.Next()
@@ -612,12 +643,16 @@ func extractTarGz(filePath, destDir string) error {
 			if err != nil {
 				return err
 			}
-			// 限制解压大小：每次最多 DefaultMaxSize
-			if _, err := io.CopyN(out, tarReader, DefaultMaxSize); err != nil && err != io.EOF {
-				out.Close()
+			// 单条目限制 + 累计总量限制（防炸弹）
+			n, err := io.CopyN(out, tarReader, DefaultMaxSize)
+			out.Close()
+			if err != nil && err != io.EOF {
 				return err
 			}
-			out.Close()
+			total += n
+			if total > maxExtractBytes {
+				return fmt.Errorf("extraction exceeds total size limit (%d bytes)", maxExtractBytes)
+			}
 		case tar.TypeSymlink:
 			// 拒绝符号链接（安全考虑）
 			continue
@@ -626,7 +661,7 @@ func extractTarGz(filePath, destDir string) error {
 	return nil
 }
 
-// extractZip 解压 zip 到 destDir，含 zip-slip 防护。
+// extractZip 解压 zip 到 destDir，含 zip-slip 防护与总量限制。
 func extractZip(filePath, destDir string) error {
 	r, err := zip.OpenReader(filePath)
 	if err != nil {
@@ -634,6 +669,7 @@ func extractZip(filePath, destDir string) error {
 	}
 	defer r.Close()
 
+	var total int64
 	for _, f := range r.File {
 		if !isSafePath(destDir, f.Name) {
 			return fmt.Errorf("%w: %s", errZipSlip, f.Name)
@@ -661,11 +697,15 @@ func extractZip(filePath, destDir string) error {
 			rc.Close()
 			return err
 		}
-		_, err = io.CopyN(out, rc, DefaultMaxSize)
+		n, err := io.CopyN(out, rc, DefaultMaxSize)
 		rc.Close()
 		out.Close()
 		if err != nil && err != io.EOF {
 			return err
+		}
+		total += n
+		if total > maxExtractBytes {
+			return fmt.Errorf("extraction exceeds total size limit (%d bytes)", maxExtractBytes)
 		}
 	}
 	return nil

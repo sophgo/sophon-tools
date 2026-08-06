@@ -123,7 +123,8 @@
     (value) => {
       const currentNetCard: any = ipData.wan.find((item: any) => item.name === value);
       if (currentNetCard) {
-        wan.ipType = currentNetCard?.dynamic + 1;
+        // dynamic 缺失时默认静态（ipType=1），避免 NaN 导致 IPv4 校验被跳过
+        wan.ipType = (currentNetCard?.dynamic ?? 0) + 1;
         wan.ip = currentNetCard?.ip || '';
         wan.subnetMask = currentNetCard?.netMask || '';
         wan.gateway = currentNetCard?.gateway || '';

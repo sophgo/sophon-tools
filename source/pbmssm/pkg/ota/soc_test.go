@@ -228,9 +228,9 @@ func TestStatusSOCDryRun(t *testing.T) {
 
 func TestExtractPanicLine(t *testing.T) {
 	cases := []struct {
-		name    string
-		log     string
-		want    string
+		name string
+		log  string
+		want string
 	}{
 		{
 			name: "last panic line extracted with prefix stripped",
@@ -252,9 +252,9 @@ last line of output`,
 			want: "last line of output",
 		},
 		{
-			name:    "empty log returns empty",
-			log:     "",
-			want:    "",
+			name: "empty log returns empty",
+			log:  "",
+			want: "",
 		},
 		{
 			name: "multiple panic lines returns last one",
@@ -266,7 +266,7 @@ more noise`,
 		},
 		{
 			name: "panic line without space after prefix",
-			log: `[PANIC]disk full error`,
+			log:  `[PANIC]disk full error`,
 			want: "disk full error",
 		},
 		{

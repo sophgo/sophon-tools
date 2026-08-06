@@ -45,12 +45,12 @@ func TestRunMultiNodeCtrlDefault(t *testing.T) {
 		t.Fatalf("runMultiNode: %v", err)
 	}
 	calls := runner.calls_()
-	if len(calls) != 1 || calls[0].Name != "bash" {
-		t.Fatalf("expected 1 bash call, got %+v", calls)
+	if len(calls) != 1 || calls[0].Name != localSh {
+		t.Fatalf("expected 1 call to %s, got %+v", localSh, calls)
 	}
-	want := localSh + " md5.txt 0"
-	if len(calls[0].Args) != 2 || calls[0].Args[0] != "-c" || calls[0].Args[1] != want {
-		t.Errorf("args = %+v, want [-c %q]", calls[0].Args, want)
+	want := []string{"md5.txt", "0"}
+	if len(calls[0].Args) != 2 || calls[0].Args[0] != "md5.txt" || calls[0].Args[1] != "0" {
+		t.Errorf("args = %+v, want %v", calls[0].Args, want)
 	}
 }
 
@@ -67,8 +67,11 @@ func TestRunMultiNodeCtrlCmdFlag(t *testing.T) {
 	if len(calls) != 1 {
 		t.Fatalf("got %d calls", len(calls))
 	}
-	if calls[0].Args[1] != "/data/ota/local_update.sh arg1" {
-		t.Errorf("cmd = %q, want whitelisted cmdflag", calls[0].Args[1])
+	if calls[0].Name != "/data/ota/local_update.sh" {
+		t.Errorf("cmd name = %q, want /data/ota/local_update.sh", calls[0].Name)
+	}
+	if len(calls[0].Args) != 1 || calls[0].Args[0] != "arg1" {
+		t.Errorf("args = %+v, want [arg1]", calls[0].Args)
 	}
 }
 
@@ -111,11 +114,11 @@ func TestRunMultiNodeCoreCmdFlag(t *testing.T) {
 		t.Fatalf("runMultiNode: %v", err)
 	}
 	calls := runner.calls_()
-	if len(calls) != 1 || calls[0].Name != "bash" {
-		t.Fatalf("expected bash call, got %+v", calls)
+	if len(calls) != 1 || calls[0].Name != "ssh" {
+		t.Fatalf("expected ssh call, got %+v", calls)
 	}
-	if calls[0].Args[1] != "ssh root@192.168.1.10 mk_bootscr.sh" {
-		t.Errorf("cmd = %q", calls[0].Args[1])
+	if len(calls[0].Args) != 2 || calls[0].Args[0] != "root@192.168.1.10" || calls[0].Args[1] != "mk_bootscr.sh" {
+		t.Errorf("args = %+v, want [root@192.168.1.10 mk_bootscr.sh]", calls[0].Args)
 	}
 }
 
@@ -138,9 +141,11 @@ func TestRunMultiNodeCoreDefault(t *testing.T) {
 	if len(calls) != 1 {
 		t.Fatalf("got %d calls", len(calls))
 	}
-	want := "/data/ota/local_update.sh md5.txt 0"
-	if calls[0].Args[1] != want {
-		t.Errorf("default core cmd = %q, want %q", calls[0].Args[1], want)
+	if calls[0].Name != "/data/ota/local_update.sh" {
+		t.Errorf("default core cmd name = %q, want /data/ota/local_update.sh", calls[0].Name)
+	}
+	if len(calls[0].Args) != 2 || calls[0].Args[0] != "md5.txt" || calls[0].Args[1] != "0" {
+		t.Errorf("default core args = %+v, want [md5.txt 0]", calls[0].Args)
 	}
 }
 
@@ -174,9 +179,10 @@ func TestMultiNodeFlowRebootSuccess(t *testing.T) {
 	for i, c := range calls {
 		names[i] = c.Name
 	}
-	// bash (local_update) + sync + shutdown
-	if !sliceContains(names, "bash") || !sliceContains(names, "sync") || !sliceContains(names, "shutdown") {
-		t.Errorf("expected bash+sync+shutdown, got %v", names)
+	// local_update.sh（参数化执行）+ sync + shutdown
+	if !sliceContains(names, filepath.Join(e.paths.CtrlOTADir, "local_update.sh")) ||
+		!sliceContains(names, "sync") || !sliceContains(names, "shutdown") {
+		t.Errorf("expected local_update+sync+shutdown, got %v", names)
 	}
 }
 

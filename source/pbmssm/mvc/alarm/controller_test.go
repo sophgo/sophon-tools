@@ -42,7 +42,7 @@ func TestListAlarmsWithAuth(t *testing.T) {
 	api.Use(middleware.Auth())
 	api.GET("/alarms", ctrl.ListAlarms)
 
-	secret := config.Conf.GetViper().GetString("server.authSecret")
+	secret := auth.EffectiveSecret(config.Conf.GetViper().GetString("server.authSecret"))
 	tokenStr, _, _ := auth.IssueToken("admin", secret, false)
 
 	w := httptest.NewRecorder()
@@ -101,7 +101,7 @@ func TestListAlarmsFilterComponentType(t *testing.T) {
 	api.Use(middleware.Auth())
 	api.GET("/alarms", ctrl.ListAlarms)
 
-	secret := config.Conf.GetViper().GetString("server.authSecret")
+	secret := auth.EffectiveSecret(config.Conf.GetViper().GetString("server.authSecret"))
 	tokenStr, _, _ := auth.IssueToken("admin", secret, false)
 
 	w := httptest.NewRecorder()

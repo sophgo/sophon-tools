@@ -52,6 +52,9 @@ func TestAuthValidTokenSetsUser(t *testing.T) {
 	ensureConfig(t)
 
 	secret := config.Conf.GetViper().GetString("server.authSecret")
+	if secret == "" {
+		secret = auth.DefaultSecret
+	}
 
 	r := gin.New()
 	r.Use(Auth())

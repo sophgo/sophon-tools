@@ -15,8 +15,8 @@ func TestValidateCmdFlag(t *testing.T) {
 		{"bm_firmware_update", false},
 		{"bm_firmware_update --dev=0xff --target=a53", false},
 		{"mk_bootscr.sh", false},
+		// ssh 参数化执行（不经 bash -c）安全，允许远程执行已知脚本
 		{"ssh root@192.168.1.10 mk_bootscr.sh", false},
-		{"bash /data/ota/local_update.sh", false},
 
 		// 注入攻击拒绝
 		{"rm -rf /", true},
@@ -31,6 +31,11 @@ func TestValidateCmdFlag(t *testing.T) {
 		{"/bin/sh", true},
 		{"/custom/upgrade.sh arg1", true},
 		{"echo 'multinode core upgrade'", true},
+		// bash 前缀交给解释器执行，属 RCE 面，必须拒绝
+		{"bash /data/ota/local_update.sh", true},
+		{"ssh root@host; rm -rf /", true},
+		{"/data/ota/local_update.sh arg$(whoami)", true},
+		{"ssh root@host rm -rf /", true},
 	}
 
 	for _, tt := range cases {

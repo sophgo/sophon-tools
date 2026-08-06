@@ -92,7 +92,7 @@
       field: 'diskRate',
     },
     {
-      label: 'tpu使用率',
+      label: t('maintenance.threshold.tpuRate'),
       field: 'tpuRate',
     },
   ];
@@ -128,14 +128,21 @@
   };
   const loading = ref(false);
   function areAllPropertyValuesValid(obj) {
+    // 温度字段（°C）允许 0~125；百分比字段要求 1~100
+    const tempFields = ['boardTemperature', 'coreTemperature'];
     for (var key in obj) {
       if (obj.hasOwnProperty(key)) {
         var value = obj[key];
 
         // 使用正则表达式判断是否是整数
         var isInteger = /^\d+$/.test(value);
-        // 判断整数范围
-        if (!isInteger || parseInt(value, 10) <= 0 || parseInt(value, 10) > 100) {
+        if (!isInteger) {
+          return false;
+        }
+        const n = parseInt(value, 10);
+        if (tempFields.includes(key)) {
+          if (n < 0 || n > 125) return false;
+        } else if (n <= 0 || n > 100) {
           return false;
         }
       }
