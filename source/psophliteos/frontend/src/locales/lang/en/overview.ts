@@ -75,6 +75,7 @@ export default {
   vpssMemory: 'VPSS Memory',
   diskLayout: 'Disk',
   emmcOverall: 'eMMC Overall',
+  ddrOverall: 'DDR Overall',
   systemPartition: 'System Partition',
   dataPartition: '/data Partition',
   // theoretialCalculationCapacity: '',
