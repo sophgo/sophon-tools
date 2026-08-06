@@ -193,3 +193,68 @@ func TestCheckProtectDenyIPv6SrcValidate(t *testing.T) {
 		t.Error("want error for IPv6 src in port rule")
 	}
 }
+
+// --- S4/S5：互补 CIDR 绕过守卫 ---
+
+func TestIsBroadMatchSlash1(t *testing.T) {
+	// /1 前缀覆盖半个 IPv4 空间，视为危险（互补 /1 对可联合覆盖全网段）
+	if !isBroadMatch("0.0.0.0/1") {
+		t.Error("0.0.0.0/1 should be broad (covers half of IPv4)")
+	}
+	if !isBroadMatch("128.0.0.0/1") {
+		t.Error("128.0.0.0/1 should be broad (covers half of IPv4)")
+	}
+	// /8 仍允许（特定源 deny 合法）
+	if isBroadMatch("10.0.0.0/8") {
+		t.Error("10.0.0.0/8 should NOT be broad")
+	}
+}
+
+func TestCheckProtectDenyPortDenySlash1Src(t *testing.T) {
+	// port_deny src 0.0.0.0/1 命中保护端口 → 拒绝（互补绕过失效）
+	it := Intent{ID: 20, Type: "port_deny", Params: mustParams(t, map[string]interface{}{"proto": "tcp", "port": 22, "src": "0.0.0.0/1"})}
+	if err := CheckProtectDeny(&it, []int{22}); err == nil {
+		t.Error("want block for 0.0.0.0/1 deny on protect port")
+	}
+}
+
+func TestCheckProtectDenyPortDenySpecificSrcStillAllowed(t *testing.T) {
+	// 特定源 /8 deny 保护端口仍允许（合法运维场景）
+	it := Intent{ID: 21, Type: "port_deny", Params: mustParams(t, map[string]interface{}{"proto": "tcp", "port": 22, "src": "10.0.0.0/8"})}
+	if err := CheckProtectDeny(&it, []int{22}); err != nil {
+		t.Errorf("want allow for specific /8 src, got %v", err)
+	}
+}
+
+// --- F1：IPv4-mapped IPv6 绕过守卫 ---
+
+func TestParseIPv4CIDRRejectsMappedIPv6(t *testing.T) {
+	// ::ffff:x.x.x.x/x 的 To4() 非 nil 但语义是 IPv6，必须拒绝（F1 绕过）
+	if _, err := parseIPv4CIDR("::ffff:0.0.0.0/0"); err == nil {
+		t.Error("want error for IPv4-mapped IPv6 cidr")
+	}
+	if _, err := parseIPv4CIDR("::ffff:192.0.2.0/120"); err == nil {
+		t.Error("want error for IPv4-mapped IPv6 cidr")
+	}
+}
+
+func TestCheckProtectDenyMappedIPv6Blacklist(t *testing.T) {
+	// ip_blacklist cidr 为 mapped IPv6 → Validate 拒绝，守卫无绕过
+	it := Intent{Type: "ip_blacklist", Params: mustParams(t, map[string]interface{}{"cidr": "::ffff:0.0.0.0/0"})}
+	if err := it.Validate(); err == nil {
+		t.Error("want Validate error for mapped IPv6 blacklist cidr")
+	}
+}
+
+// --- S6：Enabled=false 关闭不应被守卫拦阻 ---
+
+func TestCheckProtectDenyIgnoresEnabled(t *testing.T) {
+	// 守卫本身不读 it.Enabled（由 Service.AddIntent 仅在 req.Enabled 时调用）；
+	// 此处验证 CheckProtectDeny 对关闭操作（Enabled=false）同样返回 nil 语义由上层保证。
+	it := Intent{ID: 22, Type: "port_deny", Params: mustParams(t, map[string]interface{}{"proto": "tcp", "port": 22}), Enabled: false}
+	// Enabled=false 时即使守卫仍拦截（port 22 全网段），Service 层不调用守卫，
+	// 因此关闭操作可通过。这里仅验证 Validate 不因 Enabled=false 报错。
+	if err := it.Validate(); err != nil {
+		t.Errorf("Validate should pass regardless of Enabled, got %v", err)
+	}
+}

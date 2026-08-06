@@ -13,6 +13,9 @@ import (
 // Service is the firewall MVC service, wrapping pkg/firewall logic with a DB handle.
 type Service struct {
 	db *gorm.DB
+
+	// rebuildMu 串行化 Rebuild，防止并发 rebuild 交错 CleanManaged/插入产生重复或残缺规则集。
+	rebuildMu sync.Mutex
 }
 
 // NewService creates a new Service with the given DB.
@@ -47,15 +50,19 @@ func (s *Service) ListIntents() ([]firewall.Intent, error) { return firewall.Lis
 
 // AddIntent validates and persists a new or updated firewall intent.
 // Blocks port_deny rules targeting protect ports with 0.0.0.0/0.
+// 仅在启用（Enabled=true）时执行保护端口守卫：关闭/禁用一条已存在的意图是降低风险操作，
+// 不应被创建期守卫拦阻（否则旧版遗留的保护端口 deny 规则无法通过 UI 关闭）。
 func (s *Service) AddIntent(req IntentRequest) error {
 	it := firewall.Intent{ID: req.ID, Type: firewall.IntentType(req.Type), Params: req.Params, Enabled: req.Enabled}
 	if err := it.Validate(); err != nil {
 		return err
 	}
 
-	protect := firewall.ProtectPorts(firewall.DefaultRunner)
-	if err := firewall.CheckProtectDeny(&it, protect); err != nil {
-		return err
+	if req.Enabled {
+		protect := firewall.ProtectPorts(firewall.DefaultRunner)
+		if err := firewall.CheckProtectDeny(&it, protect); err != nil {
+			return err
+		}
 	}
 
 	return firewall.SaveIntent(s.db, &it)
@@ -66,15 +73,25 @@ func (s *Service) DeleteIntent(id int64) error { return firewall.DeleteIntent(s.
 
 // Rebuild translates all enabled intents, cleans managed rules, inserts the new ruleset,
 // and persists to rules.v4. 失败时恢复快照，避免 live 处于半配置状态。
+// 串行化执行（rebuildMu），防止并发 rebuild 交错产生重复/残缺规则集。
 func (s *Service) Rebuild() error {
+	s.rebuildMu.Lock()
+	defer s.rebuildMu.Unlock()
+
 	intents, err := firewall.ListIntents(s.db)
 	if err != nil {
 		return err
 	}
 	var rules []firewall.IptablesRule
+	// 应用前用当前探测的保护端口复审全部 enabled 意图：
+	// 创建时合法（如 sshd 停机时 22 未被保护）、现在危险的意图在此被拦截（S2）。
+	protect := firewall.ProtectPorts(firewall.DefaultRunner)
 	for _, it := range intents {
 		if !it.Enabled {
 			continue
+		}
+		if err := firewall.CheckProtectDeny(&it, protect); err != nil {
+			return err
 		}
 		rs, err := it.Translate()
 		if err != nil {
@@ -85,7 +102,7 @@ func (s *Service) Rebuild() error {
 
 	r := firewall.DefaultRunner
 
-	// 快照当前规则，CleanManaged/插入任一失败时恢复，保证原子性。
+	// 快照当前规则，CleanManaged/插入/持久化任一失败时恢复，保证原子性。
 	snap, err := firewall.Snapshot(r)
 	if err != nil {
 		return err
@@ -114,5 +131,10 @@ func (s *Service) Rebuild() error {
 	}
 
 	_, persistPath, _, _ := firewall.FirewallConfig()
-	return firewall.PersistRules(r, persistPath)
+	if err := firewall.PersistRules(r, persistPath); err != nil {
+		// live 已全部替换但 rules.v4 未更新：回滚快照，避免重启后规则静默丢失（S3）。
+		rollback()
+		return err
+	}
+	return nil
 }

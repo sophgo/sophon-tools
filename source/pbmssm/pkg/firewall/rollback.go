@@ -7,8 +7,12 @@ import (
 )
 
 // cleanChain 删除链上所有带给定前缀注释的规则，从大到小删避免行号移位。
+// 列表命令失败返回错误（不再静默判定"已清干净"，防止残留旧规则被重复插入）。
 func cleanChain(r CommandRunner, chain string, prefix string) error {
-	out, _, _ := r.Run("iptables", "-t", "filter", "-L", chain, "-n", "--line-numbers")
+	out, errStr, err := r.Run("iptables", "-t", "filter", "-L", chain, "-n", "--line-numbers")
+	if err != nil {
+		return fmt.Errorf("list %s: %s: %s", chain, err, errStr)
+	}
 	var nums []int
 	for _, line := range strings.Split(out, "\n") {
 		if strings.Contains(line, prefix) {

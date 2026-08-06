@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
 )
 
 type IntentType string
@@ -189,11 +190,17 @@ func parseIPv4CIDR(s string) (*net.IPNet, error) {
 	if ip.To4() == nil {
 		return nil, fmt.Errorf("only ipv4 supported")
 	}
+	// 拒绝 IPv4-mapped IPv6（::ffff:x.x.x.x/x）：To4() 非 nil 但语义上是 IPv6 语法，
+	// iptables 上的行为不确定，且会绕过 isBroadMatch 的 bits==32 判定（F1 绕过）。
+	if strings.Contains(s, ":") {
+		return nil, fmt.Errorf("only ipv4 supported")
+	}
 	return n, nil
 }
 
 // isBroadMatch 判断 src 是否覆盖所有 IPv4 源：空（缺省=匹配全部）、0.0.0.0/0、0.0.0.0。
 // 空字符串必须视为全网段——Translate 对空 src 不输出 -s 参数，等价 -s 0.0.0.0/0。
+// 前缀 /0 与 /1 均视为危险（/1 覆盖半个地址空间，几乎必含管理机/运维终端）。
 func isBroadMatch(src string) bool {
 	if src == "" || src == "0.0.0.0/0" || src == "0.0.0.0" {
 		return true
@@ -201,10 +208,21 @@ func isBroadMatch(src string) bool {
 	// 归一化后比较：0.0.0.0/0 的 IPNet 掩码位为 0，覆盖全部。
 	if ip, n, err := net.ParseCIDR(src); err == nil && n != nil {
 		ones, bits := n.Mask.Size()
-		return ip.To4() != nil && bits == 32 && ones == 0
+		if ip.To4() != nil && bits == 32 && ones <= 1 {
+			return true
+		}
+		// IPv4-mapped IPv6（::ffff:x.x.x.x/x）：ip.To4() 非 nil 但 bits=128。
+		// 归一化后按 IPv4 判定：mapped 的 /0、/1 同样覆盖全网段（F1 绕过）。
+		if ip4 := ip.To4(); ip4 != nil {
+			return ones <= 1
+		}
 	}
 	return false
 }
+
+// isBroadCidr 判断 CIDR 是否覆盖全部或近乎全部 IPv4（用于 ip_blacklist 等无端口维度意图）。
+// 与 isBroadMatch 语义一致，单独命名以强调其适用范围。
+func isBroadCidr(cidr string) bool { return isBroadMatch(cidr) }
 
 // CheckProtectDeny 拒绝屏蔽保护端口/全网段保护主机的意图。返回 ErrInvalidInput。
 // 覆盖三种绕过路径：
