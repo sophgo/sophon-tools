@@ -1,73 +1,65 @@
 <template>
-  <Modal
-    title="选择指标"
-    :visible="open"
-    :width="720"
-    @cancel="emit('update:open', false)"
-  >
-    <div v-if="categories.length === 0" class="text-center py-20px">
+  <Modal title="选择指标" :visible="open" :width="760" @cancel="emit('update:open', false)">
+    <div v-if="categories.length === 0" class="text-center py-40px">
       <Spin />
     </div>
-    <div v-else>
-      <div class="mb-12px flex items-center gap-8px">
-        <Input
-          v-model:value="keyword"
-          placeholder="搜索字段名"
-          allow-clear
-          style="width: 240px"
-        />
-        <Checkbox :checked="allChecked" @change="toggleAll($event)">
-          全选/全不选 ({{ checkedCount }}/{{ totalCount }})
-        </Checkbox>
+    <div v-else class="selector-body">
+      <!-- 顶部工具栏 -->
+      <div class="toolbar">
+        <div class="toolbar-left">
+          <Input
+            v-model:value="keyword"
+            placeholder="搜索字段名"
+            allow-clear
+            style="width: 220px"
+          />
+        </div>
+        <div class="toolbar-right">
+          <span class="count-text">
+            已选 <b class="count-num">{{ checkedCount }}</b> / {{ totalCount }}
+          </span>
+          <Checkbox :checked="allChecked" @change="toggleAll($event)">全选 / 全不选</Checkbox>
+        </div>
       </div>
 
-      <div v-for="cat in catStats" :key="cat.key" class="mb-16px">
-        <div class="flex items-center mb-8px">
-          <span class="font-bold" style="min-width: 140px">{{ cat.title }}</span>
-          <Checkbox
-            :checked="cat.allChecked"
-            :indeterminate="cat.someChecked && !cat.allChecked"
-            @change="toggleCategory(cat, $event)"
-          >
-            全选 ({{ cat.checkedCount }}/{{ cat.fields.length }})
-          </Checkbox>
+      <!-- 分组卡片 -->
+      <div class="group-list">
+        <div v-for="cat in catStats" :key="cat.key" class="group-card">
+          <div class="group-head">
+            <span class="group-title">{{ cat.title }}</span>
+            <Checkbox
+              class="group-check"
+              :checked="cat.allChecked"
+              :indeterminate="cat.someChecked && !cat.allChecked"
+              @change="toggleCategory(cat, $event)"
+            >
+              全选
+            </Checkbox>
+            <span class="group-count">{{ cat.checkedCount }}/{{ cat.fields.length }}</span>
+          </div>
+          <CheckboxGroup v-model:value="localSel[cat.key]" class="group-fields">
+            <Checkbox v-for="f in cat.fields" :key="f" :value="f" class="field-check">
+              {{ fieldLabel(f) }}
+            </Checkbox>
+          </CheckboxGroup>
         </div>
-        <CheckboxGroup
-          v-model:value="localSel[cat.key]"
-          style="display: flex; flex-wrap: wrap"
-        >
-          <Checkbox
-            v-for="f in cat.fields"
-            :key="f"
-            :value="f"
-            style="width: 33%; margin-right: 0; margin-bottom: 4px"
-          >
-            {{ fieldLabel(f) }}
-          </Checkbox>
-        </CheckboxGroup>
       </div>
     </div>
 
+    <!-- 底部操作 -->
     <template #footer>
-      <Button @click="emit('update:open', false)">取消</Button>
-      <Button type="primary" :loading="saving" @click="onApply">
-        保存并应用
-      </Button>
+      <div class="modal-footer">
+        <span class="footer-hint" v-if="!saving">提示：勾选后点击「保存并应用」生效</span>
+        <Button @click="emit('update:open', false)">取消</Button>
+        <Button type="primary" :loading="saving" @click="onApply"> 保存并应用 </Button>
+      </div>
     </template>
   </Modal>
 </template>
 <script lang="ts" setup>
   // @ts-nocheck
   import { ref, computed, watch } from 'vue';
-  import {
-    Modal,
-    Checkbox,
-    CheckboxGroup,
-    Input,
-    Button,
-    Spin,
-    message,
-  } from 'ant-design-vue';
+  import { Modal, Checkbox, CheckboxGroup, Input, Button, Spin, message } from 'ant-design-vue';
   import { GROUP_DEFS, fieldToGroup, fieldLabel } from '../metricsGroup';
   import { saveSelection } from '/@/api/overview/metrics';
 
@@ -107,7 +99,7 @@
       }
       localSel.value = init;
     },
-    { immediate: true }
+    { immediate: true },
   );
 
   const filteredCategories = computed(() => {
@@ -116,9 +108,7 @@
     return categories.value
       .map((c) => ({
         ...c,
-        fields: c.fields.filter(
-          (f) => f.toLowerCase().includes(kw) || fieldLabel(f).includes(kw)
-        ),
+        fields: c.fields.filter((f) => f.toLowerCase().includes(kw) || fieldLabel(f).includes(kw)),
       }))
       .filter((c) => c.fields.length > 0);
   });
@@ -136,14 +126,10 @@
     });
   });
 
-  const checkedCount = computed(() =>
-    catStats.value.reduce((s, c) => s + c.checkedCount, 0)
-  );
-  const totalCount = computed(() =>
-    catStats.value.reduce((s, c) => s + c.fields.length, 0)
-  );
+  const checkedCount = computed(() => catStats.value.reduce((s, c) => s + c.checkedCount, 0));
+  const totalCount = computed(() => catStats.value.reduce((s, c) => s + c.fields.length, 0));
   const allChecked = computed(
-    () => totalCount.value > 0 && checkedCount.value === totalCount.value
+    () => totalCount.value > 0 && checkedCount.value === totalCount.value,
   );
 
   function toggleCategory(cat: any, e: any) {
@@ -178,3 +164,110 @@
     emit('update:open', false);
   }
 </script>
+<style lang="less" scoped>
+  .selector-body {
+    padding-top: 4px;
+  }
+
+  /* 顶部工具栏 */
+  .toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    margin-bottom: 12px;
+    background: #fafafa;
+    border: 1px solid #f0f0f0;
+    border-radius: 6px;
+
+    .toolbar-right {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+
+      .count-text {
+        font-size: 12px;
+        color: #666;
+
+        .count-num {
+          color: #0960bd;
+          font-size: 14px;
+        }
+      }
+    }
+  }
+
+  /* 分组卡片列表 */
+  .group-list {
+    max-height: 52vh;
+    overflow-y: auto;
+    padding-right: 4px;
+  }
+
+  .group-card {
+    border: 1px solid #f0f0f0;
+    border-radius: 8px;
+    margin-bottom: 10px;
+    overflow: hidden;
+    transition: border-color 0.2s;
+
+    &:hover {
+      border-color: #d9d9d9;
+    }
+
+    .group-head {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 14px;
+      background: #fafafa;
+      border-bottom: 1px solid #f0f0f0;
+
+      .group-title {
+        font-weight: 600;
+        font-size: 13px;
+        color: #333;
+        flex: 0 0 auto;
+      }
+
+      .group-check {
+        margin-left: auto;
+        font-size: 12px;
+      }
+
+      .group-count {
+        font-size: 12px;
+        color: #999;
+        flex: 0 0 auto;
+      }
+    }
+
+    .group-fields {
+      display: flex;
+      flex-wrap: wrap;
+      padding: 10px 14px 6px;
+      gap: 0;
+    }
+  }
+
+  .field-check {
+    width: 33.333%;
+    margin-right: 0;
+    margin-bottom: 6px;
+    font-size: 12px;
+  }
+
+  /* 底部操作 */
+  .modal-footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+
+    .footer-hint {
+      margin-right: auto;
+      font-size: 12px;
+      color: #999;
+    }
+  }
+</style>
