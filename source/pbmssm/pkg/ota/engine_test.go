@@ -61,8 +61,10 @@ func TestEngineDryRunFlashSuccess(t *testing.T) {
 	if id == "" {
 		t.Fatal("workflowId empty")
 	}
-	if flows[0].Status != StatusCommit {
-		t.Errorf("initial status = %d, want %d", flows[0].Status, StatusCommit)
+	// 入队后 worker 异步消费，状态可能已从 Commit 推进到 Running/Success，
+	// 只断言初始状态属于合法推进序列（避免机器慢时的时序竞态）。
+	if st := flows[0].Status; st != StatusCommit && st != StatusRunning && st != StatusSuccess {
+		t.Errorf("initial status = %d, want %d/%d/%d", st, StatusCommit, StatusRunning, StatusSuccess)
 	}
 
 	waitForStatus(t, e, id, StatusSuccess, 3*time.Second)

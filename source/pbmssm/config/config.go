@@ -67,6 +67,10 @@ func LoadFromDir(dir string) bool {
 	// OTA dryRun：true 时只记录不实刷（真机验证用，避免变砖/断 SSH）
 	v.SetDefault("ota.dryRun", false)
 
+	// 软件包/固件安装：autoRunScript 默认 false，拒绝自动执行包内脚本
+	// （tar.gz/zip 的 install.sh、.deb 的 dpkg 维护脚本），防上传即 root RCE。
+	v.SetDefault("software.autoRunScript", false)
+
 	// Prometheus metrics 后台采集
 	v.SetDefault("metrics.enabled", true)
 	v.SetDefault("metrics.updateIntervalSeconds", 20)

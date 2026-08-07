@@ -39,3 +39,6 @@ firewall:
   persistPath: /etc/iptables/rules.v4
   rollbackSeconds: 300
   protectPorts: []
+software:
+  autoRunScript: false   # 默认 false：禁止自动执行包内脚本（tar.gz/zip 的 install.sh、
+                         # .deb 的 dpkg 维护脚本），防上传即 root RCE；需安装软件时置 true

@@ -231,6 +231,11 @@ func isBroadCidr(cidr string) bool { return isBroadMatch(cidr) }
 //  3. rate_limit 作用于保护端口 → 拒绝（recent+DROP 超限丢弃，等效拒绝）
 //
 // 与 Translate 语义对齐：src 缺省即匹配所有源，绝非"仅匹配自己"。
+//
+// 已知边界（S1/S2，前端已有提示）：特定源网段（如 10/8、172.16/12、192.168/16）的拒绝
+// 仍会合法通过守卫——企业内网管理机常落这些网段，可能锁死管理通道；且 protect 端口依赖
+// 实时探测（ss/netstat），探测不到时（如 sshd 以非标准进程名运行、systemd socket 激活）
+// 危险规则会被放行。Rebuild 不再有旧 Apply 的"临时放行 + 回滚计时器"兜底，配置需谨慎。
 func CheckProtectDeny(it *Intent, protect []int) error {
 	if len(protect) == 0 {
 		return nil

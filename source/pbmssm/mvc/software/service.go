@@ -182,7 +182,8 @@ func readVersionFile(dir string) string {
 
 // InstallPackage 安装上传的软件包。
 // 支持 .deb（dpkg -i）、.tar.gz/.tgz（解包）、.zip（解包）。
-// 若配置 software.autoRunScript 为 true，解包后自动执行 install.sh/setup.sh；否则不执行。
+// 若配置 software.autoRunScript 为 true，解包后自动执行 install.sh/setup.sh，.deb 允许 dpkg
+// 执行维护脚本；否则全部拒绝执行包内脚本（防上传即 root RCE）。
 // filePath 是上传落盘后的路径，origName 是原始文件名。
 func (s *SoftwareService) InstallPackage(filePath, origName string) (*InstallResponse, error) {
 	lower := strings.ToLower(origName)
@@ -212,7 +213,17 @@ var autoRunScript = func() bool {
 }
 
 // installDeb 用 dpkg -i 安装 deb 包。
+// dpkg 会以 root 执行包内 preinst/postinst 等维护脚本，与解包脚本同一安全口径：
+// autoRunScript 默认关闭时拒绝安装，防止上传恶意 .deb 即 root RCE。
 func (s *SoftwareService) installDeb(filePath, origName string) (*InstallResponse, error) {
+	if !autoRunScript() {
+		return &InstallResponse{
+			Success: false,
+			Message: "deb install disabled: dpkg would run package maintainer scripts as root; set software.autoRunScript=true to enable",
+			Package: origName,
+			Output:  "",
+		}, nil
+	}
 	stdout, stderr, err := system.RunCommandArgs("dpkg", "-i", filePath)
 	if err != nil {
 		logger.Error("dpkg -i %s failed: %s %s", filePath, stdout, stderr)

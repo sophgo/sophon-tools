@@ -11,6 +11,11 @@
         />
       </div>
       <BasicForm @register="registerForm" />
+      <div class="mb-2" style="color: #faad14; font-size: 12px; line-height: 1.6">
+        提示：拒绝/限速规则会命中保护端口（SSH 等管理端口）。守卫会拦截全网段的保护端口拒绝；
+        但指定源网段的拒绝（如 10/8、172.16/12、192.168/16 内的管理机）仍可能锁死管理通道，
+        且守卫依赖对保护端口的实时探测（探测不到时不会拦截），请谨慎配置。
+      </div>
       <div class="mt-2 flex justify-end" style="gap: 8px">
         <a-button @click="resetForm">{{ t('maintenance.firewall.reset') }}</a-button>
         <a-button type="primary" :loading="adding" @click="handleAdd">

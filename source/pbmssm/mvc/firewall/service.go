@@ -74,6 +74,8 @@ func (s *Service) DeleteIntent(id int64) error { return firewall.DeleteIntent(s.
 // Rebuild translates all enabled intents, cleans managed rules, inserts the new ruleset,
 // and persists to rules.v4. 失败时恢复快照，避免 live 处于半配置状态。
 // 串行化执行（rebuildMu），防止并发 rebuild 交错产生重复/残缺规则集。
+// 安全边界：无旧 Apply 的"临时放行 + 回滚计时器"兜底，仅靠 CheckProtectDeny 守卫
+// （见 pkg/firewall.CheckProtectDeny 注释的已知边界）。
 func (s *Service) Rebuild() error {
 	s.rebuildMu.Lock()
 	defer s.rebuildMu.Unlock()

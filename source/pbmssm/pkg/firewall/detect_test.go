@@ -1,19 +1,31 @@
 package firewall
 
 import (
+	"sync"
 	"strings"
 	"testing"
 )
 
-// fakeRunner 按命令名返回预设输出。
+// fakeRunner 模拟 CommandRunner：按命令名返回预设输出，或由 respond 脚本化响应，
+// 并记录全部调用（count 按子串统计）。
 type fakeRunner struct {
-	outs map[string]string // key = name + " " + strings.Join(args)
-	errs map[string]error
-	miss bool // 命令不存在时返 err
+	outs    map[string]string // key = name + " " + strings.Join(args)
+	errs    map[string]error
+	miss    bool // 命令不存在时返 err
+	respond func(name string, args []string) (string, string, error)
+
+	mu    sync.Mutex
+	calls [][2]string // {name, joined args}
 }
 
-func (f fakeRunner) Run(name string, args ...string) (string, string, error) {
+func (f *fakeRunner) Run(name string, args ...string) (string, string, error) {
 	k := name + " " + strings.Join(args, " ")
+	f.mu.Lock()
+	f.calls = append(f.calls, [2]string{name, k})
+	f.mu.Unlock()
+	if f.respond != nil {
+		return f.respond(name, args)
+	}
 	if f.errs != nil {
 		if e, ok := f.errs[k]; ok {
 			return "", "not found", e
@@ -30,6 +42,18 @@ func (f fakeRunner) Run(name string, args ...string) (string, string, error) {
 	return "", "", nil
 }
 
+func (f *fakeRunner) count(needle string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, c := range f.calls {
+		if strings.Contains(c[1], needle) {
+			n++
+		}
+	}
+	return n
+}
+
 var errNotFound = &notFoundErr{}
 
 type notFoundErr struct{}
@@ -38,7 +62,7 @@ func (*notFoundErr) Error() string { return "not found" }
 
 func TestCheckEnvironmentAllOK(t *testing.T) {
 	// iptables/iptables-save/iptables-restore 都在，ufw 不在或 disabled
-	r := fakeRunner{outs: map[string]string{
+	r := &fakeRunner{outs: map[string]string{
 		"iptables -V":          "iptables v1.8",
 		"iptables-save -V":     "v1.8",
 		"iptables-restore -V":  "v1.8",
@@ -53,7 +77,7 @@ func TestCheckEnvironmentAllOK(t *testing.T) {
 }
 
 func TestCheckEnvironmentUfwActive(t *testing.T) {
-	r := fakeRunner{outs: map[string]string{
+	r := &fakeRunner{outs: map[string]string{
 		"iptables -V":                       "v",
 		"iptables-save -V":                  "v",
 		"iptables-restore -V":               "v",
@@ -79,7 +103,7 @@ func TestCheckEnvironmentUfwActive(t *testing.T) {
 }
 
 func TestCheckEnvironmentMissingIptables(t *testing.T) {
-	r := fakeRunner{miss: true}
+	r := &fakeRunner{miss: true}
 	res := CheckEnvironment(r)
 	if res.OK {
 		t.Fatal("expected NOT ok")
@@ -101,7 +125,7 @@ func TestDetectSSHPorts(t *testing.T) {
 		"LISTEN 0      128          0.0.0.0:22          0.0.0.0:*      users:((\"sshd\",pid=1,fd=3))\n" +
 		"LISTEN 0      128          0.0.0.0:2222         0.0.0.0:*      users:((\"sshd\",pid=1,fd=4))\n" +
 		"LISTEN 0      128          0.0.0.0:8080         0.0.0.0:*      users:((\"nginx\",pid=2,fd=5))\n"
-	r := fakeRunner{outs: map[string]string{"ss -tlnpH": ssOut}}
+	r := &fakeRunner{outs: map[string]string{"ss -tlnpH": ssOut}}
 	ports := DetectSSHPorts(r)
 	if len(ports) != 2 || ports[0] != 22 || ports[1] != 2222 {
 		t.Fatalf("got %v want [22 2222]", ports)
@@ -109,7 +133,7 @@ func TestDetectSSHPorts(t *testing.T) {
 }
 
 func TestDetectSSHPortsEmpty(t *testing.T) {
-	r := fakeRunner{miss: true}
+	r := &fakeRunner{miss: true}
 	ports := DetectSSHPorts(r)
 	if len(ports) != 0 {
 		t.Fatalf("got %v want []", ports)
@@ -121,7 +145,7 @@ func TestDetectSSHPortsNetstatFallback(t *testing.T) {
 	netstatOut := "tcp        0      0 0.0.0.0:22             0.0.0.0:*               LISTEN      1234/sshd\n" +
 		"tcp        0      0 0.0.0.0:2222           0.0.0.0:*               LISTEN      1235/sshd\n" +
 		"tcp6       0      0 :::8080                 :::*                    LISTEN      1236/nginx\n"
-	r := fakeRunner{
+	r := &fakeRunner{
 		outs: map[string]string{"netstat -tlnp": netstatOut},
 		errs: map[string]error{"ss -tlnpH": &notFoundErr{}},
 	}
@@ -134,7 +158,7 @@ func TestDetectSSHPortsNetstatFallback(t *testing.T) {
 func TestDetectSophliteosPortsNetstatFallback(t *testing.T) {
 	netstatOut := "tcp        0      0 0.0.0.0:443             0.0.0.0:*               LISTEN      777/sophliteos\n" +
 		"tcp        0      0 0.0.0.0:8080            0.0.0.0:*               LISTEN      888/other\n"
-	r := fakeRunner{
+	r := &fakeRunner{
 		outs: map[string]string{"netstat -tlnp": netstatOut},
 		errs: map[string]error{"ss -tlnpH": &notFoundErr{}},
 	}
