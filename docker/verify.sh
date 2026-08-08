@@ -108,7 +108,9 @@ CHECK  "qemu-loongarch64"       "qemu-loongarch64 --version | head -1"
 if [[ "${DO_CROSS}" = "1" ]]; then
   echo "--- 交叉编译实测 ---"
   # C: aarch64 musl 静态
-  if run 'printf "int main(){return 0;}\n" > /tmp/c.c && aarch64-linux-musl-gcc -static /tmp/c.c -o /tmp/c.out && file /tmp/c.out | grep -qE "statically linked|static-pie linked"'; then
+  # 用 readelf 判 INTERP 而非 file: ubuntu:20.04 的 file 5.38 无法识别 static-pie
+  # (-static 默认 rcrt1.o 产出 ET_DYN static-pie), 会误报为 dynamically linked。
+  if run 'printf "int main(){return 0;}\n" > /tmp/c.c && aarch64-linux-musl-gcc -static /tmp/c.c -o /tmp/c.out && ! readelf -l /tmp/c.out | grep -q INTERP'; then
     echo "  [PASS] C aarch64 musl 静态编译"
   else
     echo "  [FAIL] C aarch64 musl 静态编译"
