@@ -2,6 +2,10 @@
 # =============================================================================
 # sophon-tools-build —— sophon-tools 17 子项目统一编译镜像
 #
+# 基座: ubuntu:20.04 (U1 单镜像合并决定; digest 锁定见 docker/versions.env)
+#   glibc 2.31, 满足 pqt AppImage 对宿主 glibc ≤ 2.31 的硬约束。
+#   apt 交叉 gcc 为 9.3.0 (22.04 是 11.x), 已实测可编译各目标架构。
+#
 # 设计:
 #   * 多阶段构建: Stage1 下载并校验国外大体积工具链(Go/Node); Stage2 汇入运行镜像。
 #   * 版本唯一来源 docker/versions.env(由 docker/build.sh 注入 ARG), 全部版本锁定。
@@ -53,7 +57,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 SHELL ["/bin/bash", "-c"]
 
-# ---- 系统依赖 + apt 交叉工具链(精确版本, 由 ubuntu:22.04 仓库固定) ----
+# ---- 系统依赖 + apt 交叉工具链(精确版本, 由 ubuntu:20.04 仓库固定, 均为 9.3.0) ----
 # pdfss_cpp 8 架构: aarch64/armel/riscv64 + mingw-w64(windows amd64/i686)
 # Rust/Go 静态: musl 工具链在 PATH(由 pbmssm 的 fetch-musl-toolchain.sh 识别复用)
 RUN apt-get update && apt-get install -y --no-install-recommends \
