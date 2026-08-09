@@ -1,15 +1,13 @@
 ifeq ($(KERNELRELEASE), )
-KERNELDIR := /lib/modules/$(shell uname -r)/build
-# 在x86主机上进行交叉编译时请使按照下面的注释配置环境变量，同时不要进行下方部分安装相关的操作
-# KERNELDIR = /workspace/allinone/linux-linaro-stable
-# ARCH = arm64
-# CROSS_COMPILE = /workspace/env/gcc-linaro-6.3.1-2017.05-x86_64_aarch64-linux-gnu/bin/aarch64-linux-gnu-
+# 设备端编译默认用当前运行内核头；交叉编译时外部传入
+#   KERNELDIR=<内核源码/头目录> ARCH=<arch> CROSS_COMPILE=<交叉工具链前缀>
+KERNELDIR ?= /lib/modules/$(shell uname -r)/build
 KERNEL_VERSION := $(shell uname -r)
 MODULE_PATH := drivers/net/class/
 KO_FILES := cdc-wdm.ko
 PWD :=$(shell pwd)
 default:
-		$(MAKE) -C $(KERNELDIR)  M=$(PWD)
+		$(MAKE) -C $(KERNELDIR)  M=$(PWD) ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE)
 clean:
 		rm -rf .tmp_versions Module.symvers *.mod.c *.o *.ko .*.cmd Module.markers modules.order *.a *.mod
 install:

@@ -16,10 +16,33 @@
 
 ## 安装方式
 
-1. 以root权限执行 `bash autotelecomm_install_x.x.x.sh` ，该文件可以通过本仓库的Release页面获取
+> 安装脚本会将 rootfs 文件写入 `/` 目录、注册 systemd 服务并安装内核模块，**必须以 root 权限执行**。
+
+1. 以root权限执行 `sudo bash autotelecomm_install_x.x.x.sh` ，该文件可以通过本仓库的Release页面获取
 2. 在弹出 `success, please restart this device` 后将设备关机
 3. 将SIM卡插入设备
 4. 上电启动设备
+
+## 构建方式
+
+本子项目仅支持 **arm64**（rootfs 内含 aarch64 预编译二进制 quectel-CM/dhclient，amd64 设备无法运行），统一构建接口：
+
+```bash
+bash release.sh [ARCH] [VERSION]
+#   ARCH:    仅 arm64（默认），传入其他值将报错退出
+#   VERSION: 显式版本号（默认 1.2.8），产物为 autotelecomm_install_<VERSION>.sh
+#   env OUTPUT_DIR: 产物目录（默认 <repo>/output/pautotelecomm/）
+```
+
+产物为单文件自解包安装脚本 `autotelecomm_install_<VERSION>.sh`，内含 rootfs 与内核模块源码包，在设备上以 root 执行即可安装。
+
+## 设备端内核模块安装依赖
+
+- 内核开发头文件（linux-headers，版本需与设备当前内核 `uname -r` 匹配）。
+  缺失时安装脚本会明确报错；也可传入内核头安装脚本：
+  `bash install.sh /path/to/linux-headers-install.sh`。
+- 内核模块在**设备端**编译安装（不依赖预编译 .ko），编译需 `make`/`gcc`。
+- 安装过程不依赖 sudo（脚本需 root 直跑）。
 
 ## 常见问题
 
