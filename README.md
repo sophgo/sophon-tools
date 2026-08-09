@@ -25,31 +25,36 @@
 | [ota_update](./source/pota_update) | source/pota_update | 是 | OTA远程刷机工具 |
 | [mem_aging_test](./source/pmem_aging_test) | source/pmem_aging_test | 是 | DDR压测工具 |
 | [autotelecomm](./source/pautotelecomm) | source/pautotelecomm | 是 | 4G/5G自动拨号工具 |
-| [multi_video_qt](./source/pmulti_video_qt) | source/pmulti_video_qt | 否 | QT多路视频解码播放器 |
 | [bm_set_ip](./source/pbm_set_ip) | source/pbm_set_ip | 否 | 配网工具 |
-| [get_info_exporter](./source/pget_info_exporter) | source/pget_info_exporter | 否 | 已并入 bmssm（Prometheus 指标采集） |
+| [phytool](./source/psoph_phytool) | source/psoph_phytool | 是 | 网口 PHY 寄存器读写工具（纯脚本，无编译） |
 | [bmssm](./source/pbmssm) | source/pbmssm | 否 | 设备端后端（:9779）：鉴权/硬件指标/systemd/端口/网络/OTA/文件。见 [API.md](./API.md) / [USAGE.md](./USAGE.md) / [BUILD.md](./BUILD.md) |
 | [sophliteos](./source/psophliteos) | source/psophliteos | 否 | 算力设备管理 Web 平台（Go+Vue，:8080），反代 bmssm。见 [API.md](./API.md) / [USAGE.md](./USAGE.md) / [BUILD.md](./BUILD.md) |
 
 ## 编译方式
 
-### 一键全量多平台 release（推荐）
+### 一键全量 release（推荐）
 
 本仓库已接入统一构建工程（M1~M4）：16 个子项目全部提供统一接口 `release.sh`，由
-Docker 统一镜像 `sophon-tools-build` 在容器内完成全部多平台编译。**一条命令全量出包**：
+Docker 统一镜像 `sophon-tools-build` 在容器内完成编译。**一条命令全量出包**：
 
 ```bash
 # 前置：统一构建镜像（首次）
-bash docker/build.sh --with-dfss-toolchains   # 完整镜像（含 dfss 私有 sw_64/loongarch64 工具链）
+bash docker/build.sh --with-dfss-toolchains --with-qt-mingw --with-sophui-toolchain   # 完整镜像（含 dfss 私有 sw_64/loongarch64、Qt mingw 静态库、pSophUI 交叉 Qt 库）
 
-# 一键全量 release（所有子项目多平台，Docker 内编译）
+# 一键全量 release（各子项目默认平台，Docker 内编译）
 bash release.sh
 
 # 常用变体
 bash release.sh --project pbmssm            # 单项目快速构建
 bash release.sh --version 2.1.0             # 全量 + 统一版本号
-bash release.sh --project pqt_memory_edit   # 宿主执行（pqt 系列需 docker-in-docker）
+bash release.sh --project pqt_memory_edit   # 宿主执行（pqt 系列在统一镜像内直接构建，无需 docker-in-docker）
 ```
+
+> **平台说明**：默认 `release.sh` 对每个子项目构建其**默认平台**（多数为单平台，
+> 如 pbmssm/pbm_set_ip=arm64、pget_info/pdfss_cpp=amd64；仅 pbmsec/psoph_phytool 默认出全平台）。
+> 需要跨平台出包时，对支持 `all` 的子项目在其源码目录执行 `bash release.sh all`
+> （如 pdfss_cpp 可一次出 amd64/arm64/armbi/loongarch64/riscv64/sw_64/win-amd64/win-i686 8 平台），
+> 或 `bash docker/build-all.sh --arch all` 对支持 `all` 的子项目统一驱动。
 
 构建结束后：
 
@@ -74,4 +79,4 @@ bash release.sh --project pqt_memory_edit   # 宿主执行（pqt 系列需 docke
 * 7z/zip
 * dpkg-deb
 * pandoc
-* docker（统一构建镜像 `sophon-tools-build:m2`）
+* docker（统一构建镜像 `sophon-tools-build:unified`）

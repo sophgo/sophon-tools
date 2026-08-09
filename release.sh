@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# sophon-tools 一键全量多平台 release（M4 统一入口 / M5 单镜像）
+# sophon-tools 一键全量 release（M4 统一入口 / M5 单镜像；各子项目默认平台）
 #
 # 用法:
 #   bash release.sh [--project <子项目>] [--version <版本号>] [--no-image-check]
@@ -8,8 +8,8 @@
 # 行为:
 #   1. 检查统一构建镜像 sophon-tools-build:unified（M5 单镜像, ubuntu:20.04 基座）
 #      是否可用；缺失时提示用 `bash docker/build.sh` 构建（不自动构建，避免长时间阻塞）。
-#   2. 驱动 docker/build-all.sh 对全部子项目做多平台构建（失败隔离：单项目
-#      失败不阻塞整体，结束后列出失败项，非零退出）。
+#   2. 驱动 docker/build-all.sh 对全部子项目做构建（各子项目默认平台；失败隔离：
+#      单项目失败不阻塞整体，结束后列出失败项，非零退出）。
 #   3. 汇聚产物到 output/<子项目>/（保持既有 output 约定），并生成:
 #        - output/MANIFEST.txt   产物清单（子项目/文件名/架构/版本/md5）
 #        - output/git_hash.txt   构建时仓库 HEAD
@@ -65,8 +65,8 @@ if [[ -z "${NO_IMAGE_CHECK:-}" ]]; then
     echo "ERROR: 统一构建镜像 ${IMAGE} 不存在。" >&2
     echo "       获取方式（按优先级）:" >&2
     echo "         1) 从 dfss 服务器拉取已构建镜像（推荐，免本地构建）:" >&2
-    echo "            python3 -m dfss --url=open@sophgo.com:/<dfss路径>/${IMAGE#*:}.tar.zst" >&2
-    echo "            docker load -i ${IMAGE#*:}.tar.zst" >&2
+    echo "            python3 -m dfss --url=open@sophgo.com:/<dfss路径>/${IMAGE%%:*}-${IMAGE#*:}.tar.zst" >&2
+    echo "            docker load -i ${IMAGE%%:*}-${IMAGE#*:}.tar.zst" >&2
     echo "         2) 本地构建: bash docker/build.sh [--with-dfss-toolchains]" >&2
     echo "         3) 指定已有镜像: bash release.sh --image <镜像名>" >&2
     exit 1

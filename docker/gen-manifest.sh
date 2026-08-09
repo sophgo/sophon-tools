@@ -35,7 +35,15 @@ detect_arch() {
   case "$name" in
     *win*amd64*|*win*x86_64*) echo "win-amd64"; return ;;
     *win*i686*|*win*32*)      echo "win-i686"; return ;;
-    *\.exe)                   echo "win-amd64"; return ;;
+    # 无 win 关键字的 .exe：用 file 探测区分 PE32+ / PE32（不再无条件 win-amd64）
+    *\.exe)
+      local ftype
+      ftype="$(file -b "$path" 2>/dev/null)"
+      case "$ftype" in
+        *PE32+*) echo "win-amd64"; return ;;
+        *PE32*)  echo "win-i686"; return ;;
+      esac
+      echo "win-amd64"; return ;;
     *arm64*|*aarch64*|*_arm64*)  echo "arm64"; return ;;
     *amd64*|*x86_64*|*x86-64*)   echo "amd64"; return ;;
     *armbi*) echo "armbi"; return ;;

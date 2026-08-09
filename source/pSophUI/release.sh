@@ -7,7 +7,7 @@
 #   env QT_CROSS_PREFIX: aarch64 Qt 交叉安装前缀
 #     默认 /env/qt_5.12.8_nosysroot（13.24 cross_build_sophon_u20 容器同款）
 #   env CROSS_PREFIX: aarch64 交叉编译器前缀
-#     默认 /env/gcc-linaro-6.3.1-2017.05-x86_64_aarch64-linux-gnu（Linaro GCC 6.3）
+#     默认 /usr（系统 apt aarch64-linux-gnu-gcc 9.4；Linaro GCC 6.3 已移除）
 # 说明: 工程自带 lxqt qtermwidget arm64 静态库 + Makefile 为 qmake 生成物。
 #       本脚本用 qmake 重新生成 Makefile（消除 /env/qt_fl2000 绝对路径依赖），
 #       再 make 出 arm64 二进制并打 deb。

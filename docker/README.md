@@ -205,16 +205,22 @@ cd /workspace/sophon-tools/source/pbmssm
 bash build/build-deb-bmssm.sh   # 需以非 root 用户运行，或改输出目录为可写路径
 ```
 
-## 统一构建入口（M3/M4/M5）：全部子项目一键全量多平台编译
+## 统一构建入口（M3/M4/M5）：全部子项目一键全量编译
 
 每个子项目都提供统一接口的 `release.sh`（M1 规范 v0.1）：
 
 ```bash
 bash release.sh [ARCH] [VERSION]
-#   ARCH:    arm64 | amd64 | all（默认按子项目）
+#   ARCH:    arm64 | amd64 | all（默认按子项目，见各子项目 release.sh）
 #   VERSION: 显式版本号（缺省用子项目版本来源）
 #   env OUTPUT_DIR: 覆盖产物目录（默认 <repo>/output/<子项目>/）
 ```
+
+> **平台说明**：`release.sh` / `build-all.sh` 默认只构建各子项目的**默认平台**
+> （多数为单平台：pbmssm/pbm_set_ip=arm64、pget_info/pdfss_cpp=amd64；仅 pbmsec/psoph_phytool
+> 默认出全平台）。需要跨平台出包时，对支持 `all` 的子项目在其源码目录执行
+> `bash release.sh all`（如 pdfss_cpp 一次出 amd64/arm64/armbi/loongarch64/riscv64/sw_64/win-amd64/win-i686
+> 8 平台），或用 `bash docker/build-all.sh --arch all` 对支持 `all` 的子项目统一驱动。
 
 `docker/build-all.sh` 在镜像内依次驱动全部子项目的 `release.sh`，产物汇聚到仓库根 `output/<子项目>/`：
 
@@ -244,10 +250,10 @@ bash docker/gen-manifest.sh          # -> output/MANIFEST.txt
 ### M4：一条命令全量 release（推荐入口）
 
 仓库根 `release.sh` 是 M4 的一键全量入口，内部依次完成：镜像前置检查 → 驱动
-`build-all.sh` 全量构建 → 生成 `MANIFEST.txt` + `git_hash.txt` + `.build-status.txt`。
+`build-all.sh` 全量构建（各子项目默认平台）→ 生成 `MANIFEST.txt` + `git_hash.txt` + `.build-status.txt`。
 
 ```bash
-bash release.sh                      # 一键全量多平台 release
+bash release.sh                      # 一键全量 release（各子项目默认平台）
 bash release.sh --project pbmssm     # 单项目
 bash release.sh --version 2.1.0      # 统一版本号
 ```
@@ -261,8 +267,11 @@ bash release.sh --version 2.1.0      # 统一版本号
 ```
 子项目                | 文件名                                            | 架构           | 版本      | md5
 pbmssm               | bmssm_2.1.0_arm64.deb                             | arm64          | 2.1.0     | db83...
-pdfss_cpp            | dfss-cpp-linux-loongarch64                        | loongarch64    | 1.10.5    | ...
+pdfss_cpp            | dfss-cpp-linux-loongarch64                        | loongarch64    | unknown   | ...
 ```
+
+版本列从**文件名**提取（`v?<数字>.<数字>[.<数字>]`），文件名不含版本号的一律记 `unknown`
+（如 `dfss-cpp-linux-loongarch64` 无版本后缀，即 `unknown`）。
 
 架构判定优先级：文件名关键字 → `.deb` 包 `Architecture` 字段 → `file` ELF/PE 探测。
 
