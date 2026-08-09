@@ -43,11 +43,9 @@ int setkey(int fd, char* key, int keylen) {
     int err = setsockopt(fd, SOL_ALG, ALG_SET_KEY, key, keylen);
     if (err) {
         perror("setkey err");
-        goto out;
+        return -1;
     }
-out:
-    err = errno;
-    return err;
+    return 0;
 }
  
 int sendmsg_to_crypto(int opfd, int cmsg_type, __u32 cmsg_data, char* plaintext_buf, int buflen) {
@@ -95,12 +93,8 @@ int sendmsg_to_crypto(int opfd, int cmsg_type, __u32 cmsg_data, char* plaintext_
     err = sendmsg(opfd, &msg, MSG_MORE);
     if (err == -1) {
         perror("sendmsg err");
-        goto out;
+        return -1;
     }
-    else
-        return err;
-out:
-    err = errno;
     return err;
 }
  
@@ -118,30 +112,27 @@ int recvmsg_from_crypto(int opfd, char* src, int len) {
     err = recvmsg(opfd, &msg, 0);
     if (err == -1) {
         perror("recvmsg err");
-        goto out;
+        return -1;
     }
-    else {
-        /* 打印出接收到的加密后的数据 */
-        printf("recvmsg_from_crypto hex: ");
-        print(src, len);
-        return err;
-    }
- 
- 
-out:
-    err = errno;
+    /* 打印出接收到的加密后的数据 */
+    printf("recvmsg_from_crypto hex: ");
+    print(src, len);
     return err;
 }
- 
+
 char* text_align16(const char* src, long int* len) {
     /* 对字符串进行16字节对齐不足补\0，用于处理AES加密的16字节分组 */
     char* new_str;
     long int new_len = ((*len) / 16 + 1) * 16;
     new_str = malloc((*len) % 16 == 0 ? *len : new_len);
+    if (new_str == NULL) {
+        perror("text_align16 malloc err");
+        exit(EXIT_FAILURE);
+    }
     memcpy(new_str, src, *len);
     if ((*len) % 16 == 0)
         return new_str;
-    memset((new_str + (unsigned int)(*len)), 0, new_len - *len - 1);
+    memset(new_str + *len, 0, new_len - *len);
     *len = new_len;
     return new_str;
 }
@@ -164,8 +155,8 @@ int main(int argc, char** argv) {
     char* plaintext_buf;
     long int plaintext_buf_len;
     int tfmfd;
-    int opfd;
-    int opfd2;
+    int opfd = -1;
+    int opfd2 = -1;
     int err;
     /* 实例需要加密的明文数据 */
     if (argc > 1)
@@ -175,7 +166,8 @@ int main(int argc, char** argv) {
     plaintext_buf_len = strlen(plaintext_buf);
     /* 根据输入进行内存空间的申请，确保可以处理超大字符串 */
     encrypt_buf = malloc(plaintext_buf_len + 16);
-    decrypt_buf = malloc(plaintext_buf_len + 16);
+    /* calloc 清零保证解密输出为 NUL 终止，避免 %s/strlen 越界读 */
+    decrypt_buf = calloc(plaintext_buf_len + 16, 1);
     plaintext_buf = text_align16(plaintext_buf, &plaintext_buf_len);
     printf("src text: %s len: %ld->%ld\n", plaintext_buf, strlen(plaintext_buf), plaintext_buf_len);
     /* 申请socket控制句柄 */
@@ -195,12 +187,14 @@ int main(int argc, char** argv) {
     opfd = accept(tfmfd, NULL, 0);
     if (opfd == -1) {
         perror("accept err");
+        goto accept_err;
     }
  
     /* 申请一个句柄，用于解密 */
     opfd2 = accept(tfmfd, NULL, 0);
     if (opfd2 == -1) {
         perror("accept err");
+        goto accept_err;
     }
  
     /* 发送数据用以加密 */
@@ -224,8 +218,6 @@ int main(int argc, char** argv) {
     if (err == -1) {
         goto sendmsg_err;
     }
-    int bytesToRecv = 0;
- 
 #if RECV==0
     /* 接收加密后的数据 */
     err = recvmsg_from_crypto(opfd2, decrypt_buf, plaintext_buf_len);
