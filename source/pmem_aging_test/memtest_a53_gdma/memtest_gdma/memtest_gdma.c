@@ -83,6 +83,7 @@ static int parse_shape(const char* arg, unsigned long* shape) {
   int i = 0;
   token = strtok((char*)arg, delimiters);
   while (token != NULL) {
+    if (i >= 4) return -1;
     shape[i++] = strtol(token, &endptr, 10);
     token = strtok(NULL, delimiters);
     if (*endptr != '\0') return 0;
@@ -539,7 +540,7 @@ int main(int argc, char* argv[]) {
     exit(EXIT_FAILURE);
   }
   shape_size = get_shape_size(shape);
-  printf("[INFO] use shape info: [%ld, %ld, %ld, %ld], size: %lld B\r\n",
+  printf("[INFO] use shape info: [%ld, %ld, %ld, %ld], size: %llu B\r\n",
          shape[0], shape[1], shape[2], shape[3], shape_size);
   loop = strtol(argv[3], &endptr, 10);
   if (*endptr != '\0') {
@@ -607,28 +608,28 @@ int main(int argc, char* argv[]) {
   printf("[INFO] use gdma test num: %d\r\n", gdma_test_num);
   gdma_pid = malloc(sizeof(pthread_t) * gdma_test_num);
   if (gdma_pid == NULL) {
-    printf("[ERROR] malloc gdma_pid failed, size: %lld\r\n", shape_size);
+    printf("[ERROR] malloc gdma_pid failed, size: %llu\r\n", shape_size);
     return 1;
   }
   gdma_pid_args = malloc(sizeof(struct gdma_pid_arg_t) * gdma_test_num);
   if (gdma_pid_args == NULL) {
-    printf("[ERROR] malloc gdma_pid_args failed, size: %lld\r\n", shape_size);
+    printf("[ERROR] malloc gdma_pid_args failed, size: %llu\r\n", shape_size);
     return 1;
   }
   for (unsigned int i = 0; i < gdma_test_num; i++) {
     unsigned char* sys_buffer = malloc(shape_size);
     if (sys_buffer == NULL) {
-      printf("[ERROR] malloc sys_buffer failed, size: %lld\r\n", shape_size);
+      printf("[ERROR] malloc sys_buffer failed, size: %llu\r\n", shape_size);
       return 1;
     }
     unsigned char* cmp_buffer = malloc(shape_size);
-    if (sys_buffer == NULL) {
-      printf("[ERROR] malloc cmp_buffer failed, size: %lld\r\n", shape_size);
+    if (cmp_buffer == NULL) {
+      printf("[ERROR] malloc cmp_buffer failed, size: %llu\r\n", shape_size);
       return 1;
     }
     unsigned char* ran_buffer = malloc(shape_size);
-    if (sys_buffer == NULL) {
-      printf("[ERROR] malloc ran_buffer failed, size: %lld\r\n", shape_size);
+    if (ran_buffer == NULL) {
+      printf("[ERROR] malloc ran_buffer failed, size: %llu\r\n", shape_size);
       return 1;
     }
     rand_buffer(sys_buffer, shape_size);
@@ -655,7 +656,7 @@ int main(int argc, char* argv[]) {
     free(gdma_pid_args[i].buffer_cmp);
     free(gdma_pid_args[i].buffer_ran);
   }
-  for (unsigned int i = 1; i < bm_dev_mem_num; i++) {
+  for (unsigned int i = 0; i < bm_dev_mem_num; i++) {
     bm_free_device(bm_handle_all, bm_dev_mems[i]);
   }
   bm_dev_free(bm_handle_all);

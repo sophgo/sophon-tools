@@ -168,7 +168,7 @@ echo "MEMTEST VERSION: V1.4.1"
 
 # prepare memtest_gdma
 dir_path="$(dirname "$(readlink -f "$0")")"
-pushd $dir_path/memtest_gdma
+pushd "$dir_path/memtest_gdma"
 sudo bash build.sh || echo "[MEMTEST ERROR] build memtest gdma error"
 popd
 
@@ -184,9 +184,14 @@ sudo systemctl reset-failed memtest_s.service 2>/dev/null
 sudo rm -f /run/systemd/transient/memtest_s.service 2>/dev/null
 sudo systemctl daemon-reload
 
+# 用 printf %q 转义注入到 bash -c 命令串中的参数，防止引号/分号/$() 被二次解释
+q_pcie_dev_id="$(printf '%q' "${PCIE_DEV_ID:-}")"
+q_work_dir="$(printf '%q' "$dir_path")"
+q_inloop="$(printf '%q' "$inloop")"
+
 sudo systemd-run --unit=memtest_s bash -c \
 	"source /dev/stdin <<< \$(echo \"$fun_str\" | base64 -d | gzip -d -c -); export \
-PCIE_DEV_ID=${PCIE_DEV_ID}; memtest_s $dir_path $inloop;"
+PCIE_DEV_ID=${q_pcie_dev_id}; memtest_s ${q_work_dir} ${q_inloop};"
 sleep 3
 sudo systemctl status memtest_s.service --no-page -l
 if [[ "$(systemctl is-active memtest_s.service)" != "active" ]]; then
