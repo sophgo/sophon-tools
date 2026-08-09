@@ -8,6 +8,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 KERNEL_HEADERS_SCRIPT="${1:-}"
 
+if [ "$(id -u)" != "0" ]; then
+    echo "ERROR: 需要 root 权限执行（安装将写入 /lib/modules 并注册内核模块）" >&2
+    echo "       请以 root 身份执行: sudo bash $0 ${KERNEL_HEADERS_SCRIPT:+$KERNEL_HEADERS_SCRIPT}" >&2
+    exit 1
+fi
+
 if [[ "$(modinfo cdc-wdm 2>/dev/null | wc -l)" != "0" ]] && \
    [[ "$(modinfo qmi_wwan 2>/dev/null | wc -l)" != "0" ]] && \
    [[ "$(modinfo qmi_wwan_q 2>/dev/null | wc -l)" != "0" ]]; then

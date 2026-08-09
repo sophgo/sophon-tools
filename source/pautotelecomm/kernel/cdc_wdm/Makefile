@@ -2,6 +2,9 @@ ifeq ($(KERNELRELEASE), )
 # 设备端编译默认用当前运行内核头；交叉编译时外部传入
 #   KERNELDIR=<内核源码/头目录> ARCH=<arch> CROSS_COMPILE=<交叉工具链前缀>
 KERNELDIR ?= /lib/modules/$(shell uname -r)/build
+# 本子项目仅面向 arm64 设备；空 ARCH 会让 kbuild 的 `ARCH ?= $(SUBARCH)` 失效
+# 导致 SRCARCH 为空，因此这里默认补 arm64（外部显式传入时以外部值为准）
+ARCH ?= arm64
 KERNEL_VERSION := $(shell uname -r)
 MODULE_PATH := drivers/net/class/
 KO_FILES := cdc-wdm.ko
