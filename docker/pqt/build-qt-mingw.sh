@@ -26,7 +26,6 @@ QT_URL="https://mirrors.tuna.tsinghua.edu.cn/qt/archive/qt/5.15/${QT_VERSION}/su
 PREFIX="${PREFIX:-/opt/qt-mingw}"
 JOBS="${JOBS:-$(nproc)}"
 # 默认镜像: 优先带版本号 tag（docker/versions.env 的 IMAGE_TAG），未定义则回退 unified
-SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 if [[ -z "${IMAGE:-}" ]]; then
   if [[ -f "${SCRIPT_DIR}/../versions.env" ]]; then
     # shellcheck disable=SC1091

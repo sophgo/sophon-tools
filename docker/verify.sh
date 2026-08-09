@@ -105,13 +105,21 @@ echo "--- pqt 系列 (AppImage + windows exe) ---"
 VERSION "qmake (Qt5)"           "qmake --version 2>/dev/null | tail -1"
 CHECK  "libgl1-mesa-dev"        "test -f /usr/include/GL/gl.h"
 CHECK  "fuse"                   "ls /usr/lib/x86_64-linux-gnu/libfuse* >/dev/null 2>&1"
-CHECK  "Qt mingw 静态库"        "test -f /opt/qt-mingw/lib/libQt5Widgets.a"
 CHECK  "mingw posix g++"        "command -v x86_64-w64-mingw32-g++-posix"
+if run "test -f /opt/qt-mingw/lib/libQt5Widgets.a"; then
+  echo "  [PASS] Qt mingw 静态库"
+else
+  echo "  [SKIP] Qt mingw 静态库未内置(基础镜像; 用 --with-qt-mingw 重建)"
+fi
 
 echo "--- pSophUI (aarch64 Qt 5.12.8 交叉) ---"
 VERSION "aarch64 Qt qmake"      "/env/qt_5.12.8_nosysroot/bin/qmake --version 2>/dev/null | tail -1"
-VERSION "Linaro aarch64 gcc"    "/env/gcc-linaro-6.3.1-2017.05-x86_64_aarch64-linux-gnu/bin/aarch64-linux-gnu-gcc --version | head -1"
-CHECK  "sophui-check"           "sophui-check | grep -q '已就绪'"
+VERSION "aarch64-linux-gnu-gcc" "aarch64-linux-gnu-gcc --version | head -1"
+if run "sophui-check 2>/dev/null" | grep -q "已就绪"; then
+  echo "  [PASS] pSophUI 交叉 Qt 库已就绪"
+else
+  echo "  [SKIP] pSophUI 交叉 Qt 库未内置(基础镜像; 用 --with-sophui-toolchain 重建)"
+fi
 
 echo "--- 打包 / 文档 / 验证工具 ---"
 CHECK  "dpkg-deb"               "dpkg-deb --version"
@@ -190,9 +198,9 @@ if [[ "${DO_CROSS}" = "1" ]]; then
       FAIL=1
     fi
   fi
-  # pSophUI: aarch64 Qt qmake 生成 Makefile + Linaro gcc 可编译(若有交叉 Qt)
+  # pSophUI: aarch64 Qt qmake 生成 Makefile + 系统 aarch64-linux-gnu-gcc 可编译(若有交叉 Qt)
   if run '[ -x /env/qt_5.12.8_nosysroot/bin/qmake ]'; then
-    if run 'export QMAKESPEC=/env/qt_5.12.8_nosysroot/mkspecs/linux-aarch64-gnu-g++ && export PATH=/env/qt_5.12.8_nosysroot/bin:/env/gcc-linaro-6.3.1-2017.05-x86_64_aarch64-linux-gnu/bin:$PATH && mkdir -p /tmp/pu && cd /tmp/pu && printf "QT += core gui widgets\nCONFIG += c++11\nSOURCES += main.cpp\n" > s.pro && printf "#include <QApplication>\nint main(int argc,char**argv){QApplication a(argc,argv);return 0;}\n" > main.cpp && qmake s.pro >/dev/null 2>&1 && make -s -j2 >/dev/null 2>&1 && file s | grep -q aarch64'; then
+    if run 'export QMAKESPEC=/env/qt_5.12.8_nosysroot/mkspecs/linux-aarch64-gnu-g++ && export PATH=/env/qt_5.12.8_nosysroot/bin:$PATH && mkdir -p /tmp/pu && cd /tmp/pu && printf "QT += core gui widgets\nCONFIG += c++11\nSOURCES += main.cpp\n" > s.pro && printf "#include <QApplication>\nint main(int argc,char**argv){QApplication a(argc,argv);return 0;}\n" > main.cpp && qmake s.pro >/dev/null 2>&1 && make -s -j2 >/dev/null 2>&1 && file s | grep -q aarch64'; then
       echo "  [PASS] pSophUI aarch64 Qt 交叉编译"
     else
       echo "  [FAIL] pSophUI aarch64 Qt 交叉编译"

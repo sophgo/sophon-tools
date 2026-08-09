@@ -101,7 +101,7 @@ PLATFORMS[pspacc_efuse_demo]="amd64/arm64"
 # M5: 全部子项目统一用 sophon-tools-build:unified（20.04 基座）, 不再按子项目切换镜像。
 #   pqt 系列: 统一镜像基座即 20.04(glibc 2.31), AppImage 的 linuxdeployqt 约束已满足,
 #             windows exe 依赖的 Qt mingw 静态库由 --with-qt-mingw 内置。
-#   pSophUI: 统一镜像内置 /env/qt_5.12.8_nosysroot + /env/gcc-linaro-6.3.1-2017.05...。
+#   pSophUI: 统一镜像内置 /env/qt_5.12.8_nosysroot（编译用系统 apt aarch64-linux-gnu-gcc 9.4）。
 
 # 子项目 -> 额外环境 (镜像内 export; 以 ; 分隔)
 # M5: 统一镜像已在 PATH/ENV 预置 Go/Node/Rust/交叉工具链及 pSophUI 工具链,

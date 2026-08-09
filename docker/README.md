@@ -97,7 +97,7 @@ ubuntu:20.04 的 glibc 是 2.31（22.04 是 2.35）。M5 决定以 20.04 为唯�
 |------|-----------|---------------------|
 | pqt AppImage（glibc≤2.31） | `sophon-tools-build-pqt`（20.04） | 基座即 20.04，Qt5 + libgl1-mesa-dev + fuse + patchelf 内置 |
 | pqt windows exe（Qt mingw 静态库） | `sophon-tools-build:m2` + 宿主 `/opt/qt-mingw` | `--with-qt-mingw` 内置 `/opt/qt-mingw` |
-| pSophUI（aarch64 Qt 5.12.8 交叉） | `cross_build_sophon_u20:v1`（20.04） | `--with-sophui-toolchain` 内置 `/env/qt_5.12.8_nosysroot` + `/env/gcc-linaro-...` |
+| pSophUI（aarch64 Qt 5.12.8 交叉） | `cross_build_sophon_u20:v1`（20.04） | `--with-sophui-toolchain` 内置 `/env/qt_5.12.8_nosysroot`（编译用系统 apt aarch64-linux-gnu-gcc 9.4） |
 | dfss sw_64 / loongarch64 | `sophon-tools-build:m2` 内置 | `--with-dfss-toolchains` 内置（不变） |
 | 其余 13 子项目 | `sophon-tools-build:m2` | 直接满足 |
 

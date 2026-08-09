@@ -40,6 +40,14 @@ done
 
 [[ ${#ARCHES[@]} -gt 0 ]] || ARCHES=(host aarch64 armbi loongarch64 riscv64 sw_64 mingw64 mingw)
 
+# 需要 dfss 私有工具链的架构（loongarch64 / sw_64）: 循环前预检, 避免前 4 个架构白编
+NEEDS_DFSS=0
+for a in "${ARCHES[@]}"; do
+  case "$a" in
+    loongarch64|sw_64) NEEDS_DFSS=1 ;;
+  esac
+done
+
 echo "==> 在镜像 ${IMAGE} 内编译 dfss-cpp 全部架构: ${ARCHES[*]}"
 docker run --rm \
   -v "${PDFSS_SRC}":/workspace/pdfss_cpp \
@@ -48,6 +56,12 @@ docker run --rm \
     set -e
     export PATH=\"/env/loongson-gnu-toolchain-8.3-x86_64-loongarch64-linux-gnu-rc1.1/bin:/usr/sw/swgcc830_cross_tools/usr/bin:\$PATH\"
     git config --global --add safe.directory /workspace/pdfss_cpp
+
+    if [ \"${NEEDS_DFSS}\" = \"1\" ] && ! command -v loongarch64-linux-gnu-gcc >/dev/null 2>&1; then
+      echo 'ERROR: 架构含 loongarch64/sw_64, 但镜像未内置 dfss 私有工具链。' >&2
+      echo '       请用 --with-dfss-toolchains 重建镜像(或从 13.24 容器导出归档: bash docker/scripts/export-dfss-toolchains.sh)。' >&2
+      exit 1
+    fi
 
     for arch in ${ARCHES[*]}; do
       echo \"===== 构建 \${arch} =====\"

@@ -151,10 +151,12 @@ RUN mkdir -p /opt/musl \
 # 不把 /env/qt_5.12.8_nosysroot/bin 加入全局 PATH——其含通用名 qmake/moc,
 #       会遮蔽宿主机 Qt5 qmake, 破坏 pqt 系列(linuxdeployqt)构建。
 #       pSophUI 的 release.sh 内部自行 export 自己的 qmake/gcc 到 PATH(见 source/pSophUI/release.sh)。
-# 默认不内置(约 300MB, 私有源); 加 --with-sophui-toolchain 或构建上下文放归档自动内置。
+# 默认不内置(约 300MB, 私有源); 加 --with-sophui-toolchain 或构建上下文 toolchains/ 放
+# sophui-cross-toolchains.tar.zst 自动内置（与 dfss 段语义一致）。
 ARG WITH_SOPHUI=0
 COPY toolchains/ /tmp/toolchains/
-RUN if [ "${WITH_SOPHUI}" = "1" ] && [ -f /tmp/toolchains/sophui-cross-toolchains.tar.zst ]; then \
+RUN if { [ "${WITH_SOPHUI}" = "1" ] || [ -f /tmp/toolchains/sophui-cross-toolchains.tar.zst ]; } \
+       && [ -f /tmp/toolchains/sophui-cross-toolchains.tar.zst ]; then \
         mkdir -p /env \
         && tar -C /env -I zstd -xf /tmp/toolchains/sophui-cross-toolchains.tar.zst \
         && rm -f /tmp/toolchains/sophui-cross-toolchains.tar.zst \

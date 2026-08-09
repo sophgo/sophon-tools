@@ -140,7 +140,7 @@ if [[ "${WITH_QT_MINGW}" = "1" ]]; then
       PREFIX=/opt/qt-mingw bash "${DOCKER_DIR}/pqt/build-qt-mingw.sh"
     else
       echo "==> 复用 /opt/qt-mingw 已编译产物, 校验宿主工具与 20.04 基座兼容..." >&2
-      if docker run --rm -v /opt/qt-mingw:/opt/qt-mingw:ro "${IMAGE_NAME}:unified" bash -c '/opt/qt-mingw/bin/uic --version' >/dev/null 2>&1; then
+      if docker run --rm -v /opt/qt-mingw:/opt/qt-mingw:ro "${FULL_IMAGE}" bash -c '/opt/qt-mingw/bin/uic --version' >/dev/null 2>&1; then
         echo "==> /opt/qt-mingw 与 20.04 基座兼容, 直接复用" >&2
       else
         echo "==> /opt/qt-mingw 宿主工具依赖过高 glibc(22.04 编译), 重新从源码编译..." >&2
@@ -157,7 +157,7 @@ echo "==> 构建上下文: ${BUILD_CONTEXT}"
 echo "==> 版本: Go ${GO_VERSION} / Rust ${RUST_VERSION} / Node ${NODE_VERSION} / pnpm ${PNPM_VERSION}"
 [[ "${WITH_DFSS}" = "1" ]] && echo "==> 内置 dfss 私有工具链(sw_64 + loongarch64)"
 [[ "${WITH_QT_MINGW}" = "1" ]] && echo "==> 内置 Qt mingw 静态库(pqt windows)"
-[[ "${WITH_SOPHUI}" = "1" ]] && echo "==> 内置 pSophUI 交叉工具链(aarch64 Qt 5.12.8 + Linaro GCC 6.3)"
+[[ "${WITH_SOPHUI}" = "1" ]] && echo "==> 内置 pSophUI 交叉工具链(aarch64 Qt 5.12.8 + 系统 aarch64-linux-gnu-gcc)"
 
 docker build \
   --build-arg UBUNTU_BASE_DIGEST="${UBUNTU_BASE_DIGEST}" \

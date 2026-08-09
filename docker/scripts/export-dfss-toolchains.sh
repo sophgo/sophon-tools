@@ -33,40 +33,54 @@ LOONG_SRC="/env/loongson-gnu-toolchain-8.3-x86_64-loongarch64-linux-gnu-rc1.1"
 SW64_ARCHIVE="${OUT_DIR}/swgcc830_cross_tools.tar.zst"
 LOONG_ARCHIVE="${OUT_DIR}/loongarch64-cross-tools.tar.zst"
 
-if ! docker inspect "${CONTAINER}" >/dev/null 2>&1 && ! docker image inspect "${CONTAINER}" >/dev/null 2>&1; then
+# 区分容器 / 镜像两种来源: 容器用 docker exec, 镜像用 docker run（避免镜像名误入 docker exec 报误导错误）
+RUN_MODE=""
+if docker inspect "${CONTAINER}" >/dev/null 2>&1; then
+  RUN_MODE="container"
+elif docker image inspect "${CONTAINER}" >/dev/null 2>&1; then
+  RUN_MODE="image"
+else
   echo "错误: 找不到容器/镜像 '${CONTAINER}'。" >&2
   echo "请在 13.24 服务器上运行（镜像 cross_build_sophon_u20:v1 / cross_build_sophon:v7 内置工具链）:" >&2
   echo "  docker run -d --name dfss-toolchain-src --entrypoint sleep cross_build_sophon_u20:v1 infinity" >&2
   exit 1
 fi
 
+# 在容器 / 镜像内执行命令
+run_in() {
+  local cmd="$1"
+  if [[ "${RUN_MODE}" = "container" ]]; then
+    docker exec "${CONTAINER}" sh -c "${cmd}"
+  else
+    docker run --rm --entrypoint sh "${CONTAINER}" -c "${cmd}"
+  fi
+}
+
 # 工具链是否在容器 / 镜像内
-if ! docker exec "${CONTAINER}" test -d "${SW64_SRC}" >/dev/null 2>&1 \
-   && ! docker exec "${CONTAINER}" test -d "${LOONG_SRC}" >/dev/null 2>&1; then
-  echo "错误: 容器 '${CONTAINER}' 中未找到 ${SW64_SRC} 或 ${LOONG_SRC}。" >&2
+if ! run_in "test -d '${SW64_SRC}'" >/dev/null 2>&1 \
+   && ! run_in "test -d '${LOONG_SRC}'" >/dev/null 2>&1; then
+  echo "错误: ${RUN_MODE} '${CONTAINER}' 中未找到 ${SW64_SRC} 或 ${LOONG_SRC}。" >&2
   exit 1
 fi
 
-export CONTAINER SW64_SRC LOONG_SRC
-
 # 打 tar（容器内无 zstd 则用 tar czf 走 gzip）
 pack_from_container() {
-  local container="$1" src="$2" archive="$3"
+  local src="$1" archive="$2"
   if [[ -f "${archive}" ]]; then
     echo "已存在: ${archive}（跳过）"
     return 0
   fi
   echo "导出 ${src} -> ${archive} ..."
-  if docker exec "${container}" sh -c 'command -v zstd' >/dev/null 2>&1; then
-    docker exec "${container}" sh -c "tar -C '$(dirname "${src}")' -cf - '$(basename "${src}")' | zstd -q -T0" > "${archive}"
+  if run_in 'command -v zstd' >/dev/null 2>&1; then
+    run_in "tar -C '$(dirname "${src}")' -cf - '$(basename "${src}")' | zstd -q -T0" > "${archive}"
   else
-    docker exec "${container}" sh -c "tar -C '$(dirname "${src}")' -czf - '$(basename "${src}")'" > "${archive}"
+    run_in "tar -C '$(dirname "${src}")' -czf - '$(basename "${src}")'" > "${archive}"
   fi
   ls -lh "${archive}"
 }
 
-pack_from_container "${CONTAINER}" "${SW64_SRC}" "${SW64_ARCHIVE}"
-pack_from_container "${CONTAINER}" "${LOONG_SRC}" "${LOONG_ARCHIVE}"
+pack_from_container "${SW64_SRC}" "${SW64_ARCHIVE}"
+pack_from_container "${LOONG_SRC}" "${LOONG_ARCHIVE}"
 
 echo "完成。工具链归档位于 ${OUT_DIR}"
 echo "构建镜像时加 --with-dfss-toolchains 自动内置，或在 Dockerfile 构建上下文放 toolchains/ 目录。"
