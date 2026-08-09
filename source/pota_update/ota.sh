@@ -51,8 +51,8 @@ function panic() {
     fi
     if [[ "$LAST_PART_NOT_FLASH" == "1" ]] || [[ "$LAST_PART_NOT_FLASH" == "LAST_PART_NOT_FLASH" \
 ]]; then
-        if [ -f $WORK_DIR/gpt.gz.ota_update_bak ]; then
-            mv $WORK_DIR/gpt.gz.ota_update_bak $WORK_DIR/gpt.gz
+        if [ -f "$WORK_DIR/gpt.gz.ota_update_bak" ]; then
+            mv "$WORK_DIR/gpt.gz.ota_update_bak" "$WORK_DIR/gpt.gz"
         fi
     fi
     popd &>/dev/null
@@ -63,8 +63,9 @@ function panic() {
 
 function file_validate() {
     local file
-    file=$(eval echo \$1)
-    [ -r ${file} ] || panic "$i \"$file\" is not readable"
+    # 入参可能为 find 多行结果（如 md5 文件），取首行；单路径场景行为不变
+    file="$(printf '%s\n' "$1" | head -1)"
+    [ -r "$file" ] || panic "$file is not readable"
 }
 
 # 必须是root账户
@@ -72,9 +73,9 @@ if [ ! "$(id -u)" -eq 0 ]; then
     panic "must use root"
 fi
 
-# 检查的工具
+# 检查的工具（pigz: SHELL_NEED_AUTOBOOT_ONCE 重打包路径实际调用）
 need_tools=("systemd" "systemd-run" "tee" "exec" "echo" "bc" "gdisk" "mkimage" "awk" "sed" "tr" \
-"gzip" "dd" "sgdisk" "fdisk" "fuser" "wall" "head")
+"gzip" "pigz" "dd" "sgdisk" "fdisk" "fuser" "wall" "head")
 for tool in "${need_tools[@]}"; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         panic "$tool: cannot find"
@@ -128,12 +129,12 @@ for arg in "$@"; do
             ;;
         SHELL_NEED_AUTOBOOT_ONCE=*)
             SHELL_NEED_AUTOBOOT_ONCE="${arg#*=}"
-            SHELL_NEED_AUTOBOOT_ONCE="$(readlink -f ${SHELL_NEED_AUTOBOOT_ONCE})"
+            SHELL_NEED_AUTOBOOT_ONCE="$(readlink -f "${SHELL_NEED_AUTOBOOT_ONCE}")"
             shift
             ;;
         SHELL_NEED_AUTOBOOT_ONCE_TEMP_DIR=*)
             SHELL_NEED_AUTOBOOT_ONCE_TEMP_DIR="${arg#*=}"
-            SHELL_NEED_AUTOBOOT_ONCE_TEMP_DIR="$(readlink -f ${SHELL_NEED_AUTOBOOT_ONCE_TEMP_DIR})"
+            SHELL_NEED_AUTOBOOT_ONCE_TEMP_DIR="$(readlink -f "${SHELL_NEED_AUTOBOOT_ONCE_TEMP_DIR}")"
             shift
             ;;
     esac
@@ -151,13 +152,21 @@ if [[ "$SHELL_FILE" != "${DDR_SHELL_FILE}" ]]; then
     sudo systemctl reset-failed sophon-ota-update.service 2>/dev/null
     sudo rm /run/systemd/transient/sophon-ota-update.service 2>/dev/null
     sudo systemctl daemon-reload 2>/dev/null
-    systemd-run --unit=sophon-ota-update.service --collect bash -c "${DDR_SHELL_FILE} RUN_WORK_DIR=$(dirname \
-$SHELL_FILE) LAST_PART_NOT_FLASH=${LAST_PART_NOT_FLASH} SHELL_NEED_AUTOBOOT_ONCE=${SHELL_NEED_AUTOBOOT_ONCE} \
-SHELL_NEED_AUTOBOOT_ONCE_TEMP_DIR=${SHELL_NEED_AUTOBOOT_ONCE_TEMP_DIR}"
+    # systemd-run 的 bash -c 参数在远端 shell 解析；参数来自外部刷机包路径，
+    # 必须逐参数单引号转义，防止特殊字符（空格/引号/$）导致注入。
+    _sh_quote() { printf "'%s'" "${1//\'/\'\\\'\'}"; }
+    _ota_run_cmd=""
+    for _ota_arg in \
+        "$DDR_SHELL_FILE" \
+        "RUN_WORK_DIR=$(dirname "$SHELL_FILE")" \
+        "LAST_PART_NOT_FLASH=${LAST_PART_NOT_FLASH}" \
+        "SHELL_NEED_AUTOBOOT_ONCE=${SHELL_NEED_AUTOBOOT_ONCE}" \
+        "SHELL_NEED_AUTOBOOT_ONCE_TEMP_DIR=${SHELL_NEED_AUTOBOOT_ONCE_TEMP_DIR}"; do
+        _ota_run_cmd+="$(_sh_quote "$_ota_arg") "
+    done
+    systemd-run --unit=sophon-ota-update.service --collect bash -c "$_ota_run_cmd"
     if [[ "$?" != "0" ]]; then
-        systemd-run --unit=sophon-ota-update.service bash -c "${DDR_SHELL_FILE} RUN_WORK_DIR=$(dirname \
-$SHELL_FILE) LAST_PART_NOT_FLASH=${LAST_PART_NOT_FLASH} SHELL_NEED_AUTOBOOT_ONCE=${SHELL_NEED_AUTOBOOT_ONCE} \
-SHELL_NEED_AUTOBOOT_ONCE_TEMP_DIR=${SHELL_NEED_AUTOBOOT_ONCE_TEMP_DIR}"
+        systemd-run --unit=sophon-ota-update.service bash -c "$_ota_run_cmd"
     fi
     systemctl status sophon-ota-update.service --no-page -l
     echo "[INFO] ota server started, check status use: \"systemctl status sophon-ota-update.service \
@@ -174,26 +183,26 @@ fi
 
 # 配置日志能力
 LOGFILE="$(readlink -f "${BASH_SOURCE[0]}").log"
-rm -f $LOGFILE*
+rm -f "${LOGFILE}"*
 exec > >(tee -a "$LOGFILE") 2>&1
 
 echo "[INFO] ota update tool, version: v1.4.0"
 
 WORK_DIR=""
-if [ ! -d ${RUN_WORK_DIR}/sdcard ]; then
+if [ ! -d "${RUN_WORK_DIR}/sdcard" ]; then
     echo "[INFO] cannot find sdcard, maybe in sdcard ..."
-    md5file=$(find ${RUN_WORK_DIR} -type f -name "*md5*")
-    file_validate ${md5file}
-    file_validate ${RUN_WORK_DIR}/BOOT
-    file_validate ${RUN_WORK_DIR}/boot.scr
-    WORK_DIR=$(realpath ${RUN_WORK_DIR})
+    md5file=$(find "${RUN_WORK_DIR}" -type f -name "*md5*")
+    file_validate "${md5file}"
+    file_validate "${RUN_WORK_DIR}/BOOT"
+    file_validate "${RUN_WORK_DIR}/boot.scr"
+    WORK_DIR=$(realpath "${RUN_WORK_DIR}")
 else
     WORK_DIR="$RUN_WORK_DIR"/sdcard
 fi
 echo "[INFO] work dir: $WORK_DIR"
 WORD_DIR_ROOTFS_RW_REPACK="${SHELL_NEED_AUTOBOOT_ONCE_TEMP_DIR}/ota_update_rootfs_rw_repack_temp"
 echo "[INFO] work dir rootfs rw repack: $WORD_DIR_ROOTFS_RW_REPACK"
-pushd $WORK_DIR || panic "cannot pushd $WORK_DIR, please check files healthy"
+pushd "$WORK_DIR" || panic "cannot pushd $WORK_DIR, please check files healthy"
 
 if [[ "$LAST_PART_NOT_FLASH" == "0" ]]; then
     LAST_PART_NOT_FLASH="0"
@@ -224,23 +233,23 @@ top -n1 >>"$LOGFILE"
 # 使用MD5文件进行刷机包校验
 echo "[INFO] md5 check start"
 md5file=$(find . -type f -name "*md5*")
-file_validate ${md5file}
-md5sum -c ${md5file} &>>"$LOGFILE" || panic "md5 check error!!!"
+file_validate "${md5file}"
+md5sum -c "${md5file}" &>>"$LOGFILE" || panic "md5 check error!!!"
 echo "[INFO] md5 check success"
 
 ota_cleanup() {
     wall "[OTA INFO] clean ..."
     echo "[INFO] clean ..."
 	if [[ "$LAST_PART_NOT_FLASH" == "1" ]]; then
-        if [ -f $WORK_DIR/gpt.gz.ota_update_bak ]; then
-            mv $WORK_DIR/gpt.gz.ota_update_bak $WORK_DIR/gpt.gz
+        if [ -f "$WORK_DIR/gpt.gz.ota_update_bak" ]; then
+            mv "$WORK_DIR/gpt.gz.ota_update_bak" "$WORK_DIR/gpt.gz"
         fi
     fi
     if [[ "$SHELL_NEED_AUTOBOOT_ONCE" != "" ]]; then
         if [[ -d "${WORD_DIR_ROOTFS_RW_REPACK}" ]]; then
-            umount ${WORD_DIR_ROOTFS_RW_REPACK}/rootfs_rw_part_dir 2>/dev/null
-            if [[ "$(ls $WORK_DIR/rootfs_rw.*-of-*.gz.bak 2>/dev/null | wc -l)" != "0" ]]; then
-                pushd ${WORK_DIR}
+            umount "${WORD_DIR_ROOTFS_RW_REPACK}/rootfs_rw_part_dir" 2>/dev/null
+            if [[ "$(ls "$WORK_DIR"/rootfs_rw.*-of-*.gz.bak 2>/dev/null | wc -l)" != "0" ]]; then
+                pushd "${WORK_DIR}"
                     rm -f rootfs_rw.*-of-*.gz
                     for f in rootfs_rw.*-of-*.gz.bak; do mv "$f" "${f%.bak}"; done
                 popd
@@ -259,12 +268,12 @@ if [[ "$SHELL_NEED_AUTOBOOT_ONCE" != "" ]]; then
         panic "work dir rootfs rw repack not set"
     fi
     RANDOM_STR="$(openssl rand -hex 8)"
-    umount ${WORD_DIR_ROOTFS_RW_REPACK}/rootfs_rw_part_dir 2>/dev/null
-    rm -rf ${WORD_DIR_ROOTFS_RW_REPACK}
-    mkdir -p ${WORD_DIR_ROOTFS_RW_REPACK}
+    umount "${WORD_DIR_ROOTFS_RW_REPACK}/rootfs_rw_part_dir" 2>/dev/null
+    rm -rf "${WORD_DIR_ROOTFS_RW_REPACK}"
+    mkdir -p "${WORD_DIR_ROOTFS_RW_REPACK}"
     # 需要RW分区X2大小的内存空间
-    cp ${WORK_DIR}/rootfs_rw.*-of-*.gz ${WORD_DIR_ROOTFS_RW_REPACK}/
-    pushd ${WORD_DIR_ROOTFS_RW_REPACK}/
+    cp "${WORK_DIR}"/rootfs_rw.*-of-*.gz "${WORD_DIR_ROOTFS_RW_REPACK}/"
+    pushd "${WORD_DIR_ROOTFS_RW_REPACK}/" >/dev/null
         echo "[INFO] dec rootfs_rw partition start"
         ls rootfs_rw.*-of-*.gz | sort -V | xargs cat | \
 gunzip -c > rootfs_rw.part || panic "dec rootfs_rw partition error"
@@ -285,10 +294,10 @@ ExecStartPost=/bin/systemctl disable ota_autoboot_once_${RANDOM_STR}.service
 [Install]
 WantedBy=multi-user.target" > \
 rootfs_rw_part_dir/overlay/etc/systemd/system/ota_autoboot_once_${RANDOM_STR}.service
-        cp ${SHELL_NEED_AUTOBOOT_ONCE} rootfs_rw_part_dir/overlay/usr/sbin/ota_autoboot_once_${RANDOM_STR}.sh \
+        cp "${SHELL_NEED_AUTOBOOT_ONCE}" rootfs_rw_part_dir/overlay/usr/sbin/ota_autoboot_once_${RANDOM_STR}.sh \
 || panic "copy ota_autoboot_once script error"
         chmod +x rootfs_rw_part_dir/overlay/usr/sbin/ota_autoboot_once_${RANDOM_STR}.sh
-        pushd rootfs_rw_part_dir/overlay/etc/systemd/system/multi-user.target.wants/
+        pushd rootfs_rw_part_dir/overlay/etc/systemd/system/multi-user.target.wants/ >/dev/null
             ln -s ../ota_autoboot_once_${RANDOM_STR}.service ota_autoboot_once_${RANDOM_STR}.service
         popd
         echo "[INFO] creat ota_autoboot_once_${RANDOM_STR}.service success"
@@ -317,9 +326,9 @@ rootfs_rw_part_dir/overlay/etc/systemd/system/ota_autoboot_once_${RANDOM_STR}.se
             if [ ${size} -lt ${chunk_size} ]; then
                 chunk_size=${size}
             fi
-            dd status=none if=rootfs_rw.part of=${filename} bs=${SECTOR_BYTES} \
+            dd status=none if=rootfs_rw.part of="${filename}" bs=${SECTOR_BYTES} \
 skip=${offset} count=${chunk_size} || panic "dd create part ${filename} from rootfs_rw.part error"
-            pigz -v ${filename} || panic "gzip part ${filename} error"
+            pigz -v "$filename" || panic "gzip part ${filename} error"
             count=$(expr ${count} + 1)
             offset=$(expr ${offset} + ${chunk_size})
             echo "[INFO] create part ${filename} success, size: ${chunk_size} sectors, offset: ${offset} sectors"
@@ -327,10 +336,10 @@ skip=${offset} count=${chunk_size} || panic "dd create part ${filename} from roo
         done
         rm -f rootfs_rw.part
         md5sum rootfs_rw.*-of-*.gz > rootfs_rw.md5
-    popd
-    pushd ${WORK_DIR}
+    popd >/dev/null
+    pushd "${WORK_DIR}" >/dev/null
         ls rootfs_rw.*-of-*.gz | sort -V | xargs -I{} mv {} {}.bak
-        cp ${WORD_DIR_ROOTFS_RW_REPACK}/rootfs_rw.*-of-*.gz ./
+        cp "${WORD_DIR_ROOTFS_RW_REPACK}"/rootfs_rw.*-of-*.gz ./
     popd
 fi
 
@@ -341,7 +350,7 @@ if [[ "$(find . -type f -name "partition*xml" | wc -l)" != "1" ]]; then
     panic "Unable to find one and only one partition.xml file."
 fi
 xmlfile=$(find . -type f -name "partition*xml")
-file_validate ${xmlfile}
+file_validate "${xmlfile}"
 OTA_NEW_PACKAGE_GPT_PART_SIZE_KB=$(cat ${xmlfile} | grep "<physical_partition " | awk -F'"' '{print \
 $2}')
 OTA_NEW_ALL_PART_SIZE_KB=$(cat ${xmlfile} | grep "<partition " | awk -F'"' '{print $4}' | paste \
@@ -352,25 +361,25 @@ OTA_EMMC_SIZE_KB=$(echo "$(lsblk -b | grep '^mmcblk0' | head -n1 | awk -F' ' '{p
 | bc)
 OTA_EMMC_SIZE_B=$(lsblk -b | grep '^mmcblk0' | head -n1 | awk -F' ' '{print $4}')
 OTA_GPT_TEMP_FILE="/dev/shm/ota_gpt"
-rm -f ${OTA_GPT_TEMP_FILE}
-rm -f ${OTA_GPT_TEMP_DISK_FILE}
-gzip -cd gpt.gz >${OTA_GPT_TEMP_FILE}
-OTA_GPT_TEMP_DISK_FILE=${OTA_GPT_TEMP_FILE}.disk
-dd if=${OTA_GPT_TEMP_FILE} of=${OTA_GPT_TEMP_DISK_FILE} || panic "dd write ota info to file \
+rm -f "${OTA_GPT_TEMP_FILE}"
+gzip -cd gpt.gz >"${OTA_GPT_TEMP_FILE}"
+OTA_GPT_TEMP_DISK_FILE="${OTA_GPT_TEMP_FILE}.disk"
+rm -f "${OTA_GPT_TEMP_DISK_FILE}"
+dd if="${OTA_GPT_TEMP_FILE}" of="${OTA_GPT_TEMP_DISK_FILE}" || panic "dd write ota info to file \
 ${OTA_GPT_TEMP_DISK_FILE} error"
-dd if=/dev/null of=${OTA_GPT_TEMP_DISK_FILE} bs=1 count=1 seek=${OTA_EMMC_SIZE_B} || panic "dd \
+dd if=/dev/null of="${OTA_GPT_TEMP_DISK_FILE}" bs=1 count=1 seek=${OTA_EMMC_SIZE_B} || panic "dd \
 sparse file ${OTA_GPT_TEMP_DISK_FILE} error"
-gdisk -l ${OTA_GPT_TEMP_DISK_FILE} 2>&1 >>"$LOGFILE"
+gdisk -l "${OTA_GPT_TEMP_DISK_FILE}" 2>&1 >>"$LOGFILE"
 # 获取emmc扇区大小
-OTA_NEW_SECTOR_SIZE=$(gdisk -l ${OTA_GPT_TEMP_DISK_FILE} 2>&1 | grep "ector size" | awk -F' ' \
+OTA_NEW_SECTOR_SIZE=$(gdisk -l "${OTA_GPT_TEMP_DISK_FILE}" 2>&1 | grep "ector size" | awk -F' ' \
 '{print $4}' | awk -F'/' '{print $1}')
 if [[ "$EMMC_SECTOR_B" != "$OTA_NEW_SECTOR_SIZE" ]]; then
     panic "get emmc sector size [$OTA_NEW_SECTOR_SIZE] not is default size [$EMMC_SECTOR_B], please \
 check emmc and gdisk tool"
 fi
-OTA_NEW_GPT_END_SECTOR=$(gdisk -l ${OTA_GPT_TEMP_DISK_FILE} 2>&1 | tail -n1 | awk -F' ' '{print \
+OTA_NEW_GPT_END_SECTOR=$(gdisk -l "${OTA_GPT_TEMP_DISK_FILE}" 2>&1 | tail -n1 | awk -F' ' '{print \
 $3}')
-OTA_NEW_GPT_END_PART_START=$(gdisk -l ${OTA_GPT_TEMP_DISK_FILE} 2>&1 | tail -n1 | awk -F' ' '{print \
+OTA_NEW_GPT_END_PART_START=$(gdisk -l "${OTA_GPT_TEMP_DISK_FILE}" 2>&1 | tail -n1 | awk -F' ' '{print \
 $2}')
 OTA_NEW_GPT_END_SIZE_KB=$(echo "$OTA_NEW_SECTOR_SIZE * $OTA_NEW_GPT_END_SECTOR / 1024" | bc)
 OTA_NEW_MAX_SIZE_KB=0
@@ -436,24 +445,24 @@ fi
 echo "[INFO] check update size check success"
 
 # 判断fip是否和芯片相配合
-file_validate boot.cmd
-file_validate boot_emmc.cmd
+file_validate "boot.cmd"
+file_validate "boot_emmc.cmd"
 OTA_PACK_READ_FILE_CMD="load"
-if [[ "$(cat boot.cmd | grep -a ^tftp | wc -l)" != "0" ]]; then
+if [[ "$(grep -a '^tftp' boot.cmd | wc -l)" != "0" ]]; then
     OTA_PACK_READ_FILE_CMD="tftp"
-elif [[ "$(cat boot.cmd | grep -a ^cvi_utask | wc -l)" != "0" ]]; then
+elif [[ "$(grep -a '^cvi_utask' boot.cmd | wc -l)" != "0" ]]; then
     OTA_PACK_READ_FILE_CMD="cvi_utask"
-elif [[ "$(cat boot.cmd | grep -a ^load | wc -l)" != "0" ]]; then
+elif [[ "$(grep -a '^load' boot.cmd | wc -l)" != "0" ]]; then
     OTA_PACK_READ_FILE_CMD="load"
 else
     panic "cannot get update pack type"
 fi
-OTA_EMMC_UPDATE_CMD_FILE=$(cat boot_emmc.cmd | grep -a "^${OTA_PACK_READ_FILE_CMD}" | \
+OTA_EMMC_UPDATE_CMD_FILE=$(grep -a "^${OTA_PACK_READ_FILE_CMD}" boot_emmc.cmd | \
 grep boot_emmc | awk -F' ' '{print $NF}' | awk -F'/' '{print $NF}')
-OTA_FIP_UPDATE_CMD_FILE=$(cat boot.cmd | grep -a "^${OTA_PACK_READ_FILE_CMD}" | \
+OTA_FIP_UPDATE_CMD_FILE=$(grep -a "^${OTA_PACK_READ_FILE_CMD}" boot.cmd | \
 head -n1 | awk -F' ' '{print $NF}' | awk -F'/' '{print $NF}')
-file_validate ${OTA_FIP_UPDATE_CMD_FILE}
-OTA_FIP_FILE=$(cat $OTA_FIP_UPDATE_CMD_FILE | grep -a "^${OTA_PACK_READ_FILE_CMD}" | \
+file_validate "${OTA_FIP_UPDATE_CMD_FILE}"
+OTA_FIP_FILE=$(grep -a "^${OTA_PACK_READ_FILE_CMD}" "$OTA_FIP_UPDATE_CMD_FILE" | \
 awk -F' ' '{print $NF}' | awk -F'/' '{print $NF}')
 if [[ "$OTA_FIP_UPDATE_CMD_FILE" == "" ]]; then
     panic "cannot find fip update cmd file"
@@ -463,12 +472,12 @@ if [[ "$OTA_FIP_FILE" == "" ]]; then
 fi
 echo "[INFO] Check fip file and chip type start"
 if [[ "${CPU_MODEL}" == "bm1684x" ]] || [[ "${CPU_MODEL}" == "bm1684" ]]; then
-    if [[ "$(grep -ra ${CPU_MODEL}- ${OTA_FIP_FILE} | wc -l)" == "0" ]]; then
+    if [[ "$(grep -ra ${CPU_MODEL}- "${OTA_FIP_FILE}" | wc -l)" == "0" ]]; then
         panic "chip is ${CPU_MODEL}, but fip file not have info about it"
     fi
 elif [[ "${CPU_MODEL}" == "bm1688" ]] || [[ "${CPU_MODEL}" == "cv186ah" ]]; then
-    if [[ "$(grep -ra CVBL01 ${OTA_FIP_FILE} | wc -l)" == "0" ]] || \
-[[ "$(grep -ra CVLD02 ${OTA_FIP_FILE} | wc -l)" == "0" ]]; then
+    if [[ "$(grep -ra CVBL01 "${OTA_FIP_FILE}" | wc -l)" == "0" ]] || \
+[[ "$(grep -ra CVLD02 "${OTA_FIP_FILE}" | wc -l)" == "0" ]]; then
         panic "chip is ${CPU_MODEL}, but fip file not have info about it"
     fi
 fi
@@ -479,7 +488,7 @@ echo "[INFO] resize last part to write update pack start"
 set >>"$LOGFILE"
 OTA_LAST_DEVICE=/dev/$(lsblk -l -o NAME /dev/mmcblk0 | tail -n1)
 OTA_LAST_DEVICE_MOUNT_POINT=$(df | grep "${OTA_LAST_DEVICE}" | awk -F' ' '{print $6}')
-OTA_LAST_DEVICE_SIZE_KB=$(echo "$(lsblk -b ${OTA_LAST_DEVICE} | tail -n1 | awk -F' ' '{print $4}') \
+OTA_LAST_DEVICE_SIZE_KB=$(echo "$(lsblk -b "${OTA_LAST_DEVICE}" | tail -n1 | awk -F' ' '{print $4}') \
 / 1024" | bc)
 OTA_PACK_NUM=$(ls -l ./ | wc -l)
 # 最后一个分区后预留100MB空间，并且每一个包开始都是一个扇区对齐
@@ -505,17 +514,17 @@ for i in {1..50}; do
     umount -f "${OTA_LAST_DEVICE}"
     df | grep "${OTA_LAST_DEVICE}"
 done
-if [[ "$(df | grep ${OTA_LAST_DEVICE} | wc -l)" != "0" ]]; then
+if [[ "$(df | grep "${OTA_LAST_DEVICE}" | wc -l)" != "0" ]]; then
     panic "umount ${OTA_LAST_DEVICE} error!!!"
 fi
-e2fsck -yf ${OTA_LAST_DEVICE}
-resize2fs -f ${OTA_LAST_DEVICE} ${OTA_LAST_DEVICE_NEW_SIZE_KB}K
+e2fsck -yf "${OTA_LAST_DEVICE}"
+resize2fs -f "${OTA_LAST_DEVICE}" ${OTA_LAST_DEVICE_NEW_SIZE_KB}K
 if [[ "$?" != "0" ]]; then
     panic "resize2fs ${OTA_LAST_DEVICE} -> ${OTA_LAST_DEVICE_NEW_SIZE_KB}K, please check if your \
 eMMC partition is healthy"
 fi
 mount -a
-cd $WORK_DIR
+cd "$WORK_DIR"
 if [[ "$?" != "0" ]]; then
     panic "cannot cd $WORK_DIR, please check files healthy"
 fi
@@ -525,20 +534,20 @@ echo "[INFO] resize last part to write update pack success"
 # 分区表文件中
 if [[ "$LAST_PART_NOT_FLASH" == "1" ]]; then
     echo "[INFO] LAST_PART_NOT_FLASH mode, need change gpt info"
-    sgdisk -e ${OTA_GPT_TEMP_DISK_FILE} || panic "sgdisk change file ${OTA_GPT_TEMP_DISK_FILE} \
+    sgdisk -e "${OTA_GPT_TEMP_DISK_FILE}" || panic "sgdisk change file ${OTA_GPT_TEMP_DISK_FILE} \
 error"
-    OTA_GPT_PART_NUM=$(fdisk -l ${OTA_GPT_TEMP_DISK_FILE} 2>&1 | grep "^${OTA_GPT_TEMP_DISK_FILE}" \
+    OTA_GPT_PART_NUM=$(fdisk -l "${OTA_GPT_TEMP_DISK_FILE}" 2>&1 | grep "^${OTA_GPT_TEMP_DISK_FILE}" \
 | wc -l)
     OTA_OLD_GPT_END_PART_END=$(($OTA_OLD_GPT_END_PART_START + $OTA_LAST_DEVICE_NEW_SIZE_KB * 1024 / \
 $EMMC_SECTOR_B))
     echo -e \
 "d\n${OTA_GPT_PART_NUM}\nn\n${OTA_GPT_PART_NUM}\n${OTA_OLD_GPT_END_PART_START}\n${OTA_OLD_GPT_END_PA\
-RT_END}\n0700\nw\nY\n" | gdisk ${OTA_GPT_TEMP_DISK_FILE}
-    gdisk -l ${OTA_GPT_TEMP_DISK_FILE}
-    dd if=${OTA_GPT_TEMP_DISK_FILE} of=${OTA_GPT_TEMP_FILE} bs=1 count=17408 || panic "dd sparse \
+RT_END}\n0700\nw\nY\n" | gdisk "${OTA_GPT_TEMP_DISK_FILE}"
+    gdisk -l "${OTA_GPT_TEMP_DISK_FILE}"
+    dd if="${OTA_GPT_TEMP_DISK_FILE}" of="${OTA_GPT_TEMP_FILE}" bs=1 count=17408 || panic "dd sparse \
 file new info ${OTA_GPT_TEMP_DISK_FILE} to gpt file ${OTA_GPT_TEMP_FILE} error"
     mv gpt.gz gpt.gz.ota_update_bak
-    gzip -c ${OTA_GPT_TEMP_FILE} >gpt.gz || panic "gzip file ${OTA_GPT_TEMP_FILE} to gpt.gz error"
+    gzip -c "${OTA_GPT_TEMP_FILE}" >gpt.gz || panic "gzip file ${OTA_GPT_TEMP_FILE} to gpt.gz error"
     sync
 fi
 
@@ -548,7 +557,7 @@ set >>"$LOGFILE"
 OTA_FIP_FLASH_OFFSET=()
 OTA_FIP_FLASH_SIZE=()
 IFS=$'\n'
-for item in $(cat $OTA_FIP_UPDATE_CMD_FILE | grep -a ^mmc | grep write); do
+for item in $(grep -a '^mmc' "$OTA_FIP_UPDATE_CMD_FILE" | grep write); do
     if [[ -z "$item" ]]; then
         continue
     fi
@@ -562,7 +571,7 @@ for ((item = 0; item < ${#OTA_FIP_FLASH_OFFSET[@]}; item++)); do
 ${OTA_FIP_FLASH_SIZE[$item]}"
 done
 offset=$(echo "$OTA_PACK_WRITE_START_SECTOR + 0" | bc)
-size=$(echo "scale=0; $(stat -c %s $OTA_FIP_FILE) / $EMMC_SECTOR_B + 1" | bc)
+size=$(echo "scale=0; $(stat -c %s "$OTA_FIP_FILE") / $EMMC_SECTOR_B + 1" | bc)
 OTA_FIP_WRITE_OFFSET=$(printf '0x%X' $offset)
 OTA_FIP_WRITE_SIZE=$(printf '0x%X' $size)
 OTA_UPDATE_PACK_WRITE_OFFSET=$(($OTA_FIP_WRITE_OFFSET + $OTA_FIP_WRITE_SIZE))
@@ -592,13 +601,13 @@ for emmc_boot_file in $(echo "${OTA_EMMC_UPDATE_CMD_FILE}"); do
             continue
         fi
     fi
-    for item in $(cat $emmc_boot_file | grep -aE "^${OTA_PACK_READ_FILE_CMD} |^unzip |^mmc write"); do
+    for item in $(grep -aE "^${OTA_PACK_READ_FILE_CMD} |^unzip |^mmc write" "$emmc_boot_file"); do
         if [[ -z "$item" ]]; then
             continue
         fi
         if [[ "$item" == "${OTA_PACK_READ_FILE_CMD} "* ]]; then
             filename="$(echo "$item" | awk -F' ' '{print $NF}' | awk -F'/' '{print $NF}')"
-            size=$(echo "scale=0; $(stat -c %s $filename) / $EMMC_SECTOR_B + 1" | bc)
+            size=$(echo "scale=0; $(stat -c %s "$filename") / $EMMC_SECTOR_B + 1" | bc)
             OTA_EMMC_FILES+=($filename)
             OTA_EMMC_WRITE_OFFSET["$filename"]=$(printf '0x%X' $OTA_UPDATE_PACK_WRITE_OFFSET)
             OTA_EMMC_WRITE_SIZE["$filename"]=$(printf '0x%X' $size)
@@ -630,7 +639,7 @@ echo "[INFO] Generate Upgrade Script start"
 set >>"$LOGFILE"
 OTA_UPDATE_SCRIPT_FILE=$LOGFILE.update.cmd
 random_string=$(< /dev/urandom tr -dc 'A-Za-z0-9' | head -c 10)
-echo "$led_env_str" >>$OTA_UPDATE_SCRIPT_FILE
+echo "$led_env_str" >>"$OTA_UPDATE_SCRIPT_FILE"
 flash_pre_str+="
 # random str: $random_string
 $otaenvsetup_str
@@ -647,9 +656,9 @@ saveenv;fi;echo update flag: \${OTA_UPDATE_FLAG};\
 '
 echo \"OTA UPDATE START...[flag: \${OTA_UPDATE_FLAG}]\";
 "
-echo "$flash_pre_str" >>$OTA_UPDATE_SCRIPT_FILE
+echo "$flash_pre_str" >>"$OTA_UPDATE_SCRIPT_FILE"
 
-echo "if test \${OTA_UPDATE_FLAG} = .; then" >>$OTA_UPDATE_SCRIPT_FILE
+echo "if test \${OTA_UPDATE_FLAG} = .; then" >>"$OTA_UPDATE_SCRIPT_FILE"
 if [[ "${CPU_MODEL}" == "bm1684x" ]] || [[ "${CPU_MODEL}" == "bm1684" ]]; then
     echo "echo Program $OTA_FIP_FILE start
 mmc dev 0
@@ -664,7 +673,7 @@ run led_ota_flash_error
 reset
 fi
 print chip_type
-" >>$OTA_UPDATE_SCRIPT_FILE
+" >>"$OTA_UPDATE_SCRIPT_FILE"
     if [[ " ${OTA_EMMC_FILES[@]} " == *"system."* ]]; then
         flash_update_cmd="sf update \${ramdisk_addr_r} 0x0 0x120000"
     else
@@ -675,12 +684,12 @@ if test \"\$chip_type\" = \"bm1684\"; then sf update \${ramdisk_addr_b} 0x200000
 0x200000; else sf update \${ramdisk_addr_r} 0x200000 0x200000; fi;
 echo update section B done;"
     fi
-    echo "$flash_update_cmd" >>$OTA_UPDATE_SCRIPT_FILE
+    echo "$flash_update_cmd" >>"$OTA_UPDATE_SCRIPT_FILE"
     echo "else
 echo skip SPI flash update.
 fi
 echo Program fip.bin done
-" >>$OTA_UPDATE_SCRIPT_FILE
+" >>"$OTA_UPDATE_SCRIPT_FILE"
 elif [[ "${CPU_MODEL}" == "bm1688" ]] || [[ "${CPU_MODEL}" == "cv186ah" ]]; then
     echo "
 cmp.b 0x05207f82 0x05207f83 1; if test \$? -eq 1; then setenv consoledev ttyS2; fi
@@ -696,24 +705,24 @@ run led_ota_flash_error
 run led_ota_flash_error
 reset
 fi
-" >>$OTA_UPDATE_SCRIPT_FILE
+" >>"$OTA_UPDATE_SCRIPT_FILE"
     for ((item = 0; item < ${#OTA_FIP_FLASH_OFFSET[@]}; item++)); do
         echo "mmc write \${ramdisk_addr_r} ${OTA_FIP_FLASH_OFFSET[$item]} \
-${OTA_FIP_FLASH_SIZE[$item]}" >>$OTA_UPDATE_SCRIPT_FILE
+${OTA_FIP_FLASH_SIZE[$item]}" >>"$OTA_UPDATE_SCRIPT_FILE"
     done
     echo "
 else
 echo skip fip flash.
 fi
 echo Program fip.bin done
-" >>$OTA_UPDATE_SCRIPT_FILE
+" >>"$OTA_UPDATE_SCRIPT_FILE"
 fi
 
 echo "
 run led_ota_flash_run_flash;
 run ota_update_flag_add1;
 fi
-" >>$OTA_UPDATE_SCRIPT_FILE
+" >>"$OTA_UPDATE_SCRIPT_FILE"
 
 for ((item = 0; item < ${#OTA_EMMC_FILES[@]}; item++)); do
     filename=${OTA_EMMC_FILES[$item]}
@@ -747,41 +756,41 @@ run led_ota_flash_error
 reset; fi;
 echo
 echo Program $filename done
-" >>$OTA_UPDATE_SCRIPT_FILE
+" >>"$OTA_UPDATE_SCRIPT_FILE"
 
     echo "
 run led_ota_flash_run_flash;
 run ota_update_flag_add1;
 fi
-" >>$OTA_UPDATE_SCRIPT_FILE
+" >>"$OTA_UPDATE_SCRIPT_FILE"
 
     if [[ "$(($item % 10))" == "0" ]]; then
         echo "
-bm_savelog mmc 0:1 ota_update_$(($item / 10)).log" >>$OTA_UPDATE_SCRIPT_FILE
+bm_savelog mmc 0:1 ota_update_$(($item / 10)).log" >>"$OTA_UPDATE_SCRIPT_FILE"
     fi
 done
 
-echo "$flash_post_str" >>$OTA_UPDATE_SCRIPT_FILE
+echo "$flash_post_str" >>"$OTA_UPDATE_SCRIPT_FILE"
 
-mkimage -A arm64 -O linux -T script -C none -a 0 -e 0 -n "boot.scr" -d $OTA_UPDATE_SCRIPT_FILE \
-$OTA_UPDATE_SCRIPT_FILE.scr
+mkimage -A arm64 -O linux -T script -C none -a 0 -e 0 -n "boot.scr" -d "$OTA_UPDATE_SCRIPT_FILE" \
+"$OTA_UPDATE_SCRIPT_FILE.scr"
 if [[ "$?" != "0" ]]; then
     panic "mkimage error!!!"
 fi
-OTA_UPDATE_SCRIPT_FILE_MD5=$(md5sum $OTA_UPDATE_SCRIPT_FILE.scr | awk -F' ' '{print $1}' | tr -d '\n')
+OTA_UPDATE_SCRIPT_FILE_MD5=$(md5sum "$OTA_UPDATE_SCRIPT_FILE.scr" | awk -F' ' '{print $1}' | tr -d '\n')
 OTA_UPDATE_SCRIPT_FILE_OFFSET=$(($OTA_UPDATE_PACK_WRITE_OFFSET))
-OTA_UPDATE_SCRIPT_FILE_SIZE=$(echo "scale=0; $(stat -c %s $OTA_UPDATE_SCRIPT_FILE.scr) / $EMMC_SECTOR_B + 1" | bc)
+OTA_UPDATE_SCRIPT_FILE_SIZE=$(echo "scale=0; $(stat -c %s "$OTA_UPDATE_SCRIPT_FILE.scr") / $EMMC_SECTOR_B + 1" | bc)
 OTA_UPDATE_PACK_WRITE_OFFSET=$(($OTA_UPDATE_SCRIPT_FILE_OFFSET + $OTA_UPDATE_SCRIPT_FILE_SIZE))
 echo "[INFO] Generate Upgrade Script success"
 
 # 生成刷机启动文件
 echo "[INFO] Generate Upgrade boot Script start"
 set >>"$LOGFILE"
-OTA_UPDATE_BOOT_SCRIPT_FILE=$LOGFILE.boot.cmd
+OTA_UPDATE_BOOT_SCRIPT_FILE="$LOGFILE.boot.cmd"
 
-echo "$led_env_str" >>$OTA_UPDATE_BOOT_SCRIPT_FILE
+echo "$led_env_str" >>"$OTA_UPDATE_BOOT_SCRIPT_FILE"
 
-echo "$otaenvsetup_str" >>$OTA_UPDATE_BOOT_SCRIPT_FILE
+echo "$otaenvsetup_str" >>"$OTA_UPDATE_BOOT_SCRIPT_FILE"
 
 echo "
 setenv otacmd 'run otaenvset;mmc dev 0;\
@@ -792,7 +801,7 @@ run led_ota_flash_error;run led_ota_flash_error;reset;fi;\
 source \${scriptaddr};\
 if test \$? -ne 0; then setenv LED_OTA_ERROR_FLAG 2;run led_ota_flash_error;\
 run led_ota_flash_error;run led_ota_flash_error;reset;fi;\
-'" >>$OTA_UPDATE_BOOT_SCRIPT_FILE
+'" >>"$OTA_UPDATE_BOOT_SCRIPT_FILE"
 
 echo '
 echo OTA update boot start
@@ -808,10 +817,10 @@ saveenv
 fi
 run otacmd
 reset
-' >>$OTA_UPDATE_BOOT_SCRIPT_FILE
+' >>"$OTA_UPDATE_BOOT_SCRIPT_FILE"
 
-mkimage -A arm64 -O linux -T script -C none -a 0 -e 0 -n "boot.scr" -d $OTA_UPDATE_BOOT_SCRIPT_FILE \
-$OTA_UPDATE_BOOT_SCRIPT_FILE.scr
+mkimage -A arm64 -O linux -T script -C none -a 0 -e 0 -n "boot.scr" -d "$OTA_UPDATE_BOOT_SCRIPT_FILE" \
+"$OTA_UPDATE_BOOT_SCRIPT_FILE.scr"
 if [[ "$?" != "0" ]]; then
     panic "mkimage error!!!"
 fi
@@ -830,8 +839,8 @@ for ((item = 0; item < ${#OTA_EMMC_FILES[@]}; item++)); do
     echo -e "[INFO] write file $filename
     \t to emmc offset: ${OTA_EMMC_WRITE_OFFSET["$filename"]},
     \t size: ${OTA_EMMC_WRITE_SIZE["$filename"]}"
-    file_validate $filename
-    dd if=$filename of=/dev/mmcblk0 bs=$EMMC_SECTOR_B \
+    file_validate "$filename"
+    dd if="$filename" of=/dev/mmcblk0 bs=$EMMC_SECTOR_B \
 seek=$((${OTA_EMMC_WRITE_OFFSET["$filename"]})) count=$((${OTA_EMMC_WRITE_SIZE["$filename"]})) \
 status=progress
     if [[ "$?" != "0" ]]; then
@@ -840,7 +849,7 @@ status=progress
 done
 dd if=/dev/zero of=/dev/mmcblk0 bs=$EMMC_SECTOR_B \
 seek=${OTA_UPDATE_SCRIPT_FILE_OFFSET} count=$(($OTA_UPDATE_SCRIPT_FILE_SIZE + 1)) status=progress
-dd if=$OTA_UPDATE_SCRIPT_FILE.scr of=/dev/mmcblk0 bs=$EMMC_SECTOR_B \
+dd if="$OTA_UPDATE_SCRIPT_FILE.scr" of=/dev/mmcblk0 bs=$EMMC_SECTOR_B \
 seek=${OTA_UPDATE_SCRIPT_FILE_OFFSET} count=${OTA_UPDATE_SCRIPT_FILE_SIZE} status=progress
 if [[ "$?" != "0" ]]; then
     panic "Write file $OTA_UPDATE_SCRIPT_FILE.scr to emmc error!!!"
@@ -856,7 +865,7 @@ if [ ! -f boot.scr.emmc.otabak ]; then
         panic "cp /boot/boot.scr.emmc error!!!"
     fi
 fi
-cp $OTA_UPDATE_BOOT_SCRIPT_FILE.scr /boot/boot.scr.emmc
+cp "$OTA_UPDATE_BOOT_SCRIPT_FILE.scr" /boot/boot.scr.emmc
 if [[ "$?" != "0" ]]; then
     panic "cp $OTA_UPDATE_BOOT_SCRIPT_FILE.scr error!!!"
 fi
@@ -873,8 +882,8 @@ echo "[INFO] chack pack md5sum on emmc start ..."
 set >>"$LOGFILE"
 OTA_FIP_MD5SUM_EMMC=$(dd if=/dev/mmcblk0 bs=${EMMC_SECTOR_B} \
 skip=$((${OTA_FIP_WRITE_OFFSET})) count=$((${OTA_FIP_WRITE_SIZE})) | \
-head -c $(stat -c %s $OTA_FIP_FILE) | md5sum)
-OTA_FIP_MD5SUM_FILE=$(dd if=${OTA_FIP_FILE} | md5sum)
+head -c $(stat -c %s "$OTA_FIP_FILE") | md5sum)
+OTA_FIP_MD5SUM_FILE=$(dd if="${OTA_FIP_FILE}" | md5sum)
 if [[ "$OTA_FIP_MD5SUM_EMMC" != "$OTA_FIP_MD5SUM_FILE" ]]; then
     panic "check fip md5sum for emmc [$OTA_FIP_MD5SUM_EMMC] and file [$OTA_FIP_MD5SUM_FILE]"
 fi
@@ -883,8 +892,8 @@ for ((item = 0; item < ${#OTA_EMMC_FILES[@]}; item++)); do
     filename=${OTA_EMMC_FILES[$item]}
     OTA_EMMC_MD5SUM["$filename"]=$(dd if=/dev/mmcblk0 bs=$EMMC_SECTOR_B \
 skip=$((${OTA_EMMC_WRITE_OFFSET["$filename"]})) \
-count=$((${OTA_EMMC_WRITE_SIZE["$filename"]})) | head -c $(stat -c %s $filename) | md5sum)
-    OTA_EMMC_MD5SUM_FILE=$(dd if=${filename} | md5sum)
+count=$((${OTA_EMMC_WRITE_SIZE["$filename"]})) | head -c $(stat -c %s "$filename") | md5sum)
+    OTA_EMMC_MD5SUM_FILE=$(dd if="$filename" | md5sum)
     if [[ "${OTA_EMMC_MD5SUM["$filename"]}" != "$OTA_EMMC_MD5SUM_FILE" ]]; then
         panic "check file $filename md5sum for emmc [${OTA_EMMC_MD5SUM["$filename"]}] \
 and file [$OTA_EMMC_MD5SUM_FILE]"
@@ -894,7 +903,7 @@ done
 OTA_UPDATE_CMD_MD5=$(dd if=/dev/mmcblk0 bs=$EMMC_SECTOR_B \
 skip=${OTA_UPDATE_SCRIPT_FILE_OFFSET} \
 count=${OTA_UPDATE_SCRIPT_FILE_SIZE} \
-| head -c $(stat -c %s $OTA_UPDATE_SCRIPT_FILE.scr) | md5sum | awk -F' ' '{print $1}')
+| head -c $(stat -c %s "$OTA_UPDATE_SCRIPT_FILE.scr") | md5sum | awk -F' ' '{print $1}')
 if [[ "$OTA_UPDATE_SCRIPT_FILE_MD5" != "$OTA_UPDATE_CMD_MD5" ]]; then
     panic "check file $OTA_UPDATE_SCRIPT_FILE.scr md5sum for emmc [${OTA_UPDATE_SCRIPT_FILE_MD5}] \
 and file [$OTA_UPDATE_CMD_MD5]"
@@ -910,9 +919,9 @@ if [[ "$LAST_PART_NOT_FLASH" == "1" ]]; then
 fi
 if [[ "$SHELL_NEED_AUTOBOOT_ONCE" != "" ]]; then
     if [[ -d "${WORD_DIR_ROOTFS_RW_REPACK}" ]]; then
-        umount ${WORD_DIR_ROOTFS_RW_REPACK}/rootfs_rw_part_dir 2>/dev/null
-        if [[ "$(ls $WORK_DIR/rootfs_rw.*-of-*.gz.bak | wc -l)" != "0" ]]; then
-            pushd ${WORK_DIR}
+        umount "${WORD_DIR_ROOTFS_RW_REPACK}/rootfs_rw_part_dir" 2>/dev/null
+        if [[ "$(ls "$WORK_DIR"/rootfs_rw.*-of-*.gz.bak 2>/dev/null | wc -l)" != "0" ]]; then
+            pushd "${WORK_DIR}"
                 rm -f rootfs_rw.*-of-*.gz
                 for f in rootfs_rw.*-of-*.gz.bak; do mv "$f" "${f%.bak}"; done
             popd

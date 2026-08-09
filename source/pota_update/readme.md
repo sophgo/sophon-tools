@@ -8,6 +8,22 @@
 
 1. ota.sh OTA远程刷机工具
 2. arm64_bin 该目录下会存放一些ota.sh依赖的二进制文件
+3. get_network_info.sh 保留网络配置的OTA流程中，自动抓取网络配置的范例程序
+
+## 构建产物
+
+统一构建入口 `bash release.sh [ARCH] [VERSION]`：
+
+- ARCH：arm64（默认，设备）或 amd64（仅打包脚本，bc 依赖系统自带）
+- VERSION：默认从 ota.sh 提取 v1.4.0，可显式传入；产物带版本标识
+- env OUTPUT_DIR：覆盖产物目录（默认 `<repo>/output/pota_update/`）
+
+产物形态：
+
+- `ota_update.sh` + `get_network_info.sh`（arm64 时含 `arm64_bin/`，内含 bc）直接复制到输出目录，方便现场直接取用
+- `pota_update_<VERSION>.zip` 完整整包（含上述全部文件，顶层目录 `pota_update_<VERSION>/`），用于归档与分发
+
+部署时按 readme 使用方式，将 `ota_update.sh` 拷贝到刷机包内并改名（不要与刷机包中已有文件冲突），与 BOOT 文件同目录。
 
 ## 适用范围
 

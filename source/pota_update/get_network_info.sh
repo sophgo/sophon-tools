@@ -30,7 +30,7 @@ detect_network_manager() {
         echo "NetworkManager"
     elif systemctl is-active --quiet systemd-networkd 2>/dev/null; then
         echo "systemd-networkd"
-    elif [ -f "/etc/netplan/" ] && ls /etc/netplan/*.yaml 2>/dev/null | grep -q .; then
+    elif [ -d "/etc/netplan/" ] && ls /etc/netplan/*.yaml 2>/dev/null | grep -q .; then
         echo "netplan"
     else
         echo "unknown"
@@ -41,12 +41,12 @@ detect_network_manager() {
 parse_cidr() {
     local cidr=$1
     if [[ $cidr == *"/"* ]]; then
-        local ip=$(echo $cidr | cut -d'/' -f1)
-        local prefix=$(echo $cidr | cut -d'/' -f2)
+        local ip=$(echo "$cidr" | cut -d'/' -f1)
+        local prefix=$(echo "$cidr" | cut -d'/' -f2)
 
         # 将前缀长度转换为点分十进制掩码
         local mask=""
-        if [[ $prefix =~ ^[0-9]+$ ]] && [ $prefix -ge 0 ] && [ $prefix -le 32 ]; then
+        if [[ $prefix =~ ^[0-9]+$ ]] && [ "$prefix" -ge 0 ] && [ "$prefix" -le 32 ]; then
             local full_octets=$((prefix / 8))
             local remainder=$((prefix % 8))
             local mask_octets=()
@@ -141,8 +141,8 @@ get_config_from_systemd() {
     if [ -n "$address" ]; then
         local parsed=$(parse_cidr "$address")
         if [[ $parsed == *" "* ]]; then
-            CONFIG_IP[$iface]=$(echo $parsed | awk '{print $1}')
-            CONFIG_NETMASK[$iface]=$(echo $parsed | awk '{print $2}')
+            CONFIG_IP[$iface]=$(echo "$parsed" | awk '{print $1}')
+            CONFIG_NETMASK[$iface]=$(echo "$parsed" | awk '{print $2}')
         else
             CONFIG_IP[$iface]=$parsed
         fi
@@ -190,8 +190,8 @@ get_config_from_nm() {
             local address_part=$(echo "$address_info" | awk -F',' '{print $1}')
             local parsed=$(parse_cidr "$address_part")
             if [[ $parsed == *" "* ]]; then
-                CONFIG_IP[$iface]=$(echo $parsed | awk '{print $1}')
-                CONFIG_NETMASK[$iface]=$(echo $parsed | awk '{print $2}')
+                CONFIG_IP[$iface]=$(echo "$parsed" | awk '{print $1}')
+                CONFIG_NETMASK[$iface]=$(echo "$parsed" | awk '{print $2}')
             else
                 CONFIG_IP[$iface]=$parsed
             fi
