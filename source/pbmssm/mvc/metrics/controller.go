@@ -21,7 +21,7 @@ import (
 	"bmssm/pkg/response"
 )
 
-const maxHistoryPoints = 10000
+const maxHistoryPoints = 100000
 
 // Controller 指标历史 MVC 控制器。
 type Controller struct{}
