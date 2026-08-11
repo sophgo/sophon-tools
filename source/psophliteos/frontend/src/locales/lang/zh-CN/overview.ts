@@ -75,7 +75,7 @@ export default {
   vpssMemory: 'VPSS内存',
   diskLayout: '硬盘情况',
   emmcOverall: 'eMMC整体',
-  ddrOverall: 'DDR整体',
+  ddrOverall: '内存整体',
   systemPartition: '系统分区',
   dataPartition: '/data分区',
   // theoretialCalculationCapacity: '',
