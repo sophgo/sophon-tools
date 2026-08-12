@@ -84,6 +84,17 @@
               v-html="renderMarkdown(m.content)"
             ></div>
           </div>
+          <div v-else-if="m.kind === 'permission'" class="webchat-msg webchat-msg-assistant">
+            <div class="webchat-bubble webchat-perm">
+              <div class="webchat-perm-label">需要批准：<strong>{{ m.permTitle }}</strong></div>
+              <div class="webchat-perm-hint">Agent 请求执行上述操作，是否允许？(60 秒未操作将自动拒绝)</div>
+              <div v-if="!m.permDone" class="webchat-perm-actions">
+                <button class="webchat-perm-btn webchat-perm-allow" type="button" @click="respondPermission(m.permReqId, true, m)">允许</button>
+                <button class="webchat-perm-btn webchat-perm-deny" type="button" @click="respondPermission(m.permReqId, false, m)">拒绝</button>
+              </div>
+              <div v-else class="webchat-perm-done">{{ m.permDone === true ? '已允许' : '已拒绝' }}</div>
+            </div>
+          </div>
           <div v-else class="webchat-msg webchat-msg-assistant">
             <span v-if="m.model" class="webchat-msg-model">{{ m.model }}</span>
             <div class="webchat-bubble" v-html="renderMarkdown(m.content)"></div>
@@ -135,6 +146,10 @@
     content: string;
     model?: string;
     open?: boolean;
+    // 权限审批卡片字段
+    permReqId?: number;
+    permTitle?: string;
+    permDone?: boolean | null;
   }
 
   interface Session {
@@ -292,11 +307,62 @@
         // 需求 3：自定义标题后的回执
         applyTitle(msg.session_id, payload.title);
         break;
+      case 'permission.request':
+        handlePermissionRequest(msg.session_id, payload);
+        break;
+      case 'permission.responded':
+        markPermissionDone(payload.request_id, !!payload.allow);
+        break;
       case 'error':
         errorMsg.value = payload.message || '发生错误';
         sending.value = false;
         typing.value = false;
         break;
+    }
+  }
+
+  /** permission.request：Agent 触发需用户批准的工具调用 → 在活跃会话插入审批卡片。 */
+  function handlePermissionRequest(sessionId: string | undefined, payload: any) {
+    const reqId = payload?.request_id;
+    const toolCall = payload?.tool_call || {};
+    if (reqId == null) return;
+    const s = ensureSession();
+    s.messages.push({
+      key: 'perm' + msgSeq++,
+      role: 'assistant',
+      kind: 'permission',
+      content: '',
+      permReqId: reqId,
+      permTitle: (toolCall.title as string) || '工具调用',
+      permDone: null,
+      open: false,
+    });
+    saveSessions();
+    scrollToBottom();
+  }
+
+  /** 用户点击 允许/拒绝 → 回传 permission.respond。 */
+  function respondPermission(reqId: number, allow: boolean, m: ChatMsg) {
+    const sid = activeSess.value?.id;
+    if (ws && ws.ready) {
+      ws.sendFrame({
+        type: 'permission.respond',
+        session_id: sid,
+        payload: { session_id: sid, request_id: reqId, allow },
+      });
+    }
+    m.permDone = allow;
+    saveSessions();
+  }
+
+  /** permission.responded 回执：把对应审批卡片置为已处理（幂等）。 */
+  function markPermissionDone(reqId: number, allow: boolean) {
+    const s = activeSess.value;
+    if (!s) return;
+    const m = s.messages.find((x) => x.permReqId === reqId);
+    if (m) {
+      m.permDone = allow;
+      saveSessions();
     }
   }
 
@@ -835,6 +901,51 @@
   .webchat-msg-error .webchat-bubble {
     background: #fff1f0;
     color: #ff4d4f;
+  }
+
+  /* 权限审批卡片 */
+  .webchat-perm {
+    border: 1px solid #d9d9d9;
+    background: #fafafa;
+  }
+  .webchat-perm-label {
+    font-size: 14px;
+    color: #333;
+  }
+  .webchat-perm-label strong {
+    color: #1a73e8;
+  }
+  .webchat-perm-hint {
+    margin-top: 4px;
+    font-size: 12px;
+    color: #999;
+  }
+  .webchat-perm-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+  }
+  .webchat-perm-btn {
+    border: none;
+    border-radius: 4px;
+    padding: 6px 16px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .webchat-perm-allow {
+    background: #1a73e8;
+    color: #fff;
+  }
+  .webchat-perm-deny {
+    background: #f0f2f5;
+    color: #333;
+    border: 1px solid #d9d9d9;
+  }
+  .webchat-perm-done {
+    margin-top: 10px;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: #666;
   }
 
   .webchat-msg-model {
