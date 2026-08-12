@@ -141,6 +141,13 @@
   let forwardKey = '';
   // 本地 message 渲染序号（避免重复 key）
   let msgSeq = 0;
+  // 当前流式「思考过程」折叠块的 key（同一逻辑思考常被后端拆成多个 message.create
+  // thought-1/thought-2，累积到同一折叠块避免拆泡）。
+  let openThoughtKey: string | null = null;
+
+  function clearOpenThought() {
+    openThoughtKey = null;
+  }
 
   const activeSess = computed(() => sessions.value.find((s) => s.id === activeId.value) || null);
   const currentMessages = computed(() => activeSess.value?.messages || []);
@@ -195,6 +202,7 @@
     saveActive();
     draft.value = '';
     errorMsg.value = '';
+    clearOpenThought();
     resetConnection();
     return s;
   }
@@ -203,6 +211,7 @@
     if (!sessions.value.some((s) => s.id === id)) return;
     activeId.value = id;
     saveActive();
+    clearOpenThought();
     resetConnection();
   }
 
@@ -240,6 +249,8 @@
         break;
       case 'typing.stop':
         typing.value = false;
+        // 回合结束：思考已结束，后续新思考应另起折叠块
+        clearOpenThought();
         break;
       case 'session.list':
         handleSessionList(payload);
@@ -275,6 +286,7 @@
 
     if (kind === 'text') {
       // 连续 text 合并到最近一条 assistant 文本（修复拆泡）
+      clearOpenThought();
       const last = s.messages[s.messages.length - 1];
       if (
         last &&
@@ -294,14 +306,28 @@
         open: false,
       });
     } else if (kind === 'thought') {
-      s.messages.push({
-        key: messageId || 'msg' + msgSeq++,
-        role: 'assistant',
-        kind,
-        content,
-        open: false,
-      });
+      // 同一逻辑思考常被后端拆成多个 message.create（thought-1/thought-2）：
+      // 累积到当前打开的思考折叠块，避免同一段思考被拆成两个「思考过程」气泡。
+      const existing = messageId
+        ? s.messages.find((m) => m.key === messageId && m.kind === 'thought')
+        : null;
+      if (existing) {
+        existing.content = accumulate(existing.content, content);
+        openThoughtKey = existing.key as string;
+      } else if (openThoughtKey) {
+        const target = s.messages.find((m) => m.key === openThoughtKey);
+        if (target && target.kind === 'thought') {
+          target.content += content;
+        } else {
+          openThoughtKey = null;
+          pushThought(messageId, content);
+        }
+      } else {
+        pushThought(messageId, content);
+      }
     } else if (kind === 'tool_calls') {
+      // 思考结束进入工具调用：后续新思考应另起折叠块
+      clearOpenThought();
       const text = formatToolCalls(payload);
       s.messages.push({
         key: messageId || 'msg' + msgSeq++,
@@ -315,18 +341,38 @@
     scrollToBottom();
   }
 
+  function pushThought(messageId: string, content: string) {
+    const s = activeSess.value;
+    if (!s) return;
+    const key = messageId || 'msg' + msgSeq++;
+    s.messages.push({ key, role: 'assistant', kind: 'thought', content, open: false });
+    openThoughtKey = key;
+  }
+
   function handleUpdate(payload: any) {
     const s = activeSess.value;
     if (!s) return;
     const messageId = payload.message_id || '';
     const content = payload.content || '';
-    const target = s.messages.find((m) => m.key === messageId);
-    if (target) {
-      target.content = accumulate(target.content, content);
-    } else {
-      // 未跟踪的 update：追加到最近一条同类消息
+    const kind = payload.kind || '';
+    const targetByKey = messageId ? s.messages.find((m) => m.key === messageId) : null;
+    if (targetByKey) {
+      targetByKey.content = accumulate(targetByKey.content, content);
+      // thought 增量更新到达时，把它作为当前打开的思考块累积目标
+      if (kind === 'thought' && targetByKey.kind === 'thought')
+        openThoughtKey = targetByKey.key as string;
+    } else if (kind === 'thought' && openThoughtKey) {
+      // 未跟踪的 thought 增量 → 累积到当前打开的思考块
+      const t = s.messages.find((m) => m.key === openThoughtKey);
+      if (t && t.kind === 'thought') t.content = accumulate(t.content, content);
+    } else if (kind !== 'thought') {
+      // 未跟踪的 text/tool 增量：追加到最近一条同类消息
       const last = s.messages[s.messages.length - 1];
       if (last && last.role === 'assistant') last.content = accumulate(last.content, content);
+    } else {
+      const last = s.messages[s.messages.length - 1];
+      if (last && last.role === 'assistant' && last.kind === 'thought')
+        last.content = accumulate(last.content, content);
     }
     saveSessions();
     scrollToBottom();
@@ -386,6 +432,7 @@
       model: m.model || '',
       open: false,
     }));
+    clearOpenThought();
     saveSessions();
     scrollToBottom();
   }
@@ -412,6 +459,7 @@
     }
     sending.value = true;
     errorMsg.value = '';
+    clearOpenThought();
 
     // 用户消息入本地
     s.messages.push({ key: 'msg' + msgSeq++, role: 'user', content });
@@ -497,7 +545,7 @@
 <style lang="less" scoped>
   .webchat {
     display: flex;
-    height: calc(100vh - 220px);
+    height: calc(100vh - 150px);
     border: 1px solid #e5e7eb;
     border-radius: 8px;
     overflow: hidden;
