@@ -21,11 +21,12 @@ bash_timeout_seconds = 120
 paths = ["/data/sophon/reasonix-home/skills"]
 
 [permissions]
-mode  = "ask"   # 写工具逐次询问用户（chatUI 审批）；只读工具放行
+mode  = "auto"   # 普通写/bash 自动放行（工作目录内少打扰）；嵌套/敏感/deny 仍拦截
 
 [sandbox]
-bash    = "off"   # 测试机无 bubblewrap；关闭 bash 沙箱以允许 unconfined shell
+bash    = "off"   # 本机无 bubblewrap：须关 bash 系统沙箱才能 unconfined shell（平台要求）
 network = true
+# 不配 workspace_root/allow_write/forbid_read：不做路径圈地（用户选择）
 
 [agent]
 # SE7 技术支持助手设定（"agent 设定"，见同 home 下 prompts/system.md）
