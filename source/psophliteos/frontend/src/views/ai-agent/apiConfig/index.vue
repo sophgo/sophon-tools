@@ -32,14 +32,11 @@
           />
         </a-form-item>
         <a-form-item label="默认模型名称">
-          <a-input-group compact>
-            <a-input
-              v-model:value="form.llmModel"
-              style="width: 60%"
-              placeholder="sophnet-deepseek"
-            />
-            <a-button style="width: 20%" @click="openModelPicker">选择</a-button>
-          </a-input-group>
+          <a-input
+            v-model:value="form.llmModel"
+            style="width: 100%"
+            placeholder="sophnet-deepseek"
+          />
         </a-form-item>
         <a-form-item
           label="覆盖下游请求"
@@ -98,32 +95,6 @@
         </p>
       </div>
     </a-card>
-
-    <!-- 模型选择弹窗 -->
-    <a-modal
-      v-model:open="picker.visible"
-      title="选择模型"
-      @ok="applyPickedModel"
-      :ok-button-props="{ disabled: !picker.selected }"
-    >
-      <div class="mb-3">
-        <a-input-search
-          v-model:value="picker.custom"
-          placeholder="或手动输入模型名，回车确认"
-          enter-button="使用"
-          @search="applyCustomModel"
-        />
-      </div>
-      <a-select
-        v-model:value="picker.selected"
-        style="width: 100%"
-        placeholder="从供应商拉取模型列表"
-        :loading="picker.loading"
-        :options="picker.options"
-        @dropdown-visible-change="loadModels"
-        allow-clear
-      />
-    </a-modal>
   </div>
 </template>
 
@@ -137,15 +108,12 @@
     Button,
     Switch,
     Alert,
-    Modal,
-    Select,
     Tag,
     message,
   } from 'ant-design-vue';
   import {
     getAgentConfig,
     saveAgentConfig,
-    getProviderModels,
     testAgentConfig,
     getServiceStatus,
     serviceAction,
@@ -158,13 +126,9 @@
   const AFormItem = Form.Item;
   const AInput = Input;
   const AInputPassword = Input.Password;
-  const AInputGroup = Input.Group;
-  const AInputSearch = Input.Search;
   const AButton = Button;
   const ASwitch = Switch;
   const AAlert = Alert;
-  const AModal = Modal;
-  const ASelect = Select;
   const ATag = Tag;
 
   const saving = ref(false);
@@ -241,14 +205,6 @@
     form.llmApiBase = apiBaseByType[type] || SOPHNET_API_BASE;
   }
 
-  const picker = reactive({
-    visible: false,
-    options: [] as { label: string; value: string }[],
-    selected: undefined as string | undefined,
-    custom: '',
-    loading: false,
-  });
-
   async function init() {
     const cfg = await getAgentConfig();
     if (cfg) {
@@ -296,40 +252,6 @@
       testAllOK.value = false;
       testResults.value = [{ name: '测试', ok: false, message: res.message || '测试请求失败' }];
     }
-  }
-
-  // --- 模型选择弹窗 ---
-  function openModelPicker() {
-    picker.selected = undefined;
-    picker.custom = '';
-    picker.options = [];
-    picker.visible = true;
-  }
-
-  async function loadModels(open: boolean) {
-    if (!open || picker.options.length) return;
-    picker.loading = true;
-    const ids = await getProviderModels();
-    picker.options = ids.map((id) => ({ label: id, value: id }));
-    picker.loading = false;
-  }
-
-  function applyCustomModel() {
-    const v = picker.custom.trim();
-    if (!v) return;
-    applyModel(v);
-  }
-
-  function applyPickedModel() {
-    if (picker.selected) {
-      applyModel(picker.selected);
-    }
-  }
-
-  function applyModel(name: string) {
-    form.llmModel = name;
-    picker.visible = false;
-    message.success(`已选择模型 ${name}`);
   }
 
   onMounted(() => {

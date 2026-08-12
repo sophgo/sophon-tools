@@ -6,7 +6,6 @@ import { defHttp } from '/@/utils/http/axios';
 // defHttp 自动加 /api 前缀。
 enum Api {
   LlmProxyConfig = '/v1/llm-proxy/config',
-  LlmProxyModels = '/v1/llm-proxy/models',
   LlmProxyTest = '/v1/llm-proxy/test',
   ServiceStatus = '/v1/llm-proxy/service/status',
   ServiceAction = '/v1/llm-proxy/service/action',
@@ -67,21 +66,6 @@ export async function saveAgentConfig(cfg: {
     return { ok: false, message: (res as any)?.error_message || (res as any)?.msg || '保存失败' };
   } catch (e: any) {
     return { ok: false, message: e?.message || '保存失败' };
-  }
-}
-
-// 从供应商拉取模型列表（LLM）。
-export async function getProviderModels(): Promise<string[]> {
-  try {
-    const res = await defHttp.get<{ models: { id: string }[] }>(
-      { url: Api.LlmProxyModels, params: { kind: 'llm' } },
-      { isTransformResponse: false },
-    );
-    const data = (res as any)?.result ?? res;
-    const list = data?.models;
-    return Array.isArray(list) ? list.map((m: any) => m?.id ?? m).filter(Boolean) : [];
-  } catch {
-    return [];
   }
 }
 
