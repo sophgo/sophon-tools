@@ -2,6 +2,7 @@ package agentproxy
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 )
@@ -294,5 +295,23 @@ func TestModuleEndToEnd(t *testing.T) {
 	// 会话状态与持久化
 	if got, ok := m.Sessions().Get(sess.ID); !ok || got == nil {
 		t.Fatal("session not found after prompt")
+	}
+}
+
+// TestHomeDirDefault 验证 homeDir 默认指向 /data/sophon/reasonix-home（隔离定制 reasonix
+// 与系统正常安装实例），且显式 SOPHON_REASONIX_HOME 优先。
+func TestHomeDirDefault(t *testing.T) {
+	prev := os.Getenv("SOPHON_REASONIX_HOME")
+	t.Cleanup(func() { _ = os.Setenv("SOPHON_REASONIX_HOME", prev) })
+	_ = os.Unsetenv("SOPHON_REASONIX_HOME")
+
+	pm := &ProcessManager{}
+	if got := pm.homeDir(); got != "/data/sophon/reasonix-home" {
+		t.Fatalf("homeDir() = %q, want /data/sophon/reasonix-home", got)
+	}
+
+	_ = os.Setenv("SOPHON_REASONIX_HOME", "/var/custom/home")
+	if got := pm.homeDir(); got != "/var/custom/home" {
+		t.Fatalf("homeDir() with env = %q, want /var/custom/home", got)
 	}
 }

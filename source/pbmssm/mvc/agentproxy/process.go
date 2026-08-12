@@ -423,15 +423,18 @@ func (pm *ProcessManager) stopProc(graceful bool) {
 	}
 }
 
-// homeDir 探测 reasonix 运行主目录。
+// DefaultReasonixHome 定制 reasonix 的默认运行主目录。所有 reasonix 会话数据、
+// 配置（$HOME/.reasonix/）与预载 skill 都放这里，与系统正常安装的 reasonix
+// （各用户 $HOME/.reasonix/）彻底隔离，互不影响。
+const DefaultReasonixHome = "/data/sophon/reasonix-home"
+
+// homeDir 探测 reasonix 运行主目录。SOPHON_REASONIX_HOME 显式设置时优先；
+// 否则默认 DefaultReasonixHome（隔离定制实例，避免覆盖系统安装的 $HOME/.reasonix）。
 func (pm *ProcessManager) homeDir() string {
 	if h := os.Getenv("SOPHON_REASONIX_HOME"); h != "" {
 		return h
 	}
-	if h, err := os.UserHomeDir(); err == nil && h != "" {
-		return h
-	}
-	return "/home/linaro"
+	return DefaultReasonixHome
 }
 
 // initFailThreshold 连续 initialize 失败阈值：超过进入 degraded 状态。
