@@ -90,17 +90,6 @@
               v-html="renderMarkdown(m.content)"
             ></div>
           </div>
-          <div v-else-if="m.kind === 'permission'" class="webchat-msg webchat-msg-assistant">
-            <div class="webchat-bubble webchat-perm">
-              <div class="webchat-perm-label">需要批准：<strong>{{ m.permTitle }}</strong></div>
-              <div class="webchat-perm-hint">Agent 请求执行上述操作，是否允许？(60 秒未操作将自动拒绝)</div>
-              <div v-if="!m.permDone" class="webchat-perm-actions">
-                <button class="webchat-perm-btn webchat-perm-allow" type="button" @click="respondPermission(m.permReqId, true, m)">允许</button>
-                <button class="webchat-perm-btn webchat-perm-deny" type="button" @click="respondPermission(m.permReqId, false, m)">拒绝</button>
-              </div>
-              <div v-else class="webchat-perm-done">{{ m.permDone === true ? '已允许' : '已拒绝' }}</div>
-            </div>
-          </div>
           <div v-else class="webchat-msg webchat-msg-assistant">
             <div class="webchat-bubble" v-html="renderMarkdown(m.content)"></div>
           </div>
@@ -114,6 +103,16 @@
       </div>
 
       <footer class="webchat-input-area">
+        <div v-if="pendingPerm" class="webchat-msg webchat-msg-assistant">
+          <div class="webchat-bubble webchat-perm">
+            <div class="webchat-perm-label">需要批准：<strong>{{ pendingPerm.permTitle }}</strong></div>
+            <div class="webchat-perm-hint">Agent 请求执行上述操作，是否允许？(60 秒未操作将自动拒绝)</div>
+            <div class="webchat-perm-actions">
+              <button class="webchat-perm-btn webchat-perm-allow" type="button" @click="respondPermission(pendingPerm.permReqId, true, pendingPerm)">允许</button>
+              <button class="webchat-perm-btn webchat-perm-deny" type="button" @click="respondPermission(pendingPerm.permReqId, false, pendingPerm)">拒绝</button>
+            </div>
+          </div>
+        </div>
         <div class="webchat-input-box">
           <textarea
             ref="inputEl"
@@ -196,6 +195,12 @@
 
   const activeSess = computed(() => sessions.value.find((s) => s.id === activeId.value) || null);
   const currentMessages = computed(() => activeSess.value?.messages || []);
+  // 待处理的权限请求：取当前会话第一条未处理（permDone 为空）的 permission 消息。
+  // 由消息状态派生，切换会话/允许/拒绝/回执后自动同步，与消息历史共享同一份 permDone。
+  const pendingPerm = computed<ChatMsg | null>(() => {
+    const msgs = activeSess.value?.messages || [];
+    return msgs.find((m) => m.kind === 'permission' && !m.permDone) || null;
+  });
 
   function uuid(): string {
     if (window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
@@ -964,8 +969,17 @@
     color: #ff4d4f;
   }
 
-  /* 权限审批卡片 */
-  .webchat-perm {
+  /* 权限审批卡片（需求 197：从消息区移到输入框上方，宽度与输入框对齐） */
+  .webchat-input-area .webchat-msg {
+    margin-bottom: 10px;
+    margin-right: 68px; /* 与发送按钮+间距同宽，使卡片右边缘贴齐输入框 */
+  }
+  .webchat-input-area .webchat-bubble {
+    max-width: none;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .webchat-input-area .webchat-perm {
     border: 1px solid #d9d9d9;
     background: #fafafa;
   }
