@@ -210,6 +210,23 @@ func (tr *stdIOTransport) reply(v any) error {
 	return err
 }
 
+// readRawLine 从测试侧读一行原始 NDJSON（用于校验被测进程发出的帧）。
+func (tr *stdIOTransport) readRawLine(t *testing.T, sc *bufio.Scanner) []byte {
+	t.Helper()
+	if !sc.Scan() {
+		t.Fatalf("no frame line")
+	}
+	return append([]byte(nil), sc.Bytes()...)
+}
+
+// readRawLineErr 与 readRawLine 相同，但 EOF 返回错误而非 fatal（供 goroutine 优雅退出）。
+func (tr *stdIOTransport) readRawLineErr(sc *bufio.Scanner) ([]byte, error) {
+	if !sc.Scan() {
+		return nil, sc.Err()
+	}
+	return append([]byte(nil), sc.Bytes()...), nil
+}
+
 // contains 判断子串。
 func contains(s, sub string) bool {
 	return strings.Contains(s, sub)

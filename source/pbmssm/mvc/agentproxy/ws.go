@@ -343,6 +343,8 @@ func (c *conn) handleFrame(frame clientFrame) {
 		c.handleSessionNewLocked()
 	case "session.rename":
 		c.handleSessionRenameLocked(frame)
+	case "permission.respond":
+		c.handlePermissionRespondLocked(frame)
 	default:
 		logger.Warn("agentproxy: unknown ws frame type %s from %s", frame.Type, c.addr)
 	}
@@ -586,6 +588,28 @@ func (c *conn) handleSessionCancelLocked() {
 	}
 }
 
+// handlePermissionRespondLocked 处理用户对工具权限审批的回执（permission.respond）。
+// payload：{session_id, allow: bool}。前置：持 c.mu。
+// 审批按 ACP sessionId 关联；session_id 优先取帧顶层/负载，若缺省回退本连接绑定会话。
+func (c *conn) handlePermissionRespondLocked(frame clientFrame) {
+	sid := frame.SessionID
+	if p, ok := frame.Payload["session_id"].(string); ok && p != "" {
+		sid = p
+	}
+	// 从 webchat id 解析 ACP sessionId（若 frame 带的是 webchat id）
+	acpID := sid
+	if s, ok := c.module.Sessions().Get(sid); ok {
+		acpID = s.ACPSessionID
+	} else if c.session != nil && c.session.ID == sid {
+		acpID = c.session.ACPSessionID
+	}
+	allow := false
+	if a, ok := frame.Payload["allow"].(bool); ok {
+		allow = a
+	}
+	c.module.RespondPermission(acpID, allow)
+}
+
 // enqueueErrorLocked 发送错误帧。前置：持 c.mu。
 func (c *conn) enqueueErrorLocked(message, code string) {
 	f := WSFrame{Type: "error", Payload: map[string]any{"message": message, "code": code}}
@@ -652,6 +676,11 @@ func (c *conn) close() {
 		}
 		delete(c.hub.conns, c)
 		c.hub.mu.Unlock()
+
+		// 连接断开：本会话待审批的权限请求无人可批，自动拒绝，避免 agent 永久等待。
+		if s != nil {
+			c.module.denyPermissionsForSession(s.ACPSessionID)
+		}
 
 		_ = c.ws.Close()
 		logger.Info("agentproxy: ws closed from %s", c.addr)

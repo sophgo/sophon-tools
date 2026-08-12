@@ -34,6 +34,8 @@ func (m *Module) StartTurn(webchatID, acpID, content string) error {
 	} else {
 		m.mu.Unlock()
 	}
+	// 新一轮开始：清掉该会话可能残留的待审批（旧回合被打断，不再等用户批）
+	m.denyPermissionsForSession(acpID)
 
 	client := m.Client()
 	if client == nil {

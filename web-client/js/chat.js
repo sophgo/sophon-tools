@@ -648,6 +648,12 @@
       case 'session.history':
         handleSessionHistory(payload);
         break;
+      case 'permission.request':
+        handlePermissionRequest(msg.session_id, payload);
+        break;
+      case 'permission.responded':
+        handlePermissionResponded(payload);
+        break;
       case 'error':
         handleError(payload);
         break;
@@ -671,6 +677,91 @@
     state.sending = false;
     setSendEnabled(true);
     scrollToBottom();
+  }
+
+  // ---------- 工具权限审批（permission.request / permission.responded） ----------
+
+  /** 工具权限审批卡片：Agent 触发需要用户批准的工具调用（如 bash）。
+   *  权限决策在服务器端已配 60s 超时自动拒绝；这里仅纯展示 + 回执。 */
+  function handlePermissionRequest(sessionId, payload) {
+    if (!state.messagesEl || !payload) return;
+    if (payload.request_id == null) return;
+
+    var toolCall = payload.tool_call || {};
+    var title = toolCall.title || '工具调用';
+    var wrap = document.createElement('div');
+    wrap.className = 'msg msg-assistant msg-permission';
+    wrap.setAttribute('data-perm-request', payload.request_id);
+
+    var body = document.createElement('div');
+    body.className = 'msg-bubble msg-permission-body';
+    var label = document.createElement('div');
+    label.className = 'msg-permission-label';
+    label.innerHTML = '需要批准：<strong>' + escapeHtml(title) + '</strong>';
+    body.appendChild(label);
+
+    var hint = document.createElement('div');
+    hint.className = 'msg-permission-hint';
+    hint.textContent = 'Agent 请求执行上述操作，是否允许？(60 秒未操作将自动拒绝)';
+    body.appendChild(hint);
+
+    var actions = document.createElement('div');
+    actions.className = 'msg-permission-actions';
+
+    var allowBtn = document.createElement('button');
+    allowBtn.type = 'button';
+    allowBtn.className = 'btn btn-primary';
+    allowBtn.textContent = '允许';
+    allowBtn.addEventListener('click', function () {
+      respondPermission(sessionId, payload.request_id, true, wrap);
+    });
+    actions.appendChild(allowBtn);
+
+    var denyBtn = document.createElement('button');
+    denyBtn.type = 'button';
+    denyBtn.className = 'btn btn-ghost';
+    denyBtn.textContent = '拒绝';
+    denyBtn.addEventListener('click', function () {
+      respondPermission(sessionId, payload.request_id, false, wrap);
+    });
+    actions.appendChild(denyBtn);
+
+    body.appendChild(actions);
+    wrap.appendChild(body);
+    state.messagesEl.appendChild(wrap);
+    scrollToBottom();
+  }
+
+  /** 审批回执：向前端发送 permission.respond，并把卡片标记为已处理。 */
+  function respondPermission(sessionId, requestId, allow, wrap) {
+    if (state.ws && state.ws.ready) {
+      state.ws.sendFrame({
+        type: 'permission.respond',
+        session_id: sessionId,
+        payload: { session_id: sessionId, request_id: requestId, allow: allow }
+      });
+    }
+    markPermissionDone(wrap, allow ? '已允许' : '已拒绝');
+  }
+
+  /** 服务端回执 permission.responded：更新对应卡片为已处理（幂等）。 */
+  function handlePermissionResponded(payload) {
+    if (!payload || payload.request_id == null) return;
+    var wrap = state.messagesEl.querySelector('[data-perm-request="' + payload.request_id + '"]');
+    if (wrap) {
+      markPermissionDone(wrap, payload.allow ? '已允许' : '已拒绝');
+    }
+  }
+
+  /** 把审批卡片置为已处理（禁用按钮并显示结果）。 */
+  function markPermissionDone(wrap, text) {
+    var actions = wrap.querySelector('.msg-permission-actions');
+    if (!actions) return;
+    actions.innerHTML = '';
+    var done = document.createElement('span');
+    done.className = 'msg-permission-done';
+    done.textContent = text;
+    actions.appendChild(done);
   }
 
   // ---------- 服务端会话回读（跨浏览器/跨设备恢复） ----------

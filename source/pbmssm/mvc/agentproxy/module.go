@@ -27,6 +27,7 @@ type Module struct {
 	nextID    int64
 	listeners map[int64]func(*ACPSessionUpdate) // 流式事件监听者（Hub 注册，广播分发）
 	turns     map[string]*Turn                  // acpSessionID → 进行中的回合（连接无关）
+	perms     map[string]*pendingPermission     // acpSessionID → 待审批请求（连接无关）
 
 	stopOnce sync.Once
 }
@@ -71,6 +72,7 @@ func NewModule(cfg Config, db *gorm.DB, eventFn func(*ACPSessionUpdate)) *Module
 		db:        db,
 		listeners: make(map[int64]func(*ACPSessionUpdate)),
 		turns:     make(map[string]*Turn),
+		perms:     make(map[string]*pendingPermission),
 	}
 	if eventFn != nil {
 		m.listeners[m.nextID] = eventFn
@@ -259,9 +261,14 @@ func (m *Module) onProcessReady() {
 	}
 }
 
-// dispatchNotify 收到未识别下行通知/agent 请求。
-// 当前仅记日志；S3 协议层可扩展（permission.request 等）。
-func (m *Module) dispatchNotify(method string, params json.RawMessage) {
+// dispatchNotify 收到未识别下行通知/agent 发起的 request。
+// reqID 非 nil 表示是 agent 发起的 request（如 session/request_permission），
+// host 必须按 reqID 回 JSON-RPC 响应，否则 agent 永久等待。
+func (m *Module) dispatchNotify(method string, params json.RawMessage, reqID *int64) {
+	if method == "session/request_permission" && reqID != nil {
+		m.dispatchPermissionRequest(*reqID, params)
+		return
+	}
 	logger.Info("agentproxy: downlink notify %s", method)
 }
 

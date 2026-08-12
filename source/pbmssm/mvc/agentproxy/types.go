@@ -25,6 +25,7 @@ type Config struct {
 	WorkDir           string `json:"workDir"`
 	Model             string `json:"model"`
 	RestartBackoffMax string `json:"restartBackoffMax,omitempty"` // 人类可读；解析失败用默认
+	PermissionTimeout string `json:"permissionTimeout,omitempty"` // 工具审批超时（人类可读，如 60s）；空=60s，0=不超时
 }
 
 // ProcessState reasonix 进程生命周期状态。

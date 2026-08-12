@@ -83,7 +83,10 @@ type Client struct {
 	mu      sync.Mutex
 	pending map[int64]*call // 上行请求关联表
 	onEvent func(*ACPSessionUpdate)
-	onNotify func(method string, params json.RawMessage) // 未识别下行通知（协议层可自定义）
+	// onNotify 收到其他下行通知/agent 发起的 request。reqID 非 nil 表示这是
+	// agent 发起的 request（如 session/request_permission），host 需用
+	// RespondRequest 按 reqID 回一个 JSON-RPC 响应。
+	onNotify func(method string, params json.RawMessage, reqID *int64)
 
 	closed chan struct{}
 	once   sync.Once
@@ -99,8 +102,8 @@ type call struct {
 }
 
 // NewClient 创建 ACP 客户端。onEvent 收到 session/update 解析结果；
-// onNotify 收到其他下行通知（如 agent 发起的 request）。
-func NewClient(pm *ProcessManager, onEvent func(*ACPSessionUpdate), onNotify func(string, json.RawMessage)) *Client {
+// onNotify 收到其他下行通知/agent 发起的 request（附凭 reqID 应答的 id）。
+func NewClient(pm *ProcessManager, onEvent func(*ACPSessionUpdate), onNotify func(string, json.RawMessage, *int64)) *Client {
 	c := &Client{
 		pm:       pm,
 		pending:  make(map[int64]*call),
@@ -240,11 +243,28 @@ func (c *Client) Cancel(ctx context.Context, id string) error {
 	return nil
 }
 
-// RequestPermission 回应 agent 发起的 session/request_permission。
-func (c *Client) RequestPermission(ctx context.Context, reqID int64, outcome string) error {
-	params, _ := json.Marshal(map[string]any{"requestId": reqID, "outcome": outcome})
-	_, err := c.request(ctx, "session/request_permission", params, requestTimeout)
-	return err
+// RespondRequest 回应 agent 发起的 request（如 session/request_permission）。
+// reasonix 的 ACP 是 JSON-RPC：agent 发 request 带 id，host 必须按该 id 回
+// 一个 result 帧，否则 agent 永久等待。
+func (c *Client) RespondRequest(reqID int64, result json.RawMessage) error {
+	return c.pm.WriteRequest(mustMarshal(RPCResponse{
+		JSONRPC: "2.0",
+		ID:      reqID,
+		Result:  result,
+	}))
+}
+
+// ResolvePermission 回应 agent 发起的 session/request_permission 审批请求。
+// allow=true 回 selected + optionId=allow_once（本次放行）；false 回 cancelled。
+// reqID 为下行 request 的 JSON-RPC id（来自 onNotify 的 reqID）。
+// 响应结构对齐 reasonix PermissionRequestResult：{"outcome":{outcome,optionId}}。
+func (c *Client) ResolvePermission(reqID int64, allow bool) error {
+	inner := map[string]any{"outcome": "cancelled"}
+	if allow {
+		inner = map[string]any{"outcome": "selected", "optionId": "allow_once"}
+	}
+	result, _ := json.Marshal(map[string]any{"outcome": inner})
+	return c.RespondRequest(reqID, result)
 }
 
 // Steer 回合中引导（_reasonix.io/session/steer，可选）。
@@ -385,9 +405,10 @@ func (c *Client) dispatch(line []byte) {
 		}
 		c.mu.Unlock()
 	case msg.ID != nil && msg.Method != "":
-		// agent 发起的 request（如 session/request_permission、$/cancel_request）
+		// agent 发起的 request（如 session/request_permission、$/cancel_request）。
+		// 需把 request 的 id 透传，host 才能按 id 回应（否则 agent 永久等待）。
 		if c.onNotify != nil {
-			c.onNotify(msg.Method, msg.Params)
+			c.onNotify(msg.Method, msg.Params, msg.ID)
 		}
 	default:
 		// notification
@@ -416,7 +437,7 @@ func (c *Client) dispatch(line []byte) {
 			c.mu.Unlock()
 		default:
 			if c.onNotify != nil {
-				c.onNotify(msg.Method, msg.Params)
+				c.onNotify(msg.Method, msg.Params, nil)
 			}
 		}
 	}
