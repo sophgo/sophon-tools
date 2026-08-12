@@ -27,9 +27,7 @@ if [[ -f /etc/systemd/system/sophliteos.service ]]; then
   systemctl disable sophliteos.service || true
 fi
 mkdir -p /etc/sophliteos/config /var/log/sophliteos /var/lib/sophliteos/db /data/sophliteos
-rm -rf /var/lib/sophliteos/dist
 
-cp -r dist /var/lib/sophliteos/
 cp "${dir}"sophliteos /bin
 # 配置文件仅在目标不存在时拷入模板，避免升级覆盖用户的 ssm.server/端口/日志等改动
 [ -f /etc/sophliteos/config/sophliteos.yaml ] || cp config/sophliteos.yaml /etc/sophliteos/config

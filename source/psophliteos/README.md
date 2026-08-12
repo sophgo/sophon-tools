@@ -37,14 +37,16 @@ bash build/build-deb-sophliteos.sh [VERSION] [soc|pcie]
 
 产物落到 `release/`（`OUTPUT_DIR` 可指定输出目录），如 `release/sophliteos_soc_2.1.0.deb`、`release/sophliteos_pcie_2.1.0.deb`。
 
+> 前端静态资源经 `go:embed` 内嵌进单文件二进制（见 `web_embed.go`），deb 不再单独携带/安装 `dist` 目录。
+
 > `build/build_2_release.sh`、`build/build_test.sh`、`scrip/package.sh`、`build/package-deb-sdk.sh`
 > 是旧 docker-node16 + tgz 流程，已废弃，仅供回溯。
 
 ## 产物
 ```
 release/
-├── sophliteos_soc_2.1.0.deb      # arm64 设备版
-└── sophliteos_pcie_2.1.0.deb     # amd64 开发机版
+├── sophliteos_soc_2.1.0.deb      # arm64 设备版（单文件二进制，前端内嵌）
+└── sophliteos_pcie_2.1.0.deb     # amd64 开发机版（单文件二进制，前端内嵌）
 ```
 
 ## 安装运行
@@ -52,7 +54,7 @@ release/
 sudo dpkg -i release/sophliteos_soc_2.1.0.deb     # arm 设备
 sudo dpkg -i release/sophliteos_pcie_2.1.0.deb    # x86 开发机
 ```
-安装后由 systemd 服务 `sophliteos` 拉起，监听 :8080。
+安装后由 systemd 服务 `sophliteos` 拉起，监听 :8080。前端页面由二进制内嵌资源提供，运行时不再需要独立 web 目录。
 
 ---
 
@@ -60,20 +62,11 @@ sudo dpkg -i release/sophliteos_pcie_2.1.0.deb    # x86 开发机
 
 登录页的 LOGO（`class="sophgo_logo"`）保留可替换，其余页面的 sophgo logo（顶部用户下拉 `__header`、菜单 `menu_logo`、应用 `logo.png`、登录表单 `logo.png`）已移除。
 
-替换登录 LOGO 的两种方式：
+> 前端已内嵌进二进制，**运行期替换 `/opt/sophon/sophliteos/dist/` 下文件的方式不再适用**（旧版「方式一：部署后换文件」随 embed 失效）。请走「方式二：构建期注入」，重新构建 deb 后升级即持久生效。
 
-### 方式一：替换部署后的图片文件（无需重新构建）
+### 方式一（已失效，保留说明）
 
-sophliteos 静态资源从 `/opt/sophon/sophliteos/dist/resource/` 提供，登录 LOGO 默认读取 `resource/img/login_logo.png`。
-
-```bash
-# 替换为目标 LOGO（建议 PNG，contain 缩放）
-sudo cp /path/to/your_logo.png /opt/sophon/sophliteos/dist/resource/img/login_logo.png
-```
-
-浏览器强刷（Ctrl+Shift+R）即可生效。
-
-> 注意：sophliteos deb 升级会刷新 `/opt/sophon/sophliteos/dist`，升级后需重新覆盖此文件。
+旧的运行期换文件方式：sophliteos 静态资源原从 `/opt/sophon/sophliteos/dist/resource/` 提供，登录 LOGO 默认读取 `resource/img/login_logo.png`。单文件二进制内嵌后无法直接改盘上 dist，此方式作废，请改用方式二。
 
 ### 方式二：构建期注入自定义路径（持久，随升级保留）
 

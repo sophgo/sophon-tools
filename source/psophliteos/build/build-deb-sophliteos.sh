@@ -1,12 +1,13 @@
 #!/bin/bash
-# sophliteos .deb 打包（docker-free）：pnpm 前端 + go 交叉编译 + dpkg-deb。
+# sophliteos .deb 打包（docker-free）：pnpm 前端 + go 交叉编译（前端 go:embed 内嵌）+ dpkg-deb。
 # 用法: bash build/build-deb-sophliteos.sh [VERSION] [soc|pcie]
 #   VERSION 默认 2.1.0
 #   soc=arm64（设备，默认）；pcie=amd64（开发机）
-# 产物: release/sophliteos_<PRODUCT>_<VERSION>.deb
+# 产物: release/sophliteos_<PRODUCT>_<VERSION>.deb（单文件二进制，前端内嵌）
 #
-# 规范化打包：数据树按最终路径布局（/opt/sophon/sophliteos、/etc/systemd），
-# dpkg 直接追踪所有文件；postinst 仅建运行时目录 + systemd enable/restart，不再散布/复制文件。
+# 规范化打包：前端静态资源在 go build 阶段经 //go:embed dist 打进二进制，
+# 数据树只含 二进制 + config + systemd 服务，不再单独安装 dist 目录。
+# dpkg 直接追踪所有文件；postinst 仅建运行时目录 + systemd enable/restart。
 # db 文件由 app 首次启动自动创建（/var/lib/sophliteos/db），属运行时状态，不打包。
 set -e
 
@@ -28,7 +29,8 @@ if [ ! -d node_modules ]; then
 fi
 pnpm run build || yarn build
 cd ..
-cp -r frontend/dist dist
+# 合入内嵌暂存目录 dist/（覆盖占位的 dist/index.html），go:embed 即在下一步编译期把整套前端打进二进制
+cp -r frontend/dist/. dist/
 
 # 3. go 交叉编译（arm64 走 musl 静态；amd64 宿主 gcc 动态）
 if [ "$ARCH" = "arm64" ]; then
@@ -46,17 +48,16 @@ else
 fi
 
 # 4. 组装数据树（最终绝对路径布局，dpkg 直接追踪）
+# 前端已内嵌到二进制，deb 只带 二进制 + 配置 + systemd 服务，不再单独打包 dist 目录。
 STAGE=build/stage
 rm -rf "$STAGE"
 mkdir -p "$STAGE/DEBIAN" \
          "$STAGE/opt/sophon/sophliteos/bin" \
          "$STAGE/opt/sophon/sophliteos/config" \
-         "$STAGE/opt/sophon/sophliteos/dist" \
          "$STAGE/usr/lib/systemd/system"
 install -m 0755 sophliteos "$STAGE/opt/sophon/sophliteos/bin/sophliteos"
 install -m 0644 scrip/sophliteos.service "$STAGE/usr/lib/systemd/system/sophliteos.service"
 install -m 0644 config/sophliteos.yaml "$STAGE/opt/sophon/sophliteos/config/sophliteos.yaml"
-cp -r dist/. "$STAGE/opt/sophon/sophliteos/dist/"
 install -m 0644 release_version.txt "$STAGE/opt/sophon/sophliteos/release_version.txt"
 
 # 5. DEBIAN 控制信息（模板注入 Version + Architecture；@ARCH@ 位于 Description 前，
@@ -78,8 +79,24 @@ mkdir -p release
 OUT="release/sophliteos_${PRODUCT}_${VERSION}.deb"
 dpkg-deb --root-owner-group -b "$STAGE" "$OUT"
 
-# 7. 清理项目根临时构建产物（保留 release/ 与源码）
-rm -rf dist sophliteos release_version.txt build/stage
+# 7. 清理项目根临时构建产物；把内嵌暂存目录 dist/ 重置为只含占位 index.html，
+#    使 git 跟踪的 dist/index.html 保持原样（真实前端产物仅留在 frontend/dist）。
+rm -f sophliteos release_version.txt
+rm -rf build/stage dist
+mkdir -p dist
+# 重写占位内容，与 git 跟踪的 dist/index.html 保持一致，构建后工作区不产生 dirty 差异。
+cat > dist/index.html <<'PLACEHOLDER_EOF'
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>SophLiteOS</title>
+</head>
+<body>
+  <p>SophLiteOS 前端未构建。请通过 sophliteos 统一构建流程生成 dist 后再 go build。</p>
+</body>
+</html>
+PLACEHOLDER_EOF
 
 echo
 echo "✓ built $OUT"

@@ -4,7 +4,7 @@
 #   ARCH:    arm64(soc) | amd64(pcie) | all（默认 arm64）
 #   VERSION: 显式版本号（默认 2.1.0，与 build/version.sh 一致）
 #   env OUTPUT_DIR: 产物目录（默认 <repo>/output/psophliteos/）
-# 产物: sophliteos_soc_<ver>.deb + sophliteos_pcie_<ver>.deb
+# 产物: sophliteos_soc_<ver>.deb + sophliteos_pcie_<ver>.deb（单文件二进制，前端 go:embed 内嵌）
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"

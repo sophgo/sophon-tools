@@ -9,7 +9,7 @@ import (
 
 func main() {
 	initialization.InitBase()
-	Router := initialization.Routers()
+	Router := initialization.Routers(embeddedWeb)
 	s := initialization.InitServer(Router)
 
 	time.Sleep(10 * time.Microsecond)

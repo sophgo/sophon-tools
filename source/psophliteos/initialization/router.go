@@ -1,21 +1,24 @@
 package initialization
 
 import (
+	"io/fs"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"strings"
 	"sophliteos/config"
 	"sophliteos/logger"
 	"sophliteos/middleware"
 	"sophliteos/router"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
 
 // 初始化总路由
+// webFS 为内嵌的前端构建产物（package main 的 go:embed dist），
+// 单文件二进制自带整套静态前端，运行时不再依赖磁盘上的 web 目录。
 
-func Routers() *gin.Engine {
+func Routers(webFS fs.FS) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode) // 设置Gin的模式为release
 	Router := gin.New()
 	Router.Use(gin.Recovery())
@@ -27,7 +30,6 @@ func Routers() *gin.Engine {
 	conf := &config.Conf
 	conf.Lock()
 	v := conf.GetViper()
-	path := v.GetString("server.www")
 	bmssmServer := v.GetString("bmssm.server")
 	conf.Unlock()
 
@@ -35,11 +37,17 @@ func Routers() *gin.Engine {
 		bmssmServer = "127.0.0.1:9779"
 	}
 
-	Router.StaticFile("/_app.config.js", path+"/_app.config.js")
-	Router.StaticFile("/favicon.ico", path+"/favicon.ico")
-	Router.StaticFile("/", path+"/index.html") // 前端网页入口页面
-	Router.Static("/assets", path+"/assets")   // dist里面的静态资源
-	Router.Static("/resource", path+"/resource")
+	// 静态前端全部取自内嵌 FS：以 http.FileServer 挂到 NoRoute 兜底，
+	// 统一提供 index.html/_app.config.js/favicon.ico 及 assets、resource 等子目录资源。
+	// 业务/API 路由显式注册在前，gin 命中优先于 NoRoute，未匹配的 /api/* 与非 GET 则会落此兜底。
+	webFSHandler := http.FileServer(http.FS(webFS))
+	Router.NoRoute(func(c *gin.Context) {
+		if c.Request.Method != http.MethodGet && c.Request.Method != http.MethodHead {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		webFSHandler.ServeHTTP(c.Writer, c.Request)
+	})
 
 	Router.Use(middleware.BlockerMiddleware())
 

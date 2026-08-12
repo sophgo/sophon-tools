@@ -1,6 +1,6 @@
 server:
   port: 8080
-  www: /opt/sophon/sophliteos/dist
+  # 前端静态资源已 go:embed 进单文件二进制，无需 www 磁盘路径。
   # 本地 admin 记录的 MD5 口令（遗留：登录实际走 /api/v1/login 反代到 bmssm 鉴权）。
   # 仅用于初始化本地 sqlite 的 admin 占位记录，无在线登录入口；如需保留请改为强口令。
   admin-password: c3284d0f94606de1fd2af172aba15bf3
