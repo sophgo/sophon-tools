@@ -32,7 +32,8 @@ type PermissionOption struct {
 }
 
 // pendingPermission 一次待审批的工具权限请求。
-// sessionID/reqID 用于最终应答 ACP；webchatID 用于定位前端会话。
+// reqID 用于最终应答 ACP（同一会话可能同时有多个待审批，按键 reqID 区分）；
+// sessionID/webchatID 用于定位前端会话；webchatID 供前端定位会话展示。
 type pendingPermission struct {
 	reqID     int64
 	sessionID string // ACP sessionId（reasonix 侧）
@@ -96,14 +97,16 @@ func (m *Module) dispatchPermissionRequest(reqID int64, params json.RawMessage) 
 	}
 	timeout := m.permissionTimeout()
 	pp.timer = time.AfterFunc(timeout, func() {
-		m.RespondPermission(req.SessionID, false)
+		m.RespondPermission(reqID, false)
 	})
 
 	m.mu.Lock()
 	if m.perms == nil {
-		m.perms = make(map[string]*pendingPermission)
+		m.perms = make(map[int64]*pendingPermission)
 	}
-	m.perms[req.SessionID] = pp
+	// 以 reqID 为键：同一会话可能同时有多个待审批（模型可并发发 request_permission），
+	// 避免后者覆盖前者导致其 reqID 无人应答而悬挂。
+	m.perms[reqID] = pp
 	m.mu.Unlock()
 
 	logger.Info("agentproxy: permission request session=%s tool=%s reqID=%d", req.SessionID, req.ToolCall.Title, reqID)
@@ -112,16 +115,16 @@ func (m *Module) dispatchPermissionRequest(reqID int64, params json.RawMessage) 
 	}
 }
 
-// RespondPermission 由 WS 权限审批回执触发：按 sessionId 应答对应待审批请求。
+// RespondPermission 由 WS 权限审批回执触发：按 reqID 应答对应待审批请求。
 // allow=true → selected/allow_once；false → cancelled。找不到或已处理则忽略。
-func (m *Module) RespondPermission(sessionID string, allow bool) {
+func (m *Module) RespondPermission(reqID int64, allow bool) {
 	m.mu.Lock()
-	pp := m.perms[sessionID]
+	pp := m.perms[reqID]
 	if pp == nil {
 		m.mu.Unlock()
 		return
 	}
-	delete(m.perms, sessionID)
+	delete(m.perms, reqID)
 	m.mu.Unlock()
 
 	// 超时自动拒绝：timer 已到，避免重复应答
@@ -131,36 +134,56 @@ func (m *Module) RespondPermission(sessionID string, allow bool) {
 
 	client := m.Client()
 	if client == nil {
-		logger.Warn("agentproxy: respond permission but client not ready (session %s)", sessionID)
+		logger.Warn("agentproxy: respond permission but client not ready (reqID %d)", reqID)
 		return
 	}
-	if err := client.ResolvePermission(pp.reqID, allow); err != nil {
+	if err := client.ResolvePermission(reqID, allow); err != nil {
 		logger.Warn("agentproxy: respond permission %d failed: %v", pp.reqID, err)
 	}
 	if m.hub != nil {
-		m.hub.BroadcastSession(sessionID, permissionRespondedFrame(pp.webchatID, pp.reqID, allow))
+		m.hub.BroadcastSession(pp.sessionID, permissionRespondedFrame(pp.webchatID, pp.reqID, allow))
 	}
 	logger.Info("agentproxy: permission %d resolved allow=%v", pp.reqID, allow)
 }
 
 // denyPermissionsForSession 在会话解绑/断线等场景净空其待审批请求（自动拒绝）。
+// denyPermissionsForSession 在会话解绑/断线/新一轮等场景净空其全部待审批请求（自动拒绝）。
 func (m *Module) denyPermissionsForSession(sessionID string) {
 	m.mu.Lock()
-	pp := m.perms[sessionID]
-	if pp == nil {
-		m.mu.Unlock()
-		return
+	var toDeny []*pendingPermission
+	for id, pp := range m.perms {
+		if pp.sessionID == sessionID {
+			toDeny = append(toDeny, pp)
+			delete(m.perms, id)
+			if pp.timer != nil {
+				pp.timer.Stop()
+			}
+		}
 	}
-	delete(m.perms, sessionID)
 	m.mu.Unlock()
-	if pp.timer != nil {
-		pp.timer.Stop()
+	if len(toDeny) == 0 {
+		return
 	}
 	client := m.Client()
 	if client == nil {
 		return
 	}
-	_ = client.ResolvePermission(pp.reqID, false)
+	for _, pp := range toDeny {
+		_ = client.ResolvePermission(pp.reqID, false)
+	}
+}
+
+// clearPendingPermissions 在 reasonix 进程重启/模块关闭时取消全部待审批（避免
+// 悬挂的 AfterFunc 在进程重建后仍去应答已失效的 stream；直接丢弃）。
+func (m *Module) clearPendingPermissions() {
+	m.mu.Lock()
+	for _, pp := range m.perms {
+		if pp.timer != nil {
+			pp.timer.Stop()
+		}
+	}
+	m.perms = make(map[int64]*pendingPermission)
+	m.mu.Unlock()
 }
 
 // permissionTimeout 返回待审批超时（默认 60s；0 表示不超时）。

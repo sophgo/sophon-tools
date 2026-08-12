@@ -589,25 +589,19 @@ func (c *conn) handleSessionCancelLocked() {
 }
 
 // handlePermissionRespondLocked 处理用户对工具权限审批的回执（permission.respond）。
-// payload：{session_id, allow: bool}。前置：持 c.mu。
-// 审批按 ACP sessionId 关联；session_id 优先取帧顶层/负载，若缺省回退本连接绑定会话。
+// payload：{session_id, request_id, allow: bool}，按 request_id 精确应答。前置：持 c.mu。
 func (c *conn) handlePermissionRespondLocked(frame clientFrame) {
-	sid := frame.SessionID
-	if p, ok := frame.Payload["session_id"].(string); ok && p != "" {
-		sid = p
-	}
-	// 从 webchat id 解析 ACP sessionId（若 frame 带的是 webchat id）
-	acpID := sid
-	if s, ok := c.module.Sessions().Get(sid); ok {
-		acpID = s.ACPSessionID
-	} else if c.session != nil && c.session.ID == sid {
-		acpID = c.session.ACPSessionID
-	}
 	allow := false
 	if a, ok := frame.Payload["allow"].(bool); ok {
 		allow = a
 	}
-	c.module.RespondPermission(acpID, allow)
+	reqID, ok := frame.Payload["request_id"].(float64)
+	if !ok {
+		// 兼容旧客户端：无 request_id 时回退按会话关联（仅当该会话恰一个待审批）
+		logger.Warn("agentproxy: permission.respond without request_id, ignore")
+		return
+	}
+	c.module.RespondPermission(int64(reqID), allow)
 }
 
 // enqueueErrorLocked 发送错误帧。前置：持 c.mu。

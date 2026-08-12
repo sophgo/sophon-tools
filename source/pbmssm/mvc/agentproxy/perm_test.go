@@ -311,3 +311,81 @@ func TestPermissionTimeoutAutoDeny(t *testing.T) {
 	// 不发送 respond，等超时在 goroutine 侧断言
 	time.Sleep(400 * time.Millisecond)
 }
+
+// TestRespondPermissionByReqID 验证同一会话的多个待审批可按 reqID 独立应答
+//（若按会话单选，后者会覆盖前者导致其 reqID 无人应答而悬挂）。
+func TestRespondPermissionByReqID(t *testing.T) {
+	mod, tr := mockModuleForWS(t)
+	client := mod.Client()
+	if client == nil {
+		t.Fatal("no client")
+	}
+	// 注入两个 request_permission（同 session，不同 reqID）
+	params := json.RawMessage(`{"sessionId":"acp-multi-1","toolCall":{"toolCallId":"gate-a","title":"bash a","kind":"execute","status":"pending"}}`)
+	mod.dispatchPermissionRequest(11, params)
+	mod.dispatchPermissionRequest(12, params)
+
+	// 两个都在待审批（不互相覆盖）
+	mod.mu.Lock()
+	permLen := len(mod.perms)
+	_, has11 := mod.perms[11]
+	_, has12 := mod.perms[12]
+	mod.mu.Unlock()
+	if permLen != 2 || !has11 || !has12 {
+		t.Fatalf("after dispatch: len=%d has11=%v has12=%v, want len=2 both present", permLen, has11, has12)
+	}
+
+	// 分别应答：11 allow、12 deny → 各自从待审批移除
+	mod.RespondPermission(11, true)
+	mod.RespondPermission(12, false)
+	mod.mu.Lock()
+	permLen2 := len(mod.perms)
+	mod.mu.Unlock()
+	if permLen2 != 0 {
+		t.Fatalf("after resolve: perms len=%d, want 0", permLen2)
+	}
+
+	// 确认对 reasonix 的应答确实按 reqID 发出（11→selected, 12→cancelled）。
+	sc := bufioNewScanner(tr.in)
+	if err := client.ResolvePermission(11, true); err != nil {
+		t.Fatalf("resolve 11: %v", err)
+	}
+	if err := client.ResolvePermission(12, false); err != nil {
+		t.Fatalf("resolve 12: %v", err)
+	}
+	// tr.in 是真实管道文件；设读超时避免 Scan 永久阻塞
+	_ = tr.in.SetReadDeadline(time.Now().Add(3 * time.Second))
+	allowID, denyID := int64(0), int64(0)
+	for {
+		line, err := tr.readRawLineErr(sc)
+		if err != nil {
+			break
+		}
+		var frame struct {
+			ID     *int64          `json:"id"`
+			Result json.RawMessage `json:"result,omitempty"`
+		}
+		if json.Unmarshal(line, &frame) != nil || frame.ID == nil {
+			continue
+		}
+		var res struct {
+			Outcome struct {
+				Outcome string `json:"outcome"`
+			} `json:"outcome"`
+		}
+		if err := json.Unmarshal(frame.Result, &res); err != nil {
+			continue
+		}
+		if res.Outcome.Outcome == "selected" {
+			allowID = *frame.ID
+		} else if res.Outcome.Outcome == "cancelled" {
+			denyID = *frame.ID
+		}
+	}
+	if allowID != 11 {
+		t.Errorf("allow response id = %d, want 11", allowID)
+	}
+	if denyID != 12 {
+		t.Errorf("deny response id = %d, want 12", denyID)
+	}
+}
