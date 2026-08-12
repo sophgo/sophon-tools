@@ -44,15 +44,18 @@ func (Config) TableName() string { return "llm_proxy_config" }
 
 // DefaultConfig 返回默认配置（sophnet 上游：LLM=deepseek，VLM=vl-flash）。
 // ApiBase 为 OpenAI 兼容 base（转发时直接拼 /chat/completions）。
+// LLMOverride/VLMOverride 默认开启「覆盖下游请求」：新装转发一律用默认模型名。
 func DefaultConfig() Config {
 	return Config{
-		ID:         1,
-		LLMApiBase: "https://www.sophnet.com/api/open-apis/v1",
-		LLMModel:   "sophnet-deepseek",
-		LLMEnabled: true,
-		VLMApiBase: "https://www.sophnet.com/api/open-apis/v1",
-		VLMModel:   "sophnet-vl-flash",
-		VLMEnabled: true,
+		ID:          1,
+		LLMApiBase:  "https://www.sophnet.com/api/open-apis/v1",
+		LLMModel:    "sophnet-deepseek",
+		LLMEnabled:  true,
+		LLMOverride: true,
+		VLMApiBase:  "https://www.sophnet.com/api/open-apis/v1",
+		VLMModel:    "sophnet-vl-flash",
+		VLMEnabled:  true,
+		VLMOverride: true,
 	}
 }
 

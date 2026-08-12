@@ -55,6 +55,9 @@ func TestServiceLLMAndVLMConfig(t *testing.T) {
 	if cfg.VLMModel != "sophnet-vl-flash" {
 		t.Errorf("default vlmModel = %q", cfg.VLMModel)
 	}
+	if !cfg.LLMOverride || !cfg.VLMOverride {
+		t.Errorf("default override should be on, got LLM=%v VLM=%v", cfg.LLMOverride, cfg.VLMOverride)
+	}
 	if cfg.ForwardKey == "" {
 		t.Error("forward key should be auto-generated")
 	}
@@ -202,7 +205,8 @@ func TestForwardModelPrecedence(t *testing.T) {
 	svc := NewService(db)
 	cfg, _ := svc.SaveConfig(SaveRequest{
 		LLMApiBase: upstream.URL + "/llm", LLMApiKey: "k", LLMModel: "llm-default",
-		VLMApiBase: upstream.URL + "/vlm", VLMApiKey: "k", VLMModel: "vlm-target",
+		LLMOverride: boolPtr(false),
+		VLMApiBase:  upstream.URL + "/vlm", VLMApiKey: "k", VLMModel: "vlm-target",
 	})
 	cfg.ForwardKey = "fk"
 	_ = svc.db.Model(&Config{}).Where("id = ?", 1).Update("forward_key", "fk").Error
@@ -332,7 +336,8 @@ func TestForwardModelKeptForImage(t *testing.T) {
 	svc := NewService(db)
 	cfg, _ := svc.SaveConfig(SaveRequest{
 		LLMApiBase: upstream.URL + "/llm", LLMApiKey: "k", LLMModel: "llm-target",
-		VLMApiBase: upstream.URL + "/vlm", VLMApiKey: "k", VLMModel: "vlm-target",
+		LLMOverride: boolPtr(false),
+		VLMApiBase:  upstream.URL + "/vlm", VLMApiKey: "k", VLMModel: "vlm-target",
 	})
 	cfg.ForwardKey = "fk"
 	_ = svc.db.Model(&Config{}).Where("id = ?", 1).Update("forward_key", "fk").Error
@@ -394,7 +399,8 @@ func TestImageDescribeRouting(t *testing.T) {
 	svc := NewService(db)
 	cfg, _ := svc.SaveConfig(SaveRequest{
 		LLMApiBase: upstream.URL + "/llm", LLMApiKey: "k", LLMModel: "llm-target",
-		VLMApiBase: upstream.URL + "/vlm", VLMApiKey: "k", VLMModel: "vlm-target",
+		LLMOverride: boolPtr(false),
+		VLMApiBase:  upstream.URL + "/vlm", VLMApiKey: "k", VLMModel: "vlm-target",
 	})
 	cfg.ForwardKey = "fk"
 	_ = svc.db.Model(&Config{}).Where("id = ?", 1).Update("forward_key", "fk").Error

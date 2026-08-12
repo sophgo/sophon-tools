@@ -186,7 +186,7 @@
     llmApiKey: '',
     llmModel: '',
     llmEnabled: true,
-    llmOverrideModel: false,
+    llmOverrideModel: true,
     llmHasKey: false,
   });
 
@@ -212,7 +212,7 @@
       form.llmApiBaseType = inferApiBaseType(cfg.llmApiBase || '');
       form.llmModel = cfg.llmModel || '';
       form.llmEnabled = cfg.llmEnabled !== false;
-      form.llmOverrideModel = !!cfg.llmOverrideModel;
+      form.llmOverrideModel = cfg.llmOverrideModel !== false;
       form.llmHasKey = !!cfg.llmHasKey;
     }
   }
