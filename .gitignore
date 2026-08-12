@@ -53,6 +53,9 @@ __pycache__
 # pssm 子工程的 build/ 是构建脚本（源码），非产物，需入库
 !source/pssm/build/
 !source/pssm/build/**
+# pbmssm 子工程的 build/ 是构建脚本 + deb 模板 + SE7 deb 资源（源码），非产物，需入库
+!source/pbmssm/build/
+!source/pbmssm/build/**
 
 # 构建产物（交叉编译二进制）
 source/pssm/ssm-arm64

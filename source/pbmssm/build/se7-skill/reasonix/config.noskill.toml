@@ -1,0 +1,28 @@
+# Reasonix 默认配置（bmssm agentproxy 托管）— 无 SE7 skill/agent 设定的出厂默认
+# HOME=/data/sophon/reasonix-home，与系统正常安装 reasonix 的 ~/.reasonix 隔离。
+config_version = 6
+default_model = "sophnet"
+
+[[providers]]
+name        = "sophnet"
+kind        = "openai"
+base_url    = "http://127.0.0.1:18080/v1"
+model       = "DeepSeek-V4-Flash-0731"
+api_key_env = "DEEPSEEK_API_KEY"
+reasoning_protocol = "openai"
+context_window = 131072
+
+[tools]
+enabled = []   # empty = all built-in tools
+bash_timeout_seconds = 120
+
+[permissions]
+mode  = "ask"   # 写工具逐次询问用户（chatUI 审批）；只读工具放行
+
+[sandbox]
+bash    = "off"   # 测试机无 bubblewrap；关闭 bash 沙箱以允许 unconfined shell
+network = true
+
+[environment]
+enabled = true
+offline = false

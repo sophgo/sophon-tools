@@ -1,0 +1,9 @@
+{
+  "product": "default",
+  "embedder_fingerprint": "siliconflow.BAAI/bge-m3",
+  "dim": 1024,
+  "model": "BAAI/bge-m3",
+  "chunk_count": 1183,
+  "created_at": "",
+  "build_version": "1.0"
+}
