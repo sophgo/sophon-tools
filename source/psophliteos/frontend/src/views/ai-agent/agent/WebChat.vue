@@ -96,7 +96,6 @@
             </div>
           </div>
           <div v-else class="webchat-msg webchat-msg-assistant">
-            <span v-if="m.model" class="webchat-msg-model">{{ m.model }}</span>
             <div class="webchat-bubble" v-html="renderMarkdown(m.content)"></div>
           </div>
         </template>
@@ -144,7 +143,6 @@
     role: 'user' | 'assistant';
     kind?: string;
     content: string;
-    model?: string;
     open?: boolean;
     // 权限审批卡片字段
     permReqId?: number;
@@ -394,7 +392,6 @@
     const messageId = payload.message_id || '';
     const kind = payload.kind || 'text';
     const content = payload.content || '';
-    const model = payload.model_name || '';
 
     if (kind === 'text') {
       // 连续 text 合并到最近一条 assistant 文本（修复拆泡）
@@ -407,14 +404,12 @@
         !s.messages.some((m) => m.key === messageId)
       ) {
         last.content += content;
-        last.model = last.model || model;
         return;
       }
       s.messages.push({
         key: messageId || 'msg' + msgSeq++,
         role: 'assistant',
         content,
-        model,
         open: false,
       });
     } else if (kind === 'thought') {
@@ -542,7 +537,6 @@
       role: m.role === 'user' ? 'user' : 'assistant',
       kind: m.kind || (m.role === 'user' ? '' : 'text'),
       content: m.content || '',
-      model: m.model || '',
       open: false,
     }));
     if (payload.title && s.title !== payload.title) s.title = payload.title;
@@ -876,7 +870,7 @@
     display: flex;
   }
   .webchat-msg-user {
-    justify-content: flex-end;
+    justify-content: flex-start;
   }
   .webchat-msg-assistant {
     justify-content: flex-start;
@@ -946,14 +940,6 @@
     font-size: 12.5px;
     font-weight: 600;
     color: #666;
-  }
-
-  .webchat-msg-model {
-    font-size: 11px;
-    color: #999;
-    margin-right: 8px;
-    align-self: flex-start;
-    margin-top: 8px;
   }
 
   .webchat-collapse {
