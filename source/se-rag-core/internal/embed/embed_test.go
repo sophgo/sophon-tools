@@ -10,9 +10,9 @@ import (
 	"testing"
 )
 
-// 限流：8 段文本 → 拆成 3+3+2 三批，第二批起每批载荷 ≤3
-func TestLimiterSplitsBatchesOfThree(t *testing.T) {
-	l := NewEmbeddingLimiter(2)
+// 限流：8 段文本按单次≤2 段拆 → 2+2+2+2 四批
+func TestLimiterSplitsBatchesOfTwo(t *testing.T) {
+	l := NewEmbeddingLimiter(1)
 	var sizes []int
 	_, err := l.Embed(context.Background(), []string{"a", "b", "c", "d", "e", "f", "g", "h"},
 		func(batch []string) ([][]float32, error) {
@@ -26,14 +26,14 @@ func TestLimiterSplitsBatchesOfThree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []int{3, 3, 2}
+	want := []int{2, 2, 2, 2}
 	if fmt.Sprint(sizes) != fmt.Sprint(want) {
 		t.Errorf("batch sizes = %v, want %v", sizes, want)
 	}
 }
 
-// 内置 key 下，HTTP 服务端收到的每个 embedding 载荷段落数必须 ≤3
-func TestSiliconflowEmbedderBatchLeq3(t *testing.T) {
+// 内置 key 下，HTTP 服务端收到的每个 embedding 载荷段落数必须 ≤2
+func TestSiliconflowEmbedderBatchLeq2(t *testing.T) {
 	var maxPayload atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
@@ -64,8 +64,8 @@ func TestSiliconflowEmbedderBatchLeq3(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if int(maxPayload.Load()) > 3 {
-		t.Errorf("server received payload of %d paragraphs (>3) under builtin key", maxPayload.Load())
+	if int(maxPayload.Load()) > 2 {
+		t.Errorf("server received payload of %d paragraphs (>2) under builtin key", maxPayload.Load())
 	}
 	if len(vecs) != len(texts) {
 		t.Errorf("got %d vectors want %d", len(vecs), len(texts))

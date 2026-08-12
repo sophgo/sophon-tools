@@ -52,8 +52,9 @@ func (rc *runCtx) applyFakeMode() {
 func runBuild(rc runCtx) error {
 	rc.ensureFactories()
 	rc.applyFakeMode()
+	// product 仅作 meta 标签，不参与路径（不同知识库用不同 index-dir/docs-dir）
 	if rc.product == "" {
-		rc.product = "se7"
+		rc.product = metaProductLabel
 	}
 	if rc.docsDir == "" {
 		return fmt.Errorf("docs-dir is empty")
@@ -134,8 +135,8 @@ func runBuild(rc runCtx) error {
 	if err := store.SaveIndex(rc.product, meta, vecs, orders, bmi, allChunks); err != nil {
 		return err
 	}
-	fmt.Printf("index saved: product=%s chunks=%d dim=%d embed=%s -> %s\n",
-		rc.product, len(allChunks), dim, emb.Name(), store.ProductPath(rc.product))
+	fmt.Printf("index saved: label=%s chunks=%d dim=%d embed=%s -> %s\n",
+		rc.product, len(allChunks), dim, emb.Name(), store.IndexPath())
 	return nil
 }
 

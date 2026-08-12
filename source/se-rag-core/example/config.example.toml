@@ -1,22 +1,20 @@
-# se-rag-core 供应商/产品配置示例（当前由 config.DefaultConfig() 内建，此处为参考文档）
-# 内置默认：se7 + siliconflow embedding/reranker + 内置免费 key（限流并发≤2、单次≤3段落）
+# se-rag-core 供应商配置示例（当前由 config.DefaultConfig() 内建，此处为参考文档）
+# 内置默认：siliconflow embedding/reranker + 内置混淆 key（限流并发≤1、单次≤2段落），
+#           模型固定 BAAI/bge-m3（embedding）+ BAAI/bge-reranker-v2-m3（rerank）。
 
-# [product."se7"]
-# name     = "se7"
-# docs_dir = "docs/se7"
+# [embedder]
+# type     = "siliconflow"     # siliconflow | sophnet
+# model    = "BAAI/bge-m3"
+# base_url = "https://api.siliconflow.cn/v1"
+# dim      = 1024
+# # api_key 留空 → 用内置 key（触发限流：并发≤1、单次≤2段落）；填写 → 用户自备 key，放开限流
+# api_key = ""
 #
-#   [product."se7".embedder]
-#   type    = "siliconflow"     # siliconflow | sophnet
-#   model   = "BAAI/bge-m3"
-#   base_url = "https://api.siliconflow.cn/v1"
-#   dim     = 1024
-#   # api_key 留空 → 用内置免费 key（触发限流）；填写 → 用户自备 key，放开限流
-#   api_key = ""
-#
-#   [product."se7".reranker]
-#   type    = "siliconflow"
-#   model   = "BAAI/bge-reranker-v2-m3"
-#   base_url = "https://api.siliconflow.cn/v1"
-#   api_key = ""
+# [reranker]
+# type     = "siliconflow"
+# model    = "BAAI/bge-reranker-v2-m3"
+# base_url = "https://api.siliconflow.cn/v1"
+# api_key = ""
 
-# 扩展 se8 示例：文档放入 docs/se8，build -product se8 建独立索引
+# 多知识库：不同库用不同 -index-dir / --docs-dir，无需 product 维度。
+# 示例：build --docs-dir docs/se8 -index-dir ./rag-se8

@@ -16,7 +16,7 @@ func runQuery(rc runCtx) error {
 	rc.ensureFactories()
 	rc.applyFakeMode()
 	if rc.product == "" {
-		rc.product = "se7"
+		rc.product = metaProductLabel
 	}
 	if rc.query == "" {
 		return fmt.Errorf("empty query")

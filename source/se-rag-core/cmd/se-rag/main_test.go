@@ -53,12 +53,12 @@ func TestCLIBuildQueryDoctorHappyPath(t *testing.T) {
 	rc.docsDir = docsDir
 	rc.indexDir = idx
 
-	// build
+	// build（索引直接落在 idx/ 下，无 product 子目录）
 	if err := runBuild(rc); err != nil {
 		t.Fatalf("build failed: %v", err)
 	}
 	for _, f := range []string{"meta.json", "vectors.gob", "bm25.gob", "chunks.gob"} {
-		if _, err := os.Stat(filepath.Join(idx, "se7", f)); err != nil {
+		if _, err := os.Stat(filepath.Join(idx, f)); err != nil {
 			t.Errorf("expected %s at %s: %v", f, idx, err)
 		}
 	}

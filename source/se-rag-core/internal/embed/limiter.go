@@ -2,7 +2,7 @@ package embed
 
 import "context"
 
-// EmbeddingLimiter 内置 key 限流器：并发 ≤ maxConcurrent、单次 ≤3 段落。
+// EmbeddingLimiter 内置 key 限流器：并发 ≤ maxConcurrent、单次 ≤ perCall 段落。
 type EmbeddingLimiter struct {
 	sem chan struct{}
 }
@@ -11,8 +11,8 @@ func NewEmbeddingLimiter(maxConcurrent int) *EmbeddingLimiter {
 	return &EmbeddingLimiter{sem: make(chan struct{}, maxConcurrent)}
 }
 
-// perCall 单次 embedding 最多段落数（内置 key 平台约束）。
-const perCall = 3
+// perCall 单次 embedding 最多段落数（内置 key 平台约束，需求限定单次≤2）。
+const perCall = 2
 
 // Embed 把 texts 拆成 ≤3 一段的子批，逐批调用 embedBatch（每批一次 HTTP 调用，真正
 // 以 ≤3 段落为载荷），整体并发受 sem 限制。返回按传入顺序排列的向量。

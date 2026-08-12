@@ -12,23 +12,26 @@ import (
 	"se-rag-core/internal/vector"
 )
 
-// Store 索引持久化：<IndexDir>/<product>/ 下存储
+// Store 索引持久化：<IndexDir>/ 下直接存储（不同知识库用不同 IndexDir，无需 product 子目录）
 //
 //	meta.json      指纹元信息
 //	vectors.gob    vector.Index
 //	bm25.gob       bm25.Index
 //	chunks.gob     []chunker.Chunk
+//
+// product 仅用作 Meta.Product 标签，不参与磁盘路径。
 type Store struct {
 	IndexDir string
 }
 
 func (s *Store) productDir(product string) string {
-	return filepath.Join(s.IndexDir, product)
+	_ = product // product 仅标签，不用于路径
+	return s.IndexDir
 }
 
-// ProductPath 返回产品索引目录的绝对展示路径。
-func (s *Store) ProductPath(product string) string {
-	return s.productDir(product)
+// IndexPath 返回索引目录（绝对展示路径）。
+func (s *Store) IndexPath() string {
+	return s.IndexDir
 }
 
 // BuildMeta 构造 Meta。providerName+model 例如 ("siliconflow","BAAI/bge-m3")。

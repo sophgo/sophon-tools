@@ -2,13 +2,22 @@ package config
 
 import "testing"
 
+// 内置 key 的有效明文（仅测试用；生产代码以混淆字节保存，不落明文源码）。
+const builtinPlaintext = "sk-cmljwbvgikztbawfjhhqxazetoasktbrjwifqbojjipiacrr"
+
+func TestBuiltinKeyDecodes(t *testing.T) {
+	if BuiltinKey() != builtinPlaintext {
+		t.Errorf("BuiltinKey() decode mismatch")
+	}
+}
+
 func TestEffectiveKey(t *testing.T) {
 	d := DefaultConfig()
 	p := d.Products[0].Embedder
 	if !p.IsBuiltinKey() {
 		t.Error("default embedder should use builtin key")
 	}
-	if p.EffectiveKey() != BuiltinSiliconflowKey {
+	if p.EffectiveKey() != builtinPlaintext {
 		t.Errorf("effective key mismatch")
 	}
 }

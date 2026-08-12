@@ -19,7 +19,7 @@ func newSiliconflowEmbedder(baseURL, key, model string, dim int, useBuiltinKey b
 	}
 	e := &siliconflowEmbedder{baseURL: baseURL, apiKey: key, model: model, dim: dim}
 	if useBuiltinKey {
-		e.limiter = NewEmbeddingLimiter(2) // 并发≤2
+		e.limiter = NewEmbeddingLimiter(1) // 内置 key 并发仅 1
 	}
 	return e, nil
 }

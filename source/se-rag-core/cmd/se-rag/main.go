@@ -14,6 +14,10 @@ func processArgsRaw(args []string) string {
 	return args[0]
 }
 
+// 索引/文档库不再按 product 分隔 —— 不同知识库用不同 -index-dir 即可。
+// product 仅作为 meta.json 里的元数据标签，不参与磁盘路径。
+const metaProductLabel = "default"
+
 func defaultIndexDir() string {
 	if d := os.Getenv("SE_RAG_INDEX"); d != "" {
 		return d
@@ -21,20 +25,22 @@ func defaultIndexDir() string {
 	return "./rag-data"
 }
 
-func defaultDocsDir(product string) string {
+func defaultDocsDir() string {
 	if d := os.Getenv("SE_RAG_DOCS"); d != "" {
 		return d
 	}
-	return "./docs/" + product
+	return "./docs"
 }
 
 func printUsage() {
 	fmt.Println("Usage: se-rag <build|query|doctor> [flags]")
 	fmt.Println()
 	fmt.Println("Commands:")
-	fmt.Println("  build  -product <name> --docs-dir <dir> -index-dir <dir>")
-	fmt.Println("  query  -product <name> -index-dir <dir> [-top-n N] \"question\"")
-	fmt.Println("  doctor -product <name> -index-dir <dir>")
+	fmt.Println("  build  --docs-dir <dir> -index-dir <dir>")
+	fmt.Println("  query  -index-dir <dir> [-top-n N] \"question\"")
+	fmt.Println("  doctor -index-dir <dir>")
+	fmt.Println()
+	fmt.Println("不同知识库只需指定不同 -index-dir / --docs-dir，无需 product 维度。")
 	fmt.Println()
 	fmt.Println("Env:")
 	fmt.Println("  SE_RAG_EMBED_KEY / SE_RAG_RERANK_KEY   用户自备 key（放开内置限流）")
@@ -49,7 +55,7 @@ func dispatch(args []string) int {
 	sub := args[0]
 	rest := args[1:]
 	rc := runCtx{
-		product:    "se7",
+		product:    metaProductLabel,
 		indexDir:   defaultIndexDir(),
 		topN:       8,
 		useBuiltin: true,
@@ -60,13 +66,12 @@ func dispatch(args []string) int {
 	switch sub {
 	case "build":
 		fs := flag.NewFlagSet("build", flag.ExitOnError)
-		fs.StringVar(&rc.product, "product", "se7", "product name")
-		fs.StringVar(&rc.docsDir, "docs-dir", "", "docs dir (default <cwd>/docs/<product>)")
+		fs.StringVar(&rc.docsDir, "docs-dir", "", "docs dir (default <cwd>/docs)")
 		fs.StringVar(&rc.indexDir, "index-dir", defaultIndexDir(), "index dir")
 		fs.BoolVar(&rc.useBuiltin, "builtin-key", true, "use builtin key (limits concurrency)")
 		fs.Parse(rest)
 		if rc.docsDir == "" {
-			rc.docsDir = defaultDocsDir(rc.product)
+			rc.docsDir = defaultDocsDir()
 		}
 		if err := runBuild(rc); err != nil {
 			fmt.Fprintln(os.Stderr, "build:", err)
@@ -76,7 +81,6 @@ func dispatch(args []string) int {
 
 	case "query":
 		fs := flag.NewFlagSet("query", flag.ExitOnError)
-		fs.StringVar(&rc.product, "product", "se7", "product name")
 		fs.StringVar(&rc.indexDir, "index-dir", defaultIndexDir(), "index dir")
 		fs.IntVar(&rc.topN, "top-n", 8, "top N results")
 		fs.BoolVar(&rc.useBuiltin, "builtin-key", true, "use builtin key")
@@ -90,7 +94,6 @@ func dispatch(args []string) int {
 
 	case "doctor":
 		fs := flag.NewFlagSet("doctor", flag.ExitOnError)
-		fs.StringVar(&rc.product, "product", "se7", "product name")
 		fs.StringVar(&rc.indexDir, "index-dir", defaultIndexDir(), "index dir")
 		fs.Parse(rest)
 		fatal, err := runDoctor(rc)
