@@ -98,24 +98,28 @@
       </div>
 
       <footer class="webchat-input-area">
-        <div class="webchat-input-box">
-          <textarea
-            ref="inputEl"
-            v-model="draft"
-            rows="1"
-            placeholder="输入消息…（Enter 发送，Shift+Enter 换行）"
-            @keydown="onKeydown"
-            @input="autoGrow"
-          ></textarea>
-          <button
-            class="webchat-send"
-            type="button"
-            :disabled="sending || !connected"
-            @click="sendMessage"
-            >发送</button
-          >
+        <div class="webchat-input-area-inner">
+          <div class="webchat-input-card">
+            <div class="webchat-input-box">
+              <textarea
+                ref="inputEl"
+                v-model="draft"
+                rows="1"
+                placeholder="输入消息…（Enter 发送，Shift+Enter 换行）"
+                @keydown="onKeydown"
+                @input="autoGrow"
+              ></textarea>
+              <button
+                class="webchat-send"
+                type="button"
+                :disabled="sending || !connected"
+                @click="sendMessage"
+                >发送</button
+              >
+            </div>
+          </div>
+          <div class="webchat-input-hint">内容由 AI Agent 生成，请注意甄别</div>
         </div>
-        <div class="webchat-input-hint">内容由 AI Agent 生成，请注意甄别</div>
       </footer>
     </main>
   </div>
@@ -802,11 +806,22 @@
   .webchat-messages {
     flex: 1;
     overflow-y: auto;
-    padding: 16px;
+    padding: 20px 16px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    scroll-behavior: smooth;
+  }
+
+  /* 聊天内容列：居中、最大宽度（对齐 multica max-w-4xl） */
+  .webchat-msg,
+  .webchat-collapse {
+    width: 100%;
+    max-width: 760px;
   }
 
   .webchat-msg {
-    margin-bottom: 12px;
+    margin-bottom: 16px;
     display: flex;
   }
   .webchat-msg-user {
@@ -818,19 +833,25 @@
 
   .webchat-bubble {
     max-width: 80%;
-    padding: 8px 12px;
-    border-radius: 8px;
+    padding: 10px 14px;
+    border-radius: 16px;
     font-size: 14px;
-    line-height: 1.6;
+    line-height: 1.65;
     word-break: break-word;
   }
+  /* 用户气泡：右对齐、柔和底色、大圆角（multica：rounded-2xl bg-muted） */
   .webchat-msg-user .webchat-bubble {
-    background: #1a73e8;
-    color: #fff;
+    background: #eef1f4;
+    color: #1f2328;
   }
+  /* 助手：通栏 Markdown，柔和留白（multica：leading-relaxed，无粗框） */
   .webchat-msg-assistant .webchat-bubble {
-    background: #f5f5f5;
-    color: #333;
+    background: transparent;
+    color: #24292f;
+    padding: 0;
+    max-width: 100%;
+    border-radius: 0;
+    line-height: 1.75;
   }
   .webchat-msg-error .webchat-bubble {
     background: #fff1f0;
@@ -900,44 +921,97 @@
   }
 
   .webchat-input-area {
-    border-top: 1px solid #eee;
-    padding: 12px 16px;
+    border-top: 1px solid #eceef1;
+    padding: 14px 16px 12px;
+  }
+  .webchat-input-area-inner {
+    max-width: 760px;
+    margin: 0 auto;
+  }
+  /* 输入卡：rounded-lg + 边框 + 底色，聚焦时品牌色光晕（multica chat-input-surface） */
+  .webchat-input-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid #d8dbe0;
+    border-radius: 12px;
+    background: #fff;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .webchat-input-card:focus-within {
+    border-color: #2a7de1;
+    box-shadow: 0 0 0 3px rgba(42, 125, 225, 0.18);
   }
   .webchat-input-box {
     display: flex;
     align-items: flex-end;
-    gap: 8px;
+    gap: 6px;
+    padding: 10px 12px 14px;
   }
   .webchat-input-box textarea {
     flex: 1;
     resize: none;
-    border: 1px solid #d9d9d9;
-    border-radius: 6px;
-    padding: 8px 10px;
-    font-size: 14px;
+    border: none;
+    background: transparent;
+    padding: 4px 2px;
+    font-size: 15px;
     line-height: 1.5;
     outline: none;
+    color: #1f2328;
+    font-family: inherit;
   }
-  .webchat-input-box textarea:focus {
-    border-color: #1a73e8;
+  .webchat-input-box textarea::placeholder {
+    color: #9aa0a6;
   }
   .webchat-send {
     border: none;
-    background: #1a73e8;
+    background: #2a7de1;
     color: #fff;
-    border-radius: 6px;
-    padding: 8px 16px;
+    border-radius: 8px;
+    padding: 8px 18px;
     cursor: pointer;
     font-size: 14px;
+    font-weight: 500;
+    transition: background 0.15s ease;
+  }
+  .webchat-send:hover:not(:disabled) {
+    background: #1f6fd0;
   }
   .webchat-send:disabled {
-    background: #ccc;
+    background: #c6cace;
     cursor: not-allowed;
   }
   .webchat-input-hint {
-    margin-top: 6px;
+    margin-top: 8px;
     font-size: 12px;
-    color: #bbb;
+    color: #a8adb3;
     text-align: center;
+  }
+
+  /* v-html 渲染的 Markdown 内容样式（scoped 下用 deep） */
+  :deep(.webchat-bubble p),
+  :deep(.webchat-bubble ul),
+  :deep(.webchat-bubble ol),
+  :deep(.webchat-bubble blockquote) {
+    margin: 0 0 8px;
+  }
+  :deep(.webchat-bubble pre) {
+    background: #f6f8fa;
+    border-radius: 8px;
+    padding: 10px 12px;
+    overflow-x: auto;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  :deep(.webchat-bubble code) {
+    background: #f0f2f5;
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-size: 13px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  :deep(.webchat-bubble pre code) {
+    background: transparent;
+    padding: 0;
   }
 </style>
