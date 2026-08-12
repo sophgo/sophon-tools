@@ -762,7 +762,7 @@
 <style lang="less" scoped>
   .webchat {
     display: flex;
-    height: calc(100vh - 150px);
+    height: calc(100vh - 110px);
     border: 1px solid #e5e7eb;
     border-radius: 8px;
     overflow: hidden;
@@ -1089,7 +1089,7 @@
 
   .webchat-input-area {
     border-top: 1px solid #eee;
-    padding: 12px 16px;
+    padding: 12px 16px 8px;
   }
   .webchat-input-box {
     display: flex;
