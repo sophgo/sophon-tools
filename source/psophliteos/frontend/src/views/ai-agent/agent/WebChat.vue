@@ -66,6 +66,9 @@
             <button class="webchat-collapse-header" type="button" @click="m.open = !m.open">
               <span class="webchat-collapse-arrow">{{ m.open ? '▾' : '▸' }}</span>
               <span class="webchat-collapse-label">思考过程</span>
+              <span v-if="!m.open" class="webchat-collapse-summary"
+                >· {{ thoughtSummary(m.content) }}</span
+              >
             </button>
             <div
               v-show="m.open"
@@ -77,6 +80,9 @@
             <button class="webchat-collapse-header" type="button" @click="m.open = !m.open">
               <span class="webchat-collapse-arrow">{{ m.open ? '▾' : '▸' }}</span>
               <span class="webchat-collapse-label">工具调用</span>
+              <span v-if="!m.open" class="webchat-collapse-summary"
+                >· {{ toolCallSummary(m.content) }}</span
+              >
             </button>
             <div
               v-show="m.open"
@@ -499,6 +505,67 @@
       return calls.map((c: any) => JSON.stringify(c, null, 2)).join('\n\n');
     }
     return payload.content || '';
+  }
+
+  // ---------- 折叠块收起时的单行摘要 ----------
+  // 摘要在渲染期从 m.content 实时计算，不改变已持久化的消息结构（向后兼容）。
+  const SUMMARY_LEN = 30;
+
+  function clampChars(text: string, n: number): string {
+    const chars = Array.from(text);
+    const sliced = chars.slice(0, n).join('');
+    return sliced + (chars.length > n ? '…' : '');
+  }
+
+  // 剥掉常见 markdown 标记，得到可读纯文本（避免摘要里出现 # * 等符号）
+  function plainText(text: string): string {
+    return (text || '')
+      .replace(/```[\s\S]*?```/g, ' ')
+      .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .replace(/[#>*`_~]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  // 思考过程：内容前 SUMMARY_LEN 个文字
+  function thoughtSummary(content: string): string {
+    return clampChars(plainText(content), SUMMARY_LEN);
+  }
+
+  // 工具调用：从 formatToolCalls 生成的 JSON（多 call 以空行连接）逐个提取
+  // function.name + 参数 JSON 扁平化简写，拼成「名称(参数…)、名称(参数…)」。
+  function toolCallSummary(content: string): string {
+    if (!content) return '';
+    const parts: string[] = [];
+    // 每个 call 非贪婪匹配到 name 与 arguments（arguments 可能缺失）
+    const callRe =
+      /"function"\s*:\s*\{[\s\S]*?"name"\s*:\s*"([^"]+)"[\s\S]*?(?:"arguments"\s*:\s*"((?:[^"\\]|\\.)*)")?\s*\}/g;
+    let mm: RegExpExecArray | null;
+    let guard = 0;
+    while ((mm = callRe.exec(content)) && parts.length < 4 && guard++ < 20) {
+      const name = mm[1];
+      const rawArgs = mm[2] ? flattenArgs(mm[2]) : '';
+      parts.push(rawArgs ? `${name}(${clampChars(rawArgs, 20)})` : name);
+    }
+    if (!parts.length) return clampChars(plainText(content), SUMMARY_LEN);
+    return clampChars(parts.join('、'), SUMMARY_LEN);
+  }
+
+  // 把 arguments 的转义 JSON 压成「k=v, k=v」简写；解析失败时返回空串
+  function flattenArgs(raw: string): string {
+    try {
+      const obj = JSON.parse(raw.replace(/\\n/g, '').replace(/\\"/g, '"').replace(/\\\\/g, '\\'));
+      if (obj == null) return '';
+      const pairs = Object.entries(obj).map(([k, v]) => {
+        const val = v !== null && typeof v === 'object' ? JSON.stringify(v) : String(v);
+        return `${k}=${val}`;
+      });
+      return pairs.join(', ');
+    } catch (e) {
+      return '';
+    }
   }
 
   function handleSessionList(payload: any) {
@@ -955,6 +1022,16 @@
     font-size: 13px;
     color: #666;
     padding: 4px 0;
+    width: 100%;
+    text-align: left;
+  }
+  .webchat-collapse-summary {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #999;
   }
   .webchat-collapse-arrow {
     display: inline-block;
