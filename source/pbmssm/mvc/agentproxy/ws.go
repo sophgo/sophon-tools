@@ -95,7 +95,9 @@ func (h *Hub) Start() error {
 		return nil
 	}
 	h.started = true
-	h.unlisten = h.module.AddEventListener(h.HandleEvent)
+	// 注意：不再注册 HandleEvent 作为流式监听。回合（prompt）的流式内容由
+	// turn.go 的 consumeTurn 从 `updates` 通道消费并经 Deliver 投递，是唯一来源。
+	// 若仍注册 raw 事件 → conn.enqueue 会与 consumeTurn 双重递送，导致前端重复输出。
 	h.mu.Unlock()
 
 	return h.listen()
@@ -165,21 +167,12 @@ func (h *Hub) Stop() {
 	}
 }
 
-// HandleEvent 模块事件回调：把 ACP 事件路由到绑定该 ACP 会话的连接。
-// 由 Module.dispatchEvent 在模块 goroutine 调用。
-// 注意：回合（prompt）的流式内容由 turn.go 的 consumeTurn 从 `updates` 通道消费并
-// 通过 Deliver 投递；此处仅兜底处理无 Turn 时的生命周期帧（当前无，保兼容）。
+// HandleEvent 模块事件回调（保留兼容签名，现为 no-op）。
+// 回合（prompt）的流式内容由 turn.go 的 consumeTurn 从 `updates` 通道消费并经
+// Deliver 投递，是唯一来源。此方法不再转发 raw 事件，避免与 consumeTurn 双重递送
+// 导致前端重复输出。
 func (h *Hub) HandleEvent(ev *ACPSessionUpdate) {
-	if ev == nil {
-		return
-	}
-	h.mu.Lock()
-	c := h.byACP[ev.SessionID]
-	h.mu.Unlock()
-	if c == nil {
-		return
-	}
-	c.enqueue(ev)
+	_ = ev
 }
 
 // Deliver 把已格式化好的帧投递给绑定该 ACP 会话的连接（可能有，也可能无——
@@ -263,20 +256,6 @@ func (h *Hub) authSubprotocol(r *http.Request) bool {
 		}
 	}
 	return false
-}
-
-// enqueue 把 ACP 事件映射的帧投递给连接（异步）。
-func (c *conn) enqueue(ev *ACPSessionUpdate) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.session == nil {
-		return
-	}
-	frames := c.adapter.OnACPEvent(ev, c.session.ID)
-	if len(frames) == 0 {
-		return
-	}
-	c.pushFrames(frames)
 }
 
 // enqueueFrames 投递一组已格式化好的帧（来自模块级回合），异步，无 adapter 转换。

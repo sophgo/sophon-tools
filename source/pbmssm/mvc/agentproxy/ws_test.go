@@ -350,14 +350,15 @@ func TestWSUnknownTypeIgnored(t *testing.T) {
 	}
 }
 
-// TestHubEventRouting 验证 Hub 按 ACP sessionId 把事件路由到对应连接。
-func TestHubEventRouting(t *testing.T) {
+// TestHubDeliverRouting 验证 Hub.Deliver 把已格式化帧按 ACP sessionId 路由到绑定连接。
+// （duplicate 回归：内容流式现由 turn 的 consumeTurn→Deliver 单一来源投递，
+//  HandleEvent 已为 no-op，不再走 conn.adapter 双重转发。）
+func TestHubDeliverRouting(t *testing.T) {
 	mod, tr := mockModuleForWS(t)
 	h := newHub(mod, "key")
+	mod.hub = h
 	srv := httptest.NewServer(http.HandlerFunc(h.serveWS))
 	t.Cleanup(srv.Close)
-	mod.SetEventFn(h.HandleEvent)
-	t.Cleanup(func() { mod.SetEventFn(nil) })
 
 	go func() {
 		sc := bufioNewScanner(tr.in)
@@ -366,6 +367,11 @@ func TestHubEventRouting(t *testing.T) {
 			return
 		}
 		_ = tr.reply(map[string]any{"jsonrpc": "2.0", "id": *req.ID, "result": map[string]any{"sessionId": "acp-route"}})
+		req2, err := tr.readRequestErr(sc)
+		if err != nil {
+			return
+		}
+		_ = tr.reply(map[string]any{"jsonrpc": "2.0", "id": *req2.ID, "result": map[string]any{"stopReason": "end_turn"}})
 	}()
 
 	conn := dialWS(t, wsURL(srv.URL)+wsPath, "token.key")
@@ -378,11 +384,12 @@ func TestHubEventRouting(t *testing.T) {
 		return len(h.byACP) == 1
 	})
 
-	// 直接调 Hub.HandleEvent（模拟模块 dispatchEvent）
-	h.HandleEvent(&ACPSessionUpdate{
-		SessionID: "acp-route", Discriminator: "agent_message_chunk",
-		MessageID: "m1", Content: "路由成功",
-	})
+	// 模拟 turn 把预格式化帧经 Deliver 投递
+	h.Deliver("acp-route", []WSFrame{{
+		Type:      "message.create",
+		SessionID: "web-c0",
+		Payload:   map[string]any{"content": "路由成功", "kind": "text", "message_id": "m1"},
+	}})
 
 	deadline := time.Now().Add(3 * time.Second)
 	found := false
@@ -397,7 +404,7 @@ func TestHubEventRouting(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatal("event not routed to connection")
+		t.Fatal("frame not routed to connection via Deliver")
 	}
 }
 
@@ -770,4 +777,66 @@ func TestWSTurnSurvivesDisconnect(t *testing.T) {
 		}
 		return false
 	})
+}
+
+// TestWSNoDuplicateFrames 回归（duplicate 输出）：一个流式 chunk 只投递一次，
+// 不因 turn(consumeTurn) 与 HandleEvent 双通道各发一份而重复。
+func TestWSNoDuplicateFrames(t *testing.T) {
+	mod, tr := mockModuleForWS(t)
+	h := newHub(mod, "key")
+	mod.hub = h
+	srv := httptest.NewServer(http.HandlerFunc(h.serveWS))
+	t.Cleanup(srv.Close)
+
+	go func() {
+		sc := bufioNewScanner(tr.in)
+		req, err := tr.readRequestErr(sc)
+		if err != nil {
+			return
+		}
+		if req.Method != "session/new" {
+			t.Errorf("first = %s, want session/new", req.Method)
+			return
+		}
+		_ = tr.reply(map[string]any{"jsonrpc": "2.0", "id": *req.ID, "result": map[string]any{"sessionId": "acp-n1"}})
+		req2, err := tr.readRequestErr(sc)
+		if err != nil {
+			return
+		}
+		// 单个 stream chunk（同一 messageId 只发一次 update）
+		_ = tr.reply(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"sessionId": "acp-n1", "update": map[string]any{"sessionUpdate": map[string]any{"agent_message_chunk": map[string]any{"messageId": "dup-1", "content": map[string]any{"text": "唯一"}}}}}})
+		_ = tr.reply(map[string]any{"jsonrpc": "2.0", "id": *req2.ID, "result": map[string]any{"stopReason": "end_turn"}})
+	}()
+
+	conn := dialWS(t, wsURL(srv.URL)+wsPath, "token.key")
+	_ = conn.WriteJSON(map[string]any{"type": "message.send", "payload": map[string]any{"content": "问"}})
+
+	// 收集 message.create 帧（同一 message_id 应精确一次）
+	creates := 0
+	allFrames := []string{}
+	deadline := time.Now().Add(4 * time.Second)
+	for time.Now().Before(deadline) {
+		m := readFrame(t, conn)
+		allFrames = append(allFrames, m["type"].(string))
+		if m["type"] == "message.create" {
+			creates++
+			p := m["payload"].(map[string]any)
+			if mid := p["message_id"]; mid != "dup-1" {
+				t.Fatalf("unexpected message_id: %v", mid)
+			}
+		}
+		// 收到回合结束的 typing.stop 后，再读一点点确认没有多余 create
+		if m["type"] == "typing.stop" && creates > 0 {
+			// 已见 create + 回合结束，稍作稳定再停止读取
+			time.Sleep(200 * time.Millisecond)
+			break
+		}
+		if m["type"] == "session.busy" && creates > 0 {
+			break
+		}
+	}
+	t.Logf("all frames: %v", allFrames)
+	if creates != 1 {
+		t.Fatalf("message.create delivered %d times, want exactly 1 (duplicate bug)", creates)
+	}
 }

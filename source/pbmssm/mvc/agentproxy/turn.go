@@ -61,7 +61,14 @@ func (m *Module) StartTurn(webchatID, acpID, content string) error {
 	// 用户消息入历史；若还是默认标题，用第一条用户消息前 8 字设标题（需求 3）
 	if m.sessions != nil {
 		m.sessions.AppendMessage(webchatID, ChatMessage{Role: "user", Content: content})
-		m.sessions.EnsureTitle(webchatID, content)
+		if m.sessions.EnsureTitle(webchatID, content) {
+			// 标题变化：广播给订阅该会话的连接（前端即时更新侧栏标题）
+			if m.hub != nil {
+				if s, ok := m.sessions.Get(webchatID); ok {
+					m.hub.BroadcastSession(acpID, WSFrame{Type: "session.updated", SessionID: webchatID, Payload: map[string]any{"title": s.Title}})
+				}
+			}
+		}
 	}
 	// typing.start + busy 通知
 	if m.hub != nil {
