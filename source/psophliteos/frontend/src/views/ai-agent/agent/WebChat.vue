@@ -185,6 +185,21 @@
   let forwardKey = '';
   // 本地 message 渲染序号（避免重复 key）
   let msgSeq = 0;
+  // 兜底：agent 回答完仍转圈的动画 BUG（MYS-199）。
+  // 根因：服务端回合(consumeTurn)的唯一结束信号依赖 reasonix `session/prompt`
+  // 响应帧到达才关 updates 通道并下发 typing.stop / session.busy=false；若该响应帧
+  // 丢失/迟到/挂起，这两类停止事件不送达，前端 typing 与 busy 会卡死一直转。
+  // 兜底1：收到 text 最终答案内容即本地清 typing（服务端 protocol.go 在首 chunk 也发
+  //        typing.stop，此处为防丢包/时序残留的冗余）。
+  // 兜底2：busy 超时复位——busy 会话长期收不到任何 ws 帧即视为回合已停，强制清 busy
+  //        （覆盖「回合永不结束 → busy=false 永不发」的根因路径）。
+  // 兜底3：error 事件除清 typing 外同步清当前会话 busy。
+  const BUSY_STALL_TIMEOUT = 120_000; // busy 无任何活动帧超过此值即判定停摆
+  const BUSY_SCAN_INTERVAL = 10_000; // 兜底扫描周期
+  // 会话最后一次收到 ws 帧的时间（key=sessionId）。仅用于 busy 超时判定，不入持久化。
+  const sessionLastWsAt: Record<string, number> = {};
+  // 兜底扫描定时器句柄
+  let busyStallTimer: ReturnType<typeof setInterval> | null = null;
   // 当前流式「思考过程」折叠块的 key（同一逻辑思考常被后端拆成多个 message.create
   // thought-1/thought-2，累积到同一折叠块避免拆泡）。
   let openThoughtKey: string | null = null;
@@ -286,6 +301,8 @@
     const type = msg.type;
     const payload = msg.payload || {};
     if (msg.session_id) bindServerSession(msg.session_id);
+    // 记录该会话最后活动帧时间（busy 超时兜底用）：该会话收到任何帧即视为仍在运转
+    if (msg.session_id) sessionLastWsAt[msg.session_id] = Date.now();
 
     switch (type) {
       case 'message.create':
@@ -326,6 +343,8 @@
         errorMsg.value = payload.message || '发生错误';
         sending.value = false;
         typing.value = false;
+        // 兜底3：出错即回合终止，同步复位当前会话 busy（避免异常后仍转圈）
+        setSessionBusy(msg.session_id || activeId.value, false);
         break;
     }
   }
@@ -381,6 +400,21 @@
     if (s) s.busy = busy;
   }
 
+  // 兜底2：busy 超时复位。服务端 session.busy=false 仅在回合(consumeTurn)正常结束时
+  // 下发；若回合永不结束（reasonix prompt 响应帧丢失/挂起），busy=false 永不送达，
+  // busy 转圈会一直转。此定时器兜底：busy 会话长期收不到任何 ws 帧即视为回合已停，
+  // 强制复位 busy（不改动服务端协议，纯前端保险；tool_call_update 等活动帧会刷新
+  // sessionLastWsAt，正常长任务不会被误清）。
+  function clearStalledBusy() {
+    const now = Date.now();
+    sessions.value.forEach((s) => {
+      if (!s.busy) return;
+      if (now - (sessionLastWsAt[s.id] || 0) > BUSY_STALL_TIMEOUT) {
+        s.busy = false;
+      }
+    });
+  }
+
   function applyTitle(sid: string | undefined, title: string | undefined) {
     if (!sid || !title) return;
     const s = sessions.value.find((x) => x.id === sid);
@@ -407,6 +441,9 @@
     if (kind === 'text') {
       // 连续 text 合并到最近一条 assistant 文本（修复拆泡）
       clearOpenThought();
+      // 兜底1：最终答案内容开始输出即本地清 typing（需求：收到 text 首条置 false；
+      // 服务端首 chunk 本应发 typing.stop，此处防丢包/切会话时序导致的残留）
+      typing.value = false;
       const last = s.messages[s.messages.length - 1];
       if (
         last &&
@@ -752,9 +789,15 @@
     if (saved && sessions.value.some((s) => s.id === saved)) activeId.value = saved;
     if (!activeSess.value) newSession();
     connect();
+    // 兜底2：启动忙状态超时扫描（防回合永不结束致 busy 卡死）
+    busyStallTimer = setInterval(clearStalledBusy, BUSY_SCAN_INTERVAL);
   });
 
   onBeforeUnmount(() => {
+    if (busyStallTimer) {
+      clearInterval(busyStallTimer);
+      busyStallTimer = null;
+    }
     if (ws) ws.close();
   });
 </script>
