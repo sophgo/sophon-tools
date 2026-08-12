@@ -47,17 +47,6 @@
         >
           <a-switch v-model:checked="form.llmOverrideModel" />
         </a-form-item>
-        <a-form-item
-          label="启用"
-          tooltip="控制 Agent（Reasonix 服务）是否运行。开启后 Agent Proxy 服务启动，可对话；关闭后服务停止。"
-        >
-          <a-switch
-            :checked="serviceEnabled"
-            :loading="svcActing"
-            :disabled="svcLoading"
-            @change="toggleAgentService"
-          />
-        </a-form-item>
       </a-form>
 
       <!-- 保存 + 测试 -->
