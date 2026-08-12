@@ -1,0 +1,766 @@
+<template>
+  <!-- eslint-disable vue/no-v-html -- 内容一律经 renderMarkdown（marked + DOMPurify）消毒 -->
+  <div class="webchat">
+    <!-- 左侧：会话列表 -->
+    <aside class="webchat-sidebar">
+      <div class="webchat-sidebar-header">
+        <span class="webchat-app-title">AI Agent</span>
+      </div>
+      <button class="webchat-new-chat" type="button" @click="newSession">＋ 新对话</button>
+      <nav class="webchat-session-list">
+        <div
+          v-for="s in sessions"
+          :key="s.id"
+          class="webchat-session-item"
+          :class="{ active: s.id === activeId }"
+          @click="switchSession(s.id)"
+        >
+          <div class="webchat-session-title">{{ s.title || '新会话' }}</div>
+          <button
+            class="webchat-session-del"
+            type="button"
+            title="删除会话"
+            @click.stop="deleteSession(s.id)"
+            >×</button
+          >
+        </div>
+        <div v-if="!sessions.length" class="webchat-session-empty">暂无会话</div>
+      </nav>
+    </aside>
+
+    <!-- 右侧：聊天区 -->
+    <main class="webchat-main">
+      <header class="webchat-header">
+        <div class="webchat-header-title">{{ activeSess?.title || '新会话' }}</div>
+        <div class="webchat-header-status" :class="statusClass">{{ statusText }}</div>
+      </header>
+
+      <div ref="messagesEl" class="webchat-messages">
+        <template v-for="m in currentMessages" :key="m.key">
+          <div v-if="m.role === 'user'" class="webchat-msg webchat-msg-user">
+            <div class="webchat-bubble">{{ m.content }}</div>
+          </div>
+          <div v-else-if="m.kind === 'thought'" class="webchat-collapse">
+            <button class="webchat-collapse-header" type="button" @click="m.open = !m.open">
+              <span class="webchat-collapse-arrow">{{ m.open ? '▾' : '▸' }}</span>
+              <span class="webchat-collapse-label">思考过程</span>
+            </button>
+            <div
+              v-show="m.open"
+              class="webchat-collapse-body"
+              v-html="renderMarkdown(m.content)"
+            ></div>
+          </div>
+          <div v-else-if="m.kind === 'tool_calls'" class="webchat-collapse">
+            <button class="webchat-collapse-header" type="button" @click="m.open = !m.open">
+              <span class="webchat-collapse-arrow">{{ m.open ? '▾' : '▸' }}</span>
+              <span class="webchat-collapse-label">工具调用</span>
+            </button>
+            <div
+              v-show="m.open"
+              class="webchat-collapse-body"
+              v-html="renderMarkdown(m.content)"
+            ></div>
+          </div>
+          <div v-else class="webchat-msg webchat-msg-assistant">
+            <span v-if="m.model" class="webchat-msg-model">{{ m.model }}</span>
+            <div class="webchat-bubble" v-html="renderMarkdown(m.content)"></div>
+          </div>
+        </template>
+        <div v-if="typing" class="webchat-msg webchat-msg-assistant">
+          <div class="webchat-typing"><span></span><span></span><span></span></div>
+        </div>
+        <div v-if="errorMsg" class="webchat-msg webchat-msg-error">
+          <div class="webchat-bubble">{{ errorMsg }}</div>
+        </div>
+      </div>
+
+      <footer class="webchat-input-area">
+        <div class="webchat-input-box">
+          <textarea
+            ref="inputEl"
+            v-model="draft"
+            rows="1"
+            placeholder="输入消息…（Enter 发送，Shift+Enter 换行）"
+            @keydown="onKeydown"
+            @input="autoGrow"
+          ></textarea>
+          <button
+            class="webchat-send"
+            type="button"
+            :disabled="sending || !connected"
+            @click="sendMessage"
+            >发送</button
+          >
+        </div>
+        <div class="webchat-input-hint">内容由 AI Agent 生成，请注意甄别</div>
+      </footer>
+    </main>
+  </div>
+</template>
+
+<script lang="ts" setup>
+  // @ts-nocheck
+  import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue';
+  import { PicoWs, defaultReasonixWsUrl } from '/@/api/aiAgent/ws';
+  import { renderMarkdownToHtml as renderMarkdown } from './markdown';
+  import { getAgentConfig } from '/@/api/aiAgent';
+
+  interface ChatMsg {
+    key?: string;
+    role: 'user' | 'assistant';
+    kind?: string;
+    content: string;
+    model?: string;
+    open?: boolean;
+  }
+
+  interface Session {
+    id: string;
+    title: string;
+    messages: ChatMsg[];
+  }
+
+  const SESSIONS_KEY = 'sophon.ai-agent.sessions';
+  const ACTIVE_KEY = 'sophon.ai-agent.active';
+
+  const sessions = ref<Session[]>([]);
+  const activeId = ref<string>('');
+  const draft = ref('');
+  const sending = ref(false);
+  const typing = ref(false);
+  const errorMsg = ref('');
+  const connected = ref(false);
+  const statusText = ref('连接中…');
+  const statusClass = ref('');
+
+  const messagesEl = ref<HTMLElement | null>(null);
+  const inputEl = ref<HTMLTextAreaElement | null>(null);
+
+  let ws: PicoWs | null = null;
+  let forwardKey = '';
+  // 本地 message 渲染序号（避免重复 key）
+  let msgSeq = 0;
+
+  const activeSess = computed(() => sessions.value.find((s) => s.id === activeId.value) || null);
+  const currentMessages = computed(() => activeSess.value?.messages || []);
+
+  function uuid(): string {
+    if (window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+      const r = (Math.random() * 16) | 0;
+      const v = c === 'x' ? r : (r & 0x3) | 0x8;
+      return v.toString(16);
+    });
+  }
+
+  function loadSessions(): Session[] {
+    try {
+      const raw = localStorage.getItem(SESSIONS_KEY);
+      const list = raw ? JSON.parse(raw) : [];
+      return Array.isArray(list) ? list : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function saveSessions() {
+    try {
+      localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions.value));
+    } catch (e) {
+      /* ignore */
+    }
+  }
+
+  function saveActive() {
+    try {
+      if (activeId.value) localStorage.setItem(ACTIVE_KEY, activeId.value);
+      else localStorage.removeItem(ACTIVE_KEY);
+    } catch (e) {
+      /* ignore */
+    }
+  }
+
+  function ensureSession(): Session {
+    const s = activeSess.value;
+    if (s) return s;
+    return newSession();
+  }
+
+  function newSession(): Session {
+    const s: Session = { id: uuid(), title: '新会话', messages: [] };
+    sessions.value.unshift(s);
+    activeId.value = s.id;
+    saveSessions();
+    saveActive();
+    draft.value = '';
+    errorMsg.value = '';
+    resetConnection();
+    return s;
+  }
+
+  function switchSession(id: string) {
+    if (!sessions.value.some((s) => s.id === id)) return;
+    activeId.value = id;
+    saveActive();
+    resetConnection();
+  }
+
+  function deleteSession(id: string) {
+    sessions.value = sessions.value.filter((s) => s.id !== id);
+    if (activeId.value === id) {
+      activeId.value = sessions.value.length ? sessions.value[0].id : '';
+    }
+    saveSessions();
+    saveActive();
+    if (!activeId.value) newSession();
+    else resetConnection();
+  }
+
+  function resetConnection() {
+    if (ws) ws.reconnect();
+  }
+
+  // ---------- WS ----------
+  function handleMessage(msg: any) {
+    if (!msg || !msg.type) return;
+    const type = msg.type;
+    const payload = msg.payload || {};
+    if (msg.session_id) bindServerSession(msg.session_id);
+
+    switch (type) {
+      case 'message.create':
+        handleCreate(payload);
+        break;
+      case 'message.update':
+        handleUpdate(payload);
+        break;
+      case 'typing.start':
+        typing.value = true;
+        break;
+      case 'typing.stop':
+        typing.value = false;
+        break;
+      case 'session.list':
+        handleSessionList(payload);
+        break;
+      case 'session.history':
+        handleSessionHistory(payload);
+        break;
+      case 'error':
+        errorMsg.value = payload.message || '发生错误';
+        sending.value = false;
+        typing.value = false;
+        break;
+    }
+  }
+
+  function bindServerSession(serverId: string) {
+    const s = activeSess.value;
+    if (!s || !serverId) return;
+    if (s.id !== serverId) {
+      s.id = serverId;
+      activeId.value = serverId;
+      saveSessions();
+      saveActive();
+    }
+  }
+
+  function handleCreate(payload: any) {
+    const s = ensureSession();
+    const messageId = payload.message_id || '';
+    const kind = payload.kind || 'text';
+    const content = payload.content || '';
+    const model = payload.model_name || '';
+
+    if (kind === 'text') {
+      // 连续 text 合并到最近一条 assistant 文本（修复拆泡）
+      const last = s.messages[s.messages.length - 1];
+      if (
+        last &&
+        last.role === 'assistant' &&
+        !last.kind &&
+        !s.messages.some((m) => m.key === messageId)
+      ) {
+        last.content += content;
+        last.model = last.model || model;
+        return;
+      }
+      s.messages.push({
+        key: messageId || 'msg' + msgSeq++,
+        role: 'assistant',
+        content,
+        model,
+        open: false,
+      });
+    } else if (kind === 'thought') {
+      s.messages.push({
+        key: messageId || 'msg' + msgSeq++,
+        role: 'assistant',
+        kind,
+        content,
+        open: false,
+      });
+    } else if (kind === 'tool_calls') {
+      const text = formatToolCalls(payload);
+      s.messages.push({
+        key: messageId || 'msg' + msgSeq++,
+        role: 'assistant',
+        kind,
+        content: text,
+        open: false,
+      });
+    }
+    saveSessions();
+    scrollToBottom();
+  }
+
+  function handleUpdate(payload: any) {
+    const s = activeSess.value;
+    if (!s) return;
+    const messageId = payload.message_id || '';
+    const content = payload.content || '';
+    const target = s.messages.find((m) => m.key === messageId);
+    if (target) {
+      target.content = accumulate(target.content, content);
+    } else {
+      // 未跟踪的 update：追加到最近一条同类消息
+      const last = s.messages[s.messages.length - 1];
+      if (last && last.role === 'assistant') last.content = accumulate(last.content, content);
+    }
+    saveSessions();
+    scrollToBottom();
+  }
+
+  function accumulate(current: string, incoming: string): string {
+    if (!incoming) return current;
+    if (!current) return incoming;
+    if (incoming.length >= current.length && incoming.indexOf(current) === 0) return incoming;
+    if (incoming.length > current.length) return incoming;
+    return current + incoming;
+  }
+
+  function formatToolCalls(payload: any): string {
+    const calls = payload.tool_calls;
+    if (Array.isArray(calls) && calls.length) {
+      return calls.map((c: any) => JSON.stringify(c, null, 2)).join('\n\n');
+    }
+    return payload.content || '';
+  }
+
+  function handleSessionList(payload: any) {
+    const serverList = Array.isArray(payload.sessions) ? payload.sessions : [];
+    const stored: Session[] = serverList.map((ss: any) => ({
+      id: ss.id,
+      title: ss.title || '新会话',
+      messages: [],
+    }));
+    // 保留本地尚未同步到服务端的会话
+    const storedIds = new Set(stored.map((s) => s.id));
+    sessions.value.forEach((s) => {
+      if (!storedIds.has(s.id)) stored.push(s);
+    });
+    sessions.value = stored;
+    if (!sessions.value.some((s) => s.id === activeId.value)) {
+      activeId.value = sessions.value.length ? sessions.value[0].id : '';
+    }
+    saveSessions();
+    saveActive();
+    if (activeId.value) {
+      pullHistory(activeId.value);
+    } else {
+      newSession();
+    }
+  }
+
+  function handleSessionHistory(payload: any) {
+    const sid = payload.session_id;
+    const raw = Array.isArray(payload.messages) ? payload.messages : [];
+    const s = sessions.value.find((x) => x.id === sid);
+    if (!s) return;
+    s.messages = raw.map((m: any) => ({
+      key: 'his' + msgSeq++,
+      role: m.role === 'user' ? 'user' : 'assistant',
+      kind: m.kind || (m.role === 'user' ? '' : 'text'),
+      content: m.content || '',
+      model: m.model || '',
+      open: false,
+    }));
+    saveSessions();
+    scrollToBottom();
+  }
+
+  function syncFromServer() {
+    if (!ws || !ws.ready) return;
+    ws.sendFrame({ type: 'session.list' }, { queued: true });
+  }
+
+  function pullHistory(sessionId: string) {
+    if (!ws || !ws.ready || !sessionId) return;
+    ws.sendFrame({ type: 'session.history', session_id: sessionId }, { queued: true });
+  }
+
+  // ---------- 发送 ----------
+  function sendMessage() {
+    const s = ensureSession();
+    const content = draft.value.trim();
+    if (!content) return;
+    if (sending.value) return;
+    if (!ws || !ws.ready) {
+      errorMsg.value = '连接未就绪，请稍后再试';
+      return;
+    }
+    sending.value = true;
+    errorMsg.value = '';
+
+    // 用户消息入本地
+    s.messages.push({ key: 'msg' + msgSeq++, role: 'user', content });
+    const serverId = s.id;
+    saveSessions();
+    draft.value = '';
+    autoGrow();
+    scrollToBottom();
+
+    try {
+      ws.send(serverId, content, []);
+      sending.value = false;
+    } catch (err: any) {
+      sending.value = false;
+      errorMsg.value = err.message || '发送失败，请检查连接';
+    }
+  }
+
+  function onKeydown(e: KeyboardEvent) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  }
+
+  function autoGrow() {
+    const el = inputEl.value;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 160) + 'px';
+  }
+
+  function scrollToBottom() {
+    nextTick(() => {
+      if (messagesEl.value) messagesEl.value.scrollTop = messagesEl.value.scrollHeight;
+    });
+  }
+
+  // ---------- 连接 ----------
+  async function connect() {
+    if (!forwardKey) {
+      const cfg = await getAgentConfig();
+      forwardKey = cfg?.forwardKey || '';
+    }
+    if (ws) {
+      ws.close();
+      ws = null;
+    }
+    const url = defaultReasonixWsUrl(window.location.hostname);
+    ws = new PicoWs({
+      url,
+      token: forwardKey,
+      onMessage: handleMessage,
+      onStatus: (st) => {
+        const map: Record<string, string> = {
+          connecting: '连接中…',
+          open: '已连接',
+          reconnecting: '重连中…',
+          closed: '已断开',
+        };
+        connected.value = st.state === 'open';
+        statusText.value = map[st.state] || st.state;
+        statusClass.value = st.state === 'open' ? 'ok' : st.state === 'closed' ? 'bad' : 'warn';
+        if (st.state === 'open') syncFromServer();
+      },
+    });
+    ws.connect();
+  }
+
+  onMounted(() => {
+    sessions.value = loadSessions();
+    const saved = localStorage.getItem(ACTIVE_KEY);
+    if (saved && sessions.value.some((s) => s.id === saved)) activeId.value = saved;
+    if (!activeSess.value) newSession();
+    connect();
+  });
+
+  onBeforeUnmount(() => {
+    if (ws) ws.close();
+  });
+</script>
+
+<style lang="less" scoped>
+  .webchat {
+    display: flex;
+    height: calc(100vh - 220px);
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    overflow: hidden;
+    background: #fff;
+  }
+
+  .webchat-sidebar {
+    width: 240px;
+    flex-shrink: 0;
+    border-right: 1px solid #e5e7eb;
+    display: flex;
+    flex-direction: column;
+    background: #fafafa;
+  }
+
+  .webchat-sidebar-header {
+    padding: 14px 16px;
+    font-size: 15px;
+    font-weight: 600;
+    border-bottom: 1px solid #eee;
+  }
+
+  .webchat-new-chat {
+    margin: 12px;
+    padding: 8px;
+    border: 1px dashed #d9d9d9;
+    border-radius: 6px;
+    background: #fff;
+    cursor: pointer;
+    font-size: 13px;
+    color: #333;
+  }
+  .webchat-new-chat:hover {
+    border-color: #1a73e8;
+    color: #1a73e8;
+  }
+
+  .webchat-session-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0 8px;
+  }
+
+  .webchat-session-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    color: #333;
+  }
+  .webchat-session-item:hover {
+    background: #f0f2f5;
+  }
+  .webchat-session-item.active {
+    background: #e8f0fe;
+    color: #1a73e8;
+  }
+
+  .webchat-session-title {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .webchat-session-del {
+    border: none;
+    background: transparent;
+    color: #999;
+    cursor: pointer;
+    font-size: 15px;
+    padding: 0 4px;
+  }
+  .webchat-session-del:hover {
+    color: #e33;
+  }
+
+  .webchat-session-empty {
+    padding: 20px;
+    text-align: center;
+    color: #bbb;
+    font-size: 13px;
+  }
+
+  .webchat-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .webchat-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid #eee;
+  }
+
+  .webchat-header-title {
+    font-size: 14px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .webchat-header-status {
+    font-size: 12px;
+    color: #888;
+  }
+  .webchat-header-status.ok {
+    color: #52c41a;
+  }
+  .webchat-header-status.bad {
+    color: #ff4d4f;
+  }
+  .webchat-header-status.warn {
+    color: #faad14;
+  }
+
+  .webchat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+  }
+
+  .webchat-msg {
+    margin-bottom: 12px;
+    display: flex;
+  }
+  .webchat-msg-user {
+    justify-content: flex-end;
+  }
+  .webchat-msg-assistant {
+    justify-content: flex-start;
+  }
+
+  .webchat-bubble {
+    max-width: 80%;
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 14px;
+    line-height: 1.6;
+    word-break: break-word;
+  }
+  .webchat-msg-user .webchat-bubble {
+    background: #1a73e8;
+    color: #fff;
+  }
+  .webchat-msg-assistant .webchat-bubble {
+    background: #f5f5f5;
+    color: #333;
+  }
+  .webchat-msg-error .webchat-bubble {
+    background: #fff1f0;
+    color: #ff4d4f;
+  }
+
+  .webchat-msg-model {
+    font-size: 11px;
+    color: #999;
+    margin-right: 8px;
+    align-self: flex-start;
+    margin-top: 8px;
+  }
+
+  .webchat-collapse {
+    margin-bottom: 8px;
+  }
+  .webchat-collapse-header {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    font-size: 13px;
+    color: #666;
+    padding: 4px 0;
+  }
+  .webchat-collapse-arrow {
+    display: inline-block;
+    width: 14px;
+  }
+  .webchat-collapse-body {
+    padding: 8px 12px;
+    background: #fafafa;
+    border-radius: 6px;
+    font-size: 13px;
+    color: #555;
+    word-break: break-word;
+    white-space: pre-wrap;
+  }
+
+  .webchat-typing span {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-right: 4px;
+    border-radius: 50%;
+    background: #bbb;
+    animation: webchat-blink 1.2s infinite both;
+  }
+  .webchat-typing span:nth-child(2) {
+    animation-delay: 0.2s;
+  }
+  .webchat-typing span:nth-child(3) {
+    animation-delay: 0.4s;
+  }
+  @keyframes webchat-blink {
+    0%,
+    80%,
+    100% {
+      opacity: 0.3;
+    }
+    40% {
+      opacity: 1;
+    }
+  }
+
+  .webchat-input-area {
+    border-top: 1px solid #eee;
+    padding: 12px 16px;
+  }
+  .webchat-input-box {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+  }
+  .webchat-input-box textarea {
+    flex: 1;
+    resize: none;
+    border: 1px solid #d9d9d9;
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 14px;
+    line-height: 1.5;
+    outline: none;
+  }
+  .webchat-input-box textarea:focus {
+    border-color: #1a73e8;
+  }
+  .webchat-send {
+    border: none;
+    background: #1a73e8;
+    color: #fff;
+    border-radius: 6px;
+    padding: 8px 16px;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  .webchat-send:disabled {
+    background: #ccc;
+    cursor: not-allowed;
+  }
+  .webchat-input-hint {
+    margin-top: 6px;
+    font-size: 12px;
+    color: #bbb;
+    text-align: center;
+  }
+</style>

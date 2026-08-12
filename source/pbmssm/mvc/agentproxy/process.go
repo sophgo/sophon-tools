@@ -18,12 +18,13 @@ import (
 )
 
 // ProcessManager 管理单个 reasonix acp 进程的生命周期：
-// 启动、崩溃自愈（退避重启）、健康检查、优雅关闭。
+// 启动、崩溃自愈（退避重启）、手动停止、优雅关闭。
 // 参考 llmproxy/server.go 的 os/exec 模式，但改为单进程常驻 + 崩溃自愈模型。
 //
 // 并发模型：一个 wait goroutine 独占执行 cmd.Wait()，进程退出（崩溃或主动停止）
-// 时关闭 waitCh；supervise goroutine 监听 waitCh，非主动停止则按退避重启。
-// 所有字段读写经 pm.mu。
+// 时关闭 waitCh；supervise goroutine 监听 waitCh，仅当 runRequested 仍为 true
+// （未被手动 Stop 关闭且非 GracefulStop）时按退避重启。
+// 所有字段读写经 pm.mu；runRequested/stopping 用原子量，避免带锁读。
 type ProcessManager struct {
 	cfg     Config
 	onReady func() // 每次进程成功启动后被回调（acp client 重跑 initialize + 恢复会话）
@@ -40,7 +41,8 @@ type ProcessManager struct {
 	writeMu     sync.Mutex // 防并发写行交错
 	backoff     time.Duration
 	initFailCnt atomic.Int32
-	stopping    atomic.Bool
+	stopping    atomic.Bool // 终态：bmssm 关闭/永久停止，置后不可再自愈
+	runRequested atomic.Bool // 用户/managed 是否期望进程保持运行（false=手动停止，supervise 不再重启）
 }
 
 // safeBuffer 并发安全的 stderr 收集器：读循环写、健康检查/日志读。
@@ -89,6 +91,7 @@ func NewProcessManager(cfg Config, onReady func()) *ProcessManager {
 }
 
 // Start 启动 reasonix acp 进程（幂等：已在运行则 no-op）。
+// 置 runRequested=true，使 supervise 在进程崩溃时自动重启。
 func (pm *ProcessManager) Start() error {
 	pm.mu.Lock()
 	if pm.waitCh != nil {
@@ -98,6 +101,7 @@ func (pm *ProcessManager) Start() error {
 	pm.mu.Unlock()
 
 	pm.stopping.Store(false)
+	pm.runRequested.Store(true)
 	if err := pm.startProc(); err != nil {
 		return err
 	}
@@ -176,10 +180,12 @@ func (pm *ProcessManager) startProc() error {
 	return nil
 }
 
-// supervise 监听当前进程退出；非主动停止时按退避重启。
+// supervise 监听当前进程退出；非手动停止时按退避重启。
+// 进程退出后：若 stopping（终态关闭）或 !runRequested（用户手动停止）→ 保持停止；
+// 否则视为崩溃，按退避重启。
 func (pm *ProcessManager) supervise() {
 	for {
-		if pm.stopping.Load() {
+		if pm.stopping.Load() || !pm.runRequested.Load() {
 			return
 		}
 		pm.mu.Lock()
@@ -190,7 +196,7 @@ func (pm *ProcessManager) supervise() {
 		}
 		<-waitCh
 
-		if pm.stopping.Load() {
+		if pm.stopping.Load() || !pm.runRequested.Load() {
 			return
 		}
 
@@ -204,7 +210,7 @@ func (pm *ProcessManager) supervise() {
 		logger.Warn("agentproxy: reasonix acp exited, restarting in %s", delay)
 		time.Sleep(delay)
 
-		if pm.stopping.Load() {
+		if pm.stopping.Load() || !pm.runRequested.Load() {
 			return
 		}
 		if err := pm.startProc(); err != nil {
@@ -237,8 +243,9 @@ func (pm *ProcessManager) readStderr(r io.Reader) {
 }
 
 // restart 主动重启进程（配置变更 binaryPath/workDir 时调用）。
-// 不改变 stopping 语义（保持运行）。
+// 保持运行语义不变（不置 stopping，runRequested 保持 true）。
 func (pm *ProcessManager) restart() {
+	pm.runRequested.Store(true)
 	pm.stopProc(false)
 	if err := pm.startProc(); err != nil {
 		logger.Error("agentproxy: restart failed: %v", err)
@@ -271,6 +278,12 @@ func (pm *ProcessManager) State() ProcessState {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 	return pm.state
+}
+
+// RunRequested 返回进程是否处于「应保持运行」状态（用户未手动停止）。
+// supervise 据此决定崩溃后是否自愈重启。
+func (pm *ProcessManager) RunRequested() bool {
+	return pm.runRequested.Load()
 }
 
 // Pid 返回当前进程 pid（无则 0）。
@@ -353,22 +366,26 @@ func (pm *ProcessManager) ReadLine() ([]byte, error) {
 }
 
 // GracefulStop 优雅关闭：SIGTERM，等待 5s，超时 Kill。会话清理由调用方负责。
+// 置 stopping=true（终态）与 runRequested=false，supervise 不再重启。
 func (pm *ProcessManager) GracefulStop() {
 	pm.stopping.Store(true)
+	pm.runRequested.Store(false)
 	pm.stopProc(true)
 }
 
-// Stop 停止进程但不标记 stopping（之后再调用 Start 可重新拉起）。
-// 供服务管理接口「停止」用：不同于 GracefulStop（其置 stopping 后不可再起）。
+// Stop 手动停止进程，且保持停止（runRequested=false，supervise 不再自愈重启）。
+// 供服务管理接口「停止」用：之后调用 Start 可重新拉起；
+// 不同于 GracefulStop（其置 stopping 后视为终态关闭）。
 func (pm *ProcessManager) Stop() {
+	pm.runRequested.Store(false)
 	pm.stopProc(true)
 }
 
 // Restart 重启进程（stop + start）。供服务管理接口「重启」用。
+// 保持运行语义：关闭可能残留的 stopping 终态、确保 runRequested=true。
 func (pm *ProcessManager) Restart() {
-	pm.mu.Lock()
 	pm.stopping.Store(false)
-	pm.mu.Unlock()
+	pm.runRequested.Store(true)
 	pm.restart()
 }
 

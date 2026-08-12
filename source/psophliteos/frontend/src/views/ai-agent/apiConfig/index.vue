@@ -1,19 +1,8 @@
 <template>
   <div class="p-4">
-    <a-card :bordered="false" title="Agent 配置">
-      <!-- 页选框：LLM / VLM -->
-      <a-radio-group v-model:value="activeKey" button-style="solid" class="mb-4">
-        <a-radio-button value="llm">LLM 模型</a-radio-button>
-        <a-radio-button value="vlm">VLM 模型</a-radio-button>
-      </a-radio-group>
-
-      <!-- LLM 配置（仅选中时渲染） -->
-      <a-form
-        v-if="activeKey === 'llm'"
-        :label-col="{ span: 5 }"
-        :wrapper-col="{ span: 16 }"
-        class="max-w-2xl"
-      >
+    <!-- ============ 区域一：Agent Proxy 配置 ============ -->
+    <a-card :bordered="false" title="Agent Proxy 配置" class="mb-4">
+      <a-form :label-col="{ span: 5 }" :wrapper-col="{ span: 16 }" class="max-w-2xl">
         <a
           href="https://sophnet.com/"
           target="_blank"
@@ -22,7 +11,9 @@
         >
           <div class="flex items-baseline gap-3">
             <span class="sophnet-promo-title">Sophnet</span>
-            <span class="sophnet-promo-text">专为开发者打造的 AI 工具平台，让 AI 集成变得简单高效</span>
+            <span class="sophnet-promo-text"
+              >专为开发者打造的 AI 工具平台，让 AI 集成变得简单高效</span
+            >
           </div>
         </a>
         <a-form-item label="API Base URL">
@@ -30,7 +21,7 @@
             v-model:value="form.llmApiBaseType"
             style="width: 100%"
             :options="apiBaseOptions"
-            @change="onApiBaseChange('llm', $event)"
+            @change="onApiBaseChange($event)"
           />
         </a-form-item>
         <a-form-item label="API Key">
@@ -42,67 +33,35 @@
         </a-form-item>
         <a-form-item label="默认模型名称">
           <a-input-group compact>
-            <a-input v-model:value="form.llmModel" style="width: 60%" placeholder="sophnet-deepseek" />
-            <a-button style="width: 20%" @click="openModelPicker('llm')">选择</a-button>
+            <a-input
+              v-model:value="form.llmModel"
+              style="width: 60%"
+              placeholder="sophnet-deepseek"
+            />
+            <a-button style="width: 20%" @click="openModelPicker">选择</a-button>
           </a-input-group>
         </a-form-item>
-        <a-form-item label="覆盖下游请求" tooltip="开启后，无论下游请求中的 model 是什么，转接上游时都强制使用上述默认模型名称；关闭时，仅当下游未指定 model 才使用默认模型名称。">
+        <a-form-item
+          label="覆盖下游请求"
+          tooltip="开启后，无论下游请求中的 model 是什么，转接上游时都强制使用上述默认模型名称；关闭时，仅当下游未指定 model 才使用默认模型名称。"
+        >
           <a-switch v-model:checked="form.llmOverrideModel" />
         </a-form-item>
-        <a-form-item label="启用">
-          <a-switch v-model:checked="form.llmEnabled" />
-        </a-form-item>
-      </a-form>
-
-      <!-- VLM 配置（仅选中时渲染） -->
-      <a-form
-        v-else-if="activeKey === 'vlm'"
-        :label-col="{ span: 5 }"
-        :wrapper-col="{ span: 16 }"
-        class="max-w-2xl"
-      >
-        <a
-          href="https://sophnet.com/"
-          target="_blank"
-          rel="noopener"
-          class="sophnet-promo my-5 block no-underline"
+        <a-form-item
+          label="启用"
+          tooltip="控制 Agent（Reasonix 服务）是否运行。开启后 Agent Proxy 服务启动，可对话；关闭后服务停止。"
         >
-          <div class="flex items-baseline gap-3">
-            <span class="sophnet-promo-title">Sophnet</span>
-            <span class="sophnet-promo-text">专为开发者打造的 AI 工具平台，让 AI 集成变得简单高效</span>
-          </div>
-        </a>
-        <a-form-item label="API Base URL">
-          <a-select
-            v-model:value="form.vlmApiBaseType"
-            style="width: 100%"
-            :options="apiBaseOptions"
-            @change="onApiBaseChange('vlm', $event)"
+          <a-switch
+            :checked="serviceEnabled"
+            :loading="svcActing"
+            :disabled="svcLoading"
+            @change="toggleAgentService"
           />
-        </a-form-item>
-        <a-form-item label="API Key">
-          <a-input-password
-            v-model:value="form.vlmApiKey"
-            :placeholder="form.vlmHasKey ? '已配置（留空保持不变）' : '请输入上游 API Key'"
-            autocomplete="new-password"
-          />
-        </a-form-item>
-        <a-form-item label="默认模型名称">
-          <a-input-group compact>
-            <a-input v-model:value="form.vlmModel" style="width: 60%" placeholder="sophnet-vl-flash" />
-            <a-button style="width: 20%" @click="openModelPicker('vlm')">选择</a-button>
-          </a-input-group>
-        </a-form-item>
-        <a-form-item label="覆盖下游请求" tooltip="开启后，无论下游请求中的 model 是什么，转接上游时都强制使用上述默认模型名称；关闭时，仅当下游未指定 model 才使用默认模型名称。">
-          <a-switch v-model:checked="form.vlmOverrideModel" />
-        </a-form-item>
-        <a-form-item label="启用">
-          <a-switch v-model:checked="form.vlmEnabled" />
         </a-form-item>
       </a-form>
 
       <!-- 保存 + 测试 -->
-      <div class="mt-4 flex items-center gap-2">
+      <div class="mt-4 ml-auto flex items-center gap-2">
         <a-button type="primary" :loading="saving" @click="handleSave">保存配置</a-button>
         <a-button :loading="testing" @click="handleTest">测试</a-button>
       </div>
@@ -123,67 +82,38 @@
           <div class="text-sm text-gray-600 break-all">{{ r.message }}</div>
         </div>
       </div>
+    </a-card>
 
-      <a-divider />
-
-
-      <!-- 服务监控与管理 -->
-      <div class="mt-4">
-        <div class="mb-2 flex items-center justify-between">
-          <span class="font-medium">服务管理（Reasonix）</span>
-          <a-space>
-            <a-button size="small" :loading="svcLoading" @click="refreshService">刷新</a-button>
-          </a-space>
-        </div>
-        <a-card v-if="svc" size="small" class="max-w-2xl">
-          <a-descriptions :column="2" size="small">
-            <a-descriptions-item label="运行状态">
-              <a-tag :color="svc.active ? 'green' : 'red'">
-                {{ svc.active ? '运行中' : '已停止' }}
-              </a-tag>
-            </a-descriptions-item>
-            <a-descriptions-item label="Agent Proxy 启用">
-              <a-tag :color="svc.enabledState === 'enabled' ? 'green' : 'orange'">
-                {{ svc.enabledState === 'enabled' ? '已启用' : '未启用' }}
-              </a-tag>
-            </a-descriptions-item>
-            <a-descriptions-item label="状态">
-              {{ svc.activeState || '—' }} / {{ svc.subState || '—' }}
-            </a-descriptions-item>
-            <a-descriptions-item label="PID">{{ svc.mainPid || '—' }}</a-descriptions-item>
-            <a-descriptions-item label="端口">{{ svc.ports.join(', ') }}</a-descriptions-item>
-            <a-descriptions-item label="端口可达">
-              <a-tag :color="svc.running ? 'green' : 'red'">
-                {{ svc.running ? '是' : '否' }}
-              </a-tag>
-            </a-descriptions-item>
-          </a-descriptions>
-          <div class="mt-3">
-            <a-space>
-              <a-button size="small" type="primary" :loading="svcActing" @click="doServiceAction('restart')">重启</a-button>
-              <a-button size="small" :loading="svcActing" @click="doServiceAction('start')">启动</a-button>
-              <a-button size="small" danger :loading="svcActing" @click="doServiceAction('stop')">停止</a-button>
-            </a-space>
-            <div class="text-gray-400 text-xs mt-1">
-              Reasonix 由 bmssm（agentproxy）托管，启停无需配置自启；启用与否取决于 bmssm 配置 agentproxy.enabled。
-            </div>
+    <!-- ============ 区域二：Agent 服务管理 ============ -->
+    <a-card :bordered="false" title="Agent 服务管理">
+      <div class="max-w-2xl">
+        <div class="flex items-center justify-between py-2">
+          <div class="flex items-center gap-3">
+            <span class="text-gray-600">服务开关</span>
+            <a-switch
+              :checked="serviceEnabled"
+              :loading="svcActing"
+              :disabled="svcLoading"
+              @change="toggleAgentService"
+            />
           </div>
-          <a-collapse class="mt-2" :bordered="false">
-            <a-collapse-panel key="log" header="最近日志">
-              <pre class="max-h-48 overflow-auto whitespace-pre-wrap text-xs text-gray-600">{{ svc.logTail || '暂无日志' }}</pre>
-            </a-collapse-panel>
-          </a-collapse>
-        </a-card>
-        <a-card v-else size="small" class="max-w-2xl">
-          <a-empty description="未获取到服务状态（bmssm 不可达或 agentproxy 未初始化）" />
-        </a-card>
+          <div class="text-sm text-gray-500">
+            <a-tag :color="serviceEnabled ? 'green' : 'red'">
+              {{ serviceEnabled ? '运行中' : '已停止' }}
+            </a-tag>
+            <span v-if="svc && svc.sessionCount" class="ml-2"> 会话 {{ svc.sessionCount }} </span>
+          </div>
+        </div>
+        <p class="mt-3 text-xs text-gray-400">
+          控制 Agent（Reasonix）服务的运行状态：关闭后对话不可用，开启后可恢复对话。
+        </p>
       </div>
     </a-card>
 
     <!-- 模型选择弹窗 -->
     <a-modal
       v-model:open="picker.visible"
-      :title="`选择 ${picker.kind === 'llm' ? 'LLM' : 'VLM'} 模型`"
+      title="选择模型"
       @ok="applyPickedModel"
       :ok-button-props="{ disabled: !picker.selected }"
     >
@@ -210,23 +140,17 @@
 
 <script lang="ts" setup>
   // @ts-nocheck
-  import { reactive, ref, onMounted } from 'vue';
+  import { reactive, ref, computed, onMounted } from 'vue';
   import {
     Card,
-    Radio,
     Form,
     Input,
     Button,
-    Space,
     Switch,
-    Divider,
     Alert,
     Modal,
     Select,
     Tag,
-    Descriptions,
-    Collapse,
-    Empty,
     message,
   } from 'ant-design-vue';
   import {
@@ -236,14 +160,11 @@
     testAgentConfig,
     getServiceStatus,
     serviceAction,
-    type AgentConfig,
     type TestResult,
     type ServiceStatus,
   } from '/@/api/aiAgent';
 
   const ACard = Card;
-  const ARadioGroup = Radio.Group;
-  const ARadioButton = Radio.Button;
   const AForm = Form;
   const AFormItem = Form.Item;
   const AInput = Input;
@@ -251,29 +172,22 @@
   const AInputGroup = Input.Group;
   const AInputSearch = Input.Search;
   const AButton = Button;
-  const ASpace = Space;
   const ASwitch = Switch;
-  const ADivider = Divider;
   const AAlert = Alert;
   const AModal = Modal;
   const ASelect = Select;
   const ATag = Tag;
-  const ADescriptions = Descriptions;
-  const ADescriptionsItem = Descriptions.Item;
-  const ACollapse = Collapse;
-  const ACollapsePanel = Collapse.Panel;
-  const AEmpty = Empty;
 
-  const activeKey = ref('llm');
   const saving = ref(false);
   const testing = ref(false);
   const testResults = ref<TestResult[]>([]);
   const testAllOK = ref(true);
 
-  // Reasonix（agentproxy）服务监控与管理
+  // ---- Agent 服务（启用开关 / 服务管理开关共用） ----
   const svc = ref<ServiceStatus | null>(null);
   const svcLoading = ref(false);
   const svcActing = ref(false);
+  const serviceEnabled = computed(() => !!svc.value?.active);
 
   async function refreshService() {
     svcLoading.value = true;
@@ -284,13 +198,14 @@
     }
   }
 
-  async function doServiceAction(action: string) {
+  // 启用开关 / 服务管理开关：统一驱动 Reasonix 服务启停
+  async function toggleAgentService(checked: boolean) {
     if (svcActing.value) return;
     svcActing.value = true;
     try {
-      const res = await serviceAction(action);
+      const res = await serviceAction(checked ? 'start' : 'stop');
       if (res.ok) {
-        message.success(`操作成功：${action}`);
+        message.success(checked ? 'Agent 服务已启用' : 'Agent 服务已停止');
       } else {
         message.error(res.message || '操作失败');
       }
@@ -320,13 +235,6 @@
     llmEnabled: true,
     llmOverrideModel: false,
     llmHasKey: false,
-    vlmApiBase: '',
-    vlmApiBaseType: 'sophnet',
-    vlmApiKey: '',
-    vlmModel: '',
-    vlmEnabled: true,
-    vlmOverrideModel: false,
-    vlmHasKey: false,
   });
 
   // 根据已存 apiBase 推断类型（匹配预设则对应类型，否则兜底 sophnet）
@@ -340,18 +248,12 @@
   }
 
   // 下拉切换：自动填充对应 URL（sophnet 固定，不允许自定义）
-  function onApiBaseChange(kind: 'llm' | 'vlm', type: string) {
-    const url = apiBaseByType[type] || SOPHNET_API_BASE;
-    if (kind === 'llm') {
-      form.llmApiBase = url;
-    } else {
-      form.vlmApiBase = url;
-    }
+  function onApiBaseChange(type: string) {
+    form.llmApiBase = apiBaseByType[type] || SOPHNET_API_BASE;
   }
 
   const picker = reactive({
     visible: false,
-    kind: 'llm' as 'llm' | 'vlm',
     options: [] as { label: string; value: string }[],
     selected: undefined as string | undefined,
     custom: '',
@@ -359,7 +261,7 @@
   });
 
   async function init() {
-    const cfg: AgentConfig | null = await getAgentConfig();
+    const cfg = await getAgentConfig();
     if (cfg) {
       form.llmApiBase = cfg.llmApiBase || SOPHNET_API_BASE;
       form.llmApiBaseType = inferApiBaseType(cfg.llmApiBase || '');
@@ -367,18 +269,12 @@
       form.llmEnabled = cfg.llmEnabled !== false;
       form.llmOverrideModel = !!cfg.llmOverrideModel;
       form.llmHasKey = !!cfg.llmHasKey;
-      form.vlmApiBase = cfg.vlmApiBase || SOPHNET_API_BASE;
-      form.vlmApiBaseType = inferApiBaseType(cfg.vlmApiBase || '');
-      form.vlmModel = cfg.vlmModel || '';
-      form.vlmEnabled = cfg.vlmEnabled !== false;
-      form.vlmOverrideModel = !!cfg.vlmOverrideModel;
-      form.vlmHasKey = !!cfg.vlmHasKey;
     }
   }
 
   async function handleSave() {
-    if (!form.llmApiBase.trim() && !form.vlmApiBase.trim()) {
-      message.warning('LLM 或 VLM 至少配置一个 API Base URL');
+    if (!form.llmApiBase.trim()) {
+      message.warning('请配置 API Base URL');
       return;
     }
     saving.value = true;
@@ -388,19 +284,12 @@
       llmModel: form.llmModel.trim() || 'sophnet-deepseek',
       llmEnabled: form.llmEnabled,
       llmOverrideModel: form.llmOverrideModel,
-      vlmApiBase: form.vlmApiBase.trim(),
-      vlmApiKey: form.vlmApiKey,
-      vlmModel: form.vlmModel.trim() || 'sophnet-vl-flash',
-      vlmEnabled: form.vlmEnabled,
-      vlmOverrideModel: form.vlmOverrideModel,
     });
     saving.value = false;
     if (res.ok) {
       message.success('配置已保存，转发服务已生效');
       form.llmApiKey = '';
-      form.vlmApiKey = '';
       form.llmHasKey = true;
-      form.vlmHasKey = true;
     } else {
       message.error(res.message || '保存失败');
     }
@@ -416,15 +305,12 @@
       testAllOK.value = !!res.data.allOk;
     } else {
       testAllOK.value = false;
-      testResults.value = [
-        { name: '测试', ok: false, message: res.message || '测试请求失败' },
-      ];
+      testResults.value = [{ name: '测试', ok: false, message: res.message || '测试请求失败' }];
     }
   }
 
   // --- 模型选择弹窗 ---
-  function openModelPicker(kind: 'llm' | 'vlm') {
-    picker.kind = kind;
+  function openModelPicker() {
     picker.selected = undefined;
     picker.custom = '';
     picker.options = [];
@@ -434,7 +320,7 @@
   async function loadModels(open: boolean) {
     if (!open || picker.options.length) return;
     picker.loading = true;
-    const ids = await getProviderModels(picker.kind);
+    const ids = await getProviderModels();
     picker.options = ids.map((id) => ({ label: id, value: id }));
     picker.loading = false;
   }
@@ -452,11 +338,7 @@
   }
 
   function applyModel(name: string) {
-    if (picker.kind === 'llm') {
-      form.llmModel = name;
-    } else {
-      form.vlmModel = name;
-    }
+    form.llmModel = name;
     picker.visible = false;
     message.success(`已选择模型 ${name}`);
   }
@@ -469,7 +351,7 @@
 
 <style lang="less" scoped>
   .sophnet-promo {
-    // 横幅与上下元素之间留白（my-5 已设 margin，这里定义内边距与视觉）
+    // 横幅与上下元素之间留白
     padding: 14px 20px;
     border-radius: 10px;
     border: 1px solid #d6e4ff;

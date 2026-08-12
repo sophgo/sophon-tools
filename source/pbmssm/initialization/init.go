@@ -100,7 +100,7 @@ func InitBase() {
 	// Reasonix ACP 适配器（agentproxy）：进程管理 + ACP 客户端 + 会话管理。
 	// S2 只装配核心链路；WS 端点/协议适配在 S3 接入。
 	agentproxy.Migrate(database.DB())
-	agentproxy.Start(agentproxy.LoadConfig(), database.DB())
+	agentproxy.Start(agentproxy.LoadConfig(database.DB()), database.DB())
 }
 
 // createDefaultAdmin 在 user 表为空时插入默认 admin 用户。

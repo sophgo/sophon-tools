@@ -6,4 +6,5 @@ import (
 
 func init() {
 	database.RegisterModel(&WebchatSession{})
+	database.RegisterModel(&ConfigRecord{})
 }

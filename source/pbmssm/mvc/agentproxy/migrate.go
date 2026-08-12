@@ -37,4 +37,6 @@ func Migrate(db *gorm.DB) {
 			}
 		}
 	}
+	// 持久化 enabled 状态表（「启用」/服务管理开关）
+	MigrateConfig(db)
 }

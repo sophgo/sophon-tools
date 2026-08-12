@@ -152,6 +152,30 @@ func (m *Module) Process() *ProcessManager {
 	return m.pm
 }
 
+// SetEnabled 持久化并应用 enabled 状态：
+//   - true：启动 Reasonix 进程（若未运行）
+//   - false：停止 Reasonix 进程（手动停止，supervise 不再自愈）；WS 端点仍可连接，
+//     但发送会返回「reasonix 未就绪」错误帧。
+// 供「启用」/服务管理开关调用。返回错误时进程状态可能未变更。
+func (m *Module) SetEnabled(enabled bool) error {
+	m.mu.Lock()
+	m.cfg.Enabled = enabled
+	m.mu.Unlock()
+	if _, err := persistEnabled(m.db, enabled); err != nil {
+		return err
+	}
+	if enabled {
+		if err := m.pm.Start(); err != nil {
+			return err
+		}
+		// 进程可能因手动停止处于 stopped；Start 会拉起。无需额外处理。
+		return nil
+	}
+	// 禁用：停止进程，保持停止（runRequested=false → supervise 不再重启）
+	m.pm.Stop()
+	return nil
+}
+
 // AddEventListener 注册流式事件监听者，返回可注销的句柄。
 // S3 Hub 启动时调用；多个监听者广播分发。
 func (m *Module) AddEventListener(fn func(*ACPSessionUpdate)) (remove func()) {

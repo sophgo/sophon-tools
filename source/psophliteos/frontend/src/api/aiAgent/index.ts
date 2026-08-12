@@ -1,16 +1,15 @@
 import { defHttp } from '/@/utils/http/axios';
 
 // Agent 配置相关接口。
-// - LLM/VLM 配置 + 转发 key 管理：走 bmssm /api/v1/llm-proxy/*（经 sophliteos 反代）
-// - 端口探测/转发：sophliteos 本地端点 /api/device/ai-agent/*
+// - LLM 配置 + 转发 key 管理：走 bmssm /api/v1/llm-proxy/*（经 sophliteos 反代）
+// - Service 状态/启停：bmssm agentproxy 托管 Reasonix（/api/v1/llm-proxy/service/*）
 // defHttp 自动加 /api 前缀。
 enum Api {
   LlmProxyConfig = '/v1/llm-proxy/config',
   LlmProxyModels = '/v1/llm-proxy/models',
-  ForwardKeyReset = '/v1/llm-proxy/forward-key/reset',
-  ForwardKeyWrite = '/v1/llm-proxy/forward-key/write-picoclaw',
   LlmProxyTest = '/v1/llm-proxy/test',
-  Port = '/device/ai-agent/port',
+  ServiceStatus = '/v1/llm-proxy/service/status',
+  ServiceAction = '/v1/llm-proxy/service/action',
 }
 
 export interface TestResult {
@@ -30,13 +29,7 @@ export interface AgentConfig {
   llmEnabled: boolean;
   llmOverrideModel: boolean;
   llmHasKey: boolean;
-  vlmApiBase: string;
-  vlmModel: string;
-  vlmEnabled: boolean;
-  vlmOverrideModel: boolean;
-  vlmHasKey: boolean;
-  forwardKey: string;
-  forwardKeyReady: boolean;
+  forwardKey?: string;
   updatedAt?: string;
 }
 
@@ -45,7 +38,7 @@ export async function getAgentConfig(): Promise<AgentConfig | null> {
   try {
     const res = await defHttp.get<AgentConfig>(
       { url: Api.LlmProxyConfig },
-      { isTransformResponse: false }
+      { isTransformResponse: false },
     );
     const data = (res as any)?.result ?? res;
     return data && typeof data === 'object' && 'llmApiBase' in data ? (data as AgentConfig) : null;
@@ -54,23 +47,18 @@ export async function getAgentConfig(): Promise<AgentConfig | null> {
   }
 }
 
-// 保存 LLM/VLM 配置（key 为空表示不修改）。
+// 保存 LLM 配置（key 为空表示不修改）。
 export async function saveAgentConfig(cfg: {
   llmApiBase: string;
   llmApiKey: string;
   llmModel: string;
   llmEnabled: boolean;
   llmOverrideModel: boolean;
-  vlmApiBase: string;
-  vlmApiKey: string;
-  vlmModel: string;
-  vlmEnabled: boolean;
-  vlmOverrideModel: boolean;
 }): Promise<{ ok: boolean; message?: string }> {
   try {
     const res = await defHttp.put(
       { url: Api.LlmProxyConfig, data: cfg },
-      { isTransformResponse: false }
+      { isTransformResponse: false },
     );
     const data = (res as any)?.result ?? res;
     if (data && typeof data === 'object' && 'llmApiBase' in data) {
@@ -82,12 +70,12 @@ export async function saveAgentConfig(cfg: {
   }
 }
 
-// 从供应商拉取模型列表（kind=llm|vlm）。
-export async function getProviderModels(kind: 'llm' | 'vlm'): Promise<string[]> {
+// 从供应商拉取模型列表（LLM）。
+export async function getProviderModels(): Promise<string[]> {
   try {
     const res = await defHttp.get<{ models: { id: string }[] }>(
-      { url: Api.LlmProxyModels, params: { kind } },
-      { isTransformResponse: false }
+      { url: Api.LlmProxyModels, params: { kind: 'llm' } },
+      { isTransformResponse: false },
     );
     const data = (res as any)?.result ?? res;
     const list = data?.models;
@@ -97,63 +85,16 @@ export async function getProviderModels(kind: 'llm' | 'vlm'): Promise<string[]> 
   }
 }
 
-// 重置转发 key。
-export async function resetForwardKey(): Promise<{ ok: boolean; key?: string; message?: string }> {
-  try {
-    const res = await defHttp.post(
-      { url: Api.ForwardKeyReset },
-      { isTransformResponse: false }
-    );
-    const data = (res as any)?.result ?? res;
-    if (data && typeof data === 'object' && data.forwardKey) {
-      return { ok: true, key: data.forwardKey };
-    }
-    return { ok: false, message: (res as any)?.error_message || '重置失败' };
-  } catch (e: any) {
-    return { ok: false, message: e?.message || '重置失败' };
-  }
-}
-
-// 写入本地 picoclaw。
-export async function writeForwardKeyToPicoclaw(): Promise<{ ok: boolean; message?: string }> {
-  try {
-    const res = await defHttp.post(
-      { url: Api.ForwardKeyWrite },
-      { isTransformResponse: false }
-    );
-    const data = (res as any)?.result ?? res;
-    if (data && typeof data === 'object' && data.ok) {
-      return { ok: true };
-    }
-    return { ok: false, message: (res as any)?.error_message || '写入失败' };
-  } catch (e: any) {
-    return { ok: false, message: e?.message || '写入失败' };
-  }
-}
-
-// 探测 picoclaw web 端口（本地端点）。
-export async function detectPicoclawPort(): Promise<number | null> {
-  try {
-    const res = await defHttp.get<{ port: number }>(
-      { url: Api.Port },
-      { isTransformResponse: false }
-    );
-    const data = (res as any)?.result ?? res;
-    if (data && typeof data === 'object' && typeof data.port === 'number') {
-      return data.port;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
 // 一键测试：带图分发 + LLM 推理。
-export async function testAgentConfig(): Promise<{ ok: boolean; data?: TestResponse; message?: string }> {
+export async function testAgentConfig(): Promise<{
+  ok: boolean;
+  data?: TestResponse;
+  message?: string;
+}> {
   try {
     const res = await defHttp.post<TestResponse>(
       { url: Api.LlmProxyTest },
-      { isTransformResponse: false }
+      { isTransformResponse: false },
     );
     const data = (res as any)?.result ?? res;
     if (data && typeof data === 'object' && 'allOk' in data) {
@@ -167,26 +108,21 @@ export async function testAgentConfig(): Promise<{ ok: boolean; data?: TestRespo
 
 export interface ServiceStatus {
   active: boolean;
-  activeState: string;
-  subState: string;
-  enabledState: string;
-  mainPid: string;
-  ports: number[];
   running: boolean;
-  logTail: string;
+  healthy?: boolean;
+  enabledState?: string;
+  sessionCount?: number;
 }
 
 // 查询 Reasonix（agentproxy 托管）服务状态。
 export async function getServiceStatus(): Promise<ServiceStatus | null> {
   try {
     const res = await defHttp.get<ServiceStatus>(
-      { url: '/v1/llm-proxy/service/status' },
-      { isTransformResponse: false }
+      { url: Api.ServiceStatus },
+      { isTransformResponse: false },
     );
     const data = (res as any)?.result ?? res;
-    return data && typeof data === 'object' && 'activeState' in data
-      ? (data as ServiceStatus)
-      : null;
+    return data && typeof data === 'object' && 'active' in data ? (data as ServiceStatus) : null;
   } catch {
     return null;
   }
@@ -196,8 +132,8 @@ export async function getServiceStatus(): Promise<ServiceStatus | null> {
 export async function serviceAction(action: string): Promise<{ ok: boolean; message?: string }> {
   try {
     const res = await defHttp.post(
-      { url: '/v1/llm-proxy/service/action', data: { action } },
-      { isTransformResponse: false }
+      { url: Api.ServiceAction, data: { action } },
+      { isTransformResponse: false },
     );
     const data = (res as any)?.result ?? res;
     if (data && typeof data === 'object' && data.message) {
@@ -208,5 +144,3 @@ export async function serviceAction(action: string): Promise<{ ok: boolean; mess
     return { ok: false, message: e?.message || '操作失败' };
   }
 }
-
-export { Api as AgentConfigApi };

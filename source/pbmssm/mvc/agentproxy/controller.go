@@ -110,17 +110,18 @@ func (c *Controller) action(action string) error {
 	if mod == nil {
 		return errModuleNotStarted
 	}
-	pm := mod.Process()
-	if pm == nil {
-		return errModuleNotStarted
-	}
 	switch action {
 	case "start":
-		return pm.Start()
+		// 持久化 enabled=true 并启动进程（跨 bmssm 重启保持）
+		return mod.SetEnabled(true)
 	case "stop":
-		pm.Stop()
-		return nil
+		// 持久化 enabled=false 并停止进程（supervise 不再自愈重启）
+		return mod.SetEnabled(false)
 	case "restart":
+		pm := mod.Process()
+		if pm == nil {
+			return errModuleNotStarted
+		}
 		pm.Restart()
 		return nil
 	case "enable":

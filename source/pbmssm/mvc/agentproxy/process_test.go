@@ -129,6 +129,58 @@ func TestProcessKillRestart(t *testing.T) {
 	}
 }
 
+// TestProcessManualStopStaysStopped 回归：手动 Stop 后 supervise 不应自动重启。
+// 先前 Stop() 只停进程不置标志，supervise 检测退出后按崩溃退避重启，
+// 导致「无法停止 Reasonix」。修复后 Stop() 置 runRequested=false，进程保持停止，
+// 之后 Start() 可再次拉起。
+func TestProcessManualStopStaysStopped(t *testing.T) {
+	path := mockReasonixPath(t, promptHandler())
+	dir := t.TempDir()
+
+	started := make(chan struct{}, 8)
+	pm := NewProcessManager(Config{BinaryPath: path, WorkDir: dir}, func() {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+	})
+	if err := pm.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer pm.GracefulStop()
+
+	waitFor(t, 3*time.Second, "first ready", func() bool {
+		return len(started) > 0
+	})
+	if !pm.Alive() {
+		t.Fatal("process should be alive after start")
+	}
+
+	// 手动停止：进程退出且保持停止（不被 supervise 拉回）
+	pm.Stop()
+	if pm.Alive() {
+		t.Fatal("process should be stopped after manual Stop")
+	}
+	// 给 supervise 足够退避时间，确认不会自动重启（若重启，Alive 会变 true）
+	time.Sleep(1200 * time.Millisecond)
+	if pm.Alive() {
+		t.Fatal("process should remain stopped after Stop (supervise must not restart)")
+	}
+	// RunRequested 应反映停止意图
+	if pm.RunRequested() {
+		t.Fatal("RunRequested should be false after manual Stop")
+	}
+
+	// 再次 Start：进程应能重新拉起（Stop 是可逆的，非终态）
+	if err := pm.Start(); err != nil {
+		t.Fatalf("re-start after Stop: %v", err)
+	}
+	waitFor(t, 3*time.Second, "restart after Stop", pm.Alive)
+	if !pm.Alive() {
+		t.Fatal("process should be alive after Start following Stop")
+	}
+}
+
 // TestProcessGracefulStop 验证优雅关闭：stopProc 后进程退出、状态 stopped。
 func TestProcessGracefulStop(t *testing.T) {
 	path := mockReasonixPath(t, promptHandler())

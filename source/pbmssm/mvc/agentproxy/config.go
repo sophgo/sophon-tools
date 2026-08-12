@@ -5,19 +5,21 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jinzhu/gorm"
+
 	"bmssm/config"
 )
 
-// LoadConfig 读取 agentproxy 配置：sqlite 优先，viper 兜底。
-// 本任务（S2）暂不落库：直接读 viper（bmssm.yaml agentproxy 段）+ 默认值。
-// S3 起由 controller.go 提供 REST 保存（sqlite 单例），本函数保持兼容。
-func LoadConfig() Config {
+// LoadConfig 读取 agentproxy 配置：sqlite 持久化的 enabled 优先，viper 兜底。
+// 其余字段目前仍由 viper（bmssm.yaml agentproxy 段）+ 默认值提供。
+// db 可为 nil（DB 未就绪的非致命降级，仅用 viper）。
+func LoadConfig(db *gorm.DB) Config {
 	conf := &config.Conf
 	conf.RLock()
 	defer conf.RUnlock()
 	v := conf.GetViper()
 
-	return Config{
+	cfg := Config{
 		Enabled:    v.GetBool("agentproxy.enabled"),
 		ListenIP:   v.GetString("agentproxy.listenIP"),
 		Port:       v.GetInt("agentproxy.port"),
@@ -26,6 +28,11 @@ func LoadConfig() Config {
 		Model:      v.GetString("agentproxy.model"),
 		RestartBackoffMax: v.GetString("agentproxy.restartBackoffMax"),
 	}
+	// 若已通过「启用」开关持久化过状态，以持久化值为准（兼容 viper 未配置 enabled 的情形）。
+	if persisted, ok := loadConfigEnabled(db); ok {
+		cfg.Enabled = persisted
+	}
+	return cfg
 }
 
 // DefaultConfig 返回默认配置。
