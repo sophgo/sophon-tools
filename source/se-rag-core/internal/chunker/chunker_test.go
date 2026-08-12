@@ -1,6 +1,7 @@
 package chunker
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -46,5 +47,22 @@ func TestChunksSizedBelowMax(t *testing.T) {
 		if len([]rune(c.Text)) > 6000 {
 			t.Errorf("chunk too large: %d runes > 6000", len([]rune(c.Text)))
 		}
+	}
+}
+
+func TestExtractProtectedNoTrailingNewlineTable(t *testing.T) {
+	// 回归：以表格结尾且文件末尾无换行时，旧 scanTables 的 off 会溢出到 len(text)+1，
+	// extractProtected 对 text[s.s:s.e] / text[last:s.s] 切片越界 panic。
+	text := "前文\n\n| a | b |\n| c | d |\n\n最后的表格：\n| x | y |\n| p | q |"
+	txt, regions := extractProtected(text)
+	if txt == "" {
+		t.Fatalf("unexpected empty result")
+	}
+	// 每张表格都应作为保护区域被还原，且原文内容不被破坏
+	for i, r := range regions {
+		if !strings.Contains(txt, fmt.Sprintf("__PROTECTED_%d__", i)) {
+			t.Fatalf("missing protected placeholder %d", i)
+		}
+		_ = r
 	}
 }

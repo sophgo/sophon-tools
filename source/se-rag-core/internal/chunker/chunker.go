@@ -262,15 +262,33 @@ func extractProtected(text string) (string, []region) {
 	segs = scanTables(text, segs)
 	sort.SliceStable(segs, func(i, j int) bool { return segs[i].s < segs[j].s })
 
+	clamp := func(lo, hi, n int) (int, int) {
+		if lo < 0 {
+			lo = 0
+		}
+		if lo > n {
+			lo = n
+		}
+		if hi < lo {
+			hi = lo
+		}
+		if hi > n {
+			hi = n
+		}
+		return lo, hi
+	}
+
 	var regions []region
 	var sb strings.Builder
 	last := 0
 	for i, s := range segs {
-		if s.s >= last {
-			sb.WriteString(text[last:s.s])
+		lo, hi := clamp(s.s, s.e, len(text))
+		// 仅保留非空、且不重叠在已处理区域之后的片段（防御越界于 len(text)）。
+		if hi > lo && lo >= last {
+			sb.WriteString(text[last:lo])
 			sb.WriteString(fmt.Sprintf("__PROTECTED_%d__", i))
-			regions = append(regions, region{s.s, s.e, text[s.s:s.e], s.kind})
-			last = s.e
+			regions = append(regions, region{lo, hi, text[lo:hi], s.kind})
+			last = hi
 		}
 	}
 	sb.WriteString(text[last:])
@@ -299,6 +317,7 @@ func scanCodeBlock(text string, in []seg) []seg {
 func scanTables(text string, in []seg) []seg {
 	out := in
 	lines := strings.Split(text, "\n")
+	n := len(text)
 	off := 0
 	i := 0
 	for i < len(lines) {
@@ -307,7 +326,11 @@ func scanTables(text string, in []seg) []seg {
 			st := off
 			j := i
 			for j < len(lines) && tableRow(lines[j]) {
+				// +1 对应换行符；最后一行无换行时 off 不应超过 len(text)
 				off += len(lines[j]) + 1
+				if off > n {
+					off = n
+				}
 				j++
 			}
 			out = append(out, seg{st, off, "table"})
@@ -315,6 +338,9 @@ func scanTables(text string, in []seg) []seg {
 			continue
 		}
 		off += len(line) + 1
+		if off > n {
+			off = n
+		}
 		i++
 	}
 	return out
