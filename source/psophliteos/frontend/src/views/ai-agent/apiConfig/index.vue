@@ -87,7 +87,6 @@
             <a-tag :color="serviceEnabled ? 'green' : 'red'">
               {{ serviceEnabled ? '运行中' : '已停止' }}
             </a-tag>
-            <span v-if="svc && svc.sessionCount" class="ml-2"> 会话 {{ svc.sessionCount }} </span>
           </div>
         </div>
         <p class="mt-3 text-xs text-gray-400">
