@@ -35,25 +35,13 @@ type sfEmbedResp struct {
 }
 
 func (e *siliconflowEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
-	var out [][]float32
-	run := func() error {
-		r, err := e.embedBatch(ctx, texts)
-		if err != nil {
-			return err
-		}
-		out = r
-		return nil
-	}
 	if e.limiter != nil {
-		if err := e.limiter.Do(ctx, len(texts), run); err != nil {
-			return nil, err
-		}
-	} else {
-		if err := run(); err != nil {
-			return nil, err
-		}
+		// 内置 key：把 texts 拆成 ≤3 一段的子批逐批调用，真正限制单次载荷≤3 段落
+		return e.limiter.Embed(ctx, texts, func(batch []string) ([][]float32, error) {
+			return e.embedBatch(ctx, batch)
+		})
 	}
-	return out, nil
+	return e.embedBatch(ctx, texts)
 }
 
 func (e *siliconflowEmbedder) embedBatch(ctx context.Context, texts []string) ([][]float32, error) {

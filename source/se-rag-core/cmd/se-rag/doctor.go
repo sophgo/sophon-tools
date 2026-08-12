@@ -30,7 +30,7 @@ func runDoctor(rc runCtx) (needRebuild bool, err error) {
 
 	if err := retriever.CheckFingerprint(meta.Dim, wantDim); err != nil {
 		fmt.Printf("WARNING: %v\n", err)
-		fmt.Printf("  -> run: se-rag build -product %s --docs-dir <docs> -index-dir %s --force\n",
+		fmt.Printf("  -> 重新建索引: se-rag build -product %s --docs-dir <docs> -index-dir %s\n",
 			rc.product, rc.indexDir)
 		return true, nil
 	}

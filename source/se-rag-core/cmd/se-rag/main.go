@@ -32,7 +32,7 @@ func printUsage() {
 	fmt.Println("Usage: se-rag <build|query|doctor> [flags]")
 	fmt.Println()
 	fmt.Println("Commands:")
-	fmt.Println("  build  -product <name> --docs-dir <dir> -index-dir <dir> [--force]")
+	fmt.Println("  build  -product <name> --docs-dir <dir> -index-dir <dir>")
 	fmt.Println("  query  -product <name> -index-dir <dir> [-top-n N] \"question\"")
 	fmt.Println("  doctor -product <name> -index-dir <dir>")
 	fmt.Println()
@@ -63,7 +63,6 @@ func dispatch(args []string) int {
 		fs.StringVar(&rc.product, "product", "se7", "product name")
 		fs.StringVar(&rc.docsDir, "docs-dir", "", "docs dir (default <cwd>/docs/<product>)")
 		fs.StringVar(&rc.indexDir, "index-dir", defaultIndexDir(), "index dir")
-		fs.BoolVar(&rc.force, "force", false, "force rebuild")
 		fs.BoolVar(&rc.useBuiltin, "builtin-key", true, "use builtin key (limits concurrency)")
 		fs.Parse(rest)
 		if rc.docsDir == "" {

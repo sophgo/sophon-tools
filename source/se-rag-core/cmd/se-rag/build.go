@@ -15,13 +15,13 @@ import (
 )
 
 // runCtx 供 build/query/doctor 共享的参数 + 可注入的 provider 工厂（测试/离线 fake）。
+// build 始终依据 docs 全量重建索引（docs 是唯一真源），无需 force 开关。
 type runCtx struct {
 	docsDir    string
 	indexDir   string
 	product    string
 	topN       int
 	query      string
-	force      bool
 	useBuiltin bool
 	embedF     func(config.Provider) (embed.Embedder, error)
 	rerankF    func(config.Provider) (embed.Reranker, error)

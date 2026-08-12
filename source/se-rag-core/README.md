@@ -63,11 +63,13 @@ bash release.sh arm64 1.0.0      # 仅 arm64
 
 ```bash
 # 真实 embedding（内置 siliconflow key，带限流）
-./bin/se-rag build -product se7 --docs-dir example/se7/docs -index-dir ./rag-data --force
+./bin/se-rag build -product se7 --docs-dir example/se7/docs -index-dir ./rag-data
 
 # 离线假 embedding（无网络验证全链路，SE_RAG_FAKE_EMBED 内部开关）
-SE_RAG_FAKE_EMBED=1 ./bin/se-rag build -product se7 --docs-dir example/se7/docs -index-dir ./rag-data --force
+SE_RAG_FAKE_EMBED=1 ./bin/se-rag build -product se7 --docs-dir example/se7/docs -index-dir ./rag-data
 ```
+
+> `build` 始终根据 docs **全量重建**索引（docs 是唯一真源）。切换供应商/模型后会带上新指纹重建，无需显式 force。
 
 ### 2. 查询
 
@@ -96,13 +98,17 @@ SE_RAG_FAKE_EMBED=1 ./bin/se-rag build -product se7 --docs-dir example/se7/docs 
 ```bash
 export SE_RAG_EMBED_KEY="sk-user-embedding-key"
 export SE_RAG_RERANK_KEY="sk-user-rerank-key"
-./bin/se-rag build -product se7 --docs-dir example/se7/docs -index-dir ./rag-data --force -builtin-key=false
+./bin/se-rag build -product se7 --docs-dir example/se7/docs -index-dir ./rag-data -builtin-key=false
 ./bin/se-rag query -product se7 -index-dir ./rag-data "问题" -builtin-key=false
 ```
 
 - 内置 key 启用的限流：并发 ≤ 2、单次 ≤ 3 段落
 - 用户自备 key（`-builtin-key=false`）：放开限流
-- 供应商切换（siliconflow ↔ sophnet）后，`build --force` 会用新指纹重建索引；用 `doctor` 校验
+- 供应商切换（siliconflow ↔ sophnet）后，重建会用新指纹覆盖旧索引；用 `doctor` 校验
+
+> **关于内置 key**：源码内置的 siliconflow key 是免费额度、用于默认开箱即用的 throwaway key（限流，避免滥用）。
+> 生产/共享部署应通过 `SE_RAG_EMBED_KEY` / `SE_RAG_RERANK_KEY` 环境变量注入自备 key（也即放开限流），
+> 切勿在公共镜像或日志中泄露内置 key。
 
 ## 多产品扩展
 
@@ -111,7 +117,7 @@ export SE_RAG_RERANK_KEY="sk-user-rerank-key"
 ```bash
 mkdir -p docs/se8
 # 放入 se8 产品手册 / SDK 文档
-./bin/se-rag build -product se8 --docs-dir docs/se8 -index-dir ./rag-data --force
+./bin/se-rag build -product se8 --docs-dir docs/se8 -index-dir ./rag-data
 ./bin/se-rag query -product se8 -index-dir ./rag-data "se8 问题" -top-n 8
 ./bin/se-rag doctor -product se8 -index-dir ./rag-data
 ```

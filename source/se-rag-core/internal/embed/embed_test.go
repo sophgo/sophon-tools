@@ -3,22 +3,72 @@ package embed
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 )
 
-// 限流：单次最多3段的拆分（7 → 3+3+1 = 3 批）
+// 限流：8 段文本 → 拆成 3+3+2 三批，第二批起每批载荷 ≤3
 func TestLimiterSplitsBatchesOfThree(t *testing.T) {
 	l := NewEmbeddingLimiter(2)
-	var calls atomic.Int64
-	err := l.Do(context.Background(), 7, func() error { calls.Add(1); return nil })
+	var sizes []int
+	_, err := l.Embed(context.Background(), []string{"a", "b", "c", "d", "e", "f", "g", "h"},
+		func(batch []string) ([][]float32, error) {
+			sizes = append(sizes, len(batch))
+			out := make([][]float32, len(batch))
+			for i := range batch {
+				out[i] = []float32{float32(i)}
+			}
+			return out, nil
+		})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if calls.Load() != 3 {
-		t.Errorf("expected 3 call batches, got %d", calls.Load())
+	want := []int{3, 3, 2}
+	if fmt.Sprint(sizes) != fmt.Sprint(want) {
+		t.Errorf("batch sizes = %v, want %v", sizes, want)
+	}
+}
+
+// 内置 key 下，HTTP 服务端收到的每个 embedding 载荷段落数必须 ≤3
+func TestSiliconflowEmbedderBatchLeq3(t *testing.T) {
+	var maxPayload atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Input []string `json:"input"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		if n := int64(len(req.Input)); n > maxPayload.Load() {
+			maxPayload.Store(n)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		// 逐段返回 embedding，index 对齐
+		var data []map[string]any
+		for i := range req.Input {
+			data = append(data, map[string]any{"index": i, "embedding": []float32{1, 0}})
+		}
+		b, _ := json.Marshal(map[string]any{"data": data})
+		w.Write(b)
+	}))
+	defer srv.Close()
+
+	// 用内置 key 模式构造（useBuiltinKey=true → 启用限流）
+	e, err := newSiliconflowEmbedder(srv.URL, "key", "BAAI/bge-m3", 2, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	texts := []string{"p1", "p2", "p3", "p4", "p5", "p6", "p7"}
+	vecs, err := e.Embed(context.Background(), texts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if int(maxPayload.Load()) > 3 {
+		t.Errorf("server received payload of %d paragraphs (>3) under builtin key", maxPayload.Load())
+	}
+	if len(vecs) != len(texts) {
+		t.Errorf("got %d vectors want %d", len(vecs), len(texts))
 	}
 }
 

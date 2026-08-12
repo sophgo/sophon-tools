@@ -187,7 +187,7 @@ type DimMismatchError struct {
 }
 
 func (e *DimMismatchError) Error() string {
-	return fmt.Sprintf("index rebuilt for %d-dim vectors, current query is %d-dim; run `se-rag build --force`",
+	return fmt.Sprintf("index rebuilt for %d-dim vectors, current query is %d-dim; run `se-rag build` to rebuild",
 		e.IndexDim, e.QueryDim)
 }
 

@@ -2,30 +2,39 @@ package embed
 
 import "context"
 
-// EmbeddingLimiter 限流器：内置 key 时启用（并发≤2、单次≤3段落）。
+// EmbeddingLimiter 内置 key 限流器：并发 ≤ maxConcurrent、单次 ≤3 段落。
 type EmbeddingLimiter struct {
-	sem      chan struct{}
-	maxBatch int
+	sem chan struct{}
 }
 
 func NewEmbeddingLimiter(maxConcurrent int) *EmbeddingLimiter {
-	return &EmbeddingLimiter{sem: make(chan struct{}, maxConcurrent), maxBatch: 3}
+	return &EmbeddingLimiter{sem: make(chan struct{}, maxConcurrent)}
 }
 
-// Do 把 n 个文本按 ≤maxBatch 一份拆成多批，串行提交（每批内一次调用）。
-func (l *EmbeddingLimiter) Do(ctx context.Context, n int, fn func() error) error {
-	batches := (n + l.maxBatch - 1) / l.maxBatch
-	for b := 0; b < batches; b++ {
+// perCall 单次 embedding 最多段落数（内置 key 平台约束）。
+const perCall = 3
+
+// Embed 把 texts 拆成 ≤3 一段的子批，逐批调用 embedBatch（每批一次 HTTP 调用，真正
+// 以 ≤3 段落为载荷），整体并发受 sem 限制。返回按传入顺序排列的向量。
+func (l *EmbeddingLimiter) Embed(ctx context.Context, texts []string, embedBatch func([]string) ([][]float32, error)) ([][]float32, error) {
+	out := make([][]float32, len(texts))
+	for start := 0; start < len(texts); start += perCall {
+		end := start + perCall
+		if end > len(texts) {
+			end = len(texts)
+		}
+		batch := texts[start:end]
 		select {
 		case l.sem <- struct{}{}:
 		case <-ctx.Done():
-			return ctx.Err()
+			return nil, ctx.Err()
 		}
-		if err := fn(); err != nil {
-			<-l.sem
-			return err
-		}
+		ev, err := embedBatch(batch)
 		<-l.sem
+		if err != nil {
+			return nil, err
+		}
+		copy(out[start:end], ev)
 	}
-	return nil
+	return out, nil
 }
