@@ -58,9 +58,7 @@ type conn struct {
 
 	mu           sync.Mutex
 	session      *WebchatSession
-	adapter      *MessageAdapter
-	promptCancel func() error // 进行中的 prompt 取消函数
-	roundToken   int64        // 当前回合标记（递增，防旧回合覆盖新回合状态）
+	adapter *MessageAdapter
 }
 
 // Hub 管理全部 WS 连接，并把模块级 ACP 事件路由到对应连接。
@@ -169,6 +167,8 @@ func (h *Hub) Stop() {
 
 // HandleEvent 模块事件回调：把 ACP 事件路由到绑定该 ACP 会话的连接。
 // 由 Module.dispatchEvent 在模块 goroutine 调用。
+// 注意：回合（prompt）的流式内容由 turn.go 的 consumeTurn 从 `updates` 通道消费并
+// 通过 Deliver 投递；此处仅兜底处理无 Turn 时的生命周期帧（当前无，保兼容）。
 func (h *Hub) HandleEvent(ev *ACPSessionUpdate) {
 	if ev == nil {
 		return
@@ -177,10 +177,35 @@ func (h *Hub) HandleEvent(ev *ACPSessionUpdate) {
 	c := h.byACP[ev.SessionID]
 	h.mu.Unlock()
 	if c == nil {
-		// 事件先于绑定或已断线：忽略（多连接各管各的会话）
 		return
 	}
 	c.enqueue(ev)
+}
+
+// Deliver 把已格式化好的帧投递给绑定该 ACP 会话的连接（可能有，也可能无——
+// 浏览器断开时无人订阅，Turn 仍继续并在落库时持久化）。
+func (h *Hub) Deliver(acpID string, frames []WSFrame) {
+	if len(frames) == 0 {
+		return
+	}
+	h.mu.Lock()
+	c := h.byACP[acpID]
+	h.mu.Unlock()
+	if c == nil {
+		return
+	}
+	c.enqueueFrames(frames)
+}
+
+// BroadcastSession 把帧投递给绑定该 ACP 会话的连接（会话级广播，通常恰一个）。
+func (h *Hub) BroadcastSession(acpID string, frames ...WSFrame) {
+	h.mu.Lock()
+	c := h.byACP[acpID]
+	h.mu.Unlock()
+	if c == nil || len(frames) == 0 {
+		return
+	}
+	c.enqueueFrames(frames)
 }
 
 // serveWS WebSocket 升级 + 子协议认证 + 连接生命周期。
@@ -251,6 +276,16 @@ func (c *conn) enqueue(ev *ACPSessionUpdate) {
 	if len(frames) == 0 {
 		return
 	}
+	c.pushFrames(frames)
+}
+
+// enqueueFrames 投递一组已格式化好的帧（来自模块级回合），异步，无 adapter 转换。
+func (c *conn) enqueueFrames(frames []WSFrame) {
+	c.pushFrames(frames)
+}
+
+// pushFrames 把帧写入发送缓冲（带缓冲满保护）。
+func (c *conn) pushFrames(frames []WSFrame) {
 	select {
 	case c.send <- frames:
 	case <-c.done:
@@ -327,6 +362,8 @@ func (c *conn) handleFrame(frame clientFrame) {
 		c.handleSessionCancelLocked()
 	case "session.new":
 		c.handleSessionNewLocked()
+	case "session.rename":
+		c.handleSessionRenameLocked(frame)
 	default:
 		logger.Warn("agentproxy: unknown ws frame type %s from %s", frame.Type, c.addr)
 	}
@@ -376,7 +413,9 @@ func (c *conn) handleMessageSendLocked(frame clientFrame) {
 	} else {
 		c.adapter.ResetRound()
 	}
-	if err := c.promptLocked(content); err != nil {
+
+	// 回合交由模块级 StartTurn 执行（连接无关：浏览器断开后 agent 继续干活，结果落库）。
+	if err := c.module.StartTurn(c.session.ID, c.session.ACPSessionID, content); err != nil {
 		c.enqueueErrorLocked("发送失败："+err.Error(), "prompt")
 	}
 }
@@ -423,59 +462,6 @@ func (c *conn) bindSessionLocked(s *WebchatSession) {
 	}
 }
 
-// promptLocked 发起 session/prompt。前置：持 c.mu。
-// 用一个自增 roundToken 标记当前回合：等待更新流关闭的 goroutine 仅当自己仍是
-// 最新回合时清理 promptCancel 并发送 typing.stop（避免旧回合覆盖新回合状态）。
-func (c *conn) promptLocked(content string) error {
-	// 在途回合：先取消旧的
-	if c.promptCancel != nil {
-		_ = c.promptCancel()
-	}
-
-	s := c.session
-	if s == nil {
-		return fmt.Errorf("no session")
-	}
-	updates, cancel, err := c.module.Client().Prompt(context.Background(), s.ACPSessionID, content)
-	if err != nil {
-		return err
-	}
-	c.promptCancel = cancel
-	c.roundToken++
-	token := c.roundToken
-	c.adapter.ResetRound()
-
-	// typing.start + 用户消息历史快照
-	select {
-	case c.send <- c.adapter.OnPromptStart(s.ID):
-	case <-c.done:
-		return nil
-	}
-	c.module.Sessions().AppendMessage(s.ID, ChatMessage{Role: "user", Content: content})
-
-	go func(acpID string, tok int64, webchatID string) {
-		// 等待更新流关闭（prompt 响应 stopReason 到达）
-		for range updates {
-		}
-		c.mu.Lock()
-		if c.roundToken == tok {
-			c.promptCancel = nil
-			if c.session != nil && c.session.ACPSessionID == acpID {
-				select {
-				case c.send <- c.adapter.OnPromptEnd(c.session.ID):
-				case <-c.done:
-				}
-				// 回合结束：把本回合 assistant（text/thought/tool_calls）全量落库
-				for _, am := range c.adapter.RoundAssistants() {
-					c.module.Sessions().AppendMessage(webchatID, am)
-				}
-			}
-		}
-		c.mu.Unlock()
-	}(s.ACPSessionID, token, s.ID)
-	return nil
-}
-
 // handleSessionNewLocked 显式新建会话（前端「+ 新对话」）。前置：持 c.mu。
 func (c *conn) handleSessionNewLocked() {
 	if err := c.ensureSessionLocked(); err != nil {
@@ -513,6 +499,8 @@ func (c *conn) handleSessionListLocked() {
 			"acpSessionId": s.ACPSessionID,
 			"updatedAt":    s.UpdatedAt,
 			"messageCount": len(s.Messages),
+			// 需求 2：会话是否有进行中的回合（前端忙碌转圈标记）
+			"running": c.module.HasTurn(s.ACPSessionID),
 		})
 	}
 	f := WSFrame{Type: "session.list", Payload: map[string]any{"sessions": summaries}}
@@ -542,10 +530,42 @@ func (c *conn) handleSessionHistoryLocked(frame clientFrame) {
 	f := WSFrame{
 		Type:      "session.history",
 		SessionID: sid,
-		Payload:   map[string]any{"session_id": sid, "messages": s.Messages},
+		Payload: map[string]any{
+			"session_id": sid,
+			"messages":   s.Messages,
+			"title":      s.Title,
+			"running":    c.module.HasTurn(s.ACPSessionID),
+		},
 	}
 	select {
 	case c.send <- []WSFrame{f}:
+	case <-c.done:
+	}
+}
+
+// handleSessionRenameLocked session.rename：自定义会话标题（需求 3）。
+// 前置：持 c.mu。
+func (c *conn) handleSessionRenameLocked(frame clientFrame) {
+	sid := frame.SessionID
+	if sid == "" {
+		if p, ok := frame.Payload["session_id"].(string); ok {
+			sid = p
+		}
+	}
+	if sid == "" {
+		return
+	}
+	title := ""
+	if p, ok := frame.Payload["title"].(string); ok {
+		title = p
+	}
+	if !c.module.Sessions().Rename(sid, title) {
+		c.enqueueErrorLocked("重命名失败或标题为空", "rename")
+		return
+	}
+	// 回执标题更新
+	select {
+	case c.send <- []WSFrame{{Type: "session.updated", SessionID: sid, Payload: map[string]any{"title": title}}}:
 	case <-c.done:
 	}
 }
@@ -579,10 +599,11 @@ func (c *conn) handleSessionDeleteLocked(frame clientFrame) {
 	}
 }
 
-// handleSessionCancelLocked 取消当前回合。前置：持 c.mu。
+// handleSessionCancelLocked 取消当前会话的在途回合（前端「停止」按钮）。
+// 仅显式取消；连接断开不会触发（回合独立于连接继续执行）。前置：持 c.mu。
 func (c *conn) handleSessionCancelLocked() {
-	if c.promptCancel != nil {
-		_ = c.promptCancel()
+	if c.session != nil {
+		c.module.CancelTurn(c.session.ACPSessionID)
 	}
 }
 
@@ -633,16 +654,16 @@ func (c *conn) writePing() error {
 // 锁顺序：先 close(done)（触发 writeLoop/心跳 goroutine 退出），
 // 再 c.mu 清理本地状态（不碰 hub），最后 hub.mu 解绑——避免 c.mu→hub.mu 与
 // HandleEvent 的 hub.mu→c.mu 成环。
+//
+// 重要：连接关闭【不取消】任何进行中的回合。回合由模块级 StartTurn 持有，
+// 浏览器关闭/切页/切会话时 agent 仍在服务端继续干活，结果最终落库；
+// 用户在途消息不受断线影响。
 func (c *conn) close() {
 	c.closeOnce.Do(func() {
 		close(c.done)
 
 		c.mu.Lock()
 		s := c.session
-		if c.promptCancel != nil {
-			_ = c.promptCancel()
-			c.promptCancel = nil
-		}
 		c.session = nil
 		c.mu.Unlock()
 

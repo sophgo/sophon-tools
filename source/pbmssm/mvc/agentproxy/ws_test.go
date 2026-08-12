@@ -147,6 +147,7 @@ func mockModuleForWS(t *testing.T) (*Module, *stdIOTransport) {
 		sessions: NewSessionManager(nil, t.TempDir()),
 		pm:       pm,
 		hub:      nil,
+		turns:    make(map[string]*Turn),
 	}
 	client := NewClient(pm, mod.dispatchEvent, mod.dispatchNotify)
 	mod.client = client
@@ -159,6 +160,7 @@ func mockModuleForWS(t *testing.T) (*Module, *stdIOTransport) {
 func TestWSMessageSendStreaming(t *testing.T) {
 	mod, tr := mockModuleForWS(t)
 	h := newHub(mod, "key")
+	mod.hub = h // 回合通过 hub 投递帧
 	srv := httptest.NewServer(http.HandlerFunc(h.serveWS))
 	t.Cleanup(srv.Close)
 	mod.SetEventFn(h.HandleEvent)
@@ -510,6 +512,7 @@ func TestWSSessionHistory(t *testing.T) {
 func TestWSMultiSession(t *testing.T) {
 	mod, tr := mockModuleForWS(t)
 	h := newHub(mod, "key")
+	mod.hub = h
 	srv := httptest.NewServer(http.HandlerFunc(h.serveWS))
 	t.Cleanup(srv.Close)
 	mod.SetEventFn(h.HandleEvent)
@@ -579,6 +582,7 @@ func TestWSMultiSession(t *testing.T) {
 func TestWSPersistAssistantOnRoundEnd(t *testing.T) {
 	mod, tr := mockModuleForWS(t)
 	h := newHub(mod, "key")
+	mod.hub = h
 	srv := httptest.NewServer(http.HandlerFunc(h.serveWS))
 	t.Cleanup(srv.Close)
 	mod.SetEventFn(h.HandleEvent)
@@ -629,6 +633,7 @@ func TestWSPersistAssistantOnRoundEnd(t *testing.T) {
 func TestWSSendResumeExistingSession(t *testing.T) {
 	mod, tr := mockModuleForWS(t)
 	h := newHub(mod, "key")
+	mod.hub = h
 	srv := httptest.NewServer(http.HandlerFunc(h.serveWS))
 	t.Cleanup(srv.Close)
 	mod.SetEventFn(h.HandleEvent)
@@ -698,4 +703,71 @@ func TestWSSendResumeExistingSession(t *testing.T) {
 	if !sawResume {
 		t.Error("expected session/resume for existing webchat session")
 	}
+}
+
+// TestWSTurnSurvivesDisconnect 回归：浏览器断开（关页/切页/切会话）时，进行中的
+// 回合不得被取消，agent 在服务端继续干活并把结果落库。
+// 旧实现：conn.close 取消 prompt → 断开即中断；新实现：回合独立于连接（module.StartTurn），
+// 断线后不发送 session/cancel，回合随 prompt 自然结束，用户消息已持久化。
+func TestWSTurnSurvivesDisconnect(t *testing.T) {
+	mod, tr := mockModuleForWS(t)
+	h := newHub(mod, "key")
+	mod.hub = h
+	srv := httptest.NewServer(http.HandlerFunc(h.serveWS))
+	t.Cleanup(srv.Close)
+	mod.SetEventFn(h.HandleEvent)
+	t.Cleanup(func() { mod.SetEventFn(nil) })
+
+	var cancelSeen bool
+	var mu sync.Mutex
+	// 模拟端：session/new → 建会话；session/prompt → 返回结果。记录是否出现取消帧。
+	go func() {
+		sc := bufioNewScanner(tr.in)
+		for {
+			req, err := tr.readRequestErr(sc)
+			if err != nil {
+				return
+			}
+			if req.ID == nil {
+				// notification（session/cancel 为无 id 通知）
+				if req.Method == "session/cancel" {
+					mu.Lock()
+					cancelSeen = true
+					mu.Unlock()
+				}
+				continue
+			}
+			switch req.Method {
+			case "session/new":
+				_ = tr.reply(map[string]any{"jsonrpc": "2.0", "id": *req.ID, "result": map[string]any{"sessionId": "acp-s1"}})
+			case "session/prompt":
+				_ = tr.reply(map[string]any{"jsonrpc": "2.0", "id": *req.ID, "result": map[string]any{"stopReason": "end_turn"}})
+			}
+		}
+	}()
+
+	conn := dialWS(t, wsURL(srv.URL)+wsPath, "token.key")
+	_ = conn.WriteJSON(map[string]any{"type": "message.send", "payload": map[string]any{"content": "问题"}})
+	// 等 session.create（会话已建，prompt 已发起）
+	waitFor(t, 3*time.Second, "session create", func() bool { return len(mod.sessions.List()) > 0 })
+
+	// 立即关闭连接（模拟浏览器关闭 / 切页 / 切会话断线）
+	_ = conn.Close()
+
+	// 断言：断线后未发送 session/cancel（回合未被连接关闭取消）
+	mu.Lock()
+	cancelled := cancelSeen
+	mu.Unlock()
+	if cancelled {
+		t.Fatal("turn was cancelled on disconnect (session/cancel sent) — must survive")
+	}
+	// 用户消息已持久化（回合真正完成并落库）
+	waitFor(t, 3*time.Second, "user msg persisted", func() bool {
+		for _, s := range mod.sessions.List() {
+			if s.ACPSessionID == "acp-s1" && len(s.Messages) >= 1 && s.Messages[0].Role == "user" {
+				return true
+			}
+		}
+		return false
+	})
 }

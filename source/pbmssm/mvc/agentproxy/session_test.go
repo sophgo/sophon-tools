@@ -225,3 +225,57 @@ func TestNewSessionID(t *testing.T) {
 		seen[got] = true
 	}
 }
+
+// TestSessionTitle (需求 3)：默认用第一问题前 8 字，且可自定义重命名。
+func TestSessionTitle(t *testing.T) {
+	sm := NewSessionManager(nil, t.TempDir())
+	// 预置一个会话（默认标题）
+	sm.sessions["s1"] = &WebchatSession{ID: "s1", ACPSessionID: "acp-1", Title: "新会话", Messages: []ChatMessage{}}
+
+	// EnsureTitle：第一条用户消息前 8 字
+	name := "请帮我查看系统日志看看最近设备在做什么"
+	if !sm.EnsureTitle("s1", name) {
+		t.Fatal("EnsureTitle should set title on first message")
+	}
+	got := sm.sessions["s1"].Title
+	// EnsureTitle 用 defaultTitleFromText：第一条用户消息前 8 个字
+	exp := defaultTitleFromText(name)
+	if got != exp {
+		t.Fatalf("title = %q, want %q", got, exp)
+	}
+	if got == "" || len([]rune(got)) > 8 {
+		t.Fatalf("title wrong length: %q", got)
+	}
+	// 自定义标题
+	if !sm.Rename("s1", "我的自定义标题") {
+		t.Fatal("Rename should succeed")
+	}
+	if sm.sessions["s1"].Title != "我的自定义标题" {
+		t.Fatalf("after rename title = %q", sm.sessions["s1"].Title)
+	}
+	// 已有自定义标题后 EnsureTitle 不再改
+	if sm.EnsureTitle("s1", "新问题") {
+		t.Fatal("EnsureTitle should not overwrite custom title")
+	}
+	if sm.sessions["s1"].Title != "我的自定义标题" {
+		t.Fatalf("custom title overwritten: %q", sm.sessions["s1"].Title)
+	}
+}
+
+// TestSessionTitlePersist 标题随 DB 持久化。
+func TestSessionTitlePersist(t *testing.T) {
+	db := newTestDB(t)
+	sm := NewSessionManager(db, t.TempDir())
+	sm.sessions["p1"] = &WebchatSession{ID: "p1", ACPSessionID: "acp-p", Title: "新会话", Messages: []ChatMessage{}}
+	sm.EnsureTitle("p1", "第一个问题是什么来着很长的")
+	if !sm.Rename("p1", "自定义标题") {
+		t.Fatal("rename failed")
+	}
+	// 重建后标题保留
+	sm2 := NewSessionManager(db, t.TempDir())
+	sm2.LoadAll()
+	s, ok := sm2.Get("p1")
+	if !ok || s.Title != "自定义标题" {
+		t.Fatalf("title not persisted: %+v", s)
+	}
+}

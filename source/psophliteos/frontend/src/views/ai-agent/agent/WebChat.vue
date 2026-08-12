@@ -16,6 +16,8 @@
           @click="switchSession(s.id)"
         >
           <div class="webchat-session-title">{{ s.title || '新会话' }}</div>
+          <!-- 需求 2：会话忙碌（仍在干活）时右侧转圈标记 -->
+          <span v-if="s.busy" class="webchat-busy webchat-busy-dot" title="Agent 工作中"></span>
           <button
             class="webchat-session-del"
             type="button"
@@ -31,7 +33,27 @@
     <!-- 右侧：聊天区 -->
     <main class="webchat-main">
       <header class="webchat-header">
-        <div class="webchat-header-title">{{ activeSess?.title || '新会话' }}</div>
+        <div class="webchat-header-title-wrap">
+          <div
+            v-if="!editingTitle"
+            class="webchat-header-title"
+            title="双击自定义标题"
+            @dblclick="startEditTitle"
+          >
+            {{ activeSess?.title || '新会话' }}
+          </div>
+          <input
+            v-else
+            v-model="draftTitle"
+            class="webchat-header-title-input"
+            ref="titleInputEl"
+            @keydown.enter="commitTitle"
+            @keydown.esc="cancelEditTitle"
+            @blur="commitTitle"
+          />
+          <!-- 需求 2：当前会话忙碌（agent 正在干活）时标题旁转圈 -->
+          <span v-if="activeSess?.busy" class="webchat-busy" title="Agent 正在工作中"></span>
+        </div>
         <div class="webchat-header-status" :class="statusClass">{{ statusText }}</div>
       </header>
 
@@ -119,6 +141,7 @@
     id: string;
     title: string;
     messages: ChatMsg[];
+    busy?: boolean;
   }
 
   const SESSIONS_KEY = 'sophon.ai-agent.sessions';
@@ -127,6 +150,9 @@
   const sessions = ref<Session[]>([]);
   const activeId = ref<string>('');
   const draft = ref('');
+  const editingTitle = ref(false);
+  const draftTitle = ref('');
+  const titleInputEl = ref<HTMLElement | null>(null);
   const sending = ref(false);
   const typing = ref(false);
   const errorMsg = ref('');
@@ -195,7 +221,7 @@
   }
 
   function newSession(): Session {
-    const s: Session = { id: uuid(), title: '新会话', messages: [] };
+    const s: Session = { id: uuid(), title: '新会话', messages: [], busy: false };
     sessions.value.unshift(s);
     activeId.value = s.id;
     saveSessions();
@@ -258,12 +284,32 @@
       case 'session.history':
         handleSessionHistory(payload);
         break;
+      case 'session.busy':
+        // 需求 2：会话忙碌状态（agent 正在干活）的转圈标记
+        setSessionBusy(msg.session_id || payload.session_id, !!payload.busy);
+        break;
+      case 'session.updated':
+        // 需求 3：自定义标题后的回执
+        applyTitle(msg.session_id, payload.title);
+        break;
       case 'error':
         errorMsg.value = payload.message || '发生错误';
         sending.value = false;
         typing.value = false;
         break;
     }
+  }
+
+  function setSessionBusy(sid: string | undefined, busy: boolean) {
+    if (!sid) return;
+    const s = sessions.value.find((x) => x.id === sid);
+    if (s) s.busy = busy;
+  }
+
+  function applyTitle(sid: string | undefined, title: string | undefined) {
+    if (!sid || !title) return;
+    const s = sessions.value.find((x) => x.id === sid);
+    if (s) s.title = title;
   }
 
   function bindServerSession(serverId: string) {
@@ -400,6 +446,7 @@
       id: ss.id,
       title: ss.title || '新会话',
       messages: [],
+      busy: !!ss.running, // 需求 2：服务端回合进行中 → 忙碌
     }));
     // 保留本地尚未同步到服务端的会话
     const storedIds = new Set(stored.map((s) => s.id));
@@ -432,6 +479,8 @@
       model: m.model || '',
       open: false,
     }));
+    if (payload.title && s.title !== payload.title) s.title = payload.title;
+    s.busy = !!payload.running; // 需求 2：恢复会话时同步忙碌
     clearOpenThought();
     saveSessions();
     scrollToBottom();
@@ -483,6 +532,33 @@
       e.preventDefault();
       sendMessage();
     }
+  }
+
+  // ---------- 需求 3：自定义标题 ----------
+  function startEditTitle() {
+    const s = activeSess.value;
+    if (!s) return;
+    draftTitle.value = s.title || '新会话';
+    editingTitle.value = true;
+    nextTick(() => {
+      if (titleInputEl.value) titleInputEl.value.focus();
+    });
+  }
+
+  function commitTitle() {
+    editingTitle.value = false;
+    if (!ws || !ws.ready) return;
+    const s = activeSess.value;
+    const t = draftTitle.value.trim();
+    if (!s || !t) return;
+    // 本地立即更新 + 服务端持久化
+    s.title = t;
+    saveSessions();
+    ws.sendFrame({ type: 'session.rename', session_id: s.id, payload: { title: t } });
+  }
+
+  function cancelEditTitle() {
+    editingTitle.value = false;
   }
 
   function autoGrow() {
@@ -668,6 +744,50 @@
   }
   .webchat-header-status.warn {
     color: #faad14;
+  }
+
+  .webchat-header-title-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .webchat-header-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: text;
+  }
+
+  .webchat-header-title-input {
+    width: 240px;
+    border: 1px solid #1a73e8;
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-size: 14px;
+    outline: none;
+  }
+
+  /* 需求 2：agent 正在干活的转圈动画 */
+  .webchat-busy {
+    flex-shrink: 0;
+    width: 14px;
+    height: 14px;
+    border: 2px solid #1a73e8;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: webchat-spin 0.8s linear infinite;
+  }
+  .webchat-busy-dot {
+    width: 10px;
+    height: 10px;
+  }
+  @keyframes webchat-spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
 
   .webchat-messages {

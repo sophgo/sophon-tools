@@ -26,6 +26,7 @@ type Module struct {
 	started   bool
 	nextID    int64
 	listeners map[int64]func(*ACPSessionUpdate) // 流式事件监听者（Hub 注册，广播分发）
+	turns     map[string]*Turn                  // acpSessionID → 进行中的回合（连接无关）
 
 	stopOnce sync.Once
 }
@@ -69,6 +70,7 @@ func NewModule(cfg Config, db *gorm.DB, eventFn func(*ACPSessionUpdate)) *Module
 		cfg:       cfg,
 		db:        db,
 		listeners: make(map[int64]func(*ACPSessionUpdate)),
+		turns:     make(map[string]*Turn),
 	}
 	if eventFn != nil {
 		m.listeners[m.nextID] = eventFn
