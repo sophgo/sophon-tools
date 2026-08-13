@@ -41,6 +41,7 @@ type StreamState struct {
 	created   map[string]bool            // messageId / toolCallId -> 已发 message.create
 	content   map[string]streamedContent // messageId -> 当前完整内容（含 kind）
 	toolCalls map[string]*ToolCallState  // toolCallId -> 聚合
+	order     []string                   // 本回合 messageId / toolCallId 首次到达顺序（落库合并需保持发言时序）
 	typingOn  bool                       // 当前回合是否仍显示「输入中…」
 }
 
@@ -50,6 +51,7 @@ func NewStreamState() *StreamState {
 		created:   make(map[string]bool),
 		content:   make(map[string]streamedContent),
 		toolCalls: make(map[string]*ToolCallState),
+		order:     []string{},
 		typingOn:  true,
 	}
 }
@@ -150,9 +152,10 @@ func (a *MessageAdapter) messageChunk(ev *ACPSessionUpdate, webchatID, kind stri
 	sc := a.state.content[id]
 	var merged string
 	if sc.Kind == "" {
-		// 首个 chunk：记 kind（text/thought），内容即本段
+		// 首个 chunk：记 kind（text/thought），内容即本段，并记录到达顺序
 		sc.Kind = kind
 		merged = ev.Content
+		a.state.order = appendOrder(a.state.order, id)
 	} else {
 		// 后续 chunk：增量累积
 		merged = sc.Text + ev.Content
@@ -225,6 +228,9 @@ func (a *MessageAdapter) toolCall(ev *ACPSessionUpdate, webchatID string, update
 	a.state.toolCalls[id] = tc
 	already := a.state.created[id]
 	a.state.created[id] = true
+	if !already {
+		a.state.order = appendOrder(a.state.order, id)
+	}
 	typing := a.state.typingOn
 	a.state.typingOn = false
 	a.state.mu.Unlock()
@@ -262,23 +268,47 @@ func (a *MessageAdapter) toolCall(ev *ACPSessionUpdate, webchatID string, update
 
 // RoundAssistants 返回本回合已聚合的 assistant 消息（落库用），并清空聚合状态后重开。
 // text/thought 按 messageId 归并全文，kind 保留；tool_call 按 toolCallId 归并为折叠块摘要。
+//
+// 需求（MYS-212）：reasonix 会把一个连续回答拆成多个不同 messageId 的 text 分片
+// （如同一句被拆成 text-12/text-13）。按 order（到达顺序）遍历，把**相邻的纯 text
+// 分片合并为一条**，遇 thought / tool_calls 才另起，避免落库历史出现「一句话被拆
+// 成两个气泡」。
+//
 // 调用时机：回合结束（prompt stopReason 到达），由连接层追加进会话历史。
 func (a *MessageAdapter) RoundAssistants() []ChatMessage {
 	a.state.mu.Lock()
 	defer a.state.mu.Unlock()
-	out := make([]ChatMessage, 0, len(a.state.content)+len(a.state.toolCalls))
-	for id, sc := range a.state.content {
-		out = append(out, ChatMessage{Role: "assistant", Kind: sc.Kind, Content: sc.Text, ID: id})
-	}
-	for id, tc := range a.state.toolCalls {
-		out = append(out, ChatMessage{Role: "assistant", Kind: "tool_calls", Content: toolCallSummary(tc), ID: id})
+	out := make([]ChatMessage, 0, len(a.state.order))
+	for _, id := range a.state.order {
+		if sc, ok := a.state.content[id]; ok {
+			if sc.Kind == "text" && len(out) > 0 && out[len(out)-1].Kind == "text" {
+				// 相邻纯文本分片：合并进上一条（同一连续回答）
+				out[len(out)-1].Content += sc.Text
+			} else {
+				out = append(out, ChatMessage{Role: "assistant", Kind: sc.Kind, Content: sc.Text, ID: id})
+			}
+		} else if tc, ok := a.state.toolCalls[id]; ok {
+			out = append(out, ChatMessage{Role: "assistant", Kind: "tool_calls", Content: toolCallSummary(tc), ID: id})
+		}
 	}
 	// 清空聚合状态但保留同一把锁（不能整体替换 a.state——会换掉正在持有的 mutex）。
 	a.state.content = make(map[string]streamedContent)
 	a.state.toolCalls = make(map[string]*ToolCallState)
 	a.state.created = make(map[string]bool)
+	a.state.order = []string{}
 	a.state.typingOn = true
 	return out
+}
+
+// appendOrder 把 id 追加到顺序表（幂等：已存在则跳过）。
+// 由于锁内调用，直接用线性查找即可（每条回复 messageId 数量级很小）。
+func appendOrder(order []string, id string) []string {
+	for _, o := range order {
+		if o == id {
+			return order
+		}
+	}
+	return append(order, id)
 }
 
 // modelName 返回 message.create 的 model_name。

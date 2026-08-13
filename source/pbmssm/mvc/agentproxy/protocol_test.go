@@ -243,3 +243,45 @@ func TestRoundAssistants(t *testing.T) {
 		}
 	}
 }
+
+// 需求（MYS-212）：reasonix 会把一个连续回答拆成多个不同 messageId 的
+// agent_message_chunk（测试机「为我检查这台设备」会话落库中可见：同一句
+// 「## 当前进展总结」被 reasonix 拆成 text-1='##' 与 text-2=' 当前进展…' 两条
+// 相邻 text 分片）。后端落库时应在回合结束把**相邻的纯 text 分片合并为一条**，
+// 遇 thought / tool_calls 才另起，避免历史里出现「一句话被拆成两个气泡」。
+func TestRoundAssistantsMergesAdjacentTextWithDifferentIDs(t *testing.T) {
+	a := NewMessageAdapter("m")
+	sid := "web-1"
+	// 真实取证：同一句被 reasonix 切成两个不同 messageId 的相邻 text 分片
+	_ = a.OnACPEvent(&ACPSessionUpdate{Discriminator: "agent_message_chunk", MessageID: "text-1", Content: "##"}, sid)
+	_ = a.OnACPEvent(&ACPSessionUpdate{Discriminator: "agent_message_chunk", MessageID: "text-2", Content: " 当前进展总结"}, sid)
+	// 一个 thought（应中断 text 合并，独立成条）
+	_ = a.OnACPEvent(&ACPSessionUpdate{Discriminator: "agent_thought_chunk", MessageID: "thought-1", Content: "思考"}, sid)
+	// thought 后新的相邻 text 分片（不应并入前面的 text-1/text-2）
+	_ = a.OnACPEvent(&ACPSessionUpdate{Discriminator: "agent_message_chunk", MessageID: "text-3", Content: "下一步：升级脚本"}, sid)
+
+	msgs := a.RoundAssistants()
+	var texts []string
+	var thoughts int
+	for _, m := range msgs {
+		switch m.Kind {
+		case "text":
+			texts = append(texts, m.Content)
+		case "thought":
+			thoughts++
+		}
+	}
+	// text-1 与 text-2 相邻纯文本 → 合并为一条；text-3 在 thought 后 → 独立一条
+	if len(texts) != 2 {
+		t.Fatalf("text messages = %d, want 2 (merged ##/当前进展分片 + thought 后的 text-3)", len(texts))
+	}
+	if texts[0] != "## 当前进展总结" {
+		t.Errorf("merged text[0] = %q, want %q", texts[0], "## 当前进展总结")
+	}
+	if texts[1] != "下一步：升级脚本" {
+		t.Errorf("text[1] = %q, want %q", texts[1], "下一步：升级脚本")
+	}
+	if thoughts != 1 {
+		t.Errorf("thought messages = %d, want 1", thoughts)
+	}
+}
