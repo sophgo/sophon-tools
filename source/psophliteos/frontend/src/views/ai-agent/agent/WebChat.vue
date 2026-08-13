@@ -1210,72 +1210,72 @@
     overscroll-behavior: contain;
   }
   /* 列表点位与编号 */
-  .webchat-bubble ul,
-  .webchat-collapse-body ul {
+  .webchat-bubble :deep(ul),
+  .webchat-collapse-body :deep(ul) {
     list-style: disc;
     padding-left: 1.5em;
     margin: 0.5em 0;
   }
-  .webchat-bubble ol,
-  .webchat-collapse-body ol {
+  .webchat-bubble :deep(ol),
+  .webchat-collapse-body :deep(ol) {
     list-style: decimal;
     padding-left: 1.5em;
     margin: 0.5em 0;
   }
-  .webchat-bubble li,
-  .webchat-collapse-body li {
+  .webchat-bubble :deep(li),
+  .webchat-collapse-body :deep(li) {
     margin: 0.15em 0;
   }
   /* 表格格子线 */
-  .webchat-bubble table,
-  .webchat-collapse-body table {
+  .webchat-bubble :deep(table),
+  .webchat-collapse-body :deep(table) {
     border-collapse: collapse;
     margin: 0.5em 0;
     width: 100%;
     display: block;
     overflow-x: auto;
   }
-  .webchat-bubble th,
-  .webchat-bubble td,
-  .webchat-collapse-body th,
-  .webchat-collapse-body td {
+  .webchat-bubble :deep(th),
+  .webchat-bubble :deep(td),
+  .webchat-collapse-body :deep(th),
+  .webchat-collapse-body :deep(td) {
     border: 1px solid #d9d9d9;
     padding: 6px 10px;
     text-align: left;
   }
-  .webchat-bubble th,
-  .webchat-collapse-body th {
+  .webchat-bubble :deep(th),
+  .webchat-collapse-body :deep(th) {
     background: #f0f0f0;
     font-weight: 600;
   }
   /* 标题 */
-  .webchat-bubble h1,
-  .webchat-collapse-body h1 {
+  .webchat-bubble :deep(h1),
+  .webchat-collapse-body :deep(h1) {
     font-size: 1.5em;
     margin: 0.6em 0 0.4em;
   }
-  .webchat-bubble h2,
-  .webchat-collapse-body h2 {
+  .webchat-bubble :deep(h2),
+  .webchat-collapse-body :deep(h2) {
     font-size: 1.3em;
     margin: 0.6em 0 0.4em;
   }
-  .webchat-bubble h3,
-  .webchat-collapse-body h3 {
+  .webchat-bubble :deep(h3),
+  .webchat-collapse-body :deep(h3) {
     font-size: 1.15em;
     margin: 0.5em 0 0.35em;
   }
-  .webchat-bubble h4,
-  .webchat-bubble h5,
-  .webchat-bubble h6,
-  .webchat-collapse-body h4,
-  .webchat-collapse-body h5,
-  .webchat-collapse-body h6 {
+  .webchat-bubble :deep(h4),
+  .webchat-bubble :deep(h5),
+  .webchat-bubble :deep(h6),
+  .webchat-collapse-body :deep(h4),
+  .webchat-collapse-body :deep(h5),
+  .webchat-collapse-body :deep(h6) {
     font-size: 1em;
     margin: 0.5em 0 0.3em;
   }
   /* 段落 */
-  .webchat-bubble p,
-  .webchat-collapse-body p {
+  .webchat-bubble :deep(p),
+  .webchat-collapse-body :deep(p) {
     margin: 0.4em 0;
   }
   /* 代码块（代码高亮 / mermaid 回退共用）。
@@ -1283,8 +1283,8 @@
      与 hljs 的 github（浅色）高亮主题 token 颜色（深色系）搭配，保证在浅色气泡内可读。
      暗色模式（html.dark）下气泡为深色，为避免浅色 token 撞深底，代码块保持浅色卡片
      （github 浅色主题的 token 恒为深色），随页面暗色切换不冲突。 */
-  .webchat-bubble .webchat-codeblock,
-  .webchat-collapse-body .webchat-codeblock {
+  .webchat-bubble :deep(.webchat-codeblock),
+  .webchat-collapse-body :deep(.webchat-codeblock) {
     margin: 0.5em 0;
     padding: 10px 12px;
     background: #f6f8fa;
@@ -1294,8 +1294,8 @@
     line-height: 1.5;
     overflow-x: auto;
   }
-  .webchat-bubble .webchat-codeblock code,
-  .webchat-collapse-body .webchat-codeblock code {
+  .webchat-bubble :deep(.webchat-codeblock code),
+  .webchat-collapse-body :deep(.webchat-codeblock code) {
     font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
     white-space: pre;
     word-break: normal;
@@ -1303,14 +1303,14 @@
   }
   /* 暗色页面下代码块保持浅色卡片：hljs 用的是 github(浅色)主题，token 恒为深色，
      深色页面上若让代码块随背景变深会致 token 撞底不可读，故恒保浅底。 */
-  .dark .webchat-bubble .webchat-codeblock,
-  .dark .webchat-collapse-body .webchat-codeblock {
+  .dark .webchat-bubble :deep(.webchat-codeblock),
+  .dark .webchat-collapse-body :deep(.webchat-codeblock) {
     background: #f6f8fa;
     color: #24292e;
   }
   /* 行内代码 */
-  .webchat-bubble code:not(.webchat-codeblock code),
-  .webchat-collapse-body code:not(.webchat-codeblock code) {
+  .webchat-bubble :deep(code:not(.webchat-codeblock code)),
+  .webchat-collapse-body :deep(code:not(.webchat-codeblock code)) {
     background: rgba(27, 31, 35, 0.08);
     padding: 0.15em 0.35em;
     border-radius: 4px;
@@ -1318,8 +1318,8 @@
     font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
   }
   /* 引用 */
-  .webchat-bubble blockquote,
-  .webchat-collapse-body blockquote {
+  .webchat-bubble :deep(blockquote),
+  .webchat-collapse-body :deep(blockquote) {
     margin: 0.5em 0;
     padding: 4px 12px;
     border-left: 3px solid #d9d9d9;
@@ -1327,8 +1327,8 @@
     background: rgba(0, 0, 0, 0.03);
   }
   /* mermaid 图表容器 */
-  .webchat-bubble .webchat-mermaid,
-  .webchat-collapse-body .webchat-mermaid {
+  .webchat-bubble :deep(.webchat-mermaid),
+  .webchat-collapse-body :deep(.webchat-mermaid) {
     margin: 0.5em 0;
     overflow-x: auto;
     background: #fff;
