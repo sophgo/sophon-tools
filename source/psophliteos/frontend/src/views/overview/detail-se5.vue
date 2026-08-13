@@ -69,6 +69,10 @@
           <a-descriptions-item :label="t('overview.buildTime')">{{
             originData.bmssmVersion
           }}</a-descriptions-item>
+          <!-- 需求(MYS-210)：显示 sophliteos 版本号（本地 /api/device/version 的 buildname） -->
+          <a-descriptions-item :label="t('overview.device.sophliteosVersion')">{{
+            sophliteosVersion || '-'
+          }}</a-descriptions-item>
           <a-descriptions-item :label="t('overview.device.runningTime')">
             <a-badge status="processing" :text="dynTime" />
           </a-descriptions-item>
@@ -116,9 +120,11 @@
   import DiskLayout from './components/DiskLayout.vue';
   import { getFormatTime } from '/@/utils/dateUtil';
   import { EditOutlined } from '@ant-design/icons-vue';
-  import { setDeviceInfoApi } from '/@/api/overview/index';
+  import { setDeviceInfoApi, getSoftwareInfoApi } from '/@/api/overview/index';
 
   const { t } = useI18n();
+  // 需求(MYS-210)：sophliteos 版本号（本地 /api/device/version → result.buildname）
+  const sophliteosVersion = ref('');
 
   const ADescriptions = Descriptions;
   const ATooltip = Tooltip;
@@ -137,6 +143,17 @@
       loading.value = false;
     });
   }
+
+  // 需求(MYS-210)：拉取本地 sophliteos 版本号（buildname）并入基础信息展示。
+  // 失败静默（版本号非关键信息，保持向后兼容）。
+  getSoftwareInfoApi()
+    .then((res: any) => {
+      const result = res?.result ?? res;
+      sophliteosVersion.value = result?.buildname || '';
+    })
+    .catch(() => {
+      /* ignore */
+    });
 
   const cpuCard = computed(() => {
     const cpu = originData.value.cpu || {};
