@@ -812,14 +812,27 @@
     const raw = Array.isArray(payload.messages) ? payload.messages : [];
     const s = sessions.value.find((x) => x.id === sid);
     if (!s) return;
-    const serverMsgs = raw.map((m: any) => ({
-      key: 'his' + msgSeq++,
-      role: m.role === 'user' ? 'user' : 'assistant',
-      kind: m.kind || (m.role === 'user' ? '' : 'text'),
-      // 旧持久化的工具调用可能存的是裸 JSON，规整为可读文本（幂等）
-      content: m.content && m.kind === 'tool_calls' ? displayToolCalls(m.content) : m.content || '',
-      open: false,
-    }));
+    // 需求(MYS-209)：后端一轮回答会按 message_id 拆成多条 message.create，落库后
+    // history 里会出现成段的相邻 text 小片段（agent 一条完整回答被切成 text-1..text-N）。
+    // 若逐条各自成泡会把「同一段连续输出」显示成一串碎气泡。故在加载历史时把
+    // 相邻的 assistant 纯文本（非 thought/tool_calls）累积合并为一个气泡；
+    // 遇 user / thought / tool_calls 则视为新气泡（正确开新泡，不跨逻辑段错误合并）。
+    const serverMsgs: ChatMsg[] = [];
+    for (const m of raw) {
+      const role = m.role === 'user' ? 'user' : 'assistant';
+      const kind = m.kind || (m.role === 'user' ? '' : 'text');
+      const content =
+        m.content && m.kind === 'tool_calls' ? displayToolCalls(m.content) : m.content || '';
+      const isPlainText = role === 'assistant' && kind !== 'thought' && kind !== 'tool_calls';
+      // 纯文本空内容无信息量（源是流式片段，可能为空白），跳过避免空泡
+      if (isPlainText && !content) continue;
+      const prev = serverMsgs[serverMsgs.length - 1];
+      if (isPlainText && prev && prev.role === 'assistant' && !prev.kind) {
+        prev.content += content;
+      } else {
+        serverMsgs.push({ key: 'his' + msgSeq++, role, kind, content, open: false });
+      }
+    }
     // 请求 3：以服务端历史为权威基线，并合并本地尚未同步到的消息（在途内容、权限审批记录），
     // 避免刷新/换浏览器后历史缺失；同内容按 role+kind+content 去重，防止重复。
     s.messages = mergeHistory(s.messages, serverMsgs);
@@ -1265,13 +1278,17 @@
   .webchat-collapse-body p {
     margin: 0.4em 0;
   }
-  /* 代码块（代码高亮 / mermaid 回退共用） */
+  /* 代码块（代码高亮 / mermaid 回退共用）。
+     需求(MYS-209)：由深底（#282c34/#abb2bf）改为浅色易读风格——浅灰底 + 深色正文，
+     与 hljs 的 github（浅色）高亮主题 token 颜色（深色系）搭配，保证在浅色气泡内可读。
+     暗色模式（html.dark）下气泡为深色，为避免浅色 token 撞深底，代码块保持浅色卡片
+     （github 浅色主题的 token 恒为深色），随页面暗色切换不冲突。 */
   .webchat-bubble .webchat-codeblock,
   .webchat-collapse-body .webchat-codeblock {
     margin: 0.5em 0;
     padding: 10px 12px;
-    background: #282c34;
-    color: #abb2bf;
+    background: #f6f8fa;
+    color: #24292e;
     border-radius: 6px;
     font-size: 13px;
     line-height: 1.5;
@@ -1283,6 +1300,13 @@
     white-space: pre;
     word-break: normal;
     background: transparent;
+  }
+  /* 暗色页面下代码块保持浅色卡片：hljs 用的是 github(浅色)主题，token 恒为深色，
+     深色页面上若让代码块随背景变深会致 token 撞底不可读，故恒保浅底。 */
+  .dark .webchat-bubble .webchat-codeblock,
+  .dark .webchat-collapse-body .webchat-codeblock {
+    background: #f6f8fa;
+    color: #24292e;
   }
   /* 行内代码 */
   .webchat-bubble code:not(.webchat-codeblock code),
