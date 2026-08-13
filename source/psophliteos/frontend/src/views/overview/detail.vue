@@ -26,6 +26,10 @@
         <a-descriptions-item :label="t('overview.buildTime')">{{
           originData.bmssmVersion
         }}</a-descriptions-item>
+        <!-- 需求(MYS-210)：显示 sophliteos 版本号（本地 /api/device/version 的 buildname） -->
+        <a-descriptions-item :label="t('overview.device.sophliteosVersion')">{{
+          sophlitesVersion || '-'
+        }}</a-descriptions-item>
         <a-descriptions-item :label="t('overview.device.ip')">{{
           originData.deviceIp
         }}</a-descriptions-item>
@@ -118,9 +122,12 @@
   import CircleGrid from './components/CircleGrid.vue';
   import GaugeChart from './components/Gauge.vue';
   import { useWindowSize } from '@vueuse/core';
+  import { getSoftwareInfoApi } from '/@/api/overview';
 
   const { t } = useI18n();
   const { currentRoute } = useRouter();
+  // 需求(MYS-210)：sophliteos 版本号（本地 /api/device/version → result.buildname）
+  const sophlitesVersion = ref('');
 
   const ADescriptions = Descriptions;
   const ADescriptionsItem = Descriptions.Item;
@@ -137,6 +144,17 @@
       loading.value = false;
     });
   }
+
+  // 需求(MYS-210)：拉取本地 sophliteos 版本号（buildname）并入基础信息展示。
+  // 失败静默（版本号非关键信息，保持向后兼容）。
+  getSoftwareInfoApi()
+    .then((res: any) => {
+      const result = res?.result ?? res;
+      sophlitesVersion.value = result?.buildname || '';
+    })
+    .catch(() => {
+      /* ignore */
+    });
 
   const activeKey = ref('control');
   const chipStatus = {

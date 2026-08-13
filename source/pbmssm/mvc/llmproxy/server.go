@@ -46,6 +46,18 @@ func StartServer(cfg Config) {
 	UpdateServer(cfg)
 }
 
+// InitActiveConfig 在 bmssm 启动时记录当前配置为生效配置，但不启动转发 server。
+// 需求(MYS-210)：llm 代理默认关闭，bmssm 重启后保持默认关闭——即使配置里
+// enabled=true，启动也不自动拉起转发 server；仅用户手动保存配置（SaveConfig →
+// UpdateServer）后才开启。此函数保证启动后转发链路处于关闭态，同时记录配置供
+// 后续 UpdateServer 热更新比较。
+func InitActiveConfig(cfg Config) {
+	mu.Lock()
+	activeCfg = cfg
+	mu.Unlock()
+	logger.Info("llm proxy config loaded (not started): llm=%s vlm=%s", cfg.LLMModel, cfg.VLMModel)
+}
+
 // UpdateServer 更新配置并应用。若 server 未启动则启动（绑定配置的 listenIP:port）。
 // enabled=false 时停止 server（若在运行）。串行化启动避免并发 double-start。
 func UpdateServer(cfg Config) {

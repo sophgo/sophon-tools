@@ -244,6 +244,12 @@ func TestModuleEndToEnd(t *testing.T) {
 	}
 	defer m.Shutdown()
 
+	// 需求(MYS-210)：module.Start 不再自动拉起 reasonix（默认关闭，需手动启动）。
+	// 测试模拟用户手动启动进程，驱动 initialize → client 就绪链路。
+	if err := m.pm.Start(); err != nil {
+		t.Fatalf("process start: %v", err)
+	}
+
 	// 等 client 就绪（initialize 完成）
 	waitFor(t, 5*time.Second, "client ready", func() bool {
 		return m.Client() != nil

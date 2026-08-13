@@ -18,6 +18,7 @@ export default {
     ctrSN: 'Control board SN',
     system: 'Operating System',
     sdkVersion: 'SDK Version',
+    sophliteosVersion: 'Sophliteos Version',
     runningTime: 'Running Time',
     ip: 'Device IP',
     wanip: 'WAN IP',

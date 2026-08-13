@@ -92,10 +92,11 @@ func InitBase() {
 		BoardType: global.ModuleTypeEx,
 	})
 
-	// LLM API 转发 server：迁移旧表结构、读取已存配置启动（或禁用）。
-	// 配置保存接口会热更新。
+	// LLM API 转发 server：迁移旧表结构、读取已存配置。
+	// 需求(MYS-210)：llm 代理默认关闭，bmssm 启动仅加载配置不自动拉起转发 server
+	// （重启后回到默认关闭）；用户保存配置（enabled=true）经 UpdateServer 才启动。
 	llmproxy.Migrate(database.DB())
-	llmproxy.StartServer(llmproxy.NewService(database.DB()).LoadConfig())
+	llmproxy.InitActiveConfig(llmproxy.NewService(database.DB()).LoadConfig())
 
 	// Reasonix ACP 适配器（agentproxy）：进程管理 + ACP 客户端 + 会话管理。
 	// S2 只装配核心链路；WS 端点/协议适配在 S3 接入。

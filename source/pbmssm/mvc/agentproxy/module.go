@@ -108,11 +108,11 @@ func (m *Module) Start() error {
 			}
 		}()
 	}
-	if !m.cfg.Enabled {
-		logger.Info("agentproxy: disabled, reasonix acp not started")
-		return nil
-	}
-	return m.pm.Start()
+	// 需求(MYS-210)：agent 服务默认关闭，且 bmssm 重启后保持默认关闭。
+	// 这里不据 m.cfg.Enabled 自动拉起 reasonix 进程（即使配置 enabled=true）——
+	// 仅当用户在「Agent 服务管理」手动 start（SetEnabled(true)）才启动；手动启动会
+	// 持久化 enabled 供页面刷新保持显示，但 bmssm 重启后回到默认关闭。
+	return nil
 }
 
 // Shutdown 优雅关闭：关闭 WS 服务与连接、所有活动会话，再停止进程与客户端。

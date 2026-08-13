@@ -48,16 +48,18 @@ func (Config) TableName() string { return "llm_proxy_config" }
 // DefaultConfig 返回默认配置（sophnet 上游：LLM=deepseek，VLM=qwen3-vl-plus）。
 // ApiBase 为 OpenAI 兼容 base（转发时直接拼 /chat/completions）。
 // LLMOverride/VLMOverride 默认开启「覆盖下游请求」：新装转发一律用默认模型名。
+// 需求(MYS-210)：LLM/VLM 默认 Enabled=false —— llm 代理默认关闭；用户保存配置
+// （enabled=true）后才开启转发 server，bmssm 重启后回到默认关闭（启动不自动拉起）。
 func DefaultConfig() Config {
 	return Config{
 		ID:          1,
 		LLMApiBase:  "https://www.sophnet.com/api/open-apis/v1",
 		LLMModel:    "sophnet-deepseek",
-		LLMEnabled:  true,
+		LLMEnabled:  false,
 		LLMOverride: true,
 		VLMApiBase:  "https://www.sophnet.com/api/open-apis/v1",
 		VLMModel:    "qwen3-vl-plus",
-		VLMEnabled:  true,
+		VLMEnabled:  false,
 		VLMOverride: true,
 	}
 }

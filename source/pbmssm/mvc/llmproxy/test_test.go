@@ -32,7 +32,9 @@ func setupTestController(t *testing.T) (*Controller, *httptest.Server) {
 	svc := NewService(db)
 	cfg, _ := svc.SaveConfig(SaveRequest{
 		LLMApiBase: upstream.URL + "/llm", LLMApiKey: "k", LLMModel: "llm-target",
+		LLMEnabled: boolPtr(true),
 		VLMApiBase: upstream.URL + "/vlm", VLMApiKey: "k", VLMModel: "vlm-target",
+		VLMEnabled: boolPtr(true),
 	})
 	setActive(cfg)
 	return &Controller{svc: svc}, upstream

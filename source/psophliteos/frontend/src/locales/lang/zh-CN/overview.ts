@@ -18,6 +18,7 @@ export default {
     ctrSN: '控制板SN',
     system: '操作系统',
     sdkVersion: 'SDK版本',
+    sophliteosVersion: 'sophliteos版本',
     runningTime: '运行时长',
     ip: '设备IP',
     wanip: 'WAN口IP',

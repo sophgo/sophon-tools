@@ -57,7 +57,7 @@
         <div class="webchat-header-status" :class="statusClass">{{ statusText }}</div>
       </header>
 
-      <div ref="messagesEl" class="webchat-messages">
+      <div ref="messagesEl" class="webchat-messages" @scroll.passive="onMessagesScroll">
         <template v-for="m in currentMessages" :key="m.key">
           <div v-if="m.role === 'user'" class="webchat-msg webchat-msg-user">
             <div class="webchat-bubble">{{ m.content }}</div>
@@ -100,6 +100,17 @@
         <div v-if="errorMsg" class="webchat-msg webchat-msg-error">
           <div class="webchat-bubble">{{ errorMsg }}</div>
         </div>
+        <!-- 需求(MYS-210)：上翻历史时出现的「跳到最底部」悬浮按钮 -->
+        <Transition name="webchat-fade">
+          <button
+            v-if="showJumpBottom"
+            class="webchat-jump-bottom"
+            type="button"
+            @click="scrollToBottom"
+            aria-label="跳到最底部"
+            >▼</button
+          >
+        </Transition>
       </div>
 
       <footer class="webchat-input-area">
@@ -114,6 +125,25 @@
           </div>
         </div>
         <div class="webchat-input-box">
+          <!-- 需求(MYS-210)：输入框左侧 —— 自动审批开关 + 停止按钮 -->
+          <div class="webchat-input-tools">
+            <label class="webchat-autoapprove" title="开启后，工具权限请求将自动允许（随本会话保存）">
+              <input
+                type="checkbox"
+                v-model="autoApproveOn"
+                @change="onAutoApproveChange"
+              />
+              <span>自动审批</span>
+            </label>
+            <button
+              class="webchat-stop"
+              type="button"
+              :disabled="!activeSess?.busy && !typing"
+              title="停止当前回合"
+              @click="stopAgent"
+              >■</button
+            >
+          </div>
           <textarea
             ref="inputEl"
             v-model="draft"
@@ -163,6 +193,8 @@
     title: string;
     messages: ChatMsg[];
     busy?: boolean;
+    // 需求(MYS-210)：自动审批开关，随会话保存（刷新/换浏览器后恢复）。
+    autoApprove?: boolean;
   }
 
   const SESSIONS_KEY = 'sophon.ai-agent.sessions';
@@ -183,6 +215,10 @@
 
   const messagesEl = ref<HTMLElement | null>(null);
   const inputEl = ref<HTMLTextAreaElement | null>(null);
+  // 需求(MYS-210)：消息区是否可滚动（内容超出视口才显示「跳底」按钮）与是否贴近底部
+  const canScroll = ref(false);
+  const nearBottom = ref(true);
+  const showJumpBottom = computed(() => canScroll.value && !nearBottom.value);
 
   let ws: PicoWs | null = null;
   let forwardKey = '';
@@ -228,6 +264,40 @@
     return msgs.find((m) => m.kind === 'permission' && !m.permDone) || null;
   });
 
+  // 需求(MYS-210)：自动审批开关。绑定当前会话的 autoApprove 字段，
+  // 随 Session 一起持久化（saveSessions / loadSessions），刷新或换浏览器后恢复、
+  // 各会话独立。切换会话/无会话时回退 false。
+  const autoApproveOn = computed<boolean>({
+    get: () => !!activeSess.value?.autoApprove,
+    set: (v: boolean) => {
+      const s = activeSess.value;
+      if (s) {
+        s.autoApprove = v;
+        saveSessions();
+      }
+    },
+  });
+
+  // 开关变更触发。
+  function onAutoApproveChange() {
+    // 无需额外处理：面板只是把 autoApproveOn 的状态落到 Session（见 computed setter）。
+  }
+
+  // 需求(MYS-210)：停止当前回合。向服务端发 session.cancel（agentproxy ws.go 已支持
+  // 该帧 → module.CancelTurn 取消在途回合），本地同步清 typing/busy，避免残留转圈。
+  function stopAgent() {
+    const s = activeSess.value;
+    if (ws && ws.ready && s?.id) {
+      ws.sendFrame({ type: 'session.cancel', session_id: s.id });
+    }
+    typing.value = false;
+    sending.value = false;
+    if (s) {
+      s.busy = false;
+      delete busyCalibAt[s.id];
+    }
+  }
+
   // 异步渲染 markdown → 安全 HTML。消息内容流式累积，用版本号避免旧结果的竞态覆盖。
   let renderSeq = 0;
   function renderMsgHtml(m: ChatMsg) {
@@ -272,6 +342,8 @@
           }
         }
       }, 150);
+      // 内容渲染后刷新消息区滚动状态
+      nextTick(refreshScrollState);
     }
   );
 
@@ -426,6 +498,29 @@
     const toolCall = payload?.tool_call || {};
     if (reqId == null) return;
     const s = ensureSession();
+    // 需求(MYS-210)：开启自动审批的会话 → 不渲染人审卡片，直接回「允许」，
+    // 让 agent 流程不间断。仍记录一条已处理（allow）的 permission 消息供历史可见。
+    if (s.autoApprove) {
+      if (ws && ws.ready) {
+        ws.sendFrame({
+          type: 'permission.respond',
+          session_id: s.id,
+          payload: { session_id: s.id, request_id: reqId, allow: true },
+        });
+      }
+      s.messages.push({
+        key: 'perm' + msgSeq++,
+        role: 'assistant',
+        kind: 'permission',
+        content: '',
+        permReqId: reqId,
+        permTitle: (toolCall.title as string) || '工具调用',
+        permDone: true,
+        open: false,
+      });
+      saveSessions();
+      return;
+    }
     s.messages.push({
       key: 'perm' + msgSeq++,
       role: 'assistant',
@@ -785,6 +880,7 @@
         title: ss.title || '新会话',
         messages: existing ? existing.messages : [],
         busy: false,
+        autoApprove: existing ? existing.autoApprove : false, // 需求(MYS-210)：随会话保留
       };
     });
     // 保留本地尚未同步到服务端的会话
@@ -936,8 +1032,28 @@
 
   function scrollToBottom() {
     nextTick(() => {
-      if (messagesEl.value) messagesEl.value.scrollTop = messagesEl.value.scrollHeight;
+      if (messagesEl.value) {
+        messagesEl.value.scrollTop = messagesEl.value.scrollHeight;
+        refreshScrollState();
+      }
     });
+  }
+
+  // 需求(MYS-210)：刷新「可滚动 / 贴近底部」状态（跳底按钮显隐依据）。
+  function refreshScrollState() {
+    const el = messagesEl.value;
+    if (!el) {
+      canScroll.value = false;
+      nearBottom.value = true;
+      return;
+    }
+    const can = el.scrollHeight > el.clientHeight + 1;
+    canScroll.value = can;
+    nearBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight <= 40;
+  }
+
+  function onMessagesScroll() {
+    refreshScrollState();
   }
 
   // ---------- 连接 ----------
@@ -977,6 +1093,7 @@
     if (saved && sessions.value.some((s) => s.id === saved)) activeId.value = saved;
     if (!activeSess.value) newSession();
     connect();
+    nextTick(refreshScrollState);
     // 兜底2/4：启动忙状态扫描（防回合永不结束致 busy 卡死 + 恢复型 busy 一次性校准）
     busyStallTimer = setInterval(() => {
       clearStalledBusy();
@@ -1170,6 +1287,39 @@
     flex: 1;
     overflow-y: auto;
     padding: 16px;
+    position: relative; /* 供「跳到最底部」悬浮按钮定位 */
+  }
+
+  /* 需求(MYS-210)：上翻历史时出现的「跳到最底部」悬浮按钮 */
+  .webchat-jump-bottom {
+    position: sticky;
+    bottom: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 5;
+    border: 1px solid #d9d9d9;
+    background: rgba(255, 255, 255, 0.92);
+    color: #1a73e8;
+    border-radius: 50%;
+    width: 34px;
+    height: 34px;
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  }
+  .webchat-jump-bottom:hover {
+    color: #fff;
+    background: #1a73e8;
+    border-color: #1a73e8;
+  }
+  .webchat-fade-enter-active,
+  .webchat-fade-leave-active {
+    transition: opacity 0.2s ease;
+  }
+  .webchat-fade-enter-from,
+  .webchat-fade-leave-to {
+    opacity: 0;
   }
 
   .webchat-msg {
@@ -1462,6 +1612,49 @@
     display: flex;
     align-items: flex-end;
     gap: 8px;
+  }
+  /* 需求(MYS-210)：输入框左侧工具区（自动审批开关 + 停止按钮） */
+  .webchat-input-tools {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    flex-shrink: 0;
+    padding-bottom: 2px;
+  }
+  .webchat-autoapprove {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    color: #666;
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+  }
+  .webchat-autoapprove input {
+    accent-color: #1a73e8;
+    cursor: pointer;
+  }
+  .webchat-stop {
+    border: 1px solid #d9d9d9;
+    background: #fff;
+    color: #666;
+    border-radius: 6px;
+    font-size: 12px;
+    line-height: 1;
+    padding: 6px 10px;
+    cursor: pointer;
+    text-align: center;
+  }
+  .webchat-stop:hover:not(:disabled) {
+    border-color: #ff4d4f;
+    color: #ff4d4f;
+  }
+  .webchat-stop:disabled {
+    color: #ccc;
+    cursor: not-allowed;
+    background: #fafafa;
   }
   .webchat-input-box textarea {
     flex: 1;

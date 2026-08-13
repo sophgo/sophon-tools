@@ -124,6 +124,7 @@ func TestForwardKeyRelaxed(t *testing.T) {
 	cfg, _ := svc.SaveConfig(SaveRequest{
 		LLMApiBase: upstream.URL + "/llm", LLMApiKey: "k", LLMModel: "m",
 		VLMApiBase: upstream.URL + "/vlm", VLMApiKey: "k", VLMModel: "m",
+		LLMEnabled: boolPtr(true), VLMEnabled: boolPtr(true),
 	})
 	// 强制设一个已知转发 key
 	cfg.ForwardKey = "test-forward-key"
@@ -171,6 +172,7 @@ func TestForwardKeyUnset(t *testing.T) {
 	cfg, _ := svc.SaveConfig(SaveRequest{
 		LLMApiBase: upstream.URL + "/llm", LLMApiKey: "k", LLMModel: "m",
 		VLMApiBase: upstream.URL + "/vlm", VLMApiKey: "k", VLMModel: "m",
+		LLMEnabled: boolPtr(true),
 	})
 	cfg.ForwardKey = ""
 	setActive(cfg)
@@ -205,6 +207,7 @@ func TestForwardModelPrecedence(t *testing.T) {
 	svc := NewService(db)
 	cfg, _ := svc.SaveConfig(SaveRequest{
 		LLMApiBase: upstream.URL + "/llm", LLMApiKey: "k", LLMModel: "llm-default",
+		LLMEnabled:  boolPtr(true),
 		LLMOverride: boolPtr(false),
 		VLMApiBase:  upstream.URL + "/vlm", VLMApiKey: "k", VLMModel: "vlm-target",
 	})
@@ -272,6 +275,7 @@ func TestForwardModelOverride(t *testing.T) {
 	svc := NewService(db)
 	cfg, _ := svc.SaveConfig(SaveRequest{
 		LLMApiBase: upstream.URL + "/llm", LLMApiKey: "k", LLMModel: "llm-default",
+		LLMEnabled:  boolPtr(true),
 		LLMOverride: boolPtr(true),
 		VLMApiBase:  upstream.URL + "/vlm", VLMApiKey: "k", VLMModel: "vlm-target",
 	})
@@ -444,8 +448,10 @@ func TestForwardModelKeptForImage(t *testing.T) {
 	svc := NewService(db)
 	cfg, _ := svc.SaveConfig(SaveRequest{
 		LLMApiBase: upstream.URL + "/llm", LLMApiKey: "k", LLMModel: "llm-target",
+		LLMEnabled:  boolPtr(true),
 		LLMOverride: boolPtr(false),
 		VLMApiBase:  upstream.URL + "/vlm", VLMApiKey: "k", VLMModel: "vlm-target",
+		VLMEnabled:  boolPtr(true),
 	})
 	cfg.ForwardKey = "fk"
 	_ = svc.db.Model(&Config{}).Where("id = ?", 1).Update("forward_key", "fk").Error
@@ -507,8 +513,10 @@ func TestImageDescribeRouting(t *testing.T) {
 	svc := NewService(db)
 	cfg, _ := svc.SaveConfig(SaveRequest{
 		LLMApiBase: upstream.URL + "/llm", LLMApiKey: "k", LLMModel: "llm-target",
+		LLMEnabled:  boolPtr(true),
 		LLMOverride: boolPtr(false),
 		VLMApiBase:  upstream.URL + "/vlm", VLMApiKey: "k", VLMModel: "vlm-target",
+		VLMEnabled:  boolPtr(true),
 	})
 	cfg.ForwardKey = "fk"
 	_ = svc.db.Model(&Config{}).Where("id = ?", 1).Update("forward_key", "fk").Error
@@ -607,7 +615,9 @@ func TestImageCache(t *testing.T) {
 	svc := NewService(db)
 	cfg, _ := svc.SaveConfig(SaveRequest{
 		LLMApiBase: upstream.URL + "/llm", LLMApiKey: "k", LLMModel: "llm-target",
+		LLMEnabled: boolPtr(true),
 		VLMApiBase: upstream.URL + "/vlm", VLMApiKey: "k", VLMModel: "vlm-target",
+		VLMEnabled: boolPtr(true),
 	})
 	cfg.ForwardKey = "fk"
 	_ = svc.db.Model(&Config{}).Where("id = ?", 1).Update("forward_key", "fk").Error
@@ -700,6 +710,7 @@ func TestImagePassthroughLocalLLM(t *testing.T) {
 	off := false
 	cfg, _ := svc.SaveConfig(SaveRequest{
 		LLMApiBase: upstream.URL + "/llm", LLMApiKey: "k", LLMModel: "local-model",
+		LLMEnabled:  boolPtr(true),
 		LLMOverride: boolPtr(false),
 		// VLM 显式未配置（disabled + 空模型）
 		VLMEnabled: &off,
@@ -776,6 +787,7 @@ func TestImageDescribedForSophnetImplicitVLM(t *testing.T) {
 	off := false
 	cfg, _ := svc.SaveConfig(SaveRequest{
 		LLMApiBase: upstream.URL + "/llm", LLMApiKey: "k", LLMModel: "sophnet-model",
+		LLMEnabled:  boolPtr(true),
 		LLMOverride: boolPtr(false),
 		VLMEnabled:  &off,
 	})
