@@ -197,10 +197,15 @@
   // 兜底2：busy 超时复位——busy 会话长期收不到任何 ws 帧即视为回合已停，强制清 busy
   //        （覆盖「回合永不结束 → busy=false 永不发」的根因路径）。
   // 兜底3：error 事件除清 typing 外同步清当前会话 busy。
+  // 兜底4（需求 4）：刷新/换浏览器后恢复型 busy 一次性校准——恢复的 busy 若短时间内收不到
+  //        任何新活动帧，判定为服务端 running 残留（回合已完成/卡死），复位为空闲。
   const BUSY_STALL_TIMEOUT = 120_000; // busy 无任何活动帧超过此值即判定停摆
+  const BUSY_CALIBRATE_WINDOW = 8_000; // 恢复型 busy 的校准窗口：窗口内无新帧即复位
   const BUSY_SCAN_INTERVAL = 10_000; // 兜底扫描周期
   // 会话最后一次收到 ws 帧的时间（key=sessionId）。仅用于 busy 超时判定，不入持久化。
   const sessionLastWsAt: Record<string, number> = {};
+  // 恢复型 busy 的校准截止时间（key=sessionId）；到点后若仍无新帧则复位 busy。
+  const busyCalibAt: Record<string, number> = {};
   // 兜底扫描定时器句柄
   let busyStallTimer: ReturnType<typeof setInterval> | null = null;
   // 当前流式「思考过程」折叠块的 key（同一逻辑思考常被后端拆成多个 message.create
@@ -212,7 +217,10 @@
   }
 
   const activeSess = computed(() => sessions.value.find((s) => s.id === activeId.value) || null);
-  const currentMessages = computed(() => activeSess.value?.messages || []);
+  // 展示列表：权限审批卡（kind==='permission'）只以输入框上方的 pendingPerm 呈现，
+  // 不在消息流里渲染成气泡（需求 2：允许/拒绝后不再出现空白气泡）。
+  const rawMessages = computed(() => activeSess.value?.messages || []);
+  const currentMessages = computed(() => rawMessages.value.filter((m) => m.kind !== 'permission'));
   // 待处理的权限请求：取当前会话第一条未处理（permDone 为空）的 permission 消息。
   // 由消息状态派生，切换会话/允许/拒绝/回执后自动同步，与消息历史共享同一份 permDone。
   const pendingPerm = computed<ChatMsg | null>(() => {
@@ -257,7 +265,11 @@
         const msgs = currentMessages.value || [];
         for (const m of msgs) {
           // user/error/permission 内容不渲染 markdown；assistant 文本/思考/工具调用渲染
-          if (m.role === 'assistant' && m.kind !== 'permission' && m.content) bumpRender(m);
+          if (m.role === 'assistant' && m.kind !== 'permission' && m.content) {
+            // 旧持久化的工具调用可能是裸 JSON，渲染前规整为可读文本（幂等，自动修复历史）
+            if (m.kind === 'tool_calls') m.content = displayToolCalls(m.content);
+            bumpRender(m);
+          }
         }
       }, 150);
     }
@@ -285,13 +297,18 @@
   function saveSessions() {
     try {
       // html / __renderSeq 是从 content 派生的渲染缓存，不持久化（向后兼容、避免存储膨胀）
-      const snap = sessions.value.map((s) => ({
-        ...s,
-        messages: s.messages.map((m) => {
-          const { html: _h, __renderSeq: _r, ...rest } = m as ChatMsg;
-          return rest;
-        }),
-      }));
+      // busy 是运行期派生态（需求 4）：不持久化，避免刷新后错误沿用旧的「正在工作」标记；
+      // 恢复时以服务端 running + 一次性校准为准。
+      const snap = sessions.value.map((s) => {
+        const { busy: _b, ...rest } = s as Session;
+        return {
+          ...rest,
+          messages: rest.messages.map((m) => {
+            const { html: _h, __renderSeq: _r, ...mrest } = m as ChatMsg;
+            return mrest;
+          }),
+        };
+      });
       localStorage.setItem(SESSIONS_KEY, JSON.stringify(snap));
     } catch (e) {
       /* ignore */
@@ -454,6 +471,38 @@
     if (s) s.busy = busy;
   }
 
+  // 恢复型 busy（需求 4）：刷新/换浏览器时由服务端 session.list/history 的 running 恢复。
+  // 服务端 running 仅进程内存（HasTurn），若某回合的 prompt 响应帧丢失/挂起，turn 的
+  // done 通道永不关闭，running 会一直为 true → 刷新后误显示「正在工作」。这里对该恢复的
+  // busy 做一次性校准：记基线时刻，校准窗口内若无任何新 ws 帧（真在跑会持续发
+  // tool_call/text），判定为误恢复的空闲会话并复位。
+  function restoreBusy(sid: string | undefined, busy: boolean) {
+    if (!sid) return;
+    const s = sessions.value.find((x) => x.id === sid);
+    if (!s) return;
+    s.busy = !!busy;
+    if (busy) {
+      sessionLastWsAt[sid] = Date.now(); // 恢复基线：真在跑会有新帧刷新这里
+      busyCalibAt[sid] = Date.now() + BUSY_CALIBRATE_WINDOW;
+    } else {
+      delete busyCalibAt[sid];
+    }
+  }
+
+  // 兜底4校准扫描：在每个兜底周期内，检查恢复型 busy 是否过窗且无新活动帧。
+  function calibrateRestoredBusy() {
+    const now = Date.now();
+    sessions.value.forEach((s) => {
+      const due = busyCalibAt[s.id];
+      if (!due) return;
+      if (now < due) return; // 窗口内：保持，等真在跑的任务发帧刷新基线
+      delete busyCalibAt[s.id];
+      if (s.busy && now - (sessionLastWsAt[s.id] || 0) >= BUSY_CALIBRATE_WINDOW) {
+        s.busy = false;
+      }
+    });
+  }
+
   // 兜底2：busy 超时复位。服务端 session.busy=false 仅在回合(consumeTurn)正常结束时
   // 下发；若回合永不结束（reasonix prompt 响应帧丢失/挂起），busy=false 永不送达，
   // busy 转圈会一直转。此定时器兜底：busy 会话长期收不到任何 ws 帧即视为回合已停，
@@ -598,9 +647,88 @@
   function formatToolCalls(payload: any): string {
     const calls = payload.tool_calls;
     if (Array.isArray(calls) && calls.length) {
-      return calls.map((c: any) => JSON.stringify(c, null, 2)).join('\n\n');
+      return calls.map((c: any) => toolCallLine(c)).filter(Boolean).join('\n');
     }
+    // 拿不到结构化 tool_calls：回退 payload.content（message.create 已带后端可读摘要）或空
     return payload.content || '';
+  }
+
+  // 把一条工具调用规整为可读的「工具名: 内容」（需求：不再显示裸 JSON）。
+  // 兼容两种载荷形态：
+  //   - pico/旧形态：{function:{name,arguments}} → 「工具名: 参数主内容」
+  //   - ACP 现代形态 ToolCallState：{toolCallId,title,kind,status} → 与后端
+  //     toolCallSummary 同格式（title · kind · status），保证前端实时内容与后端
+  //     持久化 history 一致，历史合并去重时不产生重复。
+  function toolCallLine(c: any): string {
+    if (c == null) return '';
+    if (typeof c !== 'object') return String(c);
+    if (c.function && typeof c.function === 'object') {
+      const name = c.function.name || '';
+      const body = extractArgs(c.function.arguments);
+      return [name, body].filter((x) => x).join(': ').trim();
+    }
+    const bits: string[] = [];
+    if (c.title) bits.push(c.title);
+    else if (c.toolCallId) bits.push(c.toolCallId);
+    if (c.kind) bits.push(c.kind);
+    if (typeof c.status === 'string' && c.status) bits.push(c.status);
+    return bits.join(' · ');
+  }
+
+  // 从工具调用的 arguments/参数中提取主参数文本（命令、文件路径优先）。
+  // arguments 可能是字符串（含转义 JSON）或已是对象；解析失败回退原文。
+  function extractArgs(raw: any): string {
+    if (raw == null) return '';
+    const primaryOf = (o: any): string => {
+      if (o == null) return '';
+      const k = o.command ?? o.path ?? o.file ?? o.paths ?? o.src ?? o.content ?? o.cmd;
+      if (k != null) return typeof k === 'object' ? JSON.stringify(k) : String(k);
+      try {
+        return Object.entries(o)
+          .map(([kk, v]) => `${kk}=${String(v)}`)
+          .join(', ');
+      } catch (e) {
+        return '';
+      }
+    };
+    if (typeof raw !== 'object') {
+      let text = String(raw);
+      // 转义 JSON（pico 会把 arguments 转义成字符串）→ 尝试解引用一次
+      try {
+        const obj = JSON.parse(text.replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\'));
+        if (obj && typeof obj === 'object') return primaryOf(obj);
+      } catch (e) {
+        /* 非 JSON，按原文返回 */
+      }
+      return text.trim();
+    }
+    return primaryOf(raw);
+  }
+
+  // 兼容旧持久化的工具调用内容：旧版可能是原始 JSON（pico function 或 ToolCallState 序列化），
+  // 检测到则规整为可读文本；已经是可读行则原样返回（幂等）。
+  function displayToolCalls(content: string): string {
+    if (!content) return '';
+    const t = content.trim();
+    const looksReadable =
+      !t.startsWith('[') && !t.includes('"function"') && !/^\{"toolCallId\b/.test(t);
+    if (looksReadable) return content;
+    try {
+      let calls: any[] | null = null;
+      if (t.startsWith('[')) {
+        const arr = JSON.parse(t);
+        if (Array.isArray(arr)) calls = arr;
+      } else {
+        calls = [JSON.parse(t)];
+      }
+      if (calls) {
+        const rebuilt = calls.map((c) => toolCallLine(c)).filter(Boolean).join('\n');
+        if (rebuilt) return rebuilt;
+      }
+    } catch (e) {
+      /* 解析失败，保持原文 */
+    }
+    return content;
   }
 
   // ---------- 折叠块收起时的单行摘要 ----------
@@ -630,48 +758,35 @@
     return clampChars(plainText(content), SUMMARY_LEN);
   }
 
-  // 工具调用：从 formatToolCalls 生成的 JSON（多 call 以空行连接）逐个提取
-  // function.name + 参数 JSON 扁平化简写，拼成「名称(参数…)、名称(参数…)」。
+  // 工具调用折叠块收起时的单行摘要：内容已是可读行（或旧 JSON），取首条「工具名: 内容」截断。
   function toolCallSummary(content: string): string {
     if (!content) return '';
-    const parts: string[] = [];
-    // 每个 call 非贪婪匹配到 name 与 arguments（arguments 可能缺失）
-    const callRe =
-      /"function"\s*:\s*\{[\s\S]*?"name"\s*:\s*"([^"]+)"[\s\S]*?(?:"arguments"\s*:\s*"((?:[^"\\]|\\.)*)")?\s*\}/g;
-    let mm: RegExpExecArray | null;
-    let guard = 0;
-    while ((mm = callRe.exec(content)) && parts.length < 4 && guard++ < 20) {
-      const name = mm[1];
-      const rawArgs = mm[2] ? flattenArgs(mm[2]) : '';
-      parts.push(rawArgs ? `${name}(${clampChars(rawArgs, 20)})` : name);
-    }
-    if (!parts.length) return clampChars(plainText(content), SUMMARY_LEN);
-    return clampChars(parts.join('、'), SUMMARY_LEN);
+    const normalized = displayToolCalls(content);
+    const firstLine = (normalized || '').split('\n')[0] || '';
+    return clampChars(plainText(firstLine), SUMMARY_LEN);
   }
 
-  // 把 arguments 的转义 JSON 压成「k=v, k=v」简写；解析失败时返回空串
-  function flattenArgs(raw: string): string {
-    try {
-      const obj = JSON.parse(raw.replace(/\\n/g, '').replace(/\\"/g, '"').replace(/\\\\/g, '\\'));
-      if (obj == null) return '';
-      const pairs = Object.entries(obj).map(([k, v]) => {
-        const val = v !== null && typeof v === 'object' ? JSON.stringify(v) : String(v);
-        return `${k}=${val}`;
-      });
-      return pairs.join(', ');
-    } catch (e) {
-      return '';
-    }
+  // 历史合并（需求 3）：服务端历史为权威完整基线（原样保留顺序，允许跨轮次同内容消息
+  // 重复存在），仅追加本地尚未被服务端覆盖的消息（在途流式内容、权限审批记录——
+  // 服务端不回放 permission）。这样既不丢失历史，也不会因去重把不同轮次的相同内容合并掉。
+  function mergeHistory(local: ChatMsg[], server: ChatMsg[]): ChatMsg[] {
+    const keyOf = (m: ChatMsg) => m.role + '|' + (m.kind || '') + '|' + (m.content || '');
+    const serverKeys = new Set(server.map(keyOf));
+    return server.concat(local.filter((m) => !serverKeys.has(keyOf(m))));
   }
 
   function handleSessionList(payload: any) {
     const serverList = Array.isArray(payload.sessions) ? payload.sessions : [];
-    const stored: Session[] = serverList.map((ss: any) => ({
-      id: ss.id,
-      title: ss.title || '新会话',
-      messages: [],
-      busy: !!ss.running, // 需求 2：服务端回合进行中 → 忙碌
-    }));
+    const stored: Session[] = serverList.map((ss: any) => {
+      // 服务端列表不含消息；保留本地已缓存消息作为兜底，等 session.history 确认后再刷新
+      const existing = sessions.value.find((x) => x.id === ss.id);
+      return {
+        id: ss.id,
+        title: ss.title || '新会话',
+        messages: existing ? existing.messages : [],
+        busy: false,
+      };
+    });
     // 保留本地尚未同步到服务端的会话
     const storedIds = new Set(stored.map((s) => s.id));
     sessions.value.forEach((s) => {
@@ -683,6 +798,8 @@
     }
     saveSessions();
     saveActive();
+    // 同步忙碌指示（需求 2/4）：服务端 running 为真相，恢复型 busy 走一次性校准
+    sessions.value.forEach((s) => restoreBusy(s.id, !!serverList.find((ss: any) => ss.id === s.id)?.running));
     if (activeId.value) {
       pullHistory(activeId.value);
     } else {
@@ -695,15 +812,19 @@
     const raw = Array.isArray(payload.messages) ? payload.messages : [];
     const s = sessions.value.find((x) => x.id === sid);
     if (!s) return;
-    s.messages = raw.map((m: any) => ({
+    const serverMsgs = raw.map((m: any) => ({
       key: 'his' + msgSeq++,
       role: m.role === 'user' ? 'user' : 'assistant',
       kind: m.kind || (m.role === 'user' ? '' : 'text'),
-      content: m.content || '',
+      // 旧持久化的工具调用可能存的是裸 JSON，规整为可读文本（幂等）
+      content: m.content && m.kind === 'tool_calls' ? displayToolCalls(m.content) : m.content || '',
       open: false,
     }));
+    // 请求 3：以服务端历史为权威基线，并合并本地尚未同步到的消息（在途内容、权限审批记录），
+    // 避免刷新/换浏览器后历史缺失；同内容按 role+kind+content 去重，防止重复。
+    s.messages = mergeHistory(s.messages, serverMsgs);
     if (payload.title && s.title !== payload.title) s.title = payload.title;
-    s.busy = !!payload.running; // 需求 2：恢复会话时同步忙碌
+    restoreBusy(s.id, !!payload.running); // 需求 4：恢复 busy 时走一次性校准
     clearOpenThought();
     saveSessions();
     scrollToBottom();
@@ -843,8 +964,11 @@
     if (saved && sessions.value.some((s) => s.id === saved)) activeId.value = saved;
     if (!activeSess.value) newSession();
     connect();
-    // 兜底2：启动忙状态超时扫描（防回合永不结束致 busy 卡死）
-    busyStallTimer = setInterval(clearStalledBusy, BUSY_SCAN_INTERVAL);
+    // 兜底2/4：启动忙状态扫描（防回合永不结束致 busy 卡死 + 恢复型 busy 一次性校准）
+    busyStallTimer = setInterval(() => {
+      clearStalledBusy();
+      calibrateRestoredBusy();
+    }, BUSY_SCAN_INTERVAL);
   });
 
   onBeforeUnmount(() => {
