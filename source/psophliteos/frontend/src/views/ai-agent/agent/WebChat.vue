@@ -1133,7 +1133,7 @@
 
     // 用户消息入本地
     s.messages.push({ key: 'msg' + msgSeq++, role: 'user', content });
-    // 需求 3：默认标题用第一条用户消息前 8 个字（本地即时更新，服务端 EnsureTitle 亦会设）
+    // 需求 3：默认标题用第一条用户消息前 20 个字（本地即时更新，服务端 EnsureTitle 亦会设）
     if (!s.title || s.title === '新会话') {
       s.title = defaultTitleFromText(content);
     }
@@ -1165,7 +1165,7 @@
   function defaultTitleFromText(text: string): string {
     const t = text.trim().replace(/\s+/g, ' ');
     if (!t) return '新会话';
-    return Array.from(t).slice(0, 8).join('') || '新会话';
+    return Array.from(t).slice(0, 20).join('') || '新会话';
   }
   function startEditTitle() {
     const s = activeSess.value;

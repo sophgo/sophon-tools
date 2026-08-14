@@ -2,6 +2,7 @@
 package firewall
 
 import (
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -64,11 +65,14 @@ func CheckEnvironment(r CommandRunner) EnvResult {
 			})
 		}
 	}
-	// rules.v4 可写
+	// rules.v4 可写。设备根为 overlay 只读底 + 未预装 iptables-persistent 时，
+	// /etc/iptables 目录与 rules.v4 可能不存在。先自愈（mkdir -p + touch）再检测：
+	// 能自愈则通过，只有自愈后仍不可写才算环境异常。
 	_, persistPath, _, _ := FirewallConfig()
 	if persistPath != "" {
+		r.Run("mkdir", "-p", filepath.Dir(persistPath))
+		r.Run("touch", persistPath)
 		if _, _, err := r.Run("test", "-w", persistPath); err != nil {
-			// test -w 退出码非零=不可写；但目录可能不存在也算不可写
 			res.OK = false
 			res.Issues = append(res.Issues, EnvIssue{
 				Check:   "rules_v4",

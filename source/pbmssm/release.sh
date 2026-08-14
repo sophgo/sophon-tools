@@ -28,13 +28,17 @@ build_one() {
   local arch="$1"
   echo "==> pbmssm build arch=$arch version=$VERSION reasonix=${REASONIX_BIN:-<none>}"
   bash build/build-deb-bmssm.sh "$VERSION" "$arch" "$REASONIX_BIN"
-  local deb="release/bmssm_${VERSION}_${arch}.deb"
-  if [ ! -f "$deb" ]; then
-    echo "ERROR: 未找到产物 $deb" >&2
-    exit 1
-  fi
-  cp "$deb" "$OUTPUT_DIR/"
-  file "$deb" | head -1
+  # build-deb-bmssm.sh 固定产出两个后缀变体（_noskill 默认 / _se7 带 SE7 skill），
+  # 逐个校验并拷贝到 OUTPUT_DIR；无匹配视为构建失败。
+  for suffix in _noskill _se7; do
+    local deb="release/bmssm_${VERSION}_${arch}${suffix}.deb"
+    if [ ! -f "$deb" ]; then
+      echo "ERROR: 未找到产物 $deb" >&2
+      exit 1
+    fi
+    cp "$deb" "$OUTPUT_DIR/"
+    file "$deb" | head -1
+  done
 }
 
 if [ -n "${ARCH_LIST:-}" ]; then

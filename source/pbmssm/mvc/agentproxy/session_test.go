@@ -232,18 +232,18 @@ func TestSessionTitle(t *testing.T) {
 	// 预置一个会话（默认标题）
 	sm.sessions["s1"] = &WebchatSession{ID: "s1", ACPSessionID: "acp-1", Title: "新会话", Messages: []ChatMessage{}}
 
-	// EnsureTitle：第一条用户消息前 8 字
+	// EnsureTitle：第一条用户消息前 20 字
 	name := "请帮我查看系统日志看看最近设备在做什么"
 	if !sm.EnsureTitle("s1", name) {
 		t.Fatal("EnsureTitle should set title on first message")
 	}
 	got := sm.sessions["s1"].Title
-	// EnsureTitle 用 defaultTitleFromText：第一条用户消息前 8 个字
+	// EnsureTitle 用 defaultTitleFromText：第一条用户消息前 20 个字
 	exp := defaultTitleFromText(name)
 	if got != exp {
 		t.Fatalf("title = %q, want %q", got, exp)
 	}
-	if got == "" || len([]rune(got)) > 8 {
+	if got == "" || len([]rune(got)) > 20 {
 		t.Fatalf("title wrong length: %q", got)
 	}
 	// 自定义标题

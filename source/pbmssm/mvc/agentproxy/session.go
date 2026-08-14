@@ -315,7 +315,7 @@ func (sm *SessionManager) SetAutoApprove(webchatID string, on bool) bool {
 
 // EnsureTitle 若会话仍为默认标题，则用给定 fallback（通常为第一条用户消息）设置标题。
 // 返回是否真正设置了。
-// 规则（需求 3）：默认用用户第一个问题的前 8 个字作为标题。
+// 规则（需求 3）：默认用用户第一个问题的前 20 个字作为标题。
 func (sm *SessionManager) EnsureTitle(webchatID, fallback string) bool {
 	title := defaultTitleFromText(fallback)
 	if title == "" {
@@ -334,15 +334,15 @@ func (sm *SessionManager) EnsureTitle(webchatID, fallback string) bool {
 	return true
 }
 
-// defaultTitleFromText 取文本前 8 个字符作为标题。
+// defaultTitleFromText 取文本前 20 个字符作为标题。
 func defaultTitleFromText(text string) string {
 	t := strings.Join(strings.Fields(strings.TrimSpace(text)), " ")
 	if t == "" {
 		return ""
 	}
 	runes := []rune(t)
-	if len(runes) > 8 {
-		return string(runes[:8])
+	if len(runes) > 20 {
+		return string(runes[:20])
 	}
 	return t
 }

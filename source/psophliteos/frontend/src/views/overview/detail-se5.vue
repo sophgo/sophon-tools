@@ -207,8 +207,15 @@
     const next = Number.isFinite(cur) ? cur + 1 : 0;
     deviceInfoStore.updateDevice('runTime', next);
   }, 1000);
+  // 需求：CPU/TPU 使用率、温度等实时监控周期性刷新（原仅在挂载时取一次快照，之后恒定不动）。
+  // runTime 由 metrics.Runtime（/proc/uptime）随系统推进返回最新值，轮询覆盖安全不回退。
+  // 5s 一次平衡实时性与后端 resource/basic 接口负担。
+  const dataRefreshTimer = setInterval(() => {
+    deviceInfoStore.getDeviceInfo().catch(() => null);
+  }, 5000);
   onUnmounted(() => {
     clearInterval(timer);
+    clearInterval(dataRefreshTimer);
   });
 
   // 设备名称

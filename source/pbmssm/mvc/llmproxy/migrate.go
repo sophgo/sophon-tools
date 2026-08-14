@@ -45,9 +45,19 @@ func Migrate(db *gorm.DB) {
 			logger.Info("llmproxy migrate: added column %s", c.name)
 		}
 	}
-	// 旧版本字段迁移到新结构（旧 api_base/api_key/target_model/enabled → llm_*）
-	db.Exec("UPDATE llm_proxy_config SET llm_api_base = api_base WHERE llm_api_base IS NULL AND api_base IS NOT NULL")
-	db.Exec("UPDATE llm_proxy_config SET llm_api_key = api_key WHERE llm_api_key IS NULL AND api_key IS NOT NULL")
-	db.Exec("UPDATE llm_proxy_config SET llm_model = target_model WHERE llm_model IS NULL AND target_model IS NOT NULL")
-	db.Exec("UPDATE llm_proxy_config SET llm_enabled = enabled WHERE llm_enabled IS NULL")
+	// 旧版本字段迁移到新结构（旧 api_base/api_key/target_model/enabled → llm_*）。
+	// 必须先确认旧列存在再 UPDATE，否则全新表（AutoMigrate 直接建 llm_* 新结构、
+	// 无 api_base 等旧列）会反复报 "no such column" 并污染启动日志。
+	migrateCol := func(oldCol, newCol string) {
+		if !db.Dialect().HasColumn("llm_proxy_config", oldCol) {
+			return
+		}
+		if err := db.Exec("UPDATE llm_proxy_config SET "+newCol+" = "+oldCol+" WHERE "+newCol+" IS NULL AND "+oldCol+" IS NOT NULL").Error; err != nil {
+			logger.Warn("llmproxy migrate %s -> %s failed: %v", oldCol, newCol, err)
+		}
+	}
+	migrateCol("api_base", "llm_api_base")
+	migrateCol("api_key", "llm_api_key")
+	migrateCol("target_model", "llm_model")
+	migrateCol("enabled", "llm_enabled")
 }

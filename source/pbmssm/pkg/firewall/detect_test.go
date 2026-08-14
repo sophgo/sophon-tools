@@ -61,7 +61,25 @@ type notFoundErr struct{}
 func (*notFoundErr) Error() string { return "not found" }
 
 func TestCheckEnvironmentAllOK(t *testing.T) {
-	// iptables/iptables-save/iptables-restore 都在，ufw 不在或 disabled
+	// iptables/iptables-save/iptables-restore 都在，ufw 不在或 disabled，
+	// rules.v4 已存在且可写（mkdir/touch/test 均成功）
+	r := &fakeRunner{outs: map[string]string{
+		"iptables -V":                            "iptables v1.8",
+		"iptables-save -V":                       "v1.8",
+		"iptables-restore -V":                    "v1.8",
+		"ufw status":                             "Status: inactive",
+		"test -w /etc/iptables/rules.v4":         "",
+	}}
+	// which 检测：用 outs 模拟存在（返空串无错=存在）
+	res := CheckEnvironment(r)
+	if !res.OK {
+		t.Fatalf("expected OK, issues=%+v", res.Issues)
+	}
+}
+
+// 需求（firewall 自愈）：设备 overlay 根未预装 iptables-persistent 时 /etc/iptables/rules.v4
+// 不存在。CheckEnvironment 应先 mkdir -p + touch 自愈，能自愈则判 OK，不报环境异常。
+func TestCheckEnvironmentSelfHealsMissingRulesFile(t *testing.T) {
 	r := &fakeRunner{outs: map[string]string{
 		"iptables -V":          "iptables v1.8",
 		"iptables-save -V":     "v1.8",
@@ -69,10 +87,47 @@ func TestCheckEnvironmentAllOK(t *testing.T) {
 		"ufw status":           "Status: inactive",
 		"test -w /etc/iptables/rules.v4": "",
 	}}
-	// which 检测：用 outs 模拟存在（返空串无错=存在）
 	res := CheckEnvironment(r)
 	if !res.OK {
-		t.Fatalf("expected OK, issues=%+v", res.Issues)
+		t.Fatalf("expected OK after self-heal mkdir+touch, issues=%+v", res.Issues)
+	}
+	// 自愈确实发生了：应先调用 mkdir -p 与 touch rules.v4
+	if r.count("mkdir -p /etc/iptables") == 0 {
+		t.Error("expected mkdir -p /etc/iptables self-heal call")
+	}
+	if r.count("touch /etc/iptables/rules.v4") == 0 {
+		t.Error("expected touch /etc/iptables/rules.v4 self-heal call")
+	}
+}
+
+// 自愈也无法成功（touch 与 test -w 均失败）→ 仍应报环境异常。
+func TestCheckEnvironmentRulesFileUnwritable(t *testing.T) {
+	notFound := &notFoundErr{}
+	r := &fakeRunner{
+		outs: map[string]string{
+			"iptables -V":         "iptables v1.8",
+			"iptables-save -V":    "v1.8",
+			"iptables-restore -V": "v1.8",
+			"ufw status":          "Status: inactive",
+		},
+		errs: map[string]error{
+			"mkdir -p /etc/iptables":         notFound,
+			"touch /etc/iptables/rules.v4":   notFound,
+			"test -w /etc/iptables/rules.v4": notFound,
+		},
+	}
+	res := CheckEnvironment(r)
+	if res.OK {
+		t.Fatal("expected NOT ok when rules.v4 stays unwritable after self-heal")
+	}
+	found := false
+	for _, i := range res.Issues {
+		if i.Check == "rules_v4" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("rules_v4 issue missing")
 	}
 }
 
