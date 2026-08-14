@@ -370,10 +370,16 @@ if [[ "$(find . -type f -name "partition*xml" | wc -l)" != "1" ]]; then
 fi
 xmlfile=$(find . -type f -name "partition*xml")
 file_validate "${xmlfile}"
-OTA_NEW_PACKAGE_GPT_PART_SIZE_KB=$(cat ${xmlfile} | grep "<physical_partition " | awk -F'"' '{print \
-$2}')
-OTA_NEW_ALL_PART_SIZE_KB=$(cat ${xmlfile} | grep "<partition " | awk -F'"' '{print $4}' | paste \
--sd+ - | bc)
+# partition 表尺寸单位可能为 size_in_kb（bm1688 等）或 size_in_sectors（CV84X2，512B/扇区）。
+# ota 内部统一按 KB 计算，故 sectors 值需 ÷2 折算为 KB（1 sector = 0.5KB）。
+OTA_PARTITION_XML_KBDIV=1
+if grep -q "size_in_sectors" "${xmlfile}"; then
+    OTA_PARTITION_XML_KBDIV=2
+fi
+OTA_NEW_PACKAGE_GPT_PART_SIZE_KB=$(echo "$(cat ${xmlfile} | grep "<physical_partition " | awk -F'"' \
+'{print $2}') / $OTA_PARTITION_XML_KBDIV" | bc)
+OTA_NEW_ALL_PART_SIZE_KB=$(echo "$(cat ${xmlfile} | grep "<partition " | awk -F'"' '{print $4}' | \
+paste -sd+ - | bc) / $OTA_PARTITION_XML_KBDIV" | bc)
 OTA_NEW_LAST_PACK_NAME=$(cat ${xmlfile} | grep "<partition " | tail -n1 | awk -F'"' '{print $2}' | \
 tr '[:upper:]' '[:lower:]')
 OTA_EMMC_SIZE_KB=$(echo "$(lsblk -b | grep '^mmcblk0' | head -n1 | awk -F' ' '{print $4}') / 1024" \
