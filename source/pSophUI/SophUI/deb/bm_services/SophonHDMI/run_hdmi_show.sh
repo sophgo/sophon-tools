@@ -42,7 +42,16 @@ function SOPHON_QT_4() {
 export -f SOPHON_QT_4
 
 CPU_MODEL=$(awk -F': ' '/model name/{print $2; exit}' /proc/cpuinfo)
-if [ "$CPU_MODEL" == "bm1688" ] || [ "$CPU_MODEL" == "cv186ah" ];then
+# CV84X2（SDK 标识 cv84x6）读 /proc/cpuinfo model name 可能为 null/空/cv186ah；
+# 以 dts 递归含 "cvitek,cv84x6-" compatible 兜底识别（与 get_info 一致）。
+# cv84x6 与 bm1688/cv186ah 同属 CV 家族，HDMI 走原生 DRM(card0) 通路，与 fl2000/USB 方案区分。
+if [ "$CPU_MODEL" != "bm1688" ] && [ "$CPU_MODEL" != "cv186ah" ] && [ "$CPU_MODEL" != "cv84x6" ] \
+   && [ -d /proc/device-tree ]; then
+    if find /proc/device-tree -name compatible -type f -exec grep -laE "cvitek,cv84x6-" {} + 2>/dev/null | grep -q .; then
+        CPU_MODEL="cv84x6"
+    fi
+fi
+if [ "$CPU_MODEL" == "bm1688" ] || [ "$CPU_MODEL" == "cv186ah" ] || [ "$CPU_MODEL" == "cv84x6" ];then
         function SOPHON_QT_1() {
                 if [[ "$SOPHON_QT_EN_ENABLE" == "1" ]]; then
                         echo "Device Info:"

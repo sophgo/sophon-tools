@@ -72,10 +72,19 @@ int main(int argc, char *argv[])
 
     MainWindow w;
     QString device_name = MainWindow::executeLinuxCmd("awk -F': ' '/model name/{print $2; exit}' /proc/cpuinfo").trimmed();
+    // CV84X2（SDK 标识 cv84x6）内核 compat 模式下 model name 可能为 null/空/cv186ah；
+    // 以 dts 递归含 "cvitek,cv84x6-" compatible 权威识别（与 get_info 一致），归一化后与 bm1688/cv186ah
+    // 同走 CV 家族的原生 DRM(card0) HDMI 通路与全屏尺寸逻辑。
+    if (device_name != "bm1688" && device_name != "cv186ah" && device_name != "cv84x6") {
+        QString dtsMatch = MainWindow::executeLinuxCmd(
+            "find /proc/device-tree -name compatible -type f -exec grep -laE 'cvitek,cv84x6-' {} + 2>/dev/null | grep -c .").trimmed();
+        if (dtsMatch.toInt() > 0)
+            device_name = "cv84x6";
+    }
     qDebug() << device_name;
     w.fontId = fontId;
     w.app = &a;
-    if (device_name == "bm1688" || device_name == "cv186ah"){
+    if (device_name == "bm1688" || device_name == "cv186ah" || device_name == "cv84x6"){
         QScreen *primaryScreen = QGuiApplication::primaryScreen();
         int screenWidth = primaryScreen->size().width();; // 屏幕分辨率
         int screenHeight= primaryScreen->size().height(); // 屏幕分辨率高度

@@ -1,6 +1,14 @@
 #!/bin/bash
 CPU_MODEL=$(awk -F': ' '/model name/{print $2; exit}' /proc/cpuinfo)
-if [ "$CPU_MODEL" == "bm1688" ] || [ "$CPU_MODEL" == "cv186ah" ];then
+# CV84X2（SDK 标识 cv84x6）读 /proc/cpuinfo model name 可能为 null/空/cv186ah；
+# 以 dts 递归含 "cvitek,cv84x6-" compatible 兜底识别（与 get_info 一致），归入 CV 家族停止 SophonHDMI。
+if [ "$CPU_MODEL" != "bm1688" ] && [ "$CPU_MODEL" != "cv186ah" ] && [ "$CPU_MODEL" != "cv84x6" ] \
+   && [ -d /proc/device-tree ]; then
+    if find /proc/device-tree -name compatible -type f -exec grep -laE "cvitek,cv84x6-" {} + 2>/dev/null | grep -q .; then
+        CPU_MODEL="cv84x6"
+    fi
+fi
+if [ "$CPU_MODEL" == "bm1688" ] || [ "$CPU_MODEL" == "cv186ah" ] || [ "$CPU_MODEL" == "cv84x6" ];then
         sudo systemctl stop SophonHDMI > /dev/null | true
         exit 0
 fi
