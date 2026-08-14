@@ -30,6 +30,10 @@
 ## 内嵌二进制
 
 - `bin/reasonix-arm64-v1.25.0-f32534ad` → 部署路径 `/opt/sophon/reasonix/bin/reasonix`
-- 编译：`GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o reasonix-arm64 ./cmd/reasonix`
-  （基于 v1.25.0 + 上述两个补丁，即本地 fix/keep-tool-group-budget 分支 HEAD f32534ad）
+- 编译（release + 去 debug/symbol）：基于 v1.25.0（`fa64f632`）+ 上述两个补丁，
+  `git apply` 补丁后：
+  ```bash
+  GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o reasonix-arm64 ./cmd/reasonix
+  ```
+  `-ldflags "-s -w"` 去除符号与 DWARF debug 段，产物 38M（未 strip 版约 52M）。
 - 部署后 `reasonix version` 显示 `git_commit: fa64f632`（v1.25.0 基线）。
