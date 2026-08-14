@@ -1,14 +1,16 @@
 package config
 
-// 内置 siliconflow 免费 key 不落明文源码，采用 XOR(0x5A) 混淆字节存储，运行时解码。
-// 使用内置 key 时强制限流（并发≤1、单次≤2 段落）；用户自备 key（APIKey 非空）时放开。
+// 默认内置 key 是自建 Cloudflare Worker 网关（se-rag-gateway）分发的 throwaway 网关 key，
+// 不落明文源码，采用 XOR(0x5A) 混淆字节存储，运行时解码。真硅基流动 key 只在网关侧持有，
+// 该内置 key 即使泄露也仅能调用白名单的两个模型、蹭免费额度，不暴露源站 key。
+// 使用内置 key 时强制限流（并发≤1、单次≤2 段落）；用户自备 key（APIKey 非空）时放开并回落官方 SiliconFlow。
 var builtinKeyMask = byte(0x5A)
 
 var builtinKeyEnc = []byte{
-	41, 49, 119, 57, 55, 54, 48, 45, 56, 44, 61, 51, 49, 32, 46, 56, 59, 45, 60, 48, 50, 50, 43, 34, 59, 32, 63, 46, 53, 59, 41, 49, 46, 56, 40, 48, 45, 51, 60, 43, 56, 53, 48, 48, 51, 42, 51, 59, 57, 40, 40,
+	20, 17, 41, 20, 16, 62, 31, 3, 20, 29, 12, 110, 2, 27, 34, 0, 20, 11, 10, 44, 24, 21, 53, 14, 104, 61, 49, 109, 44, 34, 57, 56, 46, 56, 61, 32, 56, 22, 47, 22, 34, 2, 45, 34, 57, 57, 30, 108, 14, 3, 11, 28, 16, 14, 40, 45, 62, 9, 111, 109, 9, 0, 24, 61,
 }
 
-// BuiltinKey 返回内置 siliconflow key（运行时从混淆字节解码）。
+// BuiltinKey 返回默认内置网关 key（运行时从混淆字节解码）。
 func BuiltinKey() string {
 	b := make([]byte, len(builtinKeyEnc))
 	for i, c := range builtinKeyEnc {
@@ -16,6 +18,12 @@ func BuiltinKey() string {
 	}
 	return string(b)
 }
+
+// GatewayBaseURL 是内置默认网关（se-rag-gateway Worker）地址，白名单仅 BAAI/bge-m3、BAAI/bge-reranker-v2-m3。
+const GatewayBaseURL = "https://se-rag-gateway.zetao-zhang.workers.dev/v1"
+
+// 官方 SiliconFlow 地址：用户自备 key 时回落直达，不再经网关中转。
+const officialSiliconflowBaseURL = "https://api.siliconflow.cn/v1"
 
 // Provider 一家 embedding / reranker 供应商。
 // Type ∈ {siliconflow, sophnet}。
@@ -49,11 +57,11 @@ func DefaultConfig() Config {
 			DocsDir: "docs/se7",
 			Embedder: Provider{
 				Type: "siliconflow", Model: "BAAI/bge-m3",
-				BaseURL: "https://api.siliconflow.cn/v1", Dim: 1024,
+				BaseURL: GatewayBaseURL, Dim: 1024,
 			},
 			Reranker: Provider{
 				Type: "siliconflow", Model: "BAAI/bge-reranker-v2-m3",
-				BaseURL: "https://api.siliconflow.cn/v1",
+				BaseURL: GatewayBaseURL,
 			},
 			UseBuiltinKey: true,
 		},
@@ -67,4 +75,13 @@ func (p Provider) EffectiveKey() string {
 		return p.APIKey
 	}
 	return BuiltinKey()
+}
+
+// EffectiveBaseURL 依 key 归属决定上游地址：
+// 内置 key → 默认网关（Worker，白名单两模型）；用户自备 key → 回落官方 SiliconFlow，直达不被网关替换。
+func (p Provider) EffectiveBaseURL() string {
+	if p.APIKey != "" {
+		return officialSiliconflowBaseURL
+	}
+	return p.BaseURL
 }
