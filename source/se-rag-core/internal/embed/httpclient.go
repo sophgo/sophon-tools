@@ -6,11 +6,28 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"time"
 )
 
 const maxAttempts = 6
+
+// httpClient 全局 HTTP 客户端：其 Transport 对内置网关域名做 IP 优先 + DoH 兜底拨号，
+// 其余域名（sophnet、官方回落等）走系统 DNS。所有供应商统一经此 client 发请求。
+var httpClient = newGatewayAwareClient((&net.Dialer{Timeout: dialTimeout}).DialContext)
+
+// newGatewayAwareClient 构造对内置网关域名启用 IP 优先 + DoH 兜底的 HTTP 客户端。
+func newGatewayAwareClient(base DialContext) *http.Client {
+	doh := newDoHResolver(base)
+	tr := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return dialWithResolve(ctx, network, addr, base, doh)
+		},
+	}
+	return &http.Client{Transport: tr}
+}
 
 // postJSON POST JSON 到 url，带 Bearer 鉴权。
 // 5xx/429/连接错误 → 指数退避重试（最多6次）；4xx → 快速失败不重试。
@@ -27,7 +44,7 @@ func postJSON(ctx context.Context, url, key string, payload, out any) error {
 		}
 		req.Header.Set("Authorization", "Bearer "+key)
 		req.Header.Set("Content-Type", "application/json")
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := httpClient.Do(req)
 		if err != nil {
 			lastErr = err
 			time.Sleep(backoff(attempt))
