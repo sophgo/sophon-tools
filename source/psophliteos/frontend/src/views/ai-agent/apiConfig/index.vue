@@ -41,6 +41,10 @@
             :placeholder="form.llmHasKey ? '已配置（留空保持不变）' : '请输入上游 API Key'"
             autocomplete="new-password"
           />
+          <!-- 需求：key 为空（新环境/未配置）时提示去 sophnet 获取，而非静默占位 -->
+          <div v-if="!form.llmHasKey" class="mt-1 text-xs text-amber-600">
+            目前 key 为空，请点击上方 sophnet 链接获取 key
+          </div>
         </a-form-item>
         <a-form-item label="默认模型名称">
           <a-input
