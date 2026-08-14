@@ -68,9 +68,14 @@ declare -A -g TGZ_FILES_SIZE
 TGZ_FILES_SIZE=(["boot"]=131072 ["recovery"]=3145728 ["rootfs"]=2621440 ["opt"]=2097152 ["system"]=2097152 ["data"]=4194304)
 declare -A -g TGZ_FILES_SIZE_BM1688
 TGZ_FILES_SIZE_BM1688=(["boot"]=131072 ["recovery"]=131072 ["rootfs"]=3145728 ["data"]=4194304)
+# for cv84x6（CV84X2，SDK 标识 cv84x6），与 bm1688/cv186ah 同属 CV 系共用 eMMC 布局，
+# 分区大小默认对齐 bm1688，独立常量便于按 CV84X2 真机实测微调。
+declare -A -g TGZ_FILES_SIZE_CV84X6
+TGZ_FILES_SIZE_CV84X6=(["boot"]=131072 ["recovery"]=131072 ["rootfs"]=3145728 ["data"]=4194304)
 # The increased size of each partition compared to the original partition table
 ROOTFS_RW_SIZE=$((6291456))
 ROOTFS_RW_SIZE_BM1688=$((9291456))
+ROOTFS_RW_SIZE_CV84X6=$((9291456))
 TGZ_ALL_SIZE=$((100*1024))
 EMMC_ALL_SIZE=20971520
 EMMC_MAX_SIZE=30000000
@@ -166,6 +171,15 @@ if [[ "${SOC_NAME}" == "" ]]; then
 		SOC_NAME="bm1688"
 	fi
 fi
+# cv84x6（CV84X2，SDK 标识 cv84x6）兜底：/proc/device-tree/model 根 compatible 可能为通用
+# "linux,dummy-virt"，不能直接判。以内核 dts 递归含 "cvitek,cv84x6-*" compatible 为权威信号
+#（与 get_info 的判法一致），检测到即按 CV 系（bm1688/cv186ah/cv84x6）路径打包。
+if [[ "${SOC_NAME}" == "" ]] && [ -d /proc/device-tree ]; then
+	if [ -n "$(find /proc/device-tree -name compatible -type f \
+		-exec grep -laE "cvitek,cv84x6-" {} + 2>/dev/null)" ]; then
+		SOC_NAME="cv84x6"
+	fi
+fi
 if [[ "${SOC_NAME}" == "" ]]; then
 	echo "ERROR: cannot get chip id!"
 	exit -1
@@ -204,13 +218,22 @@ if [[ "$SOC_NAME" == "bm1684x" ]] || [[ "$SOC_NAME" == "bm1684" ]]; then
 		ALL_IN_ONE_SCRIPT="${TGZ_FILES_PATH}/script/bm1684/"
 		echo "INFO: find /opt dir, the version is V22.09.02 or higher"
 	fi
-elif [[ "$SOC_NAME" == "bm1688" ]]; then
+elif [[ "$SOC_NAME" == "bm1688" ]] || [[ "$SOC_NAME" == "cv84x6" ]]; then
 	NEED_BAK_FLASH=1
-	ROOTFS_RW_SIZE=${ROOTFS_RW_SIZE_BM1688}
-	TGZ_FILES_SIZE["boot"]=${TGZ_FILES_SIZE_BM1688["boot"]}
-	TGZ_FILES_SIZE["recovery"]=${TGZ_FILES_SIZE_BM1688["recovery"]}
-	TGZ_FILES_SIZE["rootfs"]=${TGZ_FILES_SIZE_BM1688["rootfs"]}
-	TGZ_FILES_SIZE["data"]=${TGZ_FILES_SIZE_BM1688["data"]}
+	if [[ "$SOC_NAME" == "cv84x6" ]]; then
+		ROOTFS_RW_SIZE=${ROOTFS_RW_SIZE_CV84X6}
+		TGZ_FILES_SIZE["boot"]=${TGZ_FILES_SIZE_CV84X6["boot"]}
+		TGZ_FILES_SIZE["recovery"]=${TGZ_FILES_SIZE_CV84X6["recovery"]}
+		TGZ_FILES_SIZE["rootfs"]=${TGZ_FILES_SIZE_CV84X6["rootfs"]}
+		TGZ_FILES_SIZE["data"]=${TGZ_FILES_SIZE_CV84X6["data"]}
+	else
+		ROOTFS_RW_SIZE=${ROOTFS_RW_SIZE_BM1688}
+		TGZ_FILES_SIZE["boot"]=${TGZ_FILES_SIZE_BM1688["boot"]}
+		TGZ_FILES_SIZE["recovery"]=${TGZ_FILES_SIZE_BM1688["recovery"]}
+		TGZ_FILES_SIZE["rootfs"]=${TGZ_FILES_SIZE_BM1688["rootfs"]}
+		TGZ_FILES_SIZE["data"]=${TGZ_FILES_SIZE_BM1688["data"]}
+	fi
+	# bm1688/cv186ah/cv84x6 同属 CV 系，共用此打包脚本（含 cvitek raw2cimg 打包路径）
 	ALL_IN_ONE_SCRIPT="${TGZ_FILES_PATH}/script/bm1688/"
 fi
 
@@ -265,7 +288,7 @@ if [ "$NEED_BAK_FLASH" -eq 1 ]; then
 			fi
 			cp spi_flash.bin /boot/spi_flash.bin.socBakNew
 		fi
-	elif [[ "$SOC_NAME" == "bm1688" ]]; then
+	elif [[ "$SOC_NAME" == "bm1688" ]] || [[ "$SOC_NAME" == "cv84x6" ]]; then
 		dd if=/dev/mmcblk0boot0 of=${TGZ_FILES_PATH}/fip.bin bs=512 count=2048
 		if [[ "$?" != "0" ]]; then
 			echo "WARNING: bak fip.bin cannot read data"

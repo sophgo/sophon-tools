@@ -320,9 +320,17 @@ function create_top_script()
 	script_update "led error off"
 	script_update "setenv light 1"
 	script_update ""
-	script_update "#for SE9BX direct to ubuntu"
+	# cv84x6（CV84X2，SDK 标识 cv84x6）与 cv186ah 同属 CV 系复用本打包脚本，但 dts 名不同。
+	# 打包主机（socbak 所在设备）已通过 SOC_NAME 识别芯片，此处按芯片选择对应的
+	# "direct to ubuntu" dts 兜底名：cv84x6 -> config-cv84x6_wevb_emmc，其余 CV 系维持原配置。
+	local dts_fallback="config-cv186ah_sm9v1_4G" dts_desc="SE9BX"
+	if [[ "$SOC_NAME" == "cv84x6" ]]; then
+		dts_fallback="config-cv84x6_wevb_emmc"
+		dts_desc="cv84x6"
+	fi
+	script_update "#for ${dts_desc} direct to ubuntu"
 	script_update "cmp.b 0x05207f82 0x05207f83 1"
-	script_update "if test \$? -eq 1; then setenv consoledev ttyS2; setenv DTS_TYPE config-cv186ah_sm9v1_4G; load mmc 0:1 \${scriptaddr} boot.scr.emmc; source \${scriptaddr}; fi;"
+	script_update "if test \$? -eq 1; then setenv consoledev ttyS2; setenv DTS_TYPE ${dts_fallback}; load mmc 0:1 \${scriptaddr} boot.scr.emmc; source \${scriptaddr}; fi;"
 	script_update ""
 	script_update "if test \"\$reset_after\" = \"1\"; then reset; fi;"
 	script_update ""

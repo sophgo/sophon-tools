@@ -2,7 +2,7 @@
 
 ## 适用场景
 
-* 芯片：BM1684 BM1684X BM1688 CV186AH
+* 芯片：BM1684 BM1684X BM1688 CV186AH CV84X6
 * SDK版本：
   * 84&X 3.0.0以及之前版本（适配只打包功能）
   * 84&X 3.0.0之后版本（适配只打包功能和打包做包功能）
@@ -75,6 +75,9 @@
    # for bm1688 or cv186ah
    ROOTFS_RW_SIZE_BM1688=$((9291456))
    RECOVERY_SIZE_BM1688=$((131072))
+   # for cv84x6（CV84X2，SDK 标识 cv84x6），与 bm1688/cv186ah 同属 CV 系，默认对齐
+   ROOTFS_RW_SIZE_CV84X6=$((9291456))
+   RECOVERY_SIZE_CV84X6=$((131072))
    TGZ_ALL_SIZE=$((100*1024))
    EMMC_ALL_SIZE=20971520
    EMMC_MAX_SIZE=30000000
@@ -84,10 +87,12 @@
    2. `ROOTFS_RW_SIZE`: 根目录RW分区期望大小
    3. `ROOTFS_RW_SIZE_BM1688`: 对于BM1688/CV186AH平台根目录RW分区期望大小
    4. `TGZ_FILES_SIZE_BM1688`: 对于BM1688/CV186AH平台其余分区的期望大小
+   5. `ROOTFS_RW_SIZE_CV84X6`/`TGZ_FILES_SIZE_CV84X6`/`RECOVERY_SIZE_CV84X6`: 对于CV84X6平台根目录RW、其余分区、recovery 分区的期望大小（默认对齐 BM1688）
 4. 修改方式：
    1. 如果是BM1684/BM1684X平台，修改`TGZ_FILES_SIZE`或者`ROOTFS_RW_SIZE`即可
    2. 如果是BM1688/CV186AH平台，修改`TGZ_FILES_SIZE`、`ROOTFS_RW_SIZE_BM1688`或者`TGZ_FILES_SIZE_BM1688`即可
-   3. 修改后的总大小不得大于emmc大小，工具会自动检测，如果遇到`ERROR: bakpack size(XXX) > emmc size(XXX), please del some file and rework.`的报错，请检查文件是否太多了，或者自定义修改的分区期望大小太大了
+   3. 如果是CV84X6平台，修改`TGZ_FILES_SIZE`、`ROOTFS_RW_SIZE_CV84X6`或者`TGZ_FILES_SIZE_CV84X6`即可
+   4. 修改后的总大小不得大于emmc大小，工具会自动检测，如果遇到`ERROR: bakpack size(XXX) > emmc size(XXX), please del some file and rework.`的报错，请检查文件是否太多了，或者自定义修改的分区期望大小太大了
 5. 保存`socbak.sh`文件，继续执行`bash socbak.sh`命令，开始打包
 
 ### 固定分区大小功能
