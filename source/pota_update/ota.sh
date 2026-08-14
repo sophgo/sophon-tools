@@ -83,8 +83,27 @@ for tool in "${need_tools[@]}"; do
 done
 
 CPU_MODEL=$(awk -F': ' '/model name/{print $2; exit}' /proc/cpuinfo)
+
+# model name 兜底：CV84X2（SDK 标识 cv84x6）内核 compat 模式下 model name 可能输出
+# null/缺行/或 cv186ah（0x27102014 & 0x7 常为 0x1 → 打印 "cv186ah"）。cv84x6 与 cv186ah
+# 同为 CV 系但刷机包/路由路径需保持一致，以 dts 为权威信号二次识别：CV84X2 内核 dts 递归含
+# "cvitek,cv84x6-*" compatible，而真实 bm1688/cv186ah 的 dts 不含。落入歧义集且 dts 含
+# cv84x6 特征时升级为 cv84x6；已确定的 bm1684x/bm1684/bm1688 model name 不作改写。
+case "${CPU_MODEL}" in
+    ""|null|cv186ah)
+        if [ -d /proc/device-tree ]; then
+            _cv_match=$(find /proc/device-tree -name compatible -type f \
+                -exec grep -la "cv84x6" {} + 2>/dev/null)
+            if [ -n "${_cv_match}" ]; then
+                CPU_MODEL="cv84x6"
+            fi
+            unset _cv_match
+        fi
+        ;;
+esac
+
 ! [[ "$CPU_MODEL" == "" ]] || panic "cannot get cpu model from /proc/cpuinfo"
-SOC_MODE_CPU_MODEL=("bm1684x" "bm1684" "bm1688" "cv186ah")
+SOC_MODE_CPU_MODEL=("bm1684x" "bm1684" "bm1688" "cv186ah" "cv84x6")
 WORK_MODE="ERROR"
 for element in "${SOC_MODE_CPU_MODEL[@]}"; do
     if [ "$element" == "$CPU_MODEL" ]; then
@@ -186,7 +205,7 @@ LOGFILE="$(readlink -f "${BASH_SOURCE[0]}").log"
 rm -f "${LOGFILE}"*
 exec > >(tee -a "$LOGFILE") 2>&1
 
-echo "[INFO] ota update tool, version: v1.4.0"
+echo "[INFO] ota update tool, version: v1.5.0"
 
 WORK_DIR=""
 if [ ! -d "${RUN_WORK_DIR}/sdcard" ]; then
@@ -475,7 +494,8 @@ if [[ "${CPU_MODEL}" == "bm1684x" ]] || [[ "${CPU_MODEL}" == "bm1684" ]]; then
     if [[ "$(grep -ra ${CPU_MODEL}- "${OTA_FIP_FILE}" | wc -l)" == "0" ]]; then
         panic "chip is ${CPU_MODEL}, but fip file not have info about it"
     fi
-elif [[ "${CPU_MODEL}" == "bm1688" ]] || [[ "${CPU_MODEL}" == "cv186ah" ]]; then
+elif [[ "${CPU_MODEL}" == "bm1688" ]] || [[ "${CPU_MODEL}" == "cv186ah" ]] \
+|| [[ "${CPU_MODEL}" == "cv84x6" ]]; then
     if [[ "$(grep -ra CVBL01 "${OTA_FIP_FILE}" | wc -l)" == "0" ]] || \
 [[ "$(grep -ra CVLD02 "${OTA_FIP_FILE}" | wc -l)" == "0" ]]; then
         panic "chip is ${CPU_MODEL}, but fip file not have info about it"
@@ -690,7 +710,8 @@ echo skip SPI flash update.
 fi
 echo Program fip.bin done
 " >>"$OTA_UPDATE_SCRIPT_FILE"
-elif [[ "${CPU_MODEL}" == "bm1688" ]] || [[ "${CPU_MODEL}" == "cv186ah" ]]; then
+elif [[ "${CPU_MODEL}" == "bm1688" ]] || [[ "${CPU_MODEL}" == "cv186ah" ]] \
+|| [[ "${CPU_MODEL}" == "cv84x6" ]]; then
     echo "
 cmp.b 0x05207f82 0x05207f83 1; if test \$? -eq 1; then setenv consoledev ttyS2; fi
 echo Program $OTA_FIP_FILE start
