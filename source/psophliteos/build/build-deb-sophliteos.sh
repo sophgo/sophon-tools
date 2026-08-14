@@ -47,6 +47,23 @@ else
   CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags '-s -w'
 fi
 
+# strip release 冗余：go build 已带 -s -w 去符号/DWARF，这里再删 .comment（工具链
+# 版本注释）与 .note.go.buildid（构建 ID），并 --strip-unneeded 兜底清局部符号。
+find_strip() {
+  # arm64 优先与编译器同族的 musl strip；其余回退系统 strip/llvm。
+  for c in aarch64-linux-musl-strip aarch64-linux-gnu-strip strip llvm-strip; do
+    if command -v "$c" >/dev/null 2>&1; then echo "$c"; return 0; fi
+  done
+  return 1
+}
+if STRIP_BIN="$(find_strip)"; then
+  "$STRIP_BIN" --strip-unneeded --remove-section=.comment --remove-section=.note.go.buildid sophliteos \
+    && echo "strip $STRIP_BIN ok" \
+    || echo "WARN: strip 失败（跳过，产物保留 -s -w 级别）" >&2
+else
+  echo "WARN: 未找到 strip 命令，跳过（产物保留 -s -w 级别）" >&2
+fi
+
 # 4. 组装数据树（最终绝对路径布局，dpkg 直接追踪）
 # 前端已内嵌到二进制，deb 只带 二进制 + 配置 + systemd 服务，不再单独打包 dist 目录。
 STAGE=build/stage

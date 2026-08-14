@@ -11,6 +11,16 @@ LDFLAGS="-s -w -X bmssm/global.version=${VERSION} -X bmssm/global.gitCommit=${CO
 
 CGO_ENABLED=1 go build -trimpath -ldflags "${LDFLAGS}" -o bmssm .
 
+# strip release 冗余：删 .comment（工具链版本注释）与 .note.go.buildid（构建 ID），
+# 并 --strip-unneeded 兜底清局部符号；strip 不可用时静默跳过（产物仍带 -s -w）。
+for c in strip llvm-strip; do
+  if command -v "$c" >/dev/null 2>&1; then
+    "$c" --strip-unneeded --remove-section=.comment --remove-section=.note.go.buildid bmssm \
+      && echo "strip $c ok" || echo "WARN: strip 失败（跳过）" >&2
+    break
+  fi
+done
+
 mkdir -p release
 cp bmssm release/
 cp config/bmssm.yaml release/
