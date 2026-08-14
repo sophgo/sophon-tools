@@ -50,6 +50,7 @@
 #include <QProcessEnvironment>
 #include <QMetaType>
 #include <QGuiApplication>
+#include <QRegularExpression>
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class MainWindow; }
@@ -63,11 +64,19 @@ public:
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
     static QString executeLinuxCmd(QString strCmd);
+    /* 按 DTS 寄存器基址(如 290e0000)在 /sys/class/net 中查找对应接口名。
+       用于 bm1688/cv186ah 平台,兼容 ubuntu(eth0/eth1)与 debian(end0/end1)。 */
+    static QString ethernetNameByReg(const QString &reg, const QString &fallback);
+    /* 根据设备名解析 WAN/LAN 实际网口名,由 main() 探测设备名后调用。
+       bm1688/cv186ah 平台探测 sysfs;其余平台保持默认 eth0/eth1。 */
+    void resolveNetworkIfnames(const QString &deviceName);
     void _get_ip_info(QNetworkInterface interface);
     bool getDemos(void);
     void ShowDemosInf(bool show);
     QApplication* app;
     int fontId = -1;
+    QString m_wanIfName;    /* WAN 实际接口名:eth0 或 end0 */
+    QString m_lanIfName;    /* LAN 实际接口名:eth1 或 end1 */
 
 public slots:
 

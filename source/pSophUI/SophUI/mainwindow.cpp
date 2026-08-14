@@ -43,6 +43,40 @@ QString MainWindow::executeLinuxCmd(QString strCmd)
     return strResult;
 }
 
+QString MainWindow::ethernetNameByReg(const QString &reg, const QString &fallback)
+{
+    QDir netDir(QStringLiteral("/sys/class/net"));
+    /* 匹配 /sys/devices/platform/290e0000.ethernet(或 .../soc/290e0000.ethernet) 中的基址 */
+    QRegularExpression rx(QStringLiteral("([0-9a-f]+)\\.ethernet\\s*$"),
+                          QRegularExpression::CaseInsensitiveOption);
+    for (const QString &iface : netDir.entryList(QDir::AllDirs | QDir::NoDotAndDotDot)) {
+        if (iface == QLatin1String("lo"))
+            continue;
+        QFileInfo devLink(netDir.filePath(iface) + QStringLiteral("/device"));
+        if (!devLink.isSymLink())
+            continue;   /* 虚拟接口(如 veth/bridge/can)无硬件 device 链接 */
+        const auto m = rx.match(devLink.symLinkTarget());
+        if (m.hasMatch() && m.captured(1) == reg)
+            return iface;
+    }
+    return fallback;
+}
+
+void MainWindow::resolveNetworkIfnames(const QString &deviceName)
+{
+    m_wanIfName = "eth0";
+    m_lanIfName = "eth1";
+    /* bm1688/cv186ah 平台在 ubuntu 下网口名为 eth0/eth1,debian(systemd>=v252)下
+       被重命名为 end0/end1;按 DTS 寄存器基址(290e0000/290f0000)统一探测,其余平台
+       保持默认 eth0/eth1。 */
+    if (deviceName == "bm1688" || deviceName == "cv186ah") {
+        m_wanIfName = ethernetNameByReg("290e0000", "eth0");
+        m_lanIfName = ethernetNameByReg("290f0000", "eth1");
+    }
+    qDebug() << "resolveNetworkIfnames" << deviceName
+             << "wan:" << m_wanIfName << "lan:" << m_lanIfName;
+}
+
 void MainWindow::_show_cmd_to_label(QLabel* label, QString cmd)
 {
 #if GET_BASH_INFO_ASYNC
@@ -75,6 +109,12 @@ MainWindow::MainWindow(QWidget *parent)
 
     ui->setupUi(this);
     env = QProcessEnvironment::systemEnvironment();
+
+    /* 网口名默认 eth0/eth1;实际值由 main() 探测设备名后调用
+       resolveNetworkIfnames() 解析(bm1688/cv186ah 下可能为 end0/end1)。 */
+    m_wanIfName = "eth0";
+    m_lanIfName = "eth1";
+
     QString sophonBgPath = env.value("SOPHON_QT_BG_PATH");
     if(!sophonBgPath.isEmpty())
     {
@@ -194,9 +234,9 @@ void MainWindow::_get_ip_info(QNetworkInterface interface)
     QString mac_str;
     QString device_name = interface.name();
     QString *info_str = nullptr;
-    if(interface.name() == "eth0")
+    if(interface.name() == m_wanIfName)
         info_str = &network_info_eth0;
-    else if(interface.name() == "eth1")
+    else if(interface.name() == m_lanIfName)
         info_str = &network_info_eth1;
     mac_str = interface.hardwareAddress().toUtf8();
     QList<QNetworkAddressEntry>addressList = interface.addressEntries();
@@ -229,7 +269,9 @@ void MainWindow::_flash_show_info()
     {
         _get_ip_info(netInterface);
     }
-    ui->ip_detail->setText("WAN(eth0):\n" + network_info_eth0 + "\nLAN(eth1):\n" + network_info_eth1);
+    ui->ip_detail->setText(QString("WAN(%1):\n%2\nLAN(%3):\n%4")
+                               .arg(m_wanIfName).arg(network_info_eth0)
+                               .arg(m_lanIfName).arg(network_info_eth1));
     _show_cmd_to_label(ui->info_detail,"SOPHON_QT_1");
     _show_cmd_to_label(ui->info_detail_2,"SOPHON_QT_2");
 #if GET_BASH_INFO_ASYNC
@@ -313,7 +355,7 @@ bool MainWindow::__set_network(
 
 void MainWindow::_wan_button_click_cb()
 {
-    if(true == __set_network("eth0",
+    if(true == __set_network(m_wanIfName,
                               ui->wan_ip->text(), ui->wan_net->text(),
                               ui->wan_gate->text(), ui->wan_dns->text(),
                               ui->wan_ip6->text(), ui->wan_net6->text(),
@@ -330,7 +372,7 @@ void MainWindow::_wan_button_click_cb()
 }
 void MainWindow::_lan_button_click_cb()
 {
-    if(true == __set_network("eth1",
+    if(true == __set_network(m_lanIfName,
                               ui->lan_ip->text(), ui->lan_net->text(),
                               ui->lan_gate->text(), ui->lan_dns->text(),
                               ui->lan_ip6->text(), ui->lan_net6->text(),

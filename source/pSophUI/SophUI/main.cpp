@@ -82,6 +82,8 @@ int main(int argc, char *argv[])
             device_name = "cv84x6";
     }
     qDebug() << device_name;
+    /* 根据设备名解析 WAN/LAN 实际网口名(ubuntu: eth0/eth1,debian: end0/end1) */
+    w.resolveNetworkIfnames(device_name);
     w.fontId = fontId;
     w.app = &a;
     if (device_name == "bm1688" || device_name == "cv186ah" || device_name == "cv84x6"){
