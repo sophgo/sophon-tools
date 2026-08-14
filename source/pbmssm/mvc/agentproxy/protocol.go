@@ -7,7 +7,7 @@ import (
 	"sync"
 )
 
-// WSFrame 一条发给 webchatUI 的 WS 帧（对齐 pico 协议，前端 web-client/js/chat.js 消费）。
+// WSFrame 一条发给 webchatUI 的 WS 帧（对齐 pico 协议，前端 sophliteos/WebChat.vue 消费）。
 //
 // 帧结构（与 pico 一致）：
 //
