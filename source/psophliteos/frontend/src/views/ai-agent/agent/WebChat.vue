@@ -1140,6 +1140,8 @@
     const serverId = s.id;
     saveSessions();
     draft.value = '';
+    // 需求：清空输入后重算高度（autoGrow 内部 nextTick 等 Vue 把空内容渲染进 textarea，
+    // 否则残留长文本 scrollHeight，高度收不回默认 40px）
     autoGrow();
     scrollToBottom();
 
@@ -1195,7 +1197,12 @@
     const el = inputEl.value;
     if (!el) return;
     el.style.height = 'auto';
-    el.style.height = Math.min(el.scrollHeight, 160) + 'px';
+    // 需求：等本轮 Vue 渲染（清空输入后 DOM 才真正变短）再读 scrollHeight，
+    // 否则读到的是旧长文本高度，导致发送后输入框收不回默认 40px。
+    nextTick(() => {
+      const h = Math.max(40, Math.min(el.scrollHeight, 160));
+      el.style.height = h + 'px';
+    });
   }
 
   function scrollToBottom() {
@@ -1735,8 +1742,9 @@
     color: #666;
   }
 
+  /* 需求：折叠块（思考过程/工具调用）高度紧凑，上下紧挨 */
   .webchat-collapse {
-    margin-bottom: 8px;
+    margin: 0 0 2px;
   }
   .webchat-collapse-header {
     display: flex;
@@ -1745,9 +1753,9 @@
     border: none;
     background: transparent;
     cursor: pointer;
-    font-size: 13px;
-    color: #666;
-    padding: 4px 0;
+    font-size: 12px;
+    color: #888;
+    padding: 2px 0;
     width: 100%;
     text-align: left;
   }
@@ -1808,24 +1816,25 @@
     align-items: flex-end;
     gap: 8px;
   }
-  /* 需求(MYS-210)：输入框内左侧工具区（自动审批开关 + 停止，紧凑一行） */
+  /* 需求：输入框左侧工具区（自动审批 + 停止）+ 输入框 + 发送，统一 40px 高度 */
   .webchat-input-tools {
     display: flex;
     align-items: center;
     gap: 6px;
     flex-shrink: 0;
-    padding: 0 2px 2px 0;
   }
-  /* 自动审批 / 停止：与「发送」按钮同风格（蓝底白字圆角），小一号 */
+  /* 自动审批 / 停止：与「发送」按钮同风格（蓝底白字圆角），高度统一 40px */
   .webchat-tool-btn {
+    box-sizing: border-box;
+    height: 40px;
     border: 1px solid #1a73e8;
     background: #fff;
     color: #1a73e8;
     border-radius: 6px;
-    padding: 6px 12px;
+    padding: 0 12px;
     cursor: pointer;
     font-size: 12px;
-    line-height: 1.4;
+    line-height: 1;
     white-space: nowrap;
   }
   .webchat-tool-btn:hover {
@@ -1840,26 +1849,33 @@
     background: #1663c5;
   }
   .webchat-input-box textarea {
+    box-sizing: border-box;
     flex: 1;
+    height: 40px;
+    min-height: 40px;
+    max-height: 160px;
     resize: none;
     border: 1px solid #d9d9d9;
     border-radius: 6px;
-    padding: 8px 10px;
+    padding: 10px 10px;
     font-size: 14px;
-    line-height: 1.5;
+    line-height: 1.4;
     outline: none;
   }
   .webchat-input-box textarea:focus {
     border-color: #1a73e8;
   }
   .webchat-send {
+    box-sizing: border-box;
+    height: 40px;
     border: none;
     background: #1a73e8;
     color: #fff;
     border-radius: 6px;
-    padding: 8px 16px;
+    padding: 0 16px;
     cursor: pointer;
     font-size: 14px;
+    line-height: 1;
   }
   .webchat-send:disabled {
     background: #ccc;
