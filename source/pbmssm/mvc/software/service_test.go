@@ -531,6 +531,24 @@ func TestUpgradePackageSameAsInstall(t *testing.T) {
 // OTA 固件
 // ----------------------------------------------------------------
 
+func TestCleanupStaleOTA(t *testing.T) {
+	otaDir := t.TempDir()
+	stale := filepath.Join(otaDir, "stale_fw.tgz")
+	if err := os.WriteFile(stale, []byte("legacy"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewSoftwareService(t.TempDir(), t.TempDir(), otaDir, DefaultMaxSize)
+	svc.cleanupStaleOTA()
+
+	entries, err := os.ReadDir(otaDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("stale OTA files remain after cleanup: %d", len(entries))
+	}
+}
+
 func TestUploadFirmwareSuccess(t *testing.T) {
 	otaDir := t.TempDir()
 	svc := NewSoftwareService(t.TempDir(), t.TempDir(), otaDir, DefaultMaxSize)

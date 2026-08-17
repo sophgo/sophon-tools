@@ -10,6 +10,8 @@ type HealthResponse struct {
 // RebootRequest 重启请求。
 type RebootRequest struct {
 	Delay int `json:"delay,omitempty"` // 0-300 秒延迟，0 或不填表示立即重启
+	// 二次确认码（MYS-389）：必须携带 /api/v1/hazard/challenge 最近下发的一次性码。
+	Confirm string `json:"confirm"`
 }
 
 // LEDResponse LED 状态响应。

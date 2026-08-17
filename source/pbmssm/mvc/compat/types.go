@@ -86,6 +86,8 @@ type OtaVersion struct {
 	CmdFlag    string `json:"cmdFlag"`
 	Version    string `json:"version"`
 	FlashData  bool   `json:"flashData"`
+	// 二次确认码（MYS-389）：必须携带 /api/v1/hazard/challenge 最近下发的一次性码。
+	Confirm string `json:"confirm"`
 }
 
 // ---------------------------------------------------------------
