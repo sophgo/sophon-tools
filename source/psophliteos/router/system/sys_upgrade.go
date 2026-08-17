@@ -14,10 +14,13 @@ func (s *UpgradeRouter) InitUpgradeRouter(Router *gin.RouterGroup) (R gin.IRoute
 
 	// 升级/重启属敏感操作：叠加 SSO 单会话校验，避免未登录客户端直接触发。
 	// 与 /api/v1/* 反代同一套活跃会话模型；前端 defHttp 请求自动携带 token。
+	// 升级两段式：先上传暂存（upgrade），再确认执行（upgrade/confirm）。
+	// 确认接口与上传同样受 SSO 与超时中间件保护，避免未登录客户端误触发重启。
 	upgradeRouter := Router.Group("api", middleware.SSO(), middleware.TimeoutMiddleware(global.OtaTimeOut))
 	versionApi := v1.ApiGroupApp.SystemApiGroup.UpgradeApi
 	{
 		upgradeRouter.POST("upgrade", versionApi.Upgrade)
+		upgradeRouter.POST("upgrade/confirm", versionApi.UpgradeConfirm)
 	}
 
 	return upgradeRouter
