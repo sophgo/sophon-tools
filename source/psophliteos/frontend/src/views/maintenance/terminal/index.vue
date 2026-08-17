@@ -18,14 +18,15 @@
   import { Terminal } from '@xterm/xterm';
   import { FitAddon } from '@xterm/addon-fit';
   import { WebLinksAddon } from '@xterm/addon-web-links';
-  import { useUserStore } from '/@/store/modules/user';
   import { useI18n } from '/@/hooks/web/useI18n';
+  import { getSsoTicket } from '/@/api/sso';
+  import { useMessage } from '/@/hooks/web/useMessage';
   import '@xterm/xterm/css/xterm.css';
 
   const { t } = useI18n();
+  const { createMessage } = useMessage();
   const termRef = ref<HTMLElement>();
   const status = ref<'disconnected' | 'connecting' | 'connected'>('disconnected');
-  const userStore = useUserStore();
 
   let term: Terminal | null = null;
   let fit: FitAddon | null = null;
@@ -71,9 +72,18 @@
       }
     }
 
-    const token = userStore.getToken;
+    // MYS-383：WebSocket 无法携带 Authorization 头，先以 Bearer 头换取一次性票据，
+    // URL 只带 ?ticket=，JWT 不再出现在 URL/访问日志中。
+    let ticket: string;
+    try {
+      ({ ticket } = await getSsoTicket());
+    } catch {
+      status.value = 'disconnected';
+      createMessage.error('failed to get ticket');
+      return;
+    }
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    ws = new WebSocket(`${proto}://${location.host}/api/v1/hardware/terminal?token=${token}`);
+    ws = new WebSocket(`${proto}://${location.host}/api/v1/hardware/terminal?ticket=${ticket}`);
     ws.binaryType = 'arraybuffer';
 
     ws.onopen = () => {
