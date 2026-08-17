@@ -55,7 +55,7 @@ func TestSiliconflowEmbedderBatchLeq2(t *testing.T) {
 	defer srv.Close()
 
 	// 用内置 key 模式构造（useBuiltinKey=true → 启用限流）
-	e, err := newSiliconflowEmbedder(srv.URL, "key", "BAAI/bge-m3", 2, true)
+	e, err := newSiliconflowEmbedder([]string{srv.URL}, "key", "BAAI/bge-m3", 2, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestPostJSONRetries(t *testing.T) {
 	}))
 	defer srv.Close()
 	var out map[string]any
-	if err := postJSON(context.Background(), srv.URL, "k", map[string]any{}, &out); err != nil {
+	if err := postJSON(context.Background(), []string{srv.URL}, "k", map[string]any{}, &out); err != nil {
 		t.Fatalf("expected retry success, got %v", err)
 	}
 }
@@ -99,7 +99,7 @@ func TestPostJSONNoRetryOn4xx(t *testing.T) {
 	}))
 	defer srv.Close()
 	var out map[string]any
-	err := postJSON(context.Background(), srv.URL, "k", map[string]any{}, &out)
+	err := postJSON(context.Background(), []string{srv.URL}, "k", map[string]any{}, &out)
 	if err == nil {
 		t.Fatal("expected auth error")
 	}
@@ -133,7 +133,7 @@ func TestSiliconflowReranker(t *testing.T) {
 		w.Write([]byte(`{"results":[{"index":1,"relevance_score":0.9},{"index":0,"relevance_score":0.5}]}`))
 	}))
 	defer srv.Close()
-	r := &siliconflowReranker{baseURL: srv.URL, apiKey: "k", model: "BAAI/bge-reranker-v2-m3"}
+	r := &siliconflowReranker{baseURLs: []string{srv.URL}, apiKey: "k", model: "BAAI/bge-reranker-v2-m3"}
 	got, err := r.Rerank(context.Background(), "q", []string{"a", "b"}, 2)
 	if err != nil {
 		t.Fatal(err)
