@@ -86,6 +86,9 @@ func setupCompatTest(t *testing.T) *gin.Engine {
 	// 公开 login
 	r.POST("/api/v1/login", userCtrl.Login)
 
+	// 公开 WebSocket 实时终端（对齐 router.go：不走 Auth 中间件，handler 内鉴权）
+	r.GET("/api/v1/hardware/terminal", ctrl.TerminalWS)
+
 	// 受保护组
 	api := r.Group("/api/v1", middleware.Auth())
 	{
