@@ -131,8 +131,11 @@ mkdir -p docs/se8
 ./bin/se-rag doctor -index-dir ./rag-se8
 ```
 
-索引直接落盘到各自 `-index-dir/`（`meta.json` + `vectors.gob` + `bm25.gob` + `chunks.gob`），
-各知识库互不影响，可并存。
+索引直接落盘到各自 `-index-dir/`（`meta.json` + `vectors.gob` + `bm25.gob` + `chunks.gob` +
+`.complete` 完成标记），各知识库互不影响，可并存。保存为原子写入：先写临时文件、移除旧
+完成标记、再 rename 替换、最后写回完成标记，构建中断只可能留下"无标记"状态而不会是半套
+/混合代索引；`.complete` 或 `bm25.gob` 缺失时 query 显式报错并提示重建。
+注意：本版本之前的旧索引目录（无 `.complete`）升级后需重新 `se-rag build` 一次。
 
 ## 测试
 

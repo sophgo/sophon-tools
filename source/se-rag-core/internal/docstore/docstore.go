@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"encoding/gob"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -16,13 +19,24 @@ import (
 //
 //	meta.json      指纹元信息
 //	vectors.gob    vector.Index
-//	bm25.gob       bm25.Index
+//	bm25.gob       bm25.Index（SaveIndex 始终写入，无 BM25 时写入空索引）
 //	chunks.gob     []chunker.Chunk
+//	.complete      完整标记：原子保存的最后一笔，Open 以其存在作为"索引完整"判据
+//
+// 保存采用"全部先写临时文件 → 再 rename 替换 → 最后写完成标记"，构建中途被
+// kill/断电不会留下"meta 已落盘但缺 bm25.gob"的半套索引：标记缺失时 Open 显式
+// 报错并提示重建，杜绝读侧 panic。
 //
 // product 仅用作 Meta.Product 标签，不参与磁盘路径。
 type Store struct {
 	IndexDir string
 }
+
+// completeMark 索引完整标记文件名。
+const completeMark = ".complete"
+
+// ErrIncomplete 索引不完整（缺完成标记或缺失 bm25.gob），需要重新运行 se-rag build 重建。
+var ErrIncomplete = errors.New("index incomplete: needs rebuild")
 
 func (s *Store) productDir(product string) string {
 	_ = product // product 仅标签，不用于路径
@@ -51,29 +65,74 @@ func (s *Store) SaveIndex(product string, meta Meta, vecs [][]float32, chunkIDs 
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	if err := writeJSON(filepath.Join(dir, "meta.json"), meta); err != nil {
+
+	// 1) 全部先编码到内存：任何编码失败都不触碰磁盘，旧索引保持完整可用
+	mb, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
 		return err
 	}
-
 	gi := &vector.Index{Dim: meta.Dim}
 	for i, v := range vecs {
 		gi.Add(v, chunkIDs[i])
 	}
-	if err := os.WriteFile(filepath.Join(dir, "vectors.gob"), gi.Serialize(), 0o644); err != nil {
-		return err
+	vb := gi.Serialize()
+	if bm == nil {
+		bm = bm25.Build(nil, nil) // 无 BM25 时写入空索引，保证 bm25.gob 四件套总齐全
 	}
-
-	if bm != nil {
-		if err := os.WriteFile(filepath.Join(dir, "bm25.gob"), bm.Serialize(), 0o644); err != nil {
-			return err
-		}
-	}
-
+	bb := bm.Serialize()
 	cb, err := gobEncode(chunks)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, "chunks.gob"), cb, 0o644)
+
+	// 2) 临时文件全部写成功之后再改动正式文件：任一步写失败即返回，磁盘上仍是完整旧索引
+	for _, f := range [...]struct {
+		name string
+		data []byte
+	}{
+		{"meta.json", mb},
+		{"vectors.gob", vb},
+		{"bm25.gob", bb},
+		{"chunks.gob", cb},
+	} {
+		if err := writeTmp(dir, f.name, f.data); err != nil {
+			return err
+		}
+	}
+
+	// 3) 先移除旧完成标记再 rename 替换：标记存在 ⟺ 四件套完整且属同一代。
+	//    旧标记若不先移除，rename 逐文件替换期间崩溃会留下"标记仍在 + 混合代文件"的
+	//    静默错误状态；移除后任何中断都只可能留下"无标记"状态，读侧走到 ErrIncomplete
+	//    而非读到混合代数据。代价是保存写入窗口内（毫秒级）读侧短暂不可用，离线构建可接受。
+	if err := os.Remove(filepath.Join(dir, completeMark)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	for _, name := range []string{"meta.json", "vectors.gob", "bm25.gob", "chunks.gob"} {
+		if err := renameTmp(dir, name); err != nil {
+			return err
+		}
+	}
+
+	// 4) 完成标记最后落盘
+	return writeTmpRename(dir, completeMark, []byte("ok\n"))
+}
+
+// writeTmp 写同目录临时文件（不落正式名，供统一 rename 替换）。
+func writeTmp(dir, name string, data []byte) error {
+	return os.WriteFile(filepath.Join(dir, "."+name+".tmp"), data, 0o644)
+}
+
+// renameTmp 将临时文件原子替换为正式名（同一文件系统内 rename 原子）。
+func renameTmp(dir, name string) error {
+	return os.Rename(filepath.Join(dir, "."+name+".tmp"), filepath.Join(dir, name))
+}
+
+// writeTmpRename 原子落盘：写临时文件后 rename（完成标记等需要在最后一步原子出现时使用）。
+func writeTmpRename(dir, name string, data []byte) error {
+	if err := writeTmp(dir, name, data); err != nil {
+		return err
+	}
+	return renameTmp(dir, name)
 }
 
 type Loaded struct {
@@ -86,6 +145,16 @@ type Loaded struct {
 
 func (s *Store) Open(product string) (*Loaded, error) {
 	dir := s.productDir(product)
+	if _, err := os.Stat(filepath.Join(dir, completeMark)); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			// 区分"从未构建"与"半套写入"：目录都不存在时提示先构建，而非误报索引损坏
+			if _, derr := os.Stat(dir); errors.Is(derr, fs.ErrNotExist) {
+				return nil, fmt.Errorf("no index at %s: run `se-rag build` first", dir)
+			}
+			return nil, fmt.Errorf("%w: completion mark %q missing at %s (half-written index)", ErrIncomplete, completeMark, dir)
+		}
+		return nil, err
+	}
 	l := &Loaded{ChunkByID: map[string]chunker.Chunk{}}
 
 	mb, err := os.ReadFile(filepath.Join(dir, "meta.json"))
@@ -105,11 +174,14 @@ func (s *Store) Open(product string) (*Loaded, error) {
 		return nil, err
 	}
 
-	if bdata, rerr := os.ReadFile(filepath.Join(dir, "bm25.gob")); rerr == nil {
-		l.BM25, err = bm25.Load(bdata)
-		if err != nil {
-			return nil, err
-		}
+	// bm25.gob 为必选文件：缺失说明索引不完整（构建中断/被外部删除），显式报错而非静默容忍
+	bdata, err := os.ReadFile(filepath.Join(dir, "bm25.gob"))
+	if err != nil {
+		return nil, fmt.Errorf("%w: bm25.gob missing at %s", ErrIncomplete, dir)
+	}
+	l.BM25, err = bm25.Load(bdata)
+	if err != nil {
+		return nil, err
 	}
 
 	cdata, err := os.ReadFile(filepath.Join(dir, "chunks.gob"))
@@ -166,8 +238,4 @@ func gobEncode(v any) ([]byte, error) {
 
 func gobDecode(data []byte, v any) error {
 	return gob.NewDecoder(bytes.NewReader(data)).Decode(v)
-}
-
-func writeFile(path string, data []byte) error {
-	return os.WriteFile(path, data, 0o644)
 }

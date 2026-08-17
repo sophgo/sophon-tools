@@ -84,9 +84,9 @@ func (r *Retriever) Search(ctx context.Context, query string, product string, to
 
 func (r *Retriever) hybrid(ctx context.Context, loaded *docstore.Loaded, query string, q []float32, topM int) []Result {
 	vecRes := loaded.Vector.Search(q, vectorTopK)
-	bmRes := loaded.BM25.Search(query, bm25TopK)
-	if bmRes == nil {
-		bmRes = []bm25.Result{}
+	var bmRes []bm25.Result
+	if loaded.BM25 != nil { // 防御：BM25 缺失（不应发生，Open 已校验）时退化为纯向量融合
+		bmRes = loaded.BM25.Search(query, bm25TopK)
 	}
 	fused := fusion.RRF(toRankedVec(vecRes), toRankedBM25(bmRes), rrfK)
 
@@ -128,6 +128,10 @@ func (r *Retriever) hybrid(ctx context.Context, loaded *docstore.Loaded, query s
 
 func (r *Retriever) bm25Fallback(loaded *docstore.Loaded, query string, topM int, out *SearchOutcome, t0 time.Time) (*SearchOutcome, error) {
 	out.Mode = "bm25"
+	if loaded.BM25 == nil {
+		// 防御：BM25 缺失（不应发生，Open 已校验）时返回显式错误而非 panic
+		return nil, fmt.Errorf("%w: bm25 index unavailable", docstore.ErrIncomplete)
+	}
 	bmRes := loaded.BM25.Search(query, topM)
 	scoreFor := map[string]float64{}
 	order := make([]string, 0, len(bmRes))
