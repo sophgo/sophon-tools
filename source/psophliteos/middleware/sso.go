@@ -2,8 +2,9 @@
 //
 // sophliteos web 层维护一个全局"活跃会话"（username）。新用户登录且与活跃用户不同时，
 // 踢掉旧会话（旧用户后续请求被 SSO 中间件拒为 401，前端跳回登录页）。
-// 仅做会话路由，真正的 JWT 鉴权仍由 ssm 完成（请求经反代到 ssm 时 ssm 校验签名）。
-// 不涉及 ssm 改动。
+// 无活跃会话时所有受保护路由一律 401，未认证请求无法访问任何受保护数据。
+// 仅做会话路由，真正的 JWT 鉴权由 bmssm 完成（反代路径）或由本包 jwt.go 本地校验
+// （本地敏感路径）。不涉及 ssm 改动。
 package middleware
 
 import (
@@ -83,9 +84,10 @@ func SSOLogout(token string) {
 	}
 }
 
-// SSO 单会话中间件。受保护路由（/api/v1/* 除 login/password）校验：
+// SSO 单会话中间件。受保护路由（/api/v1/* 除 login/password，以及本地敏感路由）校验：
 // 请求 token 必须等于活跃 token（精确比对，同账号新登录也会顶掉旧会话）；
-// 否则 401 SESSION_OFFLINE。无活跃会话时放行（sophliteos 刚重启，SSO 暂不生效）。
+// 否则 401 SESSION_OFFLINE。无活跃会话时一律 401（未认证客户端不得访问任何受保护数据，
+// 必须先经 /api/v1/login 登录并 /api/sso/register 建立会话）。
 func SSO() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		p := c.Request.URL.Path
@@ -98,7 +100,13 @@ func SSO() gin.HandlerFunc {
 		activeToken := ssoToken
 		ssoMu.RUnlock()
 		if activeToken == "" {
-			c.Next()
+			// 无活跃会话：sophliteos 刚启动/会话被清空。持有效 bmssm JWT 的客户端
+			// 也无法直接访问（vs 旧行为放行），需先经 /api/v1/login 重新登录
+			// register 建立会话。重启后全员重登是本次修复的有意行为。
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"code":          "NO_SESSION",
+				"error_message": "会话已失效，请重新登录",
+			})
 			return
 		}
 		tok := requestToken(c)
