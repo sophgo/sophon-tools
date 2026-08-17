@@ -7,6 +7,7 @@ import (
 
 	"bmssm/database"
 	"bmssm/mvc/audit"
+	"bmssm/mvc/ops"
 	"bmssm/pkg/firewall"
 	"bmssm/pkg/oplock"
 	"bmssm/pkg/response"
@@ -115,14 +116,26 @@ func (ctrl *Controller) DeleteIntent(c *gin.Context) {
 }
 
 // Rebuild handles POST /firewall/rebuild.
-// 危险操作防护（MYS-389）：与 reboot/shutdown/OTA 刷机共享全局互斥锁
-// （防火墙 rebuild 期间重启/OTA 会留下半配置规则或打断刷机），并记审计。
+// 危险操作防护（MYS-389）：需携带 /ops/confirm 签发的一次性确认码
+// （绑定当前用户+firewall_rebuild 动作）；与 reboot/shutdown/OTA 刷机共享全局
+// 互斥锁（防火墙 rebuild 期间重启/OTA 会留下半配置规则或打断刷机）；并记审计。
 func (ctrl *Controller) Rebuild(c *gin.Context) {
 	if envFail(c) {
 		return
 	}
+	var req struct {
+		ConfirmCode string `json:"confirmCode"`
+	}
+	// 空 body 视为无确认码（ops.Verify 会给出引导性错误），不因解析失败直接 400
+	_ = c.ShouldBindJSON(&req)
+
 	username, _ := c.Get("user")
 	name, _ := username.(string)
+
+	if !ops.Verify(c, "firewall_rebuild", req.ConfirmCode) {
+		ctrl.auditWrite(c, name, "firewall_rebuild", "firewall", "blocked: missing/invalid confirm code")
+		return
+	}
 
 	release, err := oplock.Global().Acquire("firewall_rebuild")
 	if err != nil {

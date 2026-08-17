@@ -202,6 +202,10 @@ func (e *Engine) advanceToReboot(flow Workflow) {
 // workflow 持有的危险操作锁（无论由哪个 goroutine 到达终态——SOC 轮询、
 // 刷机失败、未知 product 等路径统一在此回收，避免锁悬挂）。
 func (e *Engine) updateStatus(id uint, status int, info string) {
+	// 终态锁释放不依赖 DB 可用性（先于 db 判空，防止 db==nil 时跳过释放）
+	if status == StatusSuccess || status == StatusFail {
+		e.releaseOpLock(id)
+	}
 	if e.db == nil {
 		return
 	}
@@ -210,9 +214,6 @@ func (e *Engine) updateStatus(id uint, status int, info string) {
 		"info":   info,
 	}).Error; err != nil {
 		logger.Error("updateStatus failed: id=%d status=%d err=%v", id, status, err)
-	}
-	if status == StatusSuccess || status == StatusFail {
-		e.releaseOpLock(id)
 	}
 }
 

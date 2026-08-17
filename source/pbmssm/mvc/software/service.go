@@ -124,31 +124,36 @@ func (s *SoftwareService) GetPkgDir() string {
 //   - 无 DB 记录对应的孤儿固件文件（本应命名的 uid_filename）
 //   - DB 记录指向的文件缺失时删除记录（文件已被外部清理）
 //
-// db 为 nil 时仅做文件清理（无法判定孤儿归属，只删 tmp_*/_extracted）。
+// 删除方向一律保守：DB 查询失败时跳过孤儿判定（不确定就保留），
+// 绝不因查询失败把已上传固件误当孤儿删除。
 func (s *SoftwareService) reconcileOTA() {
 	entries, err := os.ReadDir(s.otaDir)
 	if err != nil {
 		return
 	}
 
-	recorded := s.recordedUploadIDs()
+	recorded, recordedOK := s.recordedUploadIDs()
 
 	for _, ent := range entries {
 		name := ent.Name()
 		switch {
 		case strings.HasPrefix(name, "tmp_"):
-			// 上传中断残留
+			// 上传中断残留（无记录归属，必删）
 			_ = os.RemoveAll(filepath.Join(s.otaDir, name))
 		case strings.HasSuffix(name, "_extracted"):
-			// 解压残留目录（升级中断/进程被杀遗留）
+			// 解压残留目录（升级中断/进程被杀遗留，必删）
 			_ = os.RemoveAll(filepath.Join(s.otaDir, name))
 		default:
-			// uid_filename：DB 有记录则保留（重启后仍可查询/升级），否则视为孤儿删除
+			// uid_filename：DB 有记录则保留（重启后仍可查询/升级）；
+			// 仅在确认 record 查询成功且无记录时才视为孤儿删除。
+			if s.db == nil || !recordedOK {
+				continue
+			}
 			uid := name
 			if idx := strings.IndexByte(name, '_'); idx > 0 {
 				uid = name[:idx]
 			}
-			if s.db != nil && !recorded[uid] {
+			if !recorded[uid] {
 				_ = os.RemoveAll(filepath.Join(s.otaDir, name))
 			}
 		}
@@ -170,20 +175,23 @@ func (s *SoftwareService) reconcileOTA() {
 	}
 }
 
-// recordedUploadIDs 返回 DB 中全部 uploadId 集合（db 为 nil 时返回 nil）。
-func (s *SoftwareService) recordedUploadIDs() map[string]bool {
+// recordedUploadIDs 返回 DB 中全部 uploadId 集合。
+// 第二个返回值表示查询是否成功：失败（表缺失/DB 异常）时第一返回值无意义，
+// 调用方必须跳过孤儿判定（不确定就保留，防误删已上传固件）。
+func (s *SoftwareService) recordedUploadIDs() (map[string]bool, bool) {
 	if s.db == nil {
-		return nil
+		return nil, false
 	}
 	var files []OTAFile
 	if err := s.db.Select("upload_id").Find(&files).Error; err != nil {
-		return nil
+		logger.Warn("reconcileOTA: query ota_files failed, skip orphan cleanup: %v", err)
+		return nil, false
 	}
 	out := make(map[string]bool, len(files))
 	for _, f := range files {
 		out[f.UploadID] = true
 	}
-	return out
+	return out, true
 }
 
 // maxSizeFromConfig 从配置读取 software.maxSize，默认 1GB。
@@ -768,6 +776,9 @@ func isSafePath(destDir, entryPath string) bool {
 // maxExtractBytes 单次解包累计解压上限（防 tar/zip 炸弹撑爆磁盘）。
 const maxExtractBytes = 2 << 30 // 2GiB
 
+// maxExtractEntries 解包条目数上限（防海量小文件占满 inode，与 pkg/ota 对齐）。
+const maxExtractEntries = 10000
+
 // extractTarGz 解压 tar.gz 到 destDir，含 zip-slip 防护与总量限制。
 func extractTarGz(filePath, destDir string) error {
 	f, err := os.Open(filePath)
@@ -783,6 +794,7 @@ func extractTarGz(filePath, destDir string) error {
 	defer gzReader.Close()
 
 	var total int64
+	var entries int
 	tarReader := tar.NewReader(gzReader)
 	for {
 		header, err := tarReader.Next()
@@ -791,6 +803,10 @@ func extractTarGz(filePath, destDir string) error {
 		}
 		if err != nil {
 			return fmt.Errorf("tar next: %w", err)
+		}
+		entries++
+		if entries > maxExtractEntries {
+			return fmt.Errorf("extraction exceeds entry count limit (%d)", maxExtractEntries)
 		}
 
 		if !isSafePath(destDir, header.Name) {
@@ -845,6 +861,7 @@ func extractZip(filePath, destDir string) error {
 	defer r.Close()
 
 	var total int64
+	var entries int
 	for _, f := range r.File {
 		if !isSafePath(destDir, f.Name) {
 			return fmt.Errorf("%w: %s", errZipSlip, f.Name)
@@ -857,6 +874,11 @@ func extractZip(filePath, destDir string) error {
 				return err
 			}
 			continue
+		}
+
+		entries++
+		if entries > maxExtractEntries {
+			return fmt.Errorf("extraction exceeds entry count limit (%d)", maxExtractEntries)
 		}
 
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {

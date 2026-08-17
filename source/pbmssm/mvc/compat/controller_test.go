@@ -872,6 +872,22 @@ func TestCompatSCP(t *testing.T) {
 	}
 }
 
+// TestCompatShutdownRequiresConfirmCode 无确认码的关机必须被拒（MYS-389）。
+// 只测拒绝路径：带码会真实 poweroff，绝不在测试中触发。
+func TestCompatShutdownRequiresConfirmCode(t *testing.T) {
+	r := setupCompatTest(t)
+	token := getNormalToken(t, r)
+
+	body, _ := json.Marshal(CoreOpe{}) // 不带 ConfirmCode
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/hardware/shutdown", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	r.ServeHTTP(w, req)
+
+	assertSsmErr(t, w.Body.Bytes(), "shutdown without confirm code")
+}
+
 func TestCompatExec(t *testing.T) {
 	r := setupCompatTest(t)
 	token := getNormalToken(t, r)

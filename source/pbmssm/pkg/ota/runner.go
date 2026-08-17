@@ -199,13 +199,21 @@ func NewEngine(db *gorm.DB, runner Runner, flags FlagChecker, dryRun bool, paths
 	}
 }
 
-// SetAuditRecorder 注入审计回调（nil 安全，记录失败不影响刷机主流程）。
-func (e *Engine) SetAuditRecorder(fn AuditRecorder) { e.auditFn = fn }
+// SetAuditRecorder 注入审计回调（nil 安全，记录失败不影响刷机主流程；
+// 可在引擎启动后调用，e.mu 保护）。
+func (e *Engine) SetAuditRecorder(fn AuditRecorder) {
+	e.mu.Lock()
+	e.auditFn = fn
+	e.mu.Unlock()
+}
 
 // audit 经 auditFn 记录一条审计（nil 时 no-op）。
 func (e *Engine) audit(username, action, resource, ip, result string) {
-	if e.auditFn != nil {
-		e.auditFn(username, action, resource, ip, result)
+	e.mu.Lock()
+	fn := e.auditFn
+	e.mu.Unlock()
+	if fn != nil {
+		fn(username, action, resource, ip, result)
 	}
 }
 

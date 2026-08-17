@@ -1,6 +1,11 @@
 package ota
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -8,6 +13,30 @@ import (
 
 	"bmssm/pkg/oplock"
 )
+
+// mustTarGz 构造含 entries（name -> content）的 tar.gz 字节（测试辅助）。
+func mustTarGz(t *testing.T, files map[string][]byte) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+	for name, content := range files {
+		hdr := &tar.Header{Name: name, Mode: 0o644, Size: int64(len(content)), Typeflag: tar.TypeReg}
+		if err := tw.WriteHeader(hdr); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write(content); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
 
 // ---------------------------------------------------------------
 // 危险操作互斥（MYS-389）：OTA 刷机从执行到终态持有全局 oplock，
@@ -148,4 +177,52 @@ func TestEngineDryRunDoesNotTakeLock(t *testing.T) {
 	if h := e.opLock.Holder(); h != "" {
 		t.Errorf("dryRun must not hold the dangerous-op lock, holder=%q", h)
 	}
+}
+
+// TestEngineSocFlashReleasesLockOnSuccess SOC 异步刷机：锁从 flash 持有到
+// pollSOC 轮询到达终态（Success）后释放——覆盖 SOC 最长的持锁窗口。
+func TestEngineSocFlashReleasesLockOnSuccess(t *testing.T) {
+	e, _, flags, paths := newTestEngine(t, false)
+	e.opLock = oplock.New() // 独立锁，隔离测试
+	e.Start()
+	defer e.Stop()
+
+	// 准备真实刷机包（PrepareSOC 会解压它）+ 预设 success 标志（poll 首轮即终态）
+	if err := os.MkdirAll(paths.SOCOTADir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	pkg := filepath.Join(paths.SOCOTADir, "pkg.tgz")
+	if err := os.WriteFile(pkg, mustTarGz(t, map[string][]byte{"ota.sh": []byte("#!/bin/sh\necho ok")}), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	flags.success = true
+
+	flow := Workflow{Product: "SE7", FileName: "pkg.tgz", Type: TypeUpgrade, Name: "soc-test"}
+	if err := e.EnqueueFlow(&flow); err != nil {
+		t.Fatalf("EnqueueFlow: %v", err)
+	}
+
+	// 刷机执行中锁被持有（PrepareSOC/RunSOC 后、poll 到达终态前）
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if h := e.opLock.Holder(); h != "" {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if h := e.opLock.Holder(); h == "" {
+		t.Fatal("lock should be held while soc flash is running")
+	}
+
+	// pollSOC 终态 → updateStatus(Success) → 释放
+	waitForStatus(t, e, flow.WorkflowID, StatusSuccess, 3*time.Second)
+
+	deadline = time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if h := e.opLock.Holder(); h == "" {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("lock should be released after soc workflow reaches Success")
 }
