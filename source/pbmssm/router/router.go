@@ -181,7 +181,6 @@ func Register(r *gin.Engine) {
 		admin.GET("/llm-proxy/config", llmproxyCtrl.GetConfig)
 		admin.PUT("/llm-proxy/config", llmproxyCtrl.SaveConfig)
 		admin.POST("/llm-proxy/forward-key/reset", llmproxyCtrl.ResetForwardKey)
-		admin.POST("/llm-proxy/forward-key/write-picoclaw", llmproxyCtrl.WriteForwardKey)
 		admin.POST("/llm-proxy/test", llmproxyCtrl.RunTest)
 		// Reasonix 服务操作（写）——AI agent 后端由 agentproxy 管理
 		admin.POST("/llm-proxy/service/action", agentCtrl.ServiceAction)

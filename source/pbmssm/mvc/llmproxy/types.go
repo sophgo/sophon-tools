@@ -1,7 +1,7 @@
 // Package llmproxy 提供 LLM API 转发（OpenAI 兼容版）。
 //
 // 转发逻辑参考 llm-proxy（https://github.com/zzttzzmyswy/llm-proxy）：
-// 客户端（如 PicoClaw）以任意模型名请求本模块内置的 OpenAI 兼容端点，
+// 客户端（本机 reasonix 等内部调用方）以任意模型名请求本模块内置的 OpenAI 兼容端点，
 // 代理检测请求中是否含 image_url 分流到 VLM / LLM 配置的上游，
 // 请求带非空 model 则保留，否则替换为对应配置的模型名后转发到上游 api_base。
 //
@@ -26,20 +26,19 @@ type ProviderConfig struct {
 // Config 数据库模型：LLM 转发配置（单例，ID 固定为 1）。
 // LLM/VLM 各自独立的上游配置；ForwardKey 是客户端调用代理的凭据（独立于上游 key）。
 type Config struct {
-	ID                uint      `gorm:"column:id;primary_key" json:"-"`
-	LLMApiBase        string    `gorm:"column:llm_api_base" json:"llmApiBase"`
-	LLMApiKey         string    `gorm:"column:llm_api_key" json:"-"`
-	LLMModel          string    `gorm:"column:llm_model" json:"llmModel"`
-	LLMEnabled        bool      `gorm:"column:llm_enabled" json:"llmEnabled"`
-	LLMOverride       bool      `gorm:"column:llm_override_model" json:"llmOverrideModel"`
-	VLMApiBase        string    `gorm:"column:vlm_api_base" json:"vlmApiBase"`
-	VLMApiKey         string    `gorm:"column:vlm_api_key" json:"-"`
-	VLMModel          string    `gorm:"column:vlm_model" json:"vlmModel"`
-	VLMEnabled        bool      `gorm:"column:vlm_enabled" json:"vlmEnabled"`
-	VLMOverride       bool      `gorm:"column:vlm_override_model" json:"vlmOverrideModel"`
-	ForwardKey        string    `gorm:"column:forward_key" json:"-"`
-	ForwardKeyWritten bool      `gorm:"column:forward_key_written" json:"-"`
-	UpdatedAt         time.Time `gorm:"column:updated_at" json:"updatedAt"`
+	ID          uint      `gorm:"column:id;primary_key" json:"-"`
+	LLMApiBase  string    `gorm:"column:llm_api_base" json:"llmApiBase"`
+	LLMApiKey   string    `gorm:"column:llm_api_key" json:"-"`
+	LLMModel    string    `gorm:"column:llm_model" json:"llmModel"`
+	LLMEnabled  bool      `gorm:"column:llm_enabled" json:"llmEnabled"`
+	LLMOverride bool      `gorm:"column:llm_override_model" json:"llmOverrideModel"`
+	VLMApiBase  string    `gorm:"column:vlm_api_base" json:"vlmApiBase"`
+	VLMApiKey   string    `gorm:"column:vlm_api_key" json:"-"`
+	VLMModel    string    `gorm:"column:vlm_model" json:"vlmModel"`
+	VLMEnabled  bool      `gorm:"column:vlm_enabled" json:"vlmEnabled"`
+	VLMOverride bool      `gorm:"column:vlm_override_model" json:"vlmOverrideModel"`
+	ForwardKey  string    `gorm:"column:forward_key" json:"-"`
+	UpdatedAt   time.Time `gorm:"column:updated_at" json:"updatedAt"`
 }
 
 // TableName 指定表名。
@@ -152,19 +151,18 @@ type SaveRequest struct {
 // ConfigResponse 配置响应（各 key 脱敏为 hasKey 布尔；ForwardKey 明文返回供
 // 前端展示/WS 连接——该响应仅经 admin 组路由输出，见 router.go MYS-386）。
 type ConfigResponse struct {
-	LLMApiBase      string    `json:"llmApiBase"`
-	LLMModel        string    `json:"llmModel"`
-	LLMEnabled      bool      `json:"llmEnabled"`
-	LLMOverride     bool      `json:"llmOverrideModel"`
-	LLMHasKey       bool      `json:"llmHasKey"`
-	VLMApiBase      string    `json:"vlmApiBase"`
-	VLMModel        string    `json:"vlmModel"`
-	VLMEnabled      bool      `json:"vlmEnabled"`
-	VLMOverride     bool      `json:"vlmOverrideModel"`
-	VLMHasKey       bool      `json:"vlmHasKey"`
-	ForwardKey      string    `json:"forwardKey"`
-	ForwardKeyReady bool      `json:"forwardKeyReady"` // 是否已写入本地 picoclaw
-	UpdatedAt       time.Time `json:"updatedAt"`
+	LLMApiBase  string    `json:"llmApiBase"`
+	LLMModel    string    `json:"llmModel"`
+	LLMEnabled  bool      `json:"llmEnabled"`
+	LLMOverride bool      `json:"llmOverrideModel"`
+	LLMHasKey   bool      `json:"llmHasKey"`
+	VLMApiBase  string    `json:"vlmApiBase"`
+	VLMModel    string    `json:"vlmModel"`
+	VLMEnabled  bool      `json:"vlmEnabled"`
+	VLMOverride bool      `json:"vlmOverrideModel"`
+	VLMHasKey   bool      `json:"vlmHasKey"`
+	ForwardKey  string    `json:"forwardKey"`
+	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
 // ModelInfo 模型列表条目（供应商 openai 接口返回）。

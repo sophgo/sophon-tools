@@ -45,7 +45,7 @@ func setupTestController(t *testing.T) (*Controller, *httptest.Server) {
 // 且 LLM/VLM 上游 key 不出现（仅 hasKey 布尔）。
 func TestToResponseIncludesForwardKey(t *testing.T) {
 	c := Config{ID: 1, LLMApiKey: "llm-secret", VLMApiKey: "vlm-secret", ForwardKey: "forward-secret"}
-	b, err := json.Marshal(c.ToResponse(true))
+	b, err := json.Marshal(c.ToResponse())
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}

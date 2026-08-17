@@ -44,18 +44,18 @@ type clientMessage struct {
 //   - c.mu 保护 session/adapter/promptCancel。handleFrame 持 c.mu 处理各 handle*，
 //     内部不再重复加锁。
 type conn struct {
-	ws       *websocket.Conn
-	writeMu  sync.Mutex // gorilla 不允许并发写
-	send     chan []WSFrame
-	done     chan struct{}
+	ws        *websocket.Conn
+	writeMu   sync.Mutex // gorilla 不允许并发写
+	send      chan []WSFrame
+	done      chan struct{}
 	closeOnce sync.Once
-	addr     string
+	addr      string
 
 	hub    *Hub
 	module *Module
 
-	mu           sync.Mutex
-	session      *WebchatSession
+	mu      sync.Mutex
+	session *WebchatSession
 	adapter *MessageAdapter
 }
 
@@ -65,6 +65,7 @@ type conn struct {
 // 事件带 ACP sessionId；Hub 维护 acpSessionID → conn 索引，精确投递。
 type Hub struct {
 	module *Module
+	keyMu  sync.RWMutex
 	key    string // 转发 key（子协议 token.<key> 认证；空 = 放行）
 
 	mu       sync.Mutex
@@ -82,6 +83,21 @@ func newHub(module *Module, key string) *Hub {
 		conns:  make(map[*conn]bool),
 		byACP:  make(map[string]*conn),
 	}
+}
+
+// SetKey 热更新转发 key（MYS-387 轮换同步）：llm-proxy ResetForwardKey 轮换后
+// 调用，新连接立即按新 key 认证，旧 key 失效（无需重启 bmssm）。
+func (h *Hub) SetKey(key string) {
+	h.keyMu.Lock()
+	h.key = key
+	h.keyMu.Unlock()
+}
+
+// getKey 原子读当前转发 key。
+func (h *Hub) getKey() string {
+	h.keyMu.RLock()
+	defer h.keyMu.RUnlock()
+	return h.key
 }
 
 // Start 启动 Hub：注册模块事件监听。不再拉起独立 WS http.Server —— agent WS 端点
@@ -205,9 +221,10 @@ func (h *Hub) serveWS(w http.ResponseWriter, r *http.Request) {
 }
 
 // authSubprotocol 校验客户端子协议 token.<key> 与配置转发 key 一致。
-// key 未配置（空）时放行（MYS-171 放宽策略对齐：本地回环适配器暴露面可控）。
+// key 未配置（空）时放行（DB 异常降级路径；正常路径 DB 恒有 key）。
 func (h *Hub) authSubprotocol(r *http.Request) bool {
-	if h.key == "" {
+	key := h.getKey()
+	if key == "" {
 		return true
 	}
 	protos := r.Header.Values("Sec-WebSocket-Protocol")
@@ -215,7 +232,7 @@ func (h *Hub) authSubprotocol(r *http.Request) bool {
 		for _, proto := range strings.Split(p, ",") {
 			proto = strings.TrimSpace(proto)
 			if strings.HasPrefix(proto, "token.") &&
-				strings.TrimPrefix(proto, "token.") == h.key {
+				strings.TrimPrefix(proto, "token.") == key {
 				return true
 			}
 		}

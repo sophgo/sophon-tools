@@ -10,8 +10,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,17 +17,7 @@ import (
 
 	"bmssm/config"
 	"bmssm/logger"
-	"bmssm/pkg/system"
 )
-
-// runSystemctlRestart 通过 systemd 重启 sophpicoclaw 服务（可注入，测试用）。
-var runSystemctlRestart = func(name string) error {
-	_, errStr, err := system.RunCommandArgs("systemctl", "restart", name)
-	if err != nil {
-		return fmt.Errorf("systemctl restart %s: %v: %s", name, err, errStr)
-	}
-	return nil
-}
 
 // server 状态：配置变更时通过 UpdateServer 热更新（替换原子指针）。
 var (
@@ -173,9 +161,9 @@ func handleModels(w http.ResponseWriter, r *http.Request) {
 //  2. 遍历所有 messages 的 content：
 //     - 文本块 → 保留
 //     - 图片块（image_url/image）→ 提取图片数据 → 哈希查缓存：
-//         * 命中 → 复用描述
-//         * 未命中 → 调 VLM 生成详细描述 → 缓存
-//       用文本块替换图片块：{type:text, text:"这里有一个 image，其内容如下：<描述>"}
+//     * 命中 → 复用描述
+//     * 未命中 → 调 VLM 生成详细描述 → 缓存
+//     用文本块替换图片块：{type:text, text:"这里有一个 image，其内容如下：<描述>"}
 //  3. 转发到 LLM：请求带非空 model 则保留，否则替换为配置的 LLM model_name
 //  4. 用 bmssm 内部存储的 LLM 上游 key 向供应商转发
 func handleChatCompletions(w http.ResponseWriter, r *http.Request) {
@@ -183,8 +171,8 @@ func handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 
 	// 1. 转发 key 校验（MYS-171：放宽策略，不做强制拦截）。
 	//    仅当配置了 ForwardKey 且请求携带匹配 key 时视为已鉴权；
-	//    key 未配置 / 请求未携带 / 不匹配均放行（本地回环代理，暴露面可控）。
-	//    兼容旧 picoclaw 链路：其携带匹配 key 的请求行为不变。
+	//    key 未配置 / 请求未携带 / 不匹配均放行。18080 为内部回环代理，
+	//    仅本机可信进程（reasonix 等）调用，不做安全加固。
 	if cfg.ForwardKey != "" && !validForwardKey(r, cfg.ForwardKey) {
 		logger.Warn("llm proxy: forward key mismatch (config set, request key absent or wrong)")
 	}
@@ -430,59 +418,6 @@ func isImageBlock(b map[string]interface{}) bool {
 		return true
 	}
 	return false
-}
-
-// --- 写入本地 picoclaw -------------------------------------------------------
-
-// devproxyKeyPath 返回 picoclaw devproxy.key 路径。
-// 优先 SOPHON_PICOCLAW_HOME，其次 /opt/sophon/picoclaw（新出厂路径），
-// 再回退 /home/*/picoclaw-deploy 探测，最后当前用户主目录。
-func devproxyKeyPath() (string, error) {
-	var home string
-	if h := os.Getenv("SOPHON_PICOCLAW_HOME"); h != "" {
-		home = h
-	} else if st, err := os.Stat("/opt/sophon/picoclaw/.picoclaw"); err == nil && st.IsDir() {
-		home = "/opt/sophon/picoclaw"
-	} else if entries, err := os.ReadDir("/home"); err == nil {
-		for _, e := range entries {
-			if e.IsDir() {
-				candidate := filepath.Join("/home", e.Name(), ".picoclaw")
-				if st, err := os.Stat(candidate); err == nil && st.IsDir() {
-					home = filepath.Dir(candidate)
-					break
-				}
-			}
-		}
-	}
-	if home == "" {
-		return "", fmt.Errorf("cannot locate picoclaw home")
-	}
-	return filepath.Join(home, ".picoclaw", "devproxy.key"), nil
-}
-
-// WriteForwardKeyToPicoclaw 把转发 key 写入 picoclaw devproxy.key，
-// 并重启 sophpicoclaw 服务（systemd 托管）。
-func WriteForwardKeyToPicoclaw(key string) error {
-	path, err := devproxyKeyPath()
-	if err != nil {
-		return err
-	}
-	// 写文件（0600）
-	if err := os.WriteFile(path, []byte(key), 0o600); err != nil {
-		return fmt.Errorf("write devproxy.key: %w", err)
-	}
-	// 重启 sophpicoclaw（systemd 统一管理 gateway 生命周期）
-	restartPicoclaw()
-	return nil
-}
-
-// restartPicoclaw 通过 systemd 重启 sophpicoclaw 服务（替代旧 pkill+手工 spawn）。
-func restartPicoclaw() {
-	if err := runSystemctlRestart("sophpicoclaw.service"); err != nil {
-		logger.Warn("restart sophpicoclaw failed: %v", err)
-		return
-	}
-	logger.Info("sophpicoclaw.service restarted via systemctl")
 }
 
 // flushWriter SSE 透传用：每次 Write 后 Flush。

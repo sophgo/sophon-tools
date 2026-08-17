@@ -29,19 +29,20 @@ type ProcessManager struct {
 	cfg     Config
 	onReady func() // 每次进程成功启动后被回调（acp client 重跑 initialize + 恢复会话）
 
-	mu      sync.Mutex
-	cmd     *exec.Cmd     // 当前进程（Wait goroutine 退出前有效）
-	waitCh  chan struct{} // 当前进程退出信号（close 表示已退出）
-	state   ProcessState
-	started time.Time
-	stdin   io.WriteCloser // 写请求（NDJSON 行），写时需加 writeMu
-	stdout  *bufio.Reader  // 读响应（NDJSON 行）
-	stderrB *safeBuffer    // stderr 诊断日志
+	mu       sync.Mutex
+	cmd      *exec.Cmd     // 当前进程（Wait goroutine 退出前有效）
+	waitCh   chan struct{} // 当前进程退出信号（close 表示已退出）
+	state    ProcessState
+	started  time.Time
+	stdin    io.WriteCloser  // 写请求（NDJSON 行），写时需加 writeMu
+	stdout   *bufio.Reader   // 读响应（NDJSON 行）
+	stderrB  *safeBuffer     // stderr 诊断日志
+	envExtra func() []string // 每次启动进程时调用，追加额外环境变量（如转发 key）
 
-	writeMu     sync.Mutex // 防并发写行交错
-	backoff     time.Duration
-	initFailCnt atomic.Int32
-	stopping    atomic.Bool // 终态：bmssm 关闭/永久停止，置后不可再自愈
+	writeMu      sync.Mutex // 防并发写行交错
+	backoff      time.Duration
+	initFailCnt  atomic.Int32
+	stopping     atomic.Bool // 终态：bmssm 关闭/永久停止，置后不可再自愈
 	runRequested atomic.Bool // 用户/managed 是否期望进程保持运行（false=手动停止，supervise 不再重启）
 }
 
@@ -109,6 +110,29 @@ func (pm *ProcessManager) Start() error {
 	return nil
 }
 
+// SetEnvInjector 注册环境变量注入器：每次启动进程（含崩溃自愈重启）时调用，
+// 返回追加到进程环境的 KEY=VALUE 列表。用于注入 reasonix 访问本机 18080
+// 转发 server 用到的 DEEPSEEK_API_KEY（= llm-proxy forward key，config.toml
+// api_key_env 变量指向它）。
+func (pm *ProcessManager) SetEnvInjector(fn func() []string) {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	pm.envExtra = fn
+}
+
+// buildProcessEnv 组装进程环境：继承 base + HOME 覆盖 + envExtra 追加。
+// 分离为纯函数便于单测（forward key env 注入）。
+func buildProcessEnv(base []string, home string, extra func() []string) []string {
+	env := base
+	if home != "" {
+		env = append(env, "HOME="+home)
+	}
+	if extra != nil {
+		env = append(env, extra()...)
+	}
+	return env
+}
+
 // startProc 实际启动一次进程并挂起 I/O。调用方负责启动 supervise。
 func (pm *ProcessManager) startProc() error {
 	binary := pm.cfg.BinaryPath
@@ -125,10 +149,10 @@ func (pm *ProcessManager) startProc() error {
 	if pm.cfg.WorkDir != "" {
 		cmd.Dir = pm.cfg.WorkDir
 	}
-	cmd.Env = os.Environ()
-	if home := pm.homeDir(); home != "" {
-		cmd.Env = append(cmd.Env, "HOME="+home)
-	}
+	pm.mu.Lock()
+	extra := pm.envExtra
+	pm.mu.Unlock()
+	cmd.Env = buildProcessEnv(os.Environ(), pm.homeDir(), extra)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

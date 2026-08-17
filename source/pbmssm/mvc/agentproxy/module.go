@@ -28,7 +28,7 @@ type Module struct {
 	nextID    int64
 	listeners map[int64]func(*ACPSessionUpdate) // 流式事件监听者（Hub 注册，广播分发）
 	turns     map[string]*Turn                  // acpSessionID → 进行中的回合（连接无关）
-	perms     map[int64]*pendingPermission     // reqID → 待审批请求（连接无关）
+	perms     map[int64]*pendingPermission      // reqID → 待审批请求（连接无关）
 
 	stopOnce sync.Once
 }
@@ -49,6 +49,16 @@ func Start(cfg Config, db *gorm.DB) *Module {
 	globalMod = NewModule(cfg, db, nil)
 	// 注册 LLM 配置保存 → 重写 reasonix 上下文（sophnet 200K / 本地 20K）。
 	llmproxy.RegisterContextWindowApplier(ApplyReasonixContextWindow)
+	// 注册转发 key 轮换监听（MYS-387）：ResetForwardKey 后 Hub 换用新 key，
+	// 前端 WS 子协议 token 同步轮换，旧 token 立即失效（无需重启 bmssm）。
+	// 不重启 reasonix：转发 server 宽松校验（MYS-171 语义），其 env 中的
+	// 旧 key 不会造成鉴权失败。
+	llmproxy.RegisterForwardKeyListener(func(key string) {
+		if globalMod == nil || globalMod.hub == nil {
+			return
+		}
+		globalMod.hub.SetKey(key)
+	})
 	if err := globalMod.Start(); err != nil {
 		logger.Error("agentproxy: start failed: %v", err)
 	}
@@ -83,6 +93,17 @@ func NewModule(cfg Config, db *gorm.DB, eventFn func(*ACPSessionUpdate)) *Module
 	}
 	m.sessions = NewSessionManager(db, cfg.WorkDir)
 	m.pm = NewProcessManager(cfg, m.onProcessReady)
+	// reasonix 经 127.0.0.1:18080 访问 llm-proxy 转发 server（config.toml
+	// api_key_env=DEEPSEEK_API_KEY）。启动 reasonix 进程时注入
+	// DEEPSEEK_API_KEY=当前 forward key（每次启动动态读取 DB：轮换后
+	// 崩溃自愈重启即带最新值；转发 server 为宽松校验，不携带也无碍）。
+	m.pm.SetEnvInjector(func() []string {
+		key := forwardKey(db)
+		if key == "" {
+			return nil
+		}
+		return []string{"DEEPSEEK_API_KEY=" + key}
+	})
 	m.hub = newHub(m, forwardKey(db))
 	return m
 }
@@ -317,7 +338,7 @@ func ensureWorkDir(dir string) error {
 
 // forwardKey 读取转发 key（WS 子协议 token.<key> 认证凭据）。
 // 复用 llm_proxy_config.forward_key（与 pico 模式完全一致，前端 PicoWS 零改动）。
-// 读失败返回空串（认证放行——对齐 MYS-171 放宽策略）。
+// 读失败返回空串（认证放行——DB 异常降级路径；正常路径 DB 恒有 key）。
 func forwardKey(db *gorm.DB) string {
 	if db == nil {
 		return ""
