@@ -45,30 +45,33 @@ var separators = []string{"\n## ", "\n### ", "\n#### ", "\n\n", "\n", "。", ". 
 func (c *MarkdownChunker) ChunkFile(text, sourceFile string) []Chunk {
 	clean, regions := extractProtected(text)
 	linePos := buildLinePositions(text)
-	raw := c.splitText(clean, 0)
+	pieces := c.splitText(clean, 0)
 
 	var out []Chunk
-	pos := 0 // 上一片段 core 的结束偏移（各片段的 core 连续拼接即 clean，故按序累加定位）
-	for i, r := range raw {
-		text := r.overlap + r.core
-		startOff := pos
-		pos += len(r.core)
+	seq := 0 // 文件内全局块序号（含 charSplitChunks 子块），用于 ChunkID 与 ChunkIndex
+	for _, p := range pieces {
+		text := p.overlap + p.core
 		if strings.TrimSpace(text) == "" {
 			continue
 		}
 		restored := restoreProtected(text, regions)
+		// 行号基于 core 边界定位：overlap 是上一块 core 的尾部文本，
+		// 其行区间已计入上一块，不重复计入本块（MYS-392 精确偏移）。
+		startOff := cleanOffsetToText(regions, p.start)
+		coreEnd := cleanOffsetToText(regions, p.start+len(p.core))
 		if len([]rune(restored)) > c.MaxChunkChars {
-			out = append(out, c.charSplitChunks(restored, sourceFile, offsetToLine(linePos, startOff))...)
+			out = append(out, c.charSplitChunks(restored, sourceFile, offsetToLine(linePos, startOff), &seq)...)
 			continue
 		}
 		out = append(out, Chunk{
-			ChunkID:    md5Hex(restored),
+			ChunkID:    chunkID(sourceFile, seq, restored),
 			Text:       restored,
 			SourceFile: sourceFile,
 			LineStart:  offsetToLine(linePos, startOff),
-			LineEnd:    offsetToLine(linePos, startOff) + countNewlines(restored),
-			ChunkIndex: i,
+			LineEnd:    offsetToLine(linePos, coreEnd),
+			ChunkIndex: seq,
 		})
+		seq++
 	}
 
 	// 统一 LineEnd 修正（保证 ≥ LineStart）
@@ -105,6 +108,12 @@ func (c *MarkdownChunker) ChunkDirectory(docsDir string) (map[string][]Chunk, er
 }
 
 // ---- 内部辅助 ----
+
+// chunkID 生成跨文件唯一的 ChunkID：md5(源文件路径 + 块序号 + 文本) 前 16 位。
+// 旧算法 md5(文本) 使跨文件相同文本产生相同 ID，ChunkByID 检索来源错乱（MYS-392）。
+func chunkID(sourceFile string, seq int, text string) string {
+	return md5Hex(fmt.Sprintf("%s:%d:%s", sourceFile, seq, text))
+}
 
 func md5Hex(s string) string {
 	return fmt.Sprintf("%x", md5.Sum([]byte(s)))[:16]
@@ -150,9 +159,12 @@ func offsetToLine(pos []int, offset int) int {
 // splitPiece 一次分块结果：core 为核心正文，overlap 为拼在 core 之前的
 // 前导重叠（上一片段 core 的尾部文本；首段为空）。同一文本各片段的 core
 // 按序连续拼接即原文，因此可据此精确定位行号。
+// start 为 core 在输入文本中的起始字节偏移：偏移由切分过程记录（而非事后
+// strings.Index），避免重复文本定位到首次出现位置，也避免二次搜索的 O(n²)（MYS-392）。
 type splitPiece struct {
 	core    string
 	overlap string
+	start   int
 }
 
 // overlapCharLen overlap 的字符数：OverlapChars 显式设置时用其值，
@@ -169,10 +181,10 @@ func (c *MarkdownChunker) splitText(text string, depth int) []splitPiece {
 		if strings.TrimSpace(text) == "" {
 			return nil
 		}
-		return []splitPiece{{core: text}}
+		return []splitPiece{{core: text, start: 0}}
 	}
 	if depth > 10 {
-		return c.charSplit(text)
+		return c.charSplit(text, 0)
 	}
 	for _, sep := range separators {
 		if !strings.Contains(text, sep) {
@@ -182,33 +194,44 @@ func (c *MarkdownChunker) splitText(text string, depth int) []splitPiece {
 		var out []splitPiece
 		current := ""
 		overlap := "" // 待拼接到下一块的前导重叠（当前段 core 的尾部）
+		currentStart := 0
+		pref := 0 // 已消费 parts 的累计长度
 		for i, p := range parts {
 			seg := p
+			segStart := pref + i*len(sep)
 			if i > 0 {
 				seg = sep + p
 			}
+			pref += len(p)
 			if estTokens(overlap+current+seg) <= c.ChunkSize {
+				if current == "" {
+					currentStart = segStart
+				}
 				current += seg
 			} else {
 				if strings.TrimSpace(overlap+current) != "" {
-					out = append(out, splitPiece{core: current, overlap: overlap})
+					out = append(out, splitPiece{core: current, overlap: overlap, start: currentStart})
 				}
 				if estTokens(seg) > c.ChunkSize {
-					out = append(out, c.splitText(seg, depth+1)...)
+					for _, sp := range c.splitText(seg, depth+1) {
+						out = append(out, splitPiece{core: sp.core, overlap: sp.overlap, start: segStart + sp.start})
+					}
+					// 超限段已递归切分，current/overlap 必须清空：否则旧内容会在后续迭代中被重复输出
 					overlap = ""
 					current = ""
 				} else {
 					overlap = overlapTail(current, c.overlapCharLen())
 					current = seg // 触发溢出的 seg 成为下一段核心的开头
+					currentStart = segStart
 				}
 			}
 		}
 		if strings.TrimSpace(overlap+current) != "" {
-			out = append(out, splitPiece{core: current, overlap: overlap})
+			out = append(out, splitPiece{core: current, overlap: overlap, start: currentStart})
 		}
 		return out
 	}
-	return c.charSplit(text)
+	return c.charSplit(text, 0)
 }
 
 // overlapTail 取 s 尾部最多 n 个 rune 作为相邻块重叠；若切点落在保护占位符
@@ -246,7 +269,7 @@ func hasMarkerAt(r []rune, i int) bool {
 	return true
 }
 
-func (c *MarkdownChunker) charSplit(text string) []splitPiece {
+func (c *MarkdownChunker) charSplit(text string, base int) []splitPiece {
 	var out []splitPiece
 	r := []rune(text)
 	step := c.MaxChars - c.overlapCharLen()
@@ -260,14 +283,17 @@ func (c *MarkdownChunker) charSplit(text string) []splitPiece {
 		}
 		piece := string(r[i:end])
 		if strings.TrimSpace(piece) != "" {
-			out = append(out, splitPiece{core: piece})
+			// i 为 rune 下标，字节偏移 = base + 前 i 个 rune 的字节数
+			out = append(out, splitPiece{core: piece, start: base + len(string(r[:i]))})
 		}
 	}
 	return out
 }
 
 // charSplitChunks 超长 chunk 的字符级二切（runes 步进，保持 UTF-8 完整）。
-func (c *MarkdownChunker) charSplitChunks(text, sourceFile string, baseLine int) []Chunk {
+// seq 为文件内全局块序号指针：子块也占序号，保证 ChunkID/ChunkIndex 全文件唯一
+// （MYS-392：旧 md5(文本) 跨文件相同文本产生相同 ID，ChunkByID 检索来源错乱）。
+func (c *MarkdownChunker) charSplitChunks(text, sourceFile string, baseLine int, seq *int) []Chunk {
 	var out []Chunk
 	r := []rune(text)
 	for i := 0; i < len(r); i += c.MaxChunkChars {
@@ -277,13 +303,15 @@ func (c *MarkdownChunker) charSplitChunks(text, sourceFile string, baseLine int)
 		}
 		piece := string(r[i:end])
 		if strings.TrimSpace(piece) != "" {
+			s := *seq
+			*seq++
 			out = append(out, Chunk{
-				ChunkID:    md5Hex(piece),
+				ChunkID:    chunkID(sourceFile, s, piece),
 				Text:       piece,
 				SourceFile: sourceFile,
 				LineStart:  baseLine + countNewlines(text[:i]),
 				LineEnd:    baseLine + countNewlines(text[:end]),
-				ChunkIndex: len(out),
+				ChunkIndex: s,
 			})
 		}
 	}
@@ -310,9 +338,11 @@ type seg struct {
 }
 
 type region struct {
-	start, end int
-	content    string
+	start, end int    // 原 text 中的字节区间
+	content    string // 原文本内容（含换行）
 	kind       string
+	phStart    int // 占位符在 clean 文本中的字节偏移
+	phLen      int // 占位符在 clean 文本中的字节长度
 }
 
 func extractProtected(text string) (string, []region) {
@@ -345,8 +375,10 @@ func extractProtected(text string) (string, []region) {
 		// 仅保留非空、且不重叠在已处理区域之后的片段（防御越界于 len(text)）。
 		if hi > lo && lo >= last {
 			sb.WriteString(text[last:lo])
-			sb.WriteString(fmt.Sprintf("__PROTECTED_%d__", i))
-			regions = append(regions, region{lo, hi, text[lo:hi], s.kind})
+			ph := fmt.Sprintf("__PROTECTED_%d__", i)
+			phStart := sb.Len()
+			sb.WriteString(ph)
+			regions = append(regions, region{lo, hi, text[lo:hi], s.kind, phStart, len(ph)})
 			last = hi
 		}
 	}
@@ -408,6 +440,26 @@ func scanTables(text string, in []seg) []seg {
 func tableRow(s string) bool {
 	ts := strings.TrimSpace(s)
 	return strings.HasPrefix(ts, "|") && strings.HasSuffix(ts, "|") && strings.Contains(ts, "|")
+}
+
+// cleanOffsetToText 将 clean（代码块/表格已替换为占位符）文本中的字节偏移映射回原 text。
+// 占位符区域长度与原文本不一致，行号必须基于原 text 偏移（linePos 依据原 text 构建）。
+func cleanOffsetToText(regions []region, cleanOff int) int {
+	if cleanOff <= 0 {
+		return 0
+	}
+	delta := 0
+	for _, r := range regions {
+		if cleanOff < r.phStart {
+			break
+		}
+		if cleanOff < r.phStart+r.phLen {
+			// 落在占位符内部（chunk 从占位符中间切开）：按区域长度比例映射。
+			return r.start + (cleanOff-r.phStart)*(r.end-r.start)/r.phLen
+		}
+		delta += (r.end - r.start) - r.phLen
+	}
+	return cleanOff + delta
 }
 
 func restoreProtected(text string, regions []region) string {
