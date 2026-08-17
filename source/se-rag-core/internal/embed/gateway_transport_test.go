@@ -65,9 +65,10 @@ func TestDialWithResolveGatewayPrefersHardcodedIP(t *testing.T) {
 	}
 }
 
-// 作用范围收窄：非内置网关域名（如官方回落 api.siliconflow.cn、sophnet）直接走系统拨号，不做 IP 覆盖。
+// 作用范围收窄：非内置网关域名（官方回落 api.siliconflow.cn、sophnet、FC 网关 fcapp.run）
+// 直接走系统拨号，不做 IP 覆盖。阿里云 FC 网关是国内域名，走系统 DNS 不受 IP 优先逻辑影响。
 func TestDialWithResolveNonGatewayPassesThrough(t *testing.T) {
-	for _, host := range []string{"api.siliconflow.cn", "www.sophnet.com", "127.0.0.1"} {
+	for _, host := range []string{"api.siliconflow.cn", "www.sophnet.com", "se-rag-gateway-chrzlcfiqt.cn-hangzhou.fcapp.run", "127.0.0.1"} {
 		addr := net.JoinHostPort(host, "443")
 		base, calls := recordingBase(map[string]bool{addr: true})
 		_, err := dialWithResolve(context.Background(), "tcp", addr, base, fakeResolver{})

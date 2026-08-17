@@ -22,6 +22,11 @@ func BuiltinKey() string {
 // GatewayBaseURL 是内置默认网关（se-rag-gateway Worker）地址，白名单仅 BAAI/bge-m3、BAAI/bge-reranker-v2-m3。
 const GatewayBaseURL = "https://se-rag-gateway.zetao-zhang.workers.dev/v1"
 
+// GatewayFCBaseURL 是内置网关故障转移第二跳：阿里云函数计算（FC3.0）上部署的同协议网关镜像，
+// 国内直连（*.workers.dev 在该网络下不可达时使用）。与 CF 网关完全同协议：同 key / 同路径 /
+// 同模型白名单，内置 key 零改动即可切换。
+const GatewayFCBaseURL = "https://se-rag-gateway-chrzlcfiqt.cn-hangzhou.fcapp.run/v1"
+
 // 官方 SiliconFlow 地址：用户自备 key 时回落直达，不再经网关中转。
 const officialSiliconflowBaseURL = "https://api.siliconflow.cn/v1"
 
@@ -32,7 +37,11 @@ type Provider struct {
 	APIKey  string // 用户自备 key；空则用内置
 	Model   string
 	BaseURL string
-	Dim     int // embedding 维度（reranker 不适用，置 0）
+	// FallbackBaseURL 内置 key 时故障转移的第二网关（默认 GatewayFCBaseURL）：
+	// BaseURL（默认 CF Worker）不可达时自动切换；不适用于用户自备 key（直达官方 SiliconFlow）。
+	// 置空自动取 GatewayFCBaseURL；想禁用故障转移时显式置为与 BaseURL 相同的值。
+	FallbackBaseURL string
+	Dim             int // embedding 维度（reranker 不适用，置 0）
 }
 
 // Product 一个产品的文档库与索引配置（se7 / se8 / se9...）。
@@ -84,4 +93,25 @@ func (p Provider) EffectiveBaseURL() string {
 		return officialSiliconflowBaseURL
 	}
 	return p.BaseURL
+}
+
+// EffectiveBaseURLs 依 key 归属决定上游地址有序列表（网关故障转移链）：
+// 内置 key → [BaseURL（默认 CF Worker），FallbackBaseURL（默认阿里云 FC 网关）]，CF 不可达
+// 时自动切换 FC；相同地址去重。用户自备 key → 官方 SiliconFlow 直达，不经网关、无故障转移项。
+func (p Provider) EffectiveBaseURLs() []string {
+	if p.APIKey != "" {
+		return []string{officialSiliconflowBaseURL}
+	}
+	primary := p.BaseURL
+	if primary == "" {
+		primary = GatewayBaseURL
+	}
+	fallback := p.FallbackBaseURL
+	if fallback == "" {
+		fallback = GatewayFCBaseURL
+	}
+	if fallback == primary {
+		return []string{primary}
+	}
+	return []string{primary, fallback}
 }
