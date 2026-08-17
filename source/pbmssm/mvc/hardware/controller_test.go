@@ -12,6 +12,8 @@ import (
 	"bmssm/config"
 	"bmssm/middleware"
 	"bmssm/pkg/auth"
+	"bmssm/pkg/confirm"
+	"bmssm/pkg/oplock"
 	"bmssm/pkg/response"
 )
 
@@ -104,6 +106,13 @@ func TestGetHealthWithoutToken(t *testing.T) {
 
 // ========== Reboot ==========
 
+// rebootConfirmCode 为 "reboot"+admin 签发一次性确认码（MYS-389 高危操作二次确认）。
+func rebootConfirmCode(t *testing.T) string {
+	t.Helper()
+	code, _ := confirm.Global().Prepare("reboot", "admin", confirm.DefaultTTL)
+	return code
+}
+
 func TestRebootWithAuth(t *testing.T) {
 	setupHardwareTest(t)
 
@@ -120,7 +129,7 @@ func TestRebootWithAuth(t *testing.T) {
 
 	token := makeAuthToken(t)
 
-	body, _ := json.Marshal(RebootRequest{Delay: 5})
+	body, _ := json.Marshal(RebootRequest{Delay: 5, ConfirmCode: rebootConfirmCode(t)})
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/hardware/reboot", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -132,6 +141,108 @@ func TestRebootWithAuth(t *testing.T) {
 	}
 	if rb.calls.Load() != 1 {
 		t.Fatalf("expected 1 reboot call, got %d", rb.calls.Load())
+	}
+}
+
+// TestRebootRequiresConfirmCode 无确认码的高危操作必须被拒（MYS-389）。
+func TestRebootRequiresConfirmCode(t *testing.T) {
+	setupHardwareTest(t)
+
+	fr := newFakeFileReader()
+	rb := &fakeRebooter{}
+	svc := NewService(&fakeCmdRunner{}, fr, rb)
+	ctrl := NewController(svc)
+
+	r := gin.New()
+	api := r.Group("/api/v1")
+	api.Use(middleware.Auth())
+	api.POST("/hardware/reboot", ctrl.Reboot)
+
+	token := makeAuthToken(t)
+
+	// 不带 confirmCode
+	body, _ := json.Marshal(RebootRequest{Delay: 0})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/hardware/reboot", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 without confirm code, got %d body=%s", w.Code, w.Body.String())
+	}
+	if rb.calls.Load() != 0 {
+		t.Fatalf("reboot must not run without confirm code, got %d calls", rb.calls.Load())
+	}
+}
+
+// TestRebootWrongConfirmCode 错误确认码必须被拒且不执行重启。
+func TestRebootWrongConfirmCode(t *testing.T) {
+	setupHardwareTest(t)
+
+	fr := newFakeFileReader()
+	rb := &fakeRebooter{}
+	svc := NewService(&fakeCmdRunner{}, fr, rb)
+	ctrl := NewController(svc)
+
+	r := gin.New()
+	api := r.Group("/api/v1")
+	api.Use(middleware.Auth())
+	api.POST("/hardware/reboot", ctrl.Reboot)
+
+	token := makeAuthToken(t)
+
+	// 错误确认码
+	body, _ := json.Marshal(RebootRequest{Delay: 0, ConfirmCode: "000000"})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/hardware/reboot", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 with wrong confirm code, got %d body=%s", w.Code, w.Body.String())
+	}
+	if rb.calls.Load() != 0 {
+		t.Fatal("reboot must not run with wrong confirm code")
+	}
+}
+
+// TestRebootBusyConflict 另一危险操作进行中时，重启返回 409 明确冲突（MYS-389）。
+func TestRebootBusyConflict(t *testing.T) {
+	setupHardwareTest(t)
+
+	fr := newFakeFileReader()
+	rb := &fakeRebooter{}
+	svc := NewService(&fakeCmdRunner{}, fr, rb)
+	ctrl := NewController(svc)
+
+	r := gin.New()
+	api := r.Group("/api/v1")
+	api.Use(middleware.Auth())
+	api.POST("/hardware/reboot", ctrl.Reboot)
+
+	token := makeAuthToken(t)
+
+	// 模拟 OTA 刷机正在进行（占用全局危险操作锁）
+	release, err := oplock.Global().Acquire("ota:upgrade:SE7:pkg.tgz")
+	if err != nil {
+		t.Fatalf("simulate busy: %v", err)
+	}
+	defer release()
+
+	body, _ := json.Marshal(RebootRequest{Delay: 0, ConfirmCode: rebootConfirmCode(t)})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/hardware/reboot", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409 while another dangerous op in progress, got %d body=%s", w.Code, w.Body.String())
+	}
+	if rb.calls.Load() != 0 {
+		t.Fatal("reboot must not run while another dangerous op in progress")
 	}
 }
 
@@ -170,7 +281,7 @@ func TestRebootDelayTooLarge400(t *testing.T) {
 
 	token := makeAuthToken(t)
 
-	body, _ := json.Marshal(RebootRequest{Delay: 301})
+	body, _ := json.Marshal(RebootRequest{Delay: 301, ConfirmCode: rebootConfirmCode(t)})
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/hardware/reboot", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -197,7 +308,7 @@ func TestRebootNegativeDelay400(t *testing.T) {
 
 	token := makeAuthToken(t)
 
-	body, _ := json.Marshal(RebootRequest{Delay: -1})
+	body, _ := json.Marshal(RebootRequest{Delay: -1, ConfirmCode: rebootConfirmCode(t)})
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/hardware/reboot", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+token)

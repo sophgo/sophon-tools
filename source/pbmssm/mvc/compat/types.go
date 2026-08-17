@@ -75,6 +75,9 @@ type AddTable struct {
 // CoreOpe 核心板操作请求（对应 sophliteos CoreOpe）。
 type CoreOpe struct {
 	Id int `json:"id"`
+	// ConfirmCode 二次确认码（MYS-389）：先 POST /api/v1/ops/confirm 获取，
+	// 重启/关机等高危操作必须携带一次性确认码。
+	ConfirmCode string `json:"confirmCode,omitempty"`
 }
 
 // OtaVersion 固件升级版本请求（对应 sophliteos OtaVersion）。
@@ -86,6 +89,8 @@ type OtaVersion struct {
 	CmdFlag    string `json:"cmdFlag"`
 	Version    string `json:"version"`
 	FlashData  bool   `json:"flashData"`
+	// ConfirmCode 二次确认码（MYS-389）：OTA 升级/回滚入队前必须校验。
+	ConfirmCode string `json:"confirmCode,omitempty"`
 }
 
 // ---------------------------------------------------------------

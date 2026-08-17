@@ -20,6 +20,7 @@ import (
 	"bmssm/mvc/hardware"
 	"bmssm/mvc/software"
 	"bmssm/mvc/user"
+	"bmssm/pkg/confirm"
 	"bmssm/pkg/ota"
 	"bmssm/pkg/response"
 )
@@ -223,6 +224,13 @@ func getNormalToken(t *testing.T, r *gin.Engine) string {
 
 // 兼容旧调用名
 func loginAndGetToken(t *testing.T, r *gin.Engine) string { return getNormalToken(t, r) }
+
+// confirmCode 为 action+admin 签发一次性确认码（MYS-389：高危操作需二次确认）。
+func confirmCode(t *testing.T, action string) string {
+	t.Helper()
+	code, _ := confirm.Global().Prepare(action, "admin", confirm.DefaultTTL)
+	return code
+}
 
 // ---------------------------------------------------------------
 // Login + temp token 测试
@@ -668,6 +676,7 @@ func TestCompatRollback(t *testing.T) {
 
 	body, _ := json.Marshal(OtaVersion{
 		Product: "SC5", ModuleName: "a53", FileName: "fw.bin", Name: "rb-test",
+		ConfirmCode: confirmCode(t, "ota_rollback"),
 	})
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/ota/rollback", bytes.NewBuffer(body))
@@ -760,6 +769,7 @@ func TestCompatExecuteUpgrade(t *testing.T) {
 
 	body, _ := json.Marshal(OtaVersion{
 		Product: "SE7", ModuleName: "soc", FileName: "soc_fw.tgz", Name: "up-test", Version: "1.0.0",
+		ConfirmCode: confirmCode(t, "ota_upgrade"),
 	})
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/ota/upgrade", bytes.NewBuffer(body))
@@ -790,6 +800,7 @@ func TestCompatListAndQueryWorkflow(t *testing.T) {
 
 	body, _ := json.Marshal(OtaVersion{
 		Product: "SE7", FileName: "fw.tgz", Name: "list-test",
+		ConfirmCode: confirmCode(t, "ota_upgrade"),
 	})
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/ota/upgrade", bytes.NewBuffer(body))

@@ -11,6 +11,7 @@ import (
 	"bmssm/config"
 	"bmssm/database"
 	"bmssm/logger"
+	"bmssm/pkg/oplock"
 	"bmssm/pkg/system"
 )
 
@@ -159,6 +160,17 @@ type Engine struct {
 	pollInterval time.Duration                                       // SOC 异步轮询间隔
 	diskUsageFn  func(path string) (usedFraction float64, err error) // 磁盘空间预检（多节点 ctrl）
 
+	// opLock 危险操作全局互斥：OTA 刷机/自动重启期间持有，与 reboot/shutdown/
+	// 防火墙 rebuild 等互斥（并发触发可致设备变砖——MYS-389）。
+	opLock *oplock.OpLock
+	// opReleases flow.ID -> release：从 StepFlash 开始持锁，workflow 进入终态
+	// （Success/Fail，见 updateStatus）时释放。
+	opMu       sync.Mutex
+	opReleases map[uint]func()
+
+	// auditFn 审计回调（由上层注入；nil 时跳过审计）。
+	auditFn AuditRecorder
+
 	worker  chan Workflow
 	quit    chan struct{}
 	done    chan struct{}
@@ -166,6 +178,9 @@ type Engine struct {
 	mu      sync.Mutex
 	started bool
 }
+
+// AuditRecorder 记录一条操作审计（签名对齐 mvc/audit Write，ip 由注入方决定）。
+type AuditRecorder func(username, action, resource, ip, result string)
 
 // NewEngine 构造可注入依赖的引擎（测试用）。
 func NewEngine(db *gorm.DB, runner Runner, flags FlagChecker, dryRun bool, paths PathConfig) *Engine {
@@ -177,8 +192,20 @@ func NewEngine(db *gorm.DB, runner Runner, flags FlagChecker, dryRun bool, paths
 		paths:        paths,
 		pollInterval: 5 * time.Second,
 		diskUsageFn:  diskUsage,
+		opLock:       oplock.Global(),
+		opReleases:   make(map[uint]func()),
 		worker:       make(chan Workflow, 32),
 		quit:         make(chan struct{}),
+	}
+}
+
+// SetAuditRecorder 注入审计回调（nil 安全，记录失败不影响刷机主流程）。
+func (e *Engine) SetAuditRecorder(fn AuditRecorder) { e.auditFn = fn }
+
+// audit 经 auditFn 记录一条审计（nil 时 no-op）。
+func (e *Engine) audit(username, action, resource, ip, result string) {
+	if e.auditFn != nil {
+		e.auditFn(username, action, resource, ip, result)
 	}
 }
 

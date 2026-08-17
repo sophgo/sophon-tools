@@ -71,7 +71,23 @@ type ErrorResponse struct {
 // 内部类型
 // ---------------------------------------------------------------
 
-// otaRecord 内存中的 OTA 固件上传记录。
+// OTAFile OTA 固件上传记录（sqlite 落库，bmssm 重启后可继续查询/升级，
+// 修复 uploadId 曾在内存导致重启 404 的问题——MYS-389）。
+// 表字段与软件模块无外键约束，由 UploadFirmware 创建、ExecuteUpgrade 更新状态。
+type OTAFile struct {
+	ID        uint      `gorm:"column:id;primary_key;AUTO_INCREMENT" json:"id"`
+	UploadID  string    `gorm:"column:upload_id;index;not null" json:"uploadId"`
+	FileName  string    `gorm:"column:file_name;not null" json:"fileName"`
+	FilePath  string    `gorm:"column:file_path;not null" json:"filePath"`
+	FileSize  int64     `gorm:"column:file_size" json:"fileSize"`
+	Status    string    `gorm:"column:status;default:'uploaded'" json:"status"` // uploaded, upgrading, completed, failed
+	CreatedAt time.Time `gorm:"column:created_at" json:"createdAt"`
+}
+
+// TableName 自定义表名。
+func (OTAFile) TableName() string { return "ota_files" }
+
+// otaRecord 内存中的 OTA 固件上传记录（db 不可用时的回退路径）。
 type otaRecord struct {
 	UploadID   string
 	FileName   string

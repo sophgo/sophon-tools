@@ -5,20 +5,42 @@ import (
 	"net/http"
 	"strconv"
 
+	"bmssm/database"
+	"bmssm/mvc/audit"
 	"bmssm/pkg/firewall"
+	"bmssm/pkg/oplock"
 	"bmssm/pkg/response"
 
 	"github.com/gin-gonic/gin"
 )
 
 // Controller holds a Service and exposes gin handler methods.
-type Controller struct{ svc *Service }
+type Controller struct {
+	svc *Service
+	// aud 审计服务（nil 安全）：防火墙 rebuild 属危险操作，记入 audit_logs（MYS-389）。
+	aud *audit.AuditService
+}
 
 // NewController creates a Controller with the given Service.
 func NewController(svc *Service) *Controller { return &Controller{svc: svc} }
 
+// NewControllerWithAudit creates a Controller with the given Service and audit service.
+func NewControllerWithAudit(svc *Service, aud *audit.AuditService) *Controller {
+	return &Controller{svc: svc, aud: aud}
+}
+
 // DefaultController creates a Controller backed by the default (global-DB) Service.
-func DefaultController() *Controller { return NewController(DefaultService()) }
+func DefaultController() *Controller {
+	return NewControllerWithAudit(DefaultService(), audit.NewService(database.DB()))
+}
+
+// auditWrite 写入审计日志（忽略错误，不阻塞主流程）。
+func (ctrl *Controller) auditWrite(c *gin.Context, username, action, resource, result string) {
+	if ctrl.aud == nil {
+		return
+	}
+	_ = ctrl.aud.Write(username, action, resource, c.ClientIP(), result)
+}
 
 // envFail checks the firewall environment. Returns true and writes a 503
 // JSON response if the environment is unhealthy; returns false if healthy.
@@ -93,13 +115,28 @@ func (ctrl *Controller) DeleteIntent(c *gin.Context) {
 }
 
 // Rebuild handles POST /firewall/rebuild.
+// 危险操作防护（MYS-389）：与 reboot/shutdown/OTA 刷机共享全局互斥锁
+// （防火墙 rebuild 期间重启/OTA 会留下半配置规则或打断刷机），并记审计。
 func (ctrl *Controller) Rebuild(c *gin.Context) {
 	if envFail(c) {
 		return
 	}
+	username, _ := c.Get("user")
+	name, _ := username.(string)
+
+	release, err := oplock.Global().Acquire("firewall_rebuild")
+	if err != nil {
+		ctrl.auditWrite(c, name, "firewall_rebuild", "firewall", "blocked: "+err.Error())
+		c.JSON(http.StatusConflict, response.Fail(err.Error()))
+		return
+	}
+	defer release()
+
 	if err := ctrl.svc.Rebuild(); err != nil {
+		ctrl.auditWrite(c, name, "firewall_rebuild", "firewall", "failed: "+err.Error())
 		c.JSON(http.StatusInternalServerError, response.Fail(err.Error()))
 		return
 	}
+	ctrl.auditWrite(c, name, "firewall_rebuild", "firewall", "success")
 	c.JSON(http.StatusOK, response.OK(gin.H{"message": "rebuild ok"}))
 }

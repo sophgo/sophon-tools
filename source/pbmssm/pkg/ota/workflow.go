@@ -115,12 +115,26 @@ func (e *Engine) processFlow(flow Workflow) {
 // dryRun：直接标 Success（模拟）。
 // SOC 非干跑：runSOC 已置 Running + 启动轮询，ota.sh 自带 reboot。
 // PCIE/多节点非干跑：刷机成功后推进到 reboot 步骤并重新入队。
+// 危险操作互斥（MYS-389）：非干跑刷机从本步骤开始持有全局 oplock，
+// 与其他危险操作（reboot/shutdown/防火墙 rebuild/另一轮 OTA）互斥；
+// 获取失败直接把 workflow 置 Fail（冲突返回明确错误而非排队混跑）。
 func (e *Engine) handleFlash(flow Workflow) {
 	if e.dryRun {
 		logger.Info("[dryRun] simulate flash success: product=%s file=%s flashData=%v", flow.Product, flow.FileName, flow.FlashData)
 		e.updateStatus(flow.ID, StatusSuccess, "dryRun: flash simulated")
 		return
 	}
+
+	release, err := e.opLock.Acquire(otaLockHolder(flow))
+	if err != nil {
+		logger.Warn("flash blocked by another dangerous operation: wf=%s err=%v", flow.WorkflowID, err)
+		e.audit(flow.UserID, "ota_flash", otaLockResource(flow), "", "blocked: "+err.Error())
+		e.updateStatus(flow.ID, StatusFail, "blocked: "+err.Error())
+		return
+	}
+	e.opMu.Lock()
+	e.opReleases[flow.ID] = release
+	e.opMu.Unlock()
 
 	if err := e.runCmd(flow); err != nil {
 		logger.Error("flash failed: product=%s wf=%s err=%v", flow.Product, flow.WorkflowID, err)
@@ -131,12 +145,23 @@ func (e *Engine) handleFlash(flow Workflow) {
 	switch productClass(flow.Product) {
 	case ClassSOC:
 		// runSOC 已置 Running 并启动轮询 goroutine，ota.sh 自带 reboot，无需推进。
+		// 锁由 pollSOC 到达终态后经 updateStatus 释放。
 	case ClassPCIE, ClassMultiNode:
 		e.advanceToReboot(flow)
 	default:
 		logger.Warn("flash success but unknown product: %s", flow.Product)
 		e.updateStatus(flow.ID, StatusSuccess, "unknown product, marked success")
 	}
+}
+
+// otaLockHolder 描述刷机持锁者（放入 oplock.BusyError，向冲突方展示）。
+func otaLockHolder(flow Workflow) string {
+	return "ota:" + otaLockResource(flow)
+}
+
+// otaLockResource 审计资源描述（product:fileName）。
+func otaLockResource(flow Workflow) string {
+	return fmt.Sprintf("%s:%s", flow.Product, flow.FileName)
 }
 
 // handleReboot 处理重启步骤（仅 PCIE/多节点非干跑路径会到达）。
@@ -149,6 +174,7 @@ func (e *Engine) handleReboot(flow Workflow) {
 }
 
 // advanceToReboot 推进 flow 到 reboot 步骤并重新入队（对齐 bmssm nextStep+Strategy|=reboot）。
+// 锁在推进后保持持有（同 workflow 的 reboot 步骤继续占用，直至 doReboot 重启进程）。
 func (e *Engine) advanceToReboot(flow Workflow) {
 	newStrategy := flow.Strategy
 	if !strings.Contains(newStrategy, StrategyReboot) {
@@ -172,7 +198,9 @@ func (e *Engine) advanceToReboot(flow Workflow) {
 	}
 }
 
-// updateStatus 更新 workflow 状态与信息。
+// updateStatus 更新 workflow 状态与信息；进入终态（Success/Fail）时释放该
+// workflow 持有的危险操作锁（无论由哪个 goroutine 到达终态——SOC 轮询、
+// 刷机失败、未知 product 等路径统一在此回收，避免锁悬挂）。
 func (e *Engine) updateStatus(id uint, status int, info string) {
 	if e.db == nil {
 		return
@@ -182,5 +210,19 @@ func (e *Engine) updateStatus(id uint, status int, info string) {
 		"info":   info,
 	}).Error; err != nil {
 		logger.Error("updateStatus failed: id=%d status=%d err=%v", id, status, err)
+	}
+	if status == StatusSuccess || status == StatusFail {
+		e.releaseOpLock(id)
+	}
+}
+
+// releaseOpLock 释放 flow 持有的 oplock（幂等）。
+func (e *Engine) releaseOpLock(id uint) {
+	e.opMu.Lock()
+	release, ok := e.opReleases[id]
+	delete(e.opReleases, id)
+	e.opMu.Unlock()
+	if ok && release != nil {
+		release()
 	}
 }

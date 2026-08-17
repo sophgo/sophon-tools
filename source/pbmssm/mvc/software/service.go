@@ -16,8 +16,11 @@ import (
 	"time"
 
 	"bmssm/config"
+	"bmssm/database"
 	"bmssm/logger"
 	"bmssm/pkg/system"
+
+	"github.com/jinzhu/gorm"
 )
 
 // ---------------------------------------------------------------
@@ -55,8 +58,12 @@ type SoftwareService struct {
 	otaDir       string
 	maxSize      int64
 
+	// db 非 nil 时 OTA 固件记录落库 ota_files（重启后 uploadId 可继续查询，MYS-389）；
+	// nil（测试/DB 不可用）时回退内存 map。
+	db *gorm.DB
+
 	mu         sync.RWMutex
-	otaRecords map[string]*otaRecord // uploadID -> record
+	otaRecords map[string]*otaRecord // uploadID -> record（仅 db==nil 时使用）
 }
 
 // DefaultService 包级懒初始化单例。
@@ -69,11 +76,15 @@ var (
 func DefaultService() *SoftwareService {
 	defaultServiceOnce.Do(func() {
 		defaultService = NewSoftwareService(DefaultSoftwareRoot, DefaultPkgDir, DefaultOTADir, maxSizeFromConfig())
+		// 启动时清理 OTA 残留：上传中断的 tmp_*、解压残留 *_extracted、
+		// 无 DB 记录的孤儿文件；DB 记录指向的文件缺失时删除记录。
+		defaultService.reconcileOTA()
 	})
 	return defaultService
 }
 
 // NewSoftwareService 创建 SoftwareService（测试注入用）。
+// db 取 database.DB()：生产环境 DB 已就绪；纯单测未 InitDB 时为 nil，回退内存 map。
 func NewSoftwareService(softwareRoot, pkgDir, otaDir string, maxSize int64) *SoftwareService {
 	// 确保上传目录存在
 	_ = os.MkdirAll(pkgDir, 0o755)
@@ -83,6 +94,7 @@ func NewSoftwareService(softwareRoot, pkgDir, otaDir string, maxSize int64) *Sof
 		pkgDir:       pkgDir,
 		otaDir:       otaDir,
 		maxSize:      maxSize,
+		db:           database.DB(),
 		otaRecords:   make(map[string]*otaRecord),
 	}
 }
@@ -100,6 +112,78 @@ func (s *SoftwareService) GetOTADir() string {
 // GetPkgDir 返回软件包暂存目录。
 func (s *SoftwareService) GetPkgDir() string {
 	return s.pkgDir
+}
+
+// ---------------------------------------------------------------
+// OTA 残留清理（MYS-389）：启动后 /tmp/ssm-ota 不再残留无名文件
+// ---------------------------------------------------------------
+
+// reconcileOTA 清理 OTA 暂存目录与 DB 记录，保证重启后状态一致：
+//   - 上传中断残留的 tmp_*（controller 保存临时文件的命名前缀）
+//   - 解压残留的 *_extracted 目录（ExecuteUpgrade 崩溃/重启遗留）
+//   - 无 DB 记录对应的孤儿固件文件（本应命名的 uid_filename）
+//   - DB 记录指向的文件缺失时删除记录（文件已被外部清理）
+//
+// db 为 nil 时仅做文件清理（无法判定孤儿归属，只删 tmp_*/_extracted）。
+func (s *SoftwareService) reconcileOTA() {
+	entries, err := os.ReadDir(s.otaDir)
+	if err != nil {
+		return
+	}
+
+	recorded := s.recordedUploadIDs()
+
+	for _, ent := range entries {
+		name := ent.Name()
+		switch {
+		case strings.HasPrefix(name, "tmp_"):
+			// 上传中断残留
+			_ = os.RemoveAll(filepath.Join(s.otaDir, name))
+		case strings.HasSuffix(name, "_extracted"):
+			// 解压残留目录（升级中断/进程被杀遗留）
+			_ = os.RemoveAll(filepath.Join(s.otaDir, name))
+		default:
+			// uid_filename：DB 有记录则保留（重启后仍可查询/升级），否则视为孤儿删除
+			uid := name
+			if idx := strings.IndexByte(name, '_'); idx > 0 {
+				uid = name[:idx]
+			}
+			if s.db != nil && !recorded[uid] {
+				_ = os.RemoveAll(filepath.Join(s.otaDir, name))
+			}
+		}
+	}
+
+	// DB 记录指向的文件已不存在：删除记录（uploadId 查询返回 not found 而非陈旧信息）
+	if s.db == nil {
+		return
+	}
+	var files []OTAFile
+	if err := s.db.Find(&files).Error; err != nil {
+		return
+	}
+	for _, f := range files {
+		if _, err := os.Stat(f.FilePath); err != nil {
+			logger.Info("reconcileOTA: drop record %s (file %s missing)", f.UploadID, f.FilePath)
+			_ = s.db.Where("upload_id = ?", f.UploadID).Delete(&OTAFile{}).Error
+		}
+	}
+}
+
+// recordedUploadIDs 返回 DB 中全部 uploadId 集合（db 为 nil 时返回 nil）。
+func (s *SoftwareService) recordedUploadIDs() map[string]bool {
+	if s.db == nil {
+		return nil
+	}
+	var files []OTAFile
+	if err := s.db.Select("upload_id").Find(&files).Error; err != nil {
+		return nil
+	}
+	out := make(map[string]bool, len(files))
+	for _, f := range files {
+		out[f.UploadID] = true
+	}
+	return out
 }
 
 // maxSizeFromConfig 从配置读取 software.maxSize，默认 1GB。
@@ -334,9 +418,14 @@ func (s *SoftwareService) UploadFirmware(filePath, origName string, fileSize int
 		Status:     "uploaded",
 	}
 
-	s.mu.Lock()
-	s.otaRecords[uid] = rec
-	s.mu.Unlock()
+	if err := s.saveOTARecord(rec); err != nil {
+		logger.Warn("ota record persist failed, keep in-memory only: %v", err)
+		// 文件已落盘，记录不能丢：回退内存 map（本进程内仍可查询/升级；
+		// 重启后该 uploadId 会因无 DB 记录被 reconcile 清理，属降级路径）
+		s.mu.Lock()
+		s.otaRecords[rec.UploadID] = rec
+		s.mu.Unlock()
+	}
 
 	return &OTAUploadResponse{
 		UploadID:   uid,
@@ -346,8 +435,44 @@ func (s *SoftwareService) UploadFirmware(filePath, origName string, fileSize int
 	}, nil
 }
 
+// saveOTARecord 保存 OTA 上传记录：db 可用落库 ota_files，否则入内存 map。
+func (s *SoftwareService) saveOTARecord(rec *otaRecord) error {
+	if s.db != nil {
+		m := OTAFile{
+			UploadID:  rec.UploadID,
+			FileName:  rec.FileName,
+			FilePath:  rec.FilePath,
+			FileSize:  rec.FileSize,
+			Status:    rec.Status,
+			CreatedAt: rec.UploadedAt,
+		}
+		if err := s.db.Create(&m).Error; err != nil {
+			return err
+		}
+		return nil
+	}
+	s.mu.Lock()
+	s.otaRecords[rec.UploadID] = rec
+	s.mu.Unlock()
+	return nil
+}
+
 // GetFirmwareInfo 根据 uploadId 查询固件元信息。
 func (s *SoftwareService) GetFirmwareInfo(uploadID string) (*OTADownloadResponse, error) {
+	if s.db != nil {
+		var m OTAFile
+		if err := s.db.Where("upload_id = ?", uploadID).First(&m).Error; err != nil {
+			return nil, fmt.Errorf("firmware not found: %s", uploadID)
+		}
+		return &OTADownloadResponse{
+			UploadID:   m.UploadID,
+			FileName:   m.FileName,
+			FileSize:   m.FileSize,
+			UploadedAt: m.CreatedAt.Format(time.RFC3339),
+			Status:     m.Status,
+		}, nil
+	}
+
 	s.mu.RLock()
 	rec, ok := s.otaRecords[uploadID]
 	s.mu.RUnlock()
@@ -369,12 +494,9 @@ func (s *SoftwareService) GetFirmwareInfo(uploadID string) (*OTADownloadResponse
 // 解包固件 → 找 install.sh/upgrade.sh → 用 /bin/bash 执行 → 返回结果。
 // 如果找不到升级脚本，返回 available=false，不返回 error。
 func (s *SoftwareService) ExecuteUpgrade(uploadID string) (*OTAUpgradeResponse, error) {
-	s.mu.RLock()
-	rec, ok := s.otaRecords[uploadID]
-	s.mu.RUnlock()
-
-	if !ok {
-		return nil, fmt.Errorf("firmware not found: %s", uploadID)
+	rec, err := s.getOTARecord(uploadID)
+	if err != nil {
+		return nil, err
 	}
 
 	// 创建解包临时目录
@@ -421,20 +543,18 @@ func (s *SoftwareService) ExecuteUpgrade(uploadID string) (*OTAUpgradeResponse, 
 	}
 
 	// 更新状态
-	s.mu.Lock()
 	rec.Status = "upgrading"
-	s.mu.Unlock()
+	s.updateOTARecordStatus(rec)
 
 	stdout, stderr, err := system.RunCommandArgs("/bin/bash", script)
 	output := stdout + stderr
 
-	s.mu.Lock()
 	if err != nil {
 		rec.Status = "failed"
 	} else {
 		rec.Status = "completed"
 	}
-	s.mu.Unlock()
+	s.updateOTARecordStatus(rec)
 
 	return &OTAUpgradeResponse{
 		Success:   err == nil,
@@ -442,6 +562,44 @@ func (s *SoftwareService) ExecuteUpgrade(uploadID string) (*OTAUpgradeResponse, 
 		Message:   "upgrade executed",
 		Output:    strings.TrimSpace(output),
 	}, nil
+}
+
+// getOTARecord 按 uploadId 取 OTA 记录（DB 优先，nil db 回退内存 map）。
+func (s *SoftwareService) getOTARecord(uploadID string) (*otaRecord, error) {
+	if s.db != nil {
+		var m OTAFile
+		if err := s.db.Where("upload_id = ?", uploadID).First(&m).Error; err != nil {
+			return nil, fmt.Errorf("firmware not found: %s", uploadID)
+		}
+		return &otaRecord{
+			UploadID:   m.UploadID,
+			FileName:   m.FileName,
+			FilePath:   m.FilePath,
+			FileSize:   m.FileSize,
+			UploadedAt: m.CreatedAt,
+			Status:     m.Status,
+		}, nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	rec, ok := s.otaRecords[uploadID]
+	if !ok {
+		return nil, fmt.Errorf("firmware not found: %s", uploadID)
+	}
+	return rec, nil
+}
+
+// updateOTARecordStatus 更新 OTA 记录状态（best-effort：db 或内存 map）。
+func (s *SoftwareService) updateOTARecordStatus(rec *otaRecord) {
+	if s.db != nil {
+		if err := s.db.Model(&OTAFile{}).Where("upload_id = ?", rec.UploadID).Update("status", rec.Status).Error; err != nil {
+			logger.Warn("ota record status update failed: uploadId=%s err=%v", rec.UploadID, err)
+		}
+		return
+	}
+	s.mu.Lock()
+	s.otaRecords[rec.UploadID] = rec
+	s.mu.Unlock()
 }
 
 // ---------------------------------------------------------------
@@ -654,11 +812,17 @@ func extractTarGz(filePath, destDir string) error {
 			if err != nil {
 				return err
 			}
-			// 单条目限制 + 累计总量限制（防炸弹）
-			n, err := io.CopyN(out, tarReader, DefaultMaxSize)
+			// 单条目限制（DefaultMaxSize）+ 累计总量限制（maxExtractBytes，防炸弹）。
+			// CopyN 上限取 DefaultMaxSize+1：条目超过单条目上限时复制量恰好超过
+			// 上限并返回 nil（达到 limit），据此报错而非静默截断（旧实现把超限
+			// 条目截断为 1GiB，且剩余数据被吞导致后续条目解析错乱）。
+			n, err := io.CopyN(out, tarReader, DefaultMaxSize+1)
 			out.Close()
 			if err != nil && err != io.EOF {
 				return err
+			}
+			if n > DefaultMaxSize {
+				return fmt.Errorf("entry %s exceeds size limit (%d bytes)", header.Name, DefaultMaxSize)
 			}
 			total += n
 			if total > maxExtractBytes {
@@ -708,11 +872,14 @@ func extractZip(filePath, destDir string) error {
 			rc.Close()
 			return err
 		}
-		n, err := io.CopyN(out, rc, DefaultMaxSize)
+		n, err := io.CopyN(out, rc, DefaultMaxSize+1)
 		rc.Close()
 		out.Close()
 		if err != nil && err != io.EOF {
 			return err
+		}
+		if n > DefaultMaxSize {
+			return fmt.Errorf("entry %s exceeds size limit (%d bytes)", f.Name, DefaultMaxSize)
 		}
 		total += n
 		if total > maxExtractBytes {

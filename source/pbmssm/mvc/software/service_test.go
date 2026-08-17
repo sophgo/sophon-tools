@@ -8,6 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"bmssm/database"
+
+	"github.com/jinzhu/gorm"
 )
 
 // ----------------------------------------------------------------
@@ -890,6 +894,130 @@ func TestIsSafePath(t *testing.T) {
 		got := isSafePath("/tmp/dest", tt.entry)
 		if got != tt.expected {
 			t.Errorf("isSafePath(%q) = %v, want %v", tt.entry, got, tt.expected)
+		}
+	}
+}
+
+// ----------------------------------------------------------------
+// OTA uploadId 落库（MYS-389）：bmssm 重启后 uploadId 仍可查询/升级；
+// 启动 reconcile 清理 /tmp/ssm-ota 残留与失效记录。
+// 注意：这两个用例使用全局 DB，放在本文件末尾执行并恢复 SetDB(nil)，
+// 避免污染文件内前置的纯内存用例。
+// ----------------------------------------------------------------
+
+// withTestDB 用临时 sqlite 替换全局 DB（使 service 走落库路径），结束后恢复原句柄。
+func withTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	db, err := database.InitDB(dbPath)
+	if err != nil {
+		t.Fatalf("init db: %v", err)
+	}
+	if err := database.Migrate(db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	old := database.DB()
+	t.Cleanup(func() {
+		db.Close()
+		database.SetDB(old)
+	})
+	return db
+}
+
+func TestOTARecordSurvivesRestart(t *testing.T) {
+	withTestDB(t)
+	otaDir := t.TempDir()
+
+	// 合法固件包（含 upgrade.sh，供 ExecuteUpgrade 成功走到 autoRunScript 判定）
+	fwPath := createTestTarGz(t, map[string]string{
+		"upgrade.sh": "#!/bin/sh\necho hi",
+	})
+
+	svc1 := NewSoftwareService(t.TempDir(), t.TempDir(), otaDir, DefaultMaxSize)
+	up, err := svc1.UploadFirmware(fwPath, "fw_v2.tgz", 100)
+	if err != nil {
+		t.Fatalf("UploadFirmware: %v", err)
+	}
+
+	// 模拟 bmssm 重启：全新 service 实例（同一 DB）应能查到该 uploadId
+	svc2 := NewSoftwareService(t.TempDir(), t.TempDir(), otaDir, DefaultMaxSize)
+	info, err := svc2.GetFirmwareInfo(up.UploadID)
+	if err != nil {
+		t.Fatalf("GetFirmwareInfo after 'restart': %v", err)
+	}
+	if info.FileName != "fw_v2.tgz" || info.Status != "uploaded" {
+		t.Errorf("unexpected record after restart: %+v", info)
+	}
+
+	// ExecuteUpgrade 也应能找到（后续升级链路不 404）
+	if _, err := svc2.ExecuteUpgrade(up.UploadID); err != nil {
+		t.Fatalf("ExecuteUpgrade after 'restart': %v", err)
+	}
+}
+
+func TestReconcileOTACleansStale(t *testing.T) {
+	withTestDB(t)
+	otaDir := t.TempDir()
+
+	// 正常上传（记录在 DB，文件在盘）
+	svc1 := NewSoftwareService(t.TempDir(), t.TempDir(), otaDir, DefaultMaxSize)
+	fwA := filepath.Join(t.TempDir(), "keep.tgz")
+	if err := os.WriteFile(fwA, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	up, err := svc1.UploadFirmware(fwA, "keep.tgz", 4)
+	if err != nil {
+		t.Fatalf("UploadFirmware: %v", err)
+	}
+	keepFile := filepath.Join(otaDir, up.UploadID+"_keep.tgz")
+
+	// 上传后磁盘文件丢失（模拟外部清理）→ 记录应被 reconcile 删除
+	fwB := filepath.Join(t.TempDir(), "lost.tgz")
+	if err := os.WriteFile(fwB, []byte("lost"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	upLost, err := svc1.UploadFirmware(fwB, "lost.tgz", 4)
+	if err != nil {
+		t.Fatalf("UploadFirmware: %v", err)
+	}
+	if err := os.Remove(filepath.Join(otaDir, upLost.UploadID+"_lost.tgz")); err != nil {
+		t.Fatal(err)
+	}
+
+	// 残留：上传中断 tmp_*、解压残留 *_extracted、孤儿文件（无 DB 记录）
+	if err := os.WriteFile(filepath.Join(otaDir, "tmp_upload.tgz"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	orphan := filepath.Join(otaDir, "deadbeef_fw.bin")
+	if err := os.WriteFile(orphan, []byte("y"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(otaDir, "abc123_extracted"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	svc2 := NewSoftwareService(t.TempDir(), t.TempDir(), otaDir, DefaultMaxSize)
+	svc2.reconcileOTA()
+
+	// keep 的记录与文件应保留
+	if _, err := svc2.GetFirmwareInfo(up.UploadID); err != nil {
+		t.Errorf("kept record should survive reconcile: %v", err)
+	}
+	if _, err := os.Stat(keepFile); err != nil {
+		t.Errorf("kept file should survive reconcile: %v", err)
+	}
+	// 文件缺失的记录被删除
+	if _, err := svc2.GetFirmwareInfo(upLost.UploadID); err == nil {
+		t.Error("record with missing file should be dropped by reconcile")
+	}
+	// 各处残留被清理
+	for _, stale := range []string{
+		filepath.Join(otaDir, "tmp_upload.tgz"),
+		orphan,
+		filepath.Join(otaDir, "abc123_extracted"),
+	} {
+		if _, err := os.Stat(stale); !os.IsNotExist(err) {
+			t.Errorf("stale %s should be removed by reconcile", stale)
 		}
 	}
 }

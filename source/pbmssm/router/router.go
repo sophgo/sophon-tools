@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"bmssm/database"
 	"bmssm/middleware"
 	agentproxyCtrl "bmssm/mvc/agentproxy"
 	"bmssm/mvc/alarm"
@@ -20,11 +21,13 @@ import (
 	"bmssm/mvc/logs"
 	metricsCtrl "bmssm/mvc/metrics"
 	"bmssm/mvc/network"
+	"bmssm/mvc/ops"
 	portsCtrl "bmssm/mvc/ports"
 	"bmssm/mvc/software"
 	systemdCtrl "bmssm/mvc/systemd"
 	"bmssm/mvc/user"
 	"bmssm/pkg/metrics"
+	"bmssm/pkg/ota"
 )
 
 // Register 在 engine 上注册所有路由。
@@ -44,7 +47,7 @@ func Register(r *gin.Engine) {
 		r.GET("/agent/ws", gin.WrapH(agentH))
 	}
 
-	// 用户模块控制器（使用 database.DB()）
+	// 软件/OTA 控制器（使用 database.DB()）
 	userCtrl := user.DefaultController()
 	auditCtrl := audit.DefaultController()
 	logsCtrl := logs.DefaultController()
@@ -60,6 +63,14 @@ func Register(r *gin.Engine) {
 	fwCtrl := firewallCtrl.DefaultController()
 	llmproxyCtrl := llmproxyCtrl.DefaultController()
 	agentCtrl := agentproxyCtrl.DefaultController()
+	opsCtrl := ops.NewController()
+
+	// OTA 引擎审计（MYS-389）：刷机被互斥拒绝、刷机自动重启等记入 audit_logs。
+	// 后台执行无 HTTP 上下文，IP 记空串；用户名来自 workflow.UserID（入队时由
+	// handler 从 JWT 取出写入）。
+	ota.DefaultEngine().SetAuditRecorder(func(username, action, resource, ip, result string) {
+		audit.WriteAudit(audit.NewService(database.DB()), username, action, resource, ip, result)
+	})
 
 	// 公开：仅 login（含独立防爆破限流，约 5 次/12s/IP）
 	public := r.Group("/api/v1")
@@ -223,5 +234,9 @@ func Register(r *gin.Engine) {
 		admin.POST("/firewall/intent", fwCtrl.AddIntent)
 		admin.DELETE("/firewall/intent/:id", fwCtrl.DeleteIntent)
 		admin.POST("/firewall/rebuild", fwCtrl.Rebuild)
+
+		// 高危操作二次确认码（MYS-389）：先取码，再随高危操作请求携带
+		// （reboot/shutdown/OTA 升级/回滚/防火墙 rebuild）
+		admin.POST("/ops/confirm", opsCtrl.Prepare)
 	}
 }

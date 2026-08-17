@@ -19,11 +19,14 @@ import (
 	"bmssm/database"
 	"bmssm/global"
 	"bmssm/logger"
+	"bmssm/mvc/audit"
 	"bmssm/mvc/hardware"
+	"bmssm/mvc/ops"
 	"bmssm/mvc/software"
 	"bmssm/mvc/user"
 	"bmssm/pkg/auth"
 	netpkg "bmssm/pkg/network"
+	"bmssm/pkg/oplock"
 	"bmssm/pkg/ota"
 	"bmssm/pkg/response"
 )
@@ -39,6 +42,8 @@ type Controller struct {
 	swSvc     *software.SoftwareService
 	userSvc   *user.UserService
 	otaEngine *ota.Engine
+	// aud 审计服务（nil 安全）：shutdown/exec/OTA 等危险操作记入 audit_logs（MYS-389）。
+	aud *audit.AuditService
 }
 
 // NewController 创建兼容控制器。
@@ -52,15 +57,38 @@ func NewController(svc *CompatService, hwSvc *hardware.HardwareService, swSvc *s
 	}
 }
 
+// NewControllerWithAudit 创建兼容控制器（带审计服务）。
+func NewControllerWithAudit(svc *CompatService, hwSvc *hardware.HardwareService, swSvc *software.SoftwareService, userSvc *user.UserService, otaEngine *ota.Engine, aud *audit.AuditService) *Controller {
+	ctrl := NewController(svc, hwSvc, swSvc, userSvc, otaEngine)
+	ctrl.aud = aud
+	return ctrl
+}
+
 // DefaultController 构建默认控制器（生产环境依赖注入）。
 func DefaultController() *Controller {
-	return NewController(
+	return NewControllerWithAudit(
 		DefaultCompatService(),
 		hardware.NewDefaultService(),
 		software.DefaultService(),
 		user.NewService(database.DB()),
 		ota.DefaultEngine(),
+		audit.NewService(database.DB()),
 	)
+}
+
+// auditWrite 写入审计日志（忽略错误，不阻塞主流程）。
+func (ctrl *Controller) auditWrite(c *gin.Context, username, action, resource, result string) {
+	if ctrl.aud == nil {
+		return
+	}
+	_ = ctrl.aud.Write(username, action, resource, c.ClientIP(), result)
+}
+
+// currentUser 从 gin context 读取当前用户名（Auth 中间件写入）。
+func currentUser(c *gin.Context) string {
+	username, _ := c.Get("user")
+	name, _ := username.(string)
+	return name
 }
 
 // getSecret 从配置获取 JWT secret。
@@ -263,6 +291,7 @@ func (ctrl *Controller) DeleteNAT(c *gin.Context) {
 
 // Reboot POST /bitmain/v1/ssm/hardware/devices/reset
 // 复用 hardware.HardwareService 的 Rebooter（生产用 osRebooter）。
+// 高危操作防护（MYS-389）：确认码 + 危险操作互斥锁 + 审计。
 func (ctrl *Controller) Reboot(c *gin.Context) {
 	var req CoreOpe
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -270,15 +299,31 @@ func (ctrl *Controller) Reboot(c *gin.Context) {
 		return
 	}
 
+	name := currentUser(c)
+	if !ops.Verify(c, "reboot", req.ConfirmCode) {
+		ctrl.auditWrite(c, name, "reboot", "hardware", "blocked: missing/invalid confirm code")
+		return
+	}
+	release, err := oplock.Global().Acquire("reboot")
+	if err != nil {
+		ctrl.auditWrite(c, name, "reboot", "hardware", "blocked: "+err.Error())
+		c.JSON(http.StatusConflict, response.Fail(err.Error()))
+		return
+	}
+	defer release()
+
 	if err := ctrl.hwSvc.Reboot(0); err != nil {
+		ctrl.auditWrite(c, name, "reboot", "hardware", "failed: "+err.Error())
 		c.JSON(http.StatusInternalServerError, response.Fail(err.Error()))
 		return
 	}
 
+	ctrl.auditWrite(c, name, "reboot", "hardware", "success")
 	c.JSON(http.StatusOK, response.OK(nil))
 }
 
 // Shutdown POST /bitmain/v1/ssm/hardware/devices/down
+// 高危操作防护（MYS-389）：确认码 + 危险操作互斥锁 + 审计。
 func (ctrl *Controller) Shutdown(c *gin.Context) {
 	var req CoreOpe
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -286,11 +331,26 @@ func (ctrl *Controller) Shutdown(c *gin.Context) {
 		return
 	}
 
+	name := currentUser(c)
+	if !ops.Verify(c, "shutdown", req.ConfirmCode) {
+		ctrl.auditWrite(c, name, "shutdown", "hardware", "blocked: missing/invalid confirm code")
+		return
+	}
+	release, err := oplock.Global().Acquire("shutdown")
+	if err != nil {
+		ctrl.auditWrite(c, name, "shutdown", "hardware", "blocked: "+err.Error())
+		c.JSON(http.StatusConflict, response.Fail(err.Error()))
+		return
+	}
+	defer release()
+
 	if err := Shutdown(); err != nil {
+		ctrl.auditWrite(c, name, "shutdown", "hardware", "failed: "+err.Error())
 		c.JSON(http.StatusInternalServerError, response.Fail(err.Error()))
 		return
 	}
 
+	ctrl.auditWrite(c, name, "shutdown", "hardware", "success")
 	c.JSON(http.StatusOK, response.OK(nil))
 }
 
@@ -458,12 +518,21 @@ func (ctrl *Controller) UploadFirmware(c *gin.Context) {
 
 // ExecuteUpgrade POST /bitmain/v1/ssm/workflow/upgrade
 // 解析 OtaVersion body，入队 Type=Upgrade 的 workflow，立即返 "add workflow success"。
+// 高危操作防护（MYS-389）：先校验 /ops/confirm 签发的一次性确认码，再记审计；
+// 实际刷机持锁（见 pkg/ota handleFlash），入队即确认放行。
 func (ctrl *Controller) ExecuteUpgrade(c *gin.Context) {
 	var req OtaVersion
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, response.Fail("invalid request body"))
 		return
 	}
+
+	name := currentUser(c)
+	if !ops.Verify(c, "ota_upgrade", req.ConfirmCode) {
+		ctrl.auditWrite(c, name, "ota_upgrade", "ota", "blocked: missing/invalid confirm code")
+		return
+	}
+
 	// Product 为空时用设备实际型号兜底（global.DeviceTypeEx 形如 "SE7 V01"），
 	// 否则 productClass 识别不到会返回 "ota: path not implemented"。
 	product := req.Product
@@ -471,6 +540,7 @@ func (ctrl *Controller) ExecuteUpgrade(c *gin.Context) {
 		product = global.DeviceTypeEx
 	}
 	flow := ota.Workflow{
+		UserID:     name, // 落库 + 引擎审计（MYS-389）
 		Product:    product,
 		ModuleName: req.ModuleName,
 		FileName:   req.FileName,
@@ -481,25 +551,36 @@ func (ctrl *Controller) ExecuteUpgrade(c *gin.Context) {
 		FlashData:  req.FlashData,
 	}
 	if err := ctrl.otaEngine.EnqueueFlow(&flow); err != nil {
+		ctrl.auditWrite(c, name, "ota_upgrade", "ota:"+product+":"+req.FileName, "failed: "+err.Error())
 		c.JSON(http.StatusInternalServerError, response.Fail(err.Error()))
 		return
 	}
+	ctrl.auditWrite(c, name, "ota_upgrade", "ota:"+product+":"+req.FileName, "success")
 	c.JSON(http.StatusOK, response.OK("add workflow success"))
 }
 
 // Rollback POST /bitmain/v1/ssm/workflow/rollback
 // 入队 Type=Rollback 的 workflow，立即返 "add workflow success"。
+// 高危操作防护（MYS-389）：确认码 + 审计。
 func (ctrl *Controller) Rollback(c *gin.Context) {
 	var req OtaVersion
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, response.Fail("invalid request body"))
 		return
 	}
+
+	name := currentUser(c)
+	if !ops.Verify(c, "ota_rollback", req.ConfirmCode) {
+		ctrl.auditWrite(c, name, "ota_rollback", "ota", "blocked: missing/invalid confirm code")
+		return
+	}
+
 	product := req.Product
 	if strings.TrimSpace(product) == "" {
 		product = global.DeviceTypeEx
 	}
 	flow := ota.Workflow{
+		UserID:     name,
 		Product:    product,
 		ModuleName: req.ModuleName,
 		FileName:   req.FileName,
@@ -510,9 +591,11 @@ func (ctrl *Controller) Rollback(c *gin.Context) {
 		FlashData:  req.FlashData,
 	}
 	if err := ctrl.otaEngine.EnqueueFlow(&flow); err != nil {
+		ctrl.auditWrite(c, name, "ota_rollback", "ota:"+product+":"+req.FileName, "failed: "+err.Error())
 		c.JSON(http.StatusInternalServerError, response.Fail(err.Error()))
 		return
 	}
+	ctrl.auditWrite(c, name, "ota_rollback", "ota:"+product+":"+req.FileName, "success")
 	c.JSON(http.StatusOK, response.OK("add workflow success"))
 }
 
@@ -554,8 +637,9 @@ func (ctrl *Controller) SCP(c *gin.Context) {
 
 // Exec POST /bitmain/v1/ssm/hardware/devices/exec
 // 执行单条 shell 命令（sh -c），返回 stdout/stderr/exitCode。
-// 超时默认 30s，上限 300s。危险命令在此不拦截——前端仅用于只读诊断，
+// 超时默认 30s，上限 300s。高危命令在此不拦截——前端仅用于只读诊断，
 // 真正的交互式终端走 /api/v1/hardware/terminal（WebSocket pty）。
+// 审计（MYS-389）：exec 属高危命令执行，每次执行记录用户/IP/命令（不记输出）。
 func (ctrl *Controller) Exec(c *gin.Context) {
 	var req struct {
 		Command string `json:"command" binding:"required"`
@@ -565,6 +649,9 @@ func (ctrl *Controller) Exec(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, response.Fail("invalid request body"))
 		return
 	}
+	name := currentUser(c)
+	ctrl.auditWrite(c, name, "exec", "hardware", "exec: "+req.Command)
+
 	timeout := 30
 	if req.Timeout > 0 {
 		timeout = req.Timeout
