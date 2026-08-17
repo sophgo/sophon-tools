@@ -29,16 +29,23 @@ func newGatewayAwareClient(base DialContext) *http.Client {
 	return &http.Client{Transport: tr}
 }
 
-// postJSON POST JSON 到 url，带 Bearer 鉴权。
-// 5xx/429/连接错误 → 指数退避重试（最多6次）；4xx → 快速失败不重试。
-func postJSON(ctx context.Context, url, key string, payload, out any) error {
+// postJSON POST JSON 到 urls（有序网关列表，故障转移链），带 Bearer 鉴权。
+// 5xx/429/连接错误 → 指数退避重试（上限 maxAttempts 次），每次尝试按 attempt%len(urls) 轮转
+// 网关地址：主网关（CF Worker）不可达时下一次即命中 FC 网关，实现 CF → FC 故障转移；
+// 4xx → 快速失败不重试（键/路径/白名单错误在任一网关都会复现，无需转移）。
+// 单地址列表行为与旧版完全一致。
+func postJSON(ctx context.Context, urls []string, key string, payload, out any) error {
+	if len(urls) == 0 {
+		return fmt.Errorf("no gateway base urls configured")
+	}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
 	var lastErr error
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+		u := urls[attempt%len(urls)]
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(body))
 		if err != nil {
 			return err
 		}
@@ -71,6 +78,9 @@ func postJSON(ctx context.Context, url, key string, payload, out any) error {
 	if lastErr == nil {
 		lastErr = fmt.Errorf("no successful response after %d attempts", maxAttempts)
 	}
+	if len(urls) > 1 {
+		return fmt.Errorf("all %d gateway(s) unreachable (tried %s...): %w", len(urls), urls[0], lastErr)
+	}
 	return fmt.Errorf("postJSON failed: %w", lastErr)
 }
 
@@ -83,4 +93,13 @@ func backoff(attempt int) time.Duration {
 		}
 	}
 	return d
+}
+
+// joinPaths 把 base URL 列表展开为具体接口路径列表（保持有序，与故障转移轮转一致）。
+func joinPaths(baseURLs []string, rel string) []string {
+	out := make([]string, len(baseURLs))
+	for i, b := range baseURLs {
+		out[i] = b + rel
+	}
+	return out
 }

@@ -104,7 +104,7 @@ func TestServiceDeleteUser(t *testing.T) {
 
 	_ = svc.CreateUser("tempuser", "temppwd", "user")
 
-	err := svc.DeleteUser("tempuser")
+	err := svc.DeleteUser("admin", "tempuser")
 	if err != nil {
 		t.Fatalf("DeleteUser: %v", err)
 	}
@@ -122,9 +122,56 @@ func TestDeleteAdminNotAllowed(t *testing.T) {
 
 	_ = svc.CreateUser("admin", "admin", "superuser")
 
-	err := svc.DeleteUser("admin")
+	err := svc.DeleteUser("superuser", "admin")
 	if err == nil {
 		t.Fatal("should not allow deleting admin")
+	}
+}
+
+// TestAdminCannotDeleteSuperuser admin 角色（无法创建管理员账号）不允许删除 superuser 账号。
+func TestAdminCannotDeleteSuperuser(t *testing.T) {
+	db := setupTestDB(t)
+	svc := NewService(db)
+
+	_ = svc.CreateUser("sroot", "srootpwd", "superuser")
+
+	err := svc.DeleteUser("admin", "sroot")
+	if err == nil {
+		t.Fatal("admin actor should not be able to delete superuser")
+	}
+
+	// 目标账号必须仍在
+	if _, err := svc.Login("sroot", "srootpwd"); err != nil {
+		t.Fatalf("superuser account should still exist: %v", err)
+	}
+}
+
+// TestSuperuserCanDeleteSuperuser superuser 角色可以删除其他 superuser 账号。
+func TestSuperuserCanDeleteSuperuser(t *testing.T) {
+	db := setupTestDB(t)
+	svc := NewService(db)
+
+	_ = svc.CreateUser("sroot", "srootpwd", "superuser")
+
+	err := svc.DeleteUser("superuser", "sroot")
+	if err != nil {
+		t.Fatalf("superuser actor should be able to delete superuser: %v", err)
+	}
+
+	_, err = svc.Login("sroot", "srootpwd")
+	if err == nil {
+		t.Fatal("deleted superuser should not be able to login")
+	}
+}
+
+// TestDeleteNonexistentUser 删除不存在的用户应报错（而非静默成功）。
+func TestDeleteNonexistentUser(t *testing.T) {
+	db := setupTestDB(t)
+	svc := NewService(db)
+
+	err := svc.DeleteUser("superuser", "ghost")
+	if err == nil {
+		t.Fatal("should fail when deleting nonexistent user")
 	}
 }
 

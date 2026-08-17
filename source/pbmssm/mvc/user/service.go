@@ -61,10 +61,23 @@ func (s *UserService) CreateUser(username, password, role string) error {
 	return s.db.Create(&user).Error
 }
 
-// DeleteUser 按 username 删除用户（禁止删除 admin）。
-func (s *UserService) DeleteUser(username string) error {
+// DeleteUser 按 username 删除用户，actorRole 是操作者的角色（"superuser"/"admin"）。
+// 规则：默认 admin 账号禁止删除；superuser 账号仅 superuser 可删；admin 可删普通 user。
+func (s *UserService) DeleteUser(actorRole, username string) error {
 	if username == "admin" {
 		return errors.New("cannot delete default admin user")
+	}
+	// 目标账号不存在时明确报错，避免低权限者借删除接口探知用户名
+	var target User
+	if err := s.db.Where("username = ?", username).First(&target).Error; err != nil {
+		if gorm.IsRecordNotFoundError(err) {
+			return errors.New("user not found")
+		}
+		return err
+	}
+	// 权限收敛（MYS-388）：superuser 账号仅 superuser 可删，防 admin 移除最高权限账号
+	if target.Role == "superuser" && actorRole != "superuser" {
+		return errors.New("superuser role required to delete superuser")
 	}
 	return s.db.Where("username = ?", username).Delete(&User{}).Error
 }

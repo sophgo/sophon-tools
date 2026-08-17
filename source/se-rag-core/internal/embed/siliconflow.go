@@ -5,19 +5,20 @@ import (
 )
 
 // siliconflowEmbedder：OpenAI 兼容 /embeddings 接口，内置 key 时对 Embed 整体限流。
+// baseURLs 为有序网关地址列表（CF → FC 故障转移），请求按列表轮转，首个可达网关命中。
 type siliconflowEmbedder struct {
-	baseURL string
-	apiKey  string
-	model   string
-	dim     int
-	limiter *EmbeddingLimiter
+	baseURLs []string
+	apiKey   string
+	model    string
+	dim      int
+	limiter  *EmbeddingLimiter
 }
 
-func newSiliconflowEmbedder(baseURL, key, model string, dim int, useBuiltinKey bool) (Embedder, error) {
-	if baseURL == "" {
-		baseURL = "https://api.siliconflow.cn/v1"
+func newSiliconflowEmbedder(baseURLs []string, key, model string, dim int, useBuiltinKey bool) (Embedder, error) {
+	if len(baseURLs) == 0 || baseURLs[0] == "" {
+		baseURLs = []string{"https://api.siliconflow.cn/v1"}
 	}
-	e := &siliconflowEmbedder{baseURL: baseURL, apiKey: key, model: model, dim: dim}
+	e := &siliconflowEmbedder{baseURLs: baseURLs, apiKey: key, model: model, dim: dim}
 	if useBuiltinKey {
 		e.limiter = NewEmbeddingLimiter(1) // 内置 key 并发仅 1
 	}
@@ -47,7 +48,7 @@ func (e *siliconflowEmbedder) Embed(ctx context.Context, texts []string) ([][]fl
 func (e *siliconflowEmbedder) embedBatch(ctx context.Context, texts []string) ([][]float32, error) {
 	payload := map[string]any{"model": e.model, "input": texts}
 	var resp sfEmbedResp
-	if err := postJSON(ctx, e.baseURL+"/embeddings", e.apiKey, payload, &resp); err != nil {
+	if err := postJSON(ctx, joinPaths(e.baseURLs, "/embeddings"), e.apiKey, payload, &resp); err != nil {
 		return nil, err
 	}
 	out := make([][]float32, len(texts))
@@ -61,23 +62,23 @@ func (e *siliconflowEmbedder) embedBatch(ctx context.Context, texts []string) ([
 
 // NewSiliconflowEmbedderFromURL 测试辅助：显式 baseURL
 func NewSiliconflowEmbedderFromURL(baseURL string) (Embedder, error) {
-	return newSiliconflowEmbedder(baseURL, "test-key", "BAAI/bge-m3", 1024, false)
+	return newSiliconflowEmbedder([]string{baseURL}, "test-key", "BAAI/bge-m3", 1024, false)
 }
 
 // ---- siliconflow reranker ----
 
 type siliconflowReranker struct {
-	baseURL    string
+	baseURLs   []string
 	apiKey     string
 	model      string
 	useBuiltin bool
 }
 
-func newSiliconflowReranker(baseURL, key, model string, useBuiltinKey bool) (Reranker, error) {
-	if baseURL == "" {
-		baseURL = "https://api.siliconflow.cn/v1"
+func newSiliconflowReranker(baseURLs []string, key, model string, useBuiltinKey bool) (Reranker, error) {
+	if len(baseURLs) == 0 || baseURLs[0] == "" {
+		baseURLs = []string{"https://api.siliconflow.cn/v1"}
 	}
-	return &siliconflowReranker{baseURL: baseURL, apiKey: key, model: model, useBuiltin: useBuiltinKey}, nil
+	return &siliconflowReranker{baseURLs: baseURLs, apiKey: key, model: model, useBuiltin: useBuiltinKey}, nil
 }
 
 func (r *siliconflowReranker) Name() string { return "siliconflow." + r.model }
@@ -101,7 +102,7 @@ func (r *siliconflowReranker) Rerank(ctx context.Context, query string, docs []s
 	if r.useBuiltin {
 		// reranker 用并发1简单限流（单次调用本身段数由调用方控制）
 	}
-	if err := postJSON(ctx, r.baseURL+"/rerank", r.apiKey, payload, &resp); err != nil {
+	if err := postJSON(ctx, joinPaths(r.baseURLs, "/rerank"), r.apiKey, payload, &resp); err != nil {
 		return nil, err
 	}
 	order := make([]int, 0, len(resp.Results))

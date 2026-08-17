@@ -149,7 +149,8 @@ type SaveRequest struct {
 	VLMOverride *bool  `json:"vlmOverrideModel"`
 }
 
-// ConfigResponse 配置响应（各 key 脱敏为 hasKey 布尔；ForwardKey 明文返回供前端展示）。
+// ConfigResponse 配置响应（各 key 脱敏为 hasKey 布尔；ForwardKey 明文返回供
+// 前端展示/WS 连接——该响应仅经 admin 组路由输出，见 router.go MYS-386）。
 type ConfigResponse struct {
 	LLMApiBase      string    `json:"llmApiBase"`
 	LLMModel        string    `json:"llmModel"`

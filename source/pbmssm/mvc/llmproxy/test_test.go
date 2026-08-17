@@ -40,6 +40,59 @@ func setupTestController(t *testing.T) (*Controller, *httptest.Server) {
 	return &Controller{svc: svc}, upstream
 }
 
+// TestToResponseIncludesForwardKey 锁定响应契约（MYS-386）：
+// ConfigResponse JSON 含完整性 forwardKey（路由层限定仅 admin 可读），
+// 且 LLM/VLM 上游 key 不出现（仅 hasKey 布尔）。
+func TestToResponseIncludesForwardKey(t *testing.T) {
+	c := Config{ID: 1, LLMApiKey: "llm-secret", VLMApiKey: "vlm-secret", ForwardKey: "forward-secret"}
+	b, err := json.Marshal(c.ToResponse(true))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if m["forwardKey"] != "forward-secret" {
+		t.Errorf("forwardKey = %v, want plaintext 'forward-secret'", m["forwardKey"])
+	}
+	if m["llmApiKey"] != nil || m["vlmApiKey"] != nil {
+		t.Errorf("upstream keys leaked into response: %v", m)
+	}
+	if m["llmHasKey"] != true || m["vlmHasKey"] != true {
+		t.Errorf("hasKey flags = %v/%v, want true/true", m["llmHasKey"], m["vlmHasKey"])
+	}
+}
+
+// TestGetConfigReturnsForwardKey 验证 GET config 控制器返回完整性 forwardKey
+// （配合路由层 admin-only，构成「仅管理员可得 key」的完整链路）。
+func TestGetConfigReturnsForwardKey(t *testing.T) {
+	db := setupTestDB(t)
+	t.Cleanup(func() { db.Close() })
+	svc := NewService(db)
+	_ = svc.LoadConfig() // 生成并落库 forwardKey
+
+	ctrl := &Controller{svc: svc}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/llm-proxy/config", nil)
+	rec := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(rec)
+	ctx.Request = req
+	ctrl.GetConfig(ctx)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Result ConfigResponse `json:"result"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if out.Result.ForwardKey == "" {
+		t.Errorf("forwardKey empty in GetConfig response")
+	}
+}
+
 // TestRunTestAllOK 验证一键测试两个场景都通过。
 func TestRunTestAllOK(t *testing.T) {
 	ctrl, _ := setupTestController(t)
