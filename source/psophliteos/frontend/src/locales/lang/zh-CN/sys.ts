@@ -81,6 +81,7 @@ export default {
     // notify
     loginSuccessTitle: '登录成功',
     loginSuccessDesc: '欢迎回来',
+    registerFailed: '建立会话失败，请重试',
 
     // placeholder
     accountPlaceholder: '请输入账号',

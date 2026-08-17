@@ -87,6 +87,7 @@ export default {
     // notify
     loginSuccessTitle: 'Login successful',
     loginSuccessDesc: 'Welcome back',
+    registerFailed: 'Failed to establish session, please retry',
 
     // placeholder
     accountPlaceholder: 'Please input username',
