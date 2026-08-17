@@ -94,7 +94,7 @@ func (s *UserService) FindUser(username string) (*User, error) {
 }
 
 // ChangePassword 修改指定用户的密码：用 bcrypt 重新哈希并写回 DB。
-// 调用方负责校验旧密码（正式 token）或跳过（临时 token 首次改密）。
+// 调用方负责校验旧密码（控制器对临时/正式 token 一律校验）以及新密码不得等于默认密码。
 func (s *UserService) ChangePassword(username, newPassword string) error {
 	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
 	if err != nil {
