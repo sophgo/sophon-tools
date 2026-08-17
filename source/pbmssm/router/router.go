@@ -119,8 +119,8 @@ func Register(r *gin.Engine) {
 		// 端口状态
 		api.GET("/ports/listening", portsC.Listening)
 
-		// LLM 转发配置（读）
-		api.GET("/llm-proxy/config", llmproxyCtrl.GetConfig)
+		// LLM 转发配置（读）：admin-only（返回的 forwardKey 是 /agent/ws 的
+		// 唯一凭据，可驱动 root 权限 agent，泄给普通用户等同绕过账号体系）
 		// 模型列表（从供应商拉取，供前端弹窗选择）
 		api.GET("/llm-proxy/models", llmproxyCtrl.ListModels)
 		// Reasonix 服务状态（读）——AI agent 后端由 agentproxy 管理
@@ -176,6 +176,9 @@ func Register(r *gin.Engine) {
 		admin.DELETE("/docker/image/:id", dockerCtrl.RemoveImage)
 
 		// LLM 转发配置（写）
+		// 读（GetConfig）也在此组：响应含 forwardKey 明文（/agent/ws 唯一凭据，
+		// 驱动 root 权限 reasonix agent），仅 superuser/admin 可读（MYS-386）。
+		admin.GET("/llm-proxy/config", llmproxyCtrl.GetConfig)
 		admin.PUT("/llm-proxy/config", llmproxyCtrl.SaveConfig)
 		admin.POST("/llm-proxy/forward-key/reset", llmproxyCtrl.ResetForwardKey)
 		admin.POST("/llm-proxy/forward-key/write-picoclaw", llmproxyCtrl.WriteForwardKey)

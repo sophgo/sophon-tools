@@ -1242,6 +1242,15 @@
       const cfg = await getAgentConfig();
       forwardKey = cfg?.forwardKey || '';
     }
+    // MYS-386：llm-proxy/config 已改为 admin-only。非管理员（或配置读取
+    // 失败）拿不到 forwardKey，空 token 会持续 WS 握手失败重连，这里
+    // 明确提示并跳过连接，避免无限重连。
+    if (!forwardKey) {
+      statusText.value = '未连接';
+      statusClass.value = 'bad';
+      errorMsg.value = '无法连接智能体：配置读取失败（需管理员权限，或服务未就绪），请刷新页面重试';
+      return;
+    }
     if (ws) {
       ws.close();
       ws = null;
