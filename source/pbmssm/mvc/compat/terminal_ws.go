@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 
+	"bmssm/database"
 	"bmssm/pkg/auth"
 	"bmssm/pkg/response"
 )
@@ -32,10 +33,38 @@ const wsCtrlResize = 0x01
 // wsIdleTimeout 30 分钟无任何 WebSocket 消息即关闭会话。
 const wsIdleTimeout = 30 * time.Minute
 
+// requireAdminRole 查询 users 表校验 username 具备 superuser/admin 角色。
+// 与 filemanage.authToken / middleware.RequireAdmin 同口径：非管理员 403。
+// DB 不可用或查询失败一律拒绝（fail-closed）——终端以 root 运行，数据库异常时
+// 宁可拒绝也不放开 root shell。
+func requireAdminRole(c *gin.Context, username string) bool {
+	db := database.DB()
+	if db == nil {
+		c.JSON(http.StatusInternalServerError, response.Fail("database unavailable"))
+		return false
+	}
+	// GORM v1 Pluck 目标必须是 slice。
+	var roles []string
+	if err := db.Table("users").Where("username = ?", username).Pluck("role", &roles).Error; err != nil {
+		c.JSON(http.StatusForbidden, response.Fail("admin role required"))
+		return false
+	}
+	role := ""
+	if len(roles) > 0 {
+		role = roles[0]
+	}
+	if role != "superuser" && role != "admin" {
+		c.JSON(http.StatusForbidden, response.Fail("admin role required"))
+		return false
+	}
+	return true
+}
+
 // TerminalWS GET /api/v1/hardware/terminal?token=<jwt>
 // 实时交互终端：WebSocket 升级后启动 shell pty，双向 pump。
 // 鉴权：浏览器无法加 Authorization header，token 从 query ?token= 取，
 // handler 内手动 auth.ParseToken 校验，失败 401。
+// 交互终端以 root 运行，故额外要求 superuser/admin 角色（查 users 表）。
 func (ctrl *Controller) TerminalWS(c *gin.Context) {
 	// 1) JWT 校验（query token，不走 Auth 中间件）
 	// 与 Auth 中间件一致：临时 token（temp=true，默认密码登录态）拒绝，需先改密，
@@ -45,7 +74,7 @@ func (ctrl *Controller) TerminalWS(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, response.Fail("missing token"))
 		return
 	}
-	_, temp, err := auth.ParseToken(tokenStr, getSecret())
+	username, temp, err := auth.ParseToken(tokenStr, getSecret())
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, response.Fail("invalid token"))
 		return
@@ -55,14 +84,20 @@ func (ctrl *Controller) TerminalWS(c *gin.Context) {
 		return
 	}
 
-	// 2) WebSocket 升级
+	// 2) 角色校验：终端 shell 以 root 运行（bmssm systemd 单元），
+	// 普通 user 角色禁止开交互终端，仅 superuser/admin 可用。
+	if !requireAdminRole(c, username) {
+		return
+	}
+
+	// 3) WebSocket 升级
 	wsConn, err := wsUpgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		return
 	}
 	defer wsConn.Close()
 
-	// 3) 启动 shell pty：优先 bash，没有则 sh；默认账户家目录
+	// 4) 启动 shell pty：优先 bash，没有则 sh；默认账户家目录
 	shell := "sh"
 	if p, lerr := exec.LookPath("bash"); lerr == nil {
 		shell = p
@@ -85,7 +120,7 @@ func (ctrl *Controller) TerminalWS(c *gin.Context) {
 		return
 	}
 
-	// 4) 清理
+	// 5) 清理
 	var once sync.Once
 	cleanup := func() {
 		once.Do(func() {
