@@ -3,6 +3,9 @@
 package database
 
 import (
+	"os"
+	"path/filepath"
+
 	"github.com/jinzhu/gorm"
 	_ "github.com/jinzhu/gorm/dialects/sqlite"
 	_ "github.com/mattn/go-sqlite3"
@@ -20,11 +23,32 @@ var globalDB *gorm.DB
 func RegisterModel(m ...interface{}) { models = append(models, m...) }
 
 // InitDB 打开/创建 sqlite 文件，设置全局句柄并返回 *gorm.DB。
+// 权限收紧（MYS-388）：DB 明文存 LLM API key/forwardKey/会话等敏感数据，
+// 目录显式 0700、文件显式 0600（不依赖 umask，创建与已有文件均强制），
+// 防止本机其他本地用户读取密钥。
 func InitDB(path string) (*gorm.DB, error) {
+	if dir := filepath.Dir(path); dir != "." && dir != "" {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			logger.Error("mkdir %s failed: %v", dir, err)
+			return nil, err
+		}
+		_ = os.Chmod(dir, 0o700)
+		// 文件不存在时预建为空文件（0600），避免 sqlite 按默认 umask 创建
+		// （如 0644）后再次 chmod 之间留出可读窗口
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			if f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600); err == nil {
+				_ = f.Close()
+			}
+		}
+	}
 	db, err := gorm.Open("sqlite3", path)
 	if err != nil {
 		logger.Error("open sqlite %s failed: %v", path, err)
 		return nil, err
+	}
+	// 已有文件也强制收紧（兼容旧安装遗留的宽松权限）
+	if err := os.Chmod(path, 0o600); err != nil {
+		logger.Warn("chmod %s 0600 failed: %v", path, err)
 	}
 	globalDB = db
 	return db, nil

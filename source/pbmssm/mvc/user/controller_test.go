@@ -306,3 +306,91 @@ func TestControllerDeleteUser(t *testing.T) {
 		t.Fatal("victim should not be able to login after deletion")
 	}
 }
+
+// TestControllerDeleteAdminUserForbidden 即使 superuser 也不能删除默认 admin 账号（HTTP 403）。
+func TestControllerDeleteAdminUserForbidden(t *testing.T) {
+	ctrl, _, cleanup := setupController(t)
+	defer cleanup()
+
+	_ = ctrl.svc.CreateUser("admin", "admin", "superuser")
+
+	r := gin.New()
+	api := r.Group("/api/v1")
+	api.Use(middleware.Auth())
+	api.DELETE("/user/:name", ctrl.DeleteUser)
+
+	secret := auth.EffectiveSecret(config.Conf.GetViper().GetString("server.authSecret"))
+	tokenStr, _, _ := auth.IssueToken("admin", secret, false)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/user/admin", nil)
+	req.Header.Set("Authorization", "Bearer "+tokenStr)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+// TestControllerAdminCannotDeleteSuperuser admin 角色调用 DELETE /user/:name 删 superuser 应 403。
+func TestControllerAdminCannotDeleteSuperuser(t *testing.T) {
+	ctrl, _, cleanup := setupController(t)
+	defer cleanup()
+
+	_ = ctrl.svc.CreateUser("boss", "pass1", "admin")
+	_ = ctrl.svc.CreateUser("sroot", "srootpwd", "superuser")
+
+	r := gin.New()
+	api := r.Group("/api/v1")
+	api.Use(middleware.Auth())
+	api.DELETE("/user/:name", ctrl.DeleteUser)
+
+	// 用 admin 角色账号（非 superuser）发起删除
+	secret := auth.EffectiveSecret(config.Conf.GetViper().GetString("server.authSecret"))
+	tokenStr, _, _ := auth.IssueToken("boss", secret, false)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/user/sroot", nil)
+	req.Header.Set("Authorization", "Bearer "+tokenStr)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d body=%s", w.Code, w.Body.String())
+	}
+
+	// 目标 superuser 账号必须仍在
+	if _, err := ctrl.svc.Login("sroot", "srootpwd"); err != nil {
+		t.Fatalf("superuser account should still exist: %v", err)
+	}
+}
+
+// TestControllerSuperuserCanDeleteSuperuser superuser 角色删 superuser 账号应 200。
+func TestControllerSuperuserCanDeleteSuperuser(t *testing.T) {
+	ctrl, _, cleanup := setupController(t)
+	defer cleanup()
+
+	_ = ctrl.svc.CreateUser("admin", "admin", "superuser")
+	_ = ctrl.svc.CreateUser("sroot", "srootpwd", "superuser")
+
+	r := gin.New()
+	api := r.Group("/api/v1")
+	api.Use(middleware.Auth())
+	api.DELETE("/user/:name", ctrl.DeleteUser)
+
+	secret := auth.EffectiveSecret(config.Conf.GetViper().GetString("server.authSecret"))
+	tokenStr, _, _ := auth.IssueToken("admin", secret, false)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/user/sroot", nil)
+	req.Header.Set("Authorization", "Bearer "+tokenStr)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+
+	_, err := ctrl.svc.Login("sroot", "srootpwd")
+	if err == nil {
+		t.Fatal("deleted superuser should not be able to login")
+	}
+}

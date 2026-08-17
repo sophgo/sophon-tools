@@ -7,6 +7,9 @@ set -e
 
 # 运行目录（DB / 日志 / JWT secret 持久化）
 mkdir -p /var/lib/bmssm /var/log/bmssm
+# MYS-388 权限收紧：DB 明文存 LLM key/会话等敏感数据，目录仅 root 可进（0700），
+# DB 文件由 bmssm 启动时显式 chmod 0600（database.InitDB）
+chmod 0700 /var/lib/bmssm
 
 # 确保 iptables + iptables-persistent 已装（firewall 规则持久化依赖）
 if ! command -v iptables >/dev/null 2>&1; then
