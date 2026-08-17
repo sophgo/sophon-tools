@@ -126,6 +126,20 @@ func (ctrl *Controller) isAdmin(c *gin.Context) bool {
 	return u.Role == "superuser" || u.Role == "admin"
 }
 
+// isSuperuser 判断当前请求用户是否为 superuser（用户管理的最高权限角色）。
+func (ctrl *Controller) isSuperuser(c *gin.Context) bool {
+	actor, _ := c.Get("user")
+	actorStr, _ := actor.(string)
+	if actorStr == "" {
+		return false
+	}
+	u, err := ctrl.svc.FindUser(actorStr)
+	if err != nil {
+		return false
+	}
+	return u.Role == "superuser"
+}
+
 // CreateUser 处理 POST /api/v1/user（受保护，仅 superuser/admin）。
 func (ctrl *Controller) CreateUser(c *gin.Context) {
 	if !ctrl.isAdmin(c) {
@@ -142,10 +156,7 @@ func (ctrl *Controller) CreateUser(c *gin.Context) {
 	}
 	// 仅 superuser 可创建管理员级账号；admin 只能创建普通 user。
 	if req.Role == "superuser" || req.Role == "admin" {
-		actor, _ := c.Get("user")
-		actorStr, _ := actor.(string)
-		u, err := ctrl.svc.FindUser(actorStr)
-		if err != nil || u.Role != "superuser" {
+		if !ctrl.isSuperuser(c) {
 			c.JSON(http.StatusForbidden, response.Fail("superuser role required to create admin"))
 			return
 		}
@@ -174,7 +185,12 @@ func (ctrl *Controller) DeleteUser(c *gin.Context) {
 	}
 	actor, _ := c.Get("user")
 	actorStr, _ := actor.(string)
-	if err := ctrl.svc.DeleteUser(name); err != nil {
+	// 操作者角色传入 service：superuser 账号仅 superuser 可删（MYS-388）
+	actorRole := "admin"
+	if ctrl.isSuperuser(c) {
+		actorRole = "superuser"
+	}
+	if err := ctrl.svc.DeleteUser(actorRole, name); err != nil {
 		ctrl.auditWrite(c, actorStr, "delete_user:"+name, "user", "failed")
 		c.JSON(http.StatusForbidden, response.Fail(err.Error()))
 		return
