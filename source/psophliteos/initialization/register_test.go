@@ -45,14 +45,25 @@ func registerJSON(t *testing.T, router http.Handler, body string) *httptest.Resp
 	return w
 }
 
+// setProdTimeouts 与生产 InitBase 一致设置超时中间件参数（为 0 会让
+// TimeoutMiddleware 立即超时，测试不稳定）；结束后恢复原值，避免影响本包
+// 其他测试对超时行为的既有假设。
+func setProdTimeouts(t *testing.T) {
+	t.Helper()
+	origTO, origOta := global.TimeOut, global.OtaTimeOut
+	global.TimeOut, _ = time.ParseDuration("30s")
+	global.OtaTimeOut, _ = time.ParseDuration("30s")
+	t.Cleanup(func() {
+		global.TimeOut, global.OtaTimeOut = origTO, origOta
+	})
+}
+
 // TestSSORegisterRequiresValidJWT 验证 register 鉴权闭环：
 // 未携带有效 bmssm JWT 的请求不能自造活跃会话。
 func TestSSORegisterRequiresValidJWT(t *testing.T) {
 	middleware.SetJWTSecretFilePath("")
 	config.LoadConfig()
-	// 与生产 InitBase 一致，设置超时中间件参数（为 0 会让 TimeoutMiddleware 立即超时，测试不稳定）
-	global.TimeOut, _ = time.ParseDuration("30s")
-	global.OtaTimeOut, _ = time.ParseDuration("30s")
+	setProdTimeouts(t)
 	gin.SetMode(gin.TestMode)
 	router := Routers(testEmbeddedFS(t))
 
@@ -98,8 +109,7 @@ func TestSSORegisterRequiresValidJWT(t *testing.T) {
 func TestProtectedLocalRoutesUnifiedAuth(t *testing.T) {
 	middleware.SetJWTSecretFilePath("")
 	config.LoadConfig()
-	global.TimeOut, _ = time.ParseDuration("30s")
-	global.OtaTimeOut, _ = time.ParseDuration("30s")
+	setProdTimeouts(t)
 	gin.SetMode(gin.TestMode)
 	router := Routers(testEmbeddedFS(t))
 
