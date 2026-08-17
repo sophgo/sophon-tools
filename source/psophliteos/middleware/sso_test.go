@@ -330,3 +330,42 @@ func TestSSOActiveAndLogout(t *testing.T) {
 		t.Fatal("logout with matching token should clear session")
 	}
 }
+
+// --- 一次性票据单测见上；以下为 MYS-382 审计辅助函数测试 ---
+
+func TestSSOUserByToken(t *testing.T) {
+	// 无活跃会话时不可解析
+	if name, ok := SSOUserByToken("tok-1"); ok {
+		t.Fatalf("no active session: got (%q, true)", name)
+	}
+
+	SSORegister("alice", "tok-1")
+
+	// 活跃 token 精确匹配
+	if name, ok := SSOUserByToken("tok-1"); !ok || name != "alice" {
+		t.Fatalf("active token: got (%q, %v), want (alice, true)", name, ok)
+	}
+	// 未知 token 不可解析
+	if name, ok := SSOUserByToken("tok-2"); ok {
+		t.Fatalf("unknown token must not resolve, got %q", name)
+	}
+	// 空 token 不可解析
+	if name, ok := SSOUserByToken(""); ok {
+		t.Fatalf("empty token must not resolve, got %q", name)
+	}
+
+	// 新登录顶掉旧会话：旧 token 立即失效（审计不得记到旧用户头上）
+	SSORegister("bob", "tok-2")
+	if name, ok := SSOUserByToken("tok-1"); ok {
+		t.Fatalf("stale token must not resolve after re-login, got %q", name)
+	}
+	if name, ok := SSOUserByToken("tok-2"); !ok || name != "bob" {
+		t.Fatalf("new active token: got (%q, %v), want (bob, true)", name, ok)
+	}
+
+	// 登出后不可解析
+	SSOLogout("tok-2")
+	if name, ok := SSOUserByToken("tok-2"); ok {
+		t.Fatalf("token after logout must not resolve, got %q", name)
+	}
+}

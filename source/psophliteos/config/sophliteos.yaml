@@ -1,10 +1,16 @@
 server:
   port: 8080
-  # 前端静态资源已 go:embed 进单文件二进制，无需 www 磁盘路径。
-  # 本地 admin 记录的 MD5 口令（遗留：登录实际走 /api/v1/login 反代到 bmssm 鉴权）。
-  # 仅用于初始化本地 sqlite 的 admin 占位记录，无在线登录入口；如需保留请改为强口令。
-  admin-password: c3284d0f94606de1fd2af172aba15bf3
-  timeout: 12m
+  # 本地 admin 占位记录的 MD5 口令。明文口令不随仓库提交（MYS-382）：
+  # 部署期通过环境变量 SOPHLITEOS_ADMIN_PASSWORD 注入（systemd 环境变量/EnvironmentFile），
+  # 或经外部覆盖本配置文件（server.admin-password）。缺省时以空口令占位——
+  # 登录实际走 /api/v1/login 反代到 bmssm 鉴权，此记录无在线登录入口。
+  # admin-password: <部署期注入>
+  # 常规 HTTP 读/写超时（非 OTA 升级接口）：慢连接不会长期占用连接。
+  read-timeout: 30s
+  # 读取请求头超时：拒绝"慢速请求头"式慢连接攻击（slowloris）。
+  read-header-timeout: 10s
+  # OTA/升级长超时（分片上传、固件升级需更长窗口；旧配置键 server.timeout 自动兼容）。
+  ota-timeout: 12m
 
 log:
   path: /var/log/sophliteos
