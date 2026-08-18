@@ -22,7 +22,7 @@ import (
 // AiAgentApi AI Agent 功能：picoclaw web 端口探测与转发、本地模型样例。
 // LLM/VLM API 配置由 bmssm 的 /api/v1/llm-proxy/config 管理（sophliteos 不再刷新 picoclaw）。
 //
-// MYS-379 安全加固：路由已叠加 SSO（见 router/system/sys_ai_agent.go）。本层：
+// MYS-379 安全加固（本层）：端点属设备内部自用、不经 ssm 反代，鉴权不做（见 router 层）；
 //   - 探测目标身份校验：部署锚定（设备已安装 sophpicoclaw）+ 候选端口白名单 + HTTP 探针；
 //   - 探测结果缓存（ok 30s / miss 5s）：消除每请求 4 次探测的资源消耗、
 //     探测与代理间的 TOCTOU 竞态，以及端口扫描式反馈；
