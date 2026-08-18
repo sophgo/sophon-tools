@@ -24,9 +24,9 @@ QString MainWindow::executeLinuxCmd(QString strCmd)
 {
     QProcess p;
     p.start("bash", QStringList() << "-c" << strCmd);
-    /* 该方法在 UI 线程同步调用: 加超时保护, 命令挂起时最多阻塞 5s 即终止,
+    /* 该方法在 UI 线程同步调用: 加超时保护, 命令挂起时最多阻塞 30s 即终止,
        避免 SophUI 界面被永久冻结(如网络/传感器类命令无响应) */
-    if (!p.waitForFinished(5000)) {
+    if (!p.waitForFinished(30000)) {
         p.kill();
         p.waitForFinished(1000);
     }
