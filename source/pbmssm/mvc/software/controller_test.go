@@ -18,6 +18,7 @@ import (
 	"bmssm/config"
 	"bmssm/middleware"
 	"bmssm/pkg/auth"
+	"bmssm/pkg/hazard"
 	"bmssm/pkg/response"
 )
 
@@ -109,6 +110,7 @@ func createMultipartBody(fieldName, fileName, content string) (*bytes.Buffer, st
 	w := multipart.NewWriter(buf)
 	part, _ := w.CreateFormFile(fieldName, fileName)
 	io.WriteString(part, content)
+	_ = w.WriteField("confirm", hazard.NewConfirmCode()) // MYS-389 二次确认
 	w.Close()
 	return buf, w.FormDataContentType()
 }
@@ -180,9 +182,14 @@ func TestControllerInstallMissingFile(t *testing.T) {
 
 	r := setupSoftwareRouter(ctrl)
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/software/install", nil)
+	// 携带合法 confirm 但缺 file 字段 → 仍应 400 missing file（MYS-389 确认放行后）
+	body := new(bytes.Buffer)
+	mw := multipart.NewWriter(body)
+	_ = mw.WriteField("confirm", hazard.NewConfirmCode())
+	mw.Close()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/software/install", body)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
 	req.Header.Set("Authorization", "Bearer "+makeToken())
-	// 缺少 Content-Type 和 multipart body
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadRequest {
@@ -368,7 +375,7 @@ func TestControllerOTAUpgrade(t *testing.T) {
 
 	r := setupSoftwareRouter(ctrl)
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/ota/upgrade?uploadId="+uploadResp.UploadID, nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ota/upgrade?uploadId="+uploadResp.UploadID+"&confirm="+hazard.NewConfirmCode(), nil)
 	req.Header.Set("Authorization", "Bearer "+makeToken())
 	r.ServeHTTP(w, req)
 
@@ -399,7 +406,7 @@ func TestControllerOTAUpgradeDegraded(t *testing.T) {
 
 	r := setupSoftwareRouter(ctrl)
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/ota/upgrade?uploadId="+uploadResp.UploadID, nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ota/upgrade?uploadId="+uploadResp.UploadID+"&confirm="+hazard.NewConfirmCode(), nil)
 	req.Header.Set("Authorization", "Bearer "+makeToken())
 	r.ServeHTTP(w, req)
 
@@ -447,7 +454,7 @@ func TestSoftwareEndpointsWithoutToken(t *testing.T) {
 		{http.MethodPost, "/api/v1/software/upgrade"},
 		{http.MethodPost, "/api/v1/ota/upload"},
 		{http.MethodGet, "/api/v1/ota/download/test-id"},
-		{http.MethodPost, "/api/v1/ota/upgrade?uploadId=test"},
+		{http.MethodPost, "/api/v1/ota/upgrade?uploadId=test&confirm=" + hazard.NewConfirmCode()},
 	}
 
 	for _, ep := range endpoints {
@@ -517,11 +524,13 @@ func TestControllerConcurrentUploads(t *testing.T) {
 	tgzData := createTarGzBytes(t, map[string]string{"VERSION": "1.0\n"})
 
 	done := make(chan int, 5)
+	// MYS-389: 共享同一确认码(并发各自 NewConfirmCode 会互相覆盖, 恰是互斥语义要防的场景)
+	confirm := hazard.NewConfirmCode()
 	for i := range 5 {
 		go func(idx int) {
 			// 每个 goroutine 使用唯一文件名，避免并发写同一文件
 			fname := fmt.Sprintf("pkg%d.tar.gz", idx)
-			body, contentType := createMultipartFileBody(t, "file", fname, tgzData)
+			body, contentType := createMultipartFileBodyConfirm(t, "file", fname, tgzData, confirm)
 			w := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodPost, "/api/v1/software/install", body)
 			req.Header.Set("Authorization", "Bearer "+makeToken())
@@ -561,12 +570,26 @@ func createTarGzBytes(t *testing.T, files map[string]string) []byte {
 }
 
 // createMultipartFileBody 创建含文件内容的 multipart body（使用实际文件内容）。
+// createMultipartFileBodyConfirm 创建含文件内容的 multipart body，使用调用方指定的确认码
+// （并发用例共享同一确认码，避免相互覆盖，MYS-389）。
+func createMultipartFileBodyConfirm(t *testing.T, fieldName, fileName string, content []byte, confirm string) (*bytes.Buffer, string) {
+	t.Helper()
+	buf := new(bytes.Buffer)
+	w := multipart.NewWriter(buf)
+	part, _ := w.CreateFormFile(fieldName, fileName)
+	part.Write(content)
+	_ = w.WriteField("confirm", confirm)
+	w.Close()
+	return buf, w.FormDataContentType()
+}
+
 func createMultipartFileBody(t *testing.T, fieldName, fileName string, content []byte) (*bytes.Buffer, string) {
 	t.Helper()
 	buf := new(bytes.Buffer)
 	w := multipart.NewWriter(buf)
 	part, _ := w.CreateFormFile(fieldName, fileName)
 	part.Write(content)
+	_ = w.WriteField("confirm", hazard.NewConfirmCode()) // MYS-389 二次确认
 	w.Close()
 	return buf, w.FormDataContentType()
 }
@@ -632,7 +655,7 @@ func TestControllerOTAUpgradeWithScriptInBody(t *testing.T) {
 
 	// 执行升级
 	w2 := httptest.NewRecorder()
-	req2 := httptest.NewRequest(http.MethodPost, "/api/v1/ota/upgrade?uploadId="+uploadResp.UploadID, nil)
+	req2 := httptest.NewRequest(http.MethodPost, "/api/v1/ota/upgrade?uploadId="+uploadResp.UploadID+"&confirm="+hazard.NewConfirmCode(), nil)
 	req2.Header.Set("Authorization", "Bearer "+makeToken())
 	r.ServeHTTP(w2, req2)
 

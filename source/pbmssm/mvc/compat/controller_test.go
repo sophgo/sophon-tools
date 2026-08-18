@@ -20,6 +20,7 @@ import (
 	"bmssm/mvc/hardware"
 	"bmssm/mvc/software"
 	"bmssm/mvc/user"
+	"bmssm/pkg/hazard"
 	"bmssm/pkg/ota"
 	"bmssm/pkg/response"
 )
@@ -671,6 +672,7 @@ func TestCompatRollback(t *testing.T) {
 
 	body, _ := json.Marshal(OtaVersion{
 		Product: "SC5", ModuleName: "a53", FileName: "fw.bin", Name: "rb-test",
+		Confirm: hazard.NewConfirmCode(),
 	})
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/ota/rollback", bytes.NewBuffer(body))
@@ -763,6 +765,7 @@ func TestCompatExecuteUpgrade(t *testing.T) {
 
 	body, _ := json.Marshal(OtaVersion{
 		Product: "SE7", ModuleName: "soc", FileName: "soc_fw.tgz", Name: "up-test", Version: "1.0.0",
+		Confirm: hazard.NewConfirmCode(),
 	})
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/ota/upgrade", bytes.NewBuffer(body))
@@ -793,6 +796,7 @@ func TestCompatListAndQueryWorkflow(t *testing.T) {
 
 	body, _ := json.Marshal(OtaVersion{
 		Product: "SE7", FileName: "fw.tgz", Name: "list-test",
+		Confirm: hazard.NewConfirmCode(),
 	})
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/ota/upgrade", bytes.NewBuffer(body))

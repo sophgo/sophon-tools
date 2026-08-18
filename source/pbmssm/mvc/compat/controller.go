@@ -19,10 +19,12 @@ import (
 	"bmssm/database"
 	"bmssm/global"
 	"bmssm/logger"
+	"bmssm/mvc/audit"
 	"bmssm/mvc/hardware"
 	"bmssm/mvc/software"
 	"bmssm/mvc/user"
 	"bmssm/pkg/auth"
+	"bmssm/pkg/hazard"
 	netpkg "bmssm/pkg/network"
 	"bmssm/pkg/ota"
 	"bmssm/pkg/response"
@@ -39,6 +41,7 @@ type Controller struct {
 	swSvc     *software.SoftwareService
 	userSvc   *user.UserService
 	otaEngine *ota.Engine
+	aud       *audit.AuditService
 }
 
 // NewController 创建兼容控制器。
@@ -54,13 +57,42 @@ func NewController(svc *CompatService, hwSvc *hardware.HardwareService, swSvc *s
 
 // DefaultController 构建默认控制器（生产环境依赖注入）。
 func DefaultController() *Controller {
-	return NewController(
+	ctrl := NewController(
 		DefaultCompatService(),
 		hardware.NewDefaultService(),
 		software.DefaultService(),
 		user.NewService(database.DB()),
 		ota.DefaultEngine(),
 	)
+	ctrl.aud = audit.NewService(database.DB())
+	return ctrl
+}
+
+// auditWrite 写入审计日志（忽略错误，不阻塞主流程）。
+func (ctrl *Controller) auditWrite(c *gin.Context, username, action, resource, result string) {
+	if ctrl.aud == nil {
+		return
+	}
+	_ = ctrl.aud.Write(username, action, resource, c.ClientIP(), result)
+}
+
+// requireHazardGuard 校验二次确认码并占用高危互斥锁（MYS-389）。
+// 返回 guard 与 bool：false 时已写出错误响应，直接 return。
+func (ctrl *Controller) requireHazardGuard(c *gin.Context, holder, action, resource, confirm string) (*hazard.Guard, bool) {
+	username, _ := c.Get("user")
+	uname, _ := username.(string)
+	if !hazard.VerifyConfirmCode(confirm) {
+		ctrl.auditWrite(c, uname, action, resource, "confirmation_failed")
+		c.JSON(http.StatusForbidden, response.Fail("confirmation required: fetch /api/v1/hazard/challenge first"))
+		return nil, false
+	}
+	guard, err := hazard.HazardOps.TryAcquire(holder)
+	if err != nil {
+		ctrl.auditWrite(c, uname, action, resource, "blocked")
+		c.JSON(http.StatusConflict, response.Fail(err.Error()))
+		return nil, false
+	}
+	return guard, true
 }
 
 // getSecret 从配置获取 JWT secret。
@@ -264,33 +296,62 @@ func (ctrl *Controller) DeleteNAT(c *gin.Context) {
 // Reboot POST /bitmain/v1/ssm/hardware/devices/reset
 // 复用 hardware.HardwareService 的 Rebooter（生产用 osRebooter）。
 func (ctrl *Controller) Reboot(c *gin.Context) {
-	var req CoreOpe
+	var req struct {
+		CoreOpe
+		Confirm string `json:"confirm"`
+	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, response.Fail("invalid request body"))
 		return
 	}
 
+	// MYS-389：二次确认 + 高危互斥 + 审计
+	guard, ok := ctrl.requireHazardGuard(c, "reboot", "reboot", "hardware", req.Confirm)
+	if !ok {
+		return
+	}
+	defer guard.Release()
+
 	if err := ctrl.hwSvc.Reboot(0); err != nil {
+		ctrl.auditWrite(c, uname(c), "reboot", "hardware", "failed")
 		c.JSON(http.StatusInternalServerError, response.Fail(err.Error()))
 		return
 	}
-
+	ctrl.auditWrite(c, uname(c), "reboot", "hardware", "success")
 	c.JSON(http.StatusOK, response.OK(nil))
+}
+
+// uname 从 gin context 取用户名（middleware.Auth 注入）。
+func uname(c *gin.Context) string {
+	u, _ := c.Get("user")
+	s, _ := u.(string)
+	return s
 }
 
 // Shutdown POST /bitmain/v1/ssm/hardware/devices/down
 func (ctrl *Controller) Shutdown(c *gin.Context) {
-	var req CoreOpe
+	var req struct {
+		CoreOpe
+		Confirm string `json:"confirm"`
+	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, response.Fail("invalid request body"))
 		return
 	}
 
+	// MYS-389：二次确认 + 高危互斥 + 审计
+	guard, ok := ctrl.requireHazardGuard(c, "shutdown", "shutdown", "hardware", req.Confirm)
+	if !ok {
+		return
+	}
+	defer guard.Release()
+
 	if err := Shutdown(); err != nil {
+		ctrl.auditWrite(c, uname(c), "shutdown", "hardware", "failed")
 		c.JSON(http.StatusInternalServerError, response.Fail(err.Error()))
 		return
 	}
-
+	ctrl.auditWrite(c, uname(c), "shutdown", "hardware", "success")
 	c.JSON(http.StatusOK, response.OK(nil))
 }
 
@@ -412,6 +473,8 @@ func (ctrl *Controller) GetAlarm(c *gin.Context) {
 // UploadFirmware POST /bitmain/v1/ssm/file/ota
 // 接收 multipart .tgz 刷机包，按 module（form 字段，默认 soc）保存到对应目录。
 func (ctrl *Controller) UploadFirmware(c *gin.Context) {
+	// MYS-389：OTA 上传记审计
+	ctrl.auditWrite(c, uname(c), "ota.upload", "ota", "attempted")
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, response.Fail("missing file field"))
@@ -464,6 +527,13 @@ func (ctrl *Controller) ExecuteUpgrade(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, response.Fail("invalid request body"))
 		return
 	}
+
+	// MYS-389：二次确认 + 高危互斥 + 审计
+	guard, ok := ctrl.requireHazardGuard(c, "ota.upgrade", "ota.upgrade", "ota", req.Confirm)
+	if !ok {
+		return
+	}
+	defer guard.Release()
 	// Product 为空时用设备实际型号兜底（global.DeviceTypeEx 形如 "SE7 V01"），
 	// 否则 productClass 识别不到会返回 "ota: path not implemented"。
 	product := req.Product
@@ -481,9 +551,11 @@ func (ctrl *Controller) ExecuteUpgrade(c *gin.Context) {
 		FlashData:  req.FlashData,
 	}
 	if err := ctrl.otaEngine.EnqueueFlow(&flow); err != nil {
+		ctrl.auditWrite(c, uname(c), "ota.upgrade", "ota", "failed")
 		c.JSON(http.StatusInternalServerError, response.Fail(err.Error()))
 		return
 	}
+	ctrl.auditWrite(c, uname(c), "ota.upgrade", "ota", "success")
 	c.JSON(http.StatusOK, response.OK("add workflow success"))
 }
 
@@ -495,6 +567,14 @@ func (ctrl *Controller) Rollback(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, response.Fail("invalid request body"))
 		return
 	}
+
+	// MYS-389：二次确认 + 高危互斥 + 审计
+	guard, ok := ctrl.requireHazardGuard(c, "ota.rollback", "ota.rollback", "ota", req.Confirm)
+	if !ok {
+		return
+	}
+	defer guard.Release()
+
 	product := req.Product
 	if strings.TrimSpace(product) == "" {
 		product = global.DeviceTypeEx
@@ -510,9 +590,11 @@ func (ctrl *Controller) Rollback(c *gin.Context) {
 		FlashData:  req.FlashData,
 	}
 	if err := ctrl.otaEngine.EnqueueFlow(&flow); err != nil {
+		ctrl.auditWrite(c, uname(c), "ota.rollback", "ota", "failed")
 		c.JSON(http.StatusInternalServerError, response.Fail(err.Error()))
 		return
 	}
+	ctrl.auditWrite(c, uname(c), "ota.rollback", "ota", "success")
 	c.JSON(http.StatusOK, response.OK("add workflow success"))
 }
 
@@ -561,6 +643,7 @@ func (ctrl *Controller) Exec(c *gin.Context) {
 		Command string `json:"command" binding:"required"`
 		Timeout int    `json:"timeout"`
 	}
+	// MYS-389：exec 记审计（保留只读诊断能力，不强制二次确认）
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, response.Fail("invalid request body"))
 		return
@@ -587,6 +670,11 @@ func (ctrl *Controller) Exec(c *gin.Context) {
 			exitCode = -1
 		}
 	}
+	res := "success"
+	if exitCode != 0 {
+		res = "failed"
+	}
+	ctrl.auditWrite(c, uname(c), "exec", "hardware.exec", res)
 	c.JSON(http.StatusOK, response.OK(gin.H{
 		"stdout":   stdout.String(),
 		"stderr":   stderr.String(),
