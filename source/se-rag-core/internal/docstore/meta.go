@@ -1,7 +1,6 @@
 package docstore
 
 import (
-	"encoding/json"
 	"strconv"
 )
 
@@ -24,12 +23,4 @@ func (m Meta) Fingerprint() string {
 // FpName 组合 provider 与 model 的规范名（供调用方写入 EmbeddedFingerprint）。
 func FpName(providerName, model string) string {
 	return providerName + "." + model
-}
-
-func writeJSON(path string, v any) error {
-	b, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return err
-	}
-	return writeFile(path, b)
 }
