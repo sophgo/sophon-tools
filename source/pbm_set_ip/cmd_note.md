@@ -46,6 +46,13 @@
 
 前缀越界(v4>32/v6>128)、非连续/非法点分掩码、畸形 IP(段越界/不足/含 `/`)、空网卡、DHCP 族加静态额外地址。表名允许 `_`/`-`,含点号报错。边界合法:前缀 0、全 0/全 1 掩码。路由 via 可空(直连路由)。
 
+## DNS(逗号分隔多地址,MYS-436)
+
+- 单个 DNS 槽(`dns` 参数)支持逗号分隔多地址:`"8.8.8.8,114.114.114.114"` → 数组逐项校验后存储(`Family.dns: Vec<String>`)。
+- 校验:逐项 trim;空项(连续/首尾逗号、纯空白)、非法项、含 `/` 项直接报错;**必须与地址族一致**(v4 族只收 IPv4,v6 族只收 IPv6,不可混族——各后端 nmcli `ipv4.dns`/`ipv6.dns` 按族隔离,混族运行时失败,故解析层拦截)。
+- 渲染:netplan `nameservers.addresses` 数组逐项;networkd `DNS=` 空格分隔;nmcli `ipv4.dns`/`ipv6.dns` 逗号串(原生);ip 兜底逐项 `nameserver`。
+- 旧模式 v4 family 的 dns 槽含 `:` 的串会触发 family2(v6 族)跳转——混族/纯 v6 DNS 串不做 v4 family 的 DNS,仅 v4 DNS 列表可放该槽。
+
 ## 后端
 
 netplan(需 yaml;apply 检测 stderr Error/Conflicting;写入前清除旧 gateway4/gateway6;routes/routing-policy 表名须数字或 rt_tables 已注册)→ nmcli(routes 用 `table=N`,routing-rules 逗号+固定 priority+数字 table;缺席 family 显式 method=disabled;先 add 后删旧,add/up 失败不丢旧配置)→ networkd(`networkctl reload`+`reconfigure <dev>`,不波及其他网口;写前备份、失败恢复)→ ip 兜底(逐条检测失败打印 WARNING;DHCP 不支持报错退出;支持 v6 默认路由与 DNS(resolvconf/resolvectl/resolv.conf))。切换后端前 `rm /etc/systemd/network/10-<dev>.network` 残留。
