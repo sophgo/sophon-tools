@@ -182,20 +182,19 @@ func (h *Hub) BroadcastSession(acpID string, frames ...WSFrame) {
 	c.enqueueFrames(frames)
 }
 
-// serveWS WebSocket 升级 + 子协议认证 + 连接生命周期。
+// serveWS WebSocket 升级 + 连接生命周期。
+// MYS-379 后续裁定：/agent/ws 属设备内部自用，与 18080 转发一致"不需要 key"——
+// 不再校验子协议 token.<key>；仍回显客户端所选子协议（浏览器强制要求回显
+// Sec-WebSocket-Protocol，否则握手失败），前端 PicoWs 携带 token.<forward_key>
+// 的行为保持兼容。
 func (h *Hub) serveWS(w http.ResponseWriter, r *http.Request) {
-	if !h.authSubprotocol(r) {
-		logger.Warn("agentproxy: ws auth failed from %s", r.RemoteAddr)
-		http.Error(w, "unauthorized", http.StatusForbidden)
-		return
-	}
 	upgrader := websocket.Upgrader{
 		ReadBufferSize:  4096,
 		WriteBufferSize: 4096,
 		CheckOrigin:     func(r *http.Request) bool { return true },
 		// 回显客户端请求的子协议（token.<key>），浏览器强制要求服务端回显
-		// Sec-WebSocket-Protocol，否则握手失败。认证在 authSubprotocol 已通过，
-		// 这里直接把客户端列表透传给 selectSubprotocol 以回显首项。
+		// Sec-WebSocket-Protocol，否则握手失败。
+		// 子协议只用于回显，不再做 key 校验（见函数头注释）。
 		Subprotocols: websocket.Subprotocols(r),
 	}
 	wsConn, err := upgrader.Upgrade(w, r, nil)
@@ -218,26 +217,6 @@ func (h *Hub) serveWS(w http.ResponseWriter, r *http.Request) {
 	logger.Info("agentproxy: ws connected from %s", c.addr)
 	go c.writeLoop()
 	c.readLoop()
-}
-
-// authSubprotocol 校验客户端子协议 token.<key> 与配置转发 key 一致。
-// key 未配置（空）时放行（DB 异常降级路径；正常路径 DB 恒有 key）。
-func (h *Hub) authSubprotocol(r *http.Request) bool {
-	key := h.getKey()
-	if key == "" {
-		return true
-	}
-	protos := r.Header.Values("Sec-WebSocket-Protocol")
-	for _, p := range protos {
-		for _, proto := range strings.Split(p, ",") {
-			proto = strings.TrimSpace(proto)
-			if strings.HasPrefix(proto, "token.") &&
-				strings.TrimPrefix(proto, "token.") == key {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 // enqueueFrames 投递一组已格式化好的帧（来自模块级回合），异步，无 adapter 转换。

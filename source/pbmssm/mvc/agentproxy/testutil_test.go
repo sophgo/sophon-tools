@@ -153,8 +153,8 @@ func readRPCLine(t *testing.T, sc *bufio.Scanner) (*RPCResponse, error) {
 // 用 sh 管道对实现读写，满足 ProcessManager 接口语义的测试替身。
 type stdIOTransport struct {
 	pm  *ProcessManager
-	in  *os.File  // 读方向（从传输读到行）
-	out *os.File  // 写方向（向传输写行）
+	in  *os.File // 读方向（从传输读到行）
+	out *os.File // 写方向（向传输写行）
 }
 
 // newStdIOTransport 创建双向管道对：一端给被测 ProcessManager，
@@ -171,9 +171,9 @@ func newStdIOTransport(t *testing.T) (*stdIOTransport, *ProcessManager) {
 	}
 	// 被测进程：stdin=w1（写请求），stdout=r2（读响应）
 	pm := &ProcessManager{
-		stdin:  w1,
-		stdout: bufio.NewReader(r2),
-		state:  StateRunning,
+		stdin:   w1,
+		stdout:  bufio.NewReader(r2),
+		state:   StateRunning,
 		backoff: time.Second,
 		stderrB: &safeBuffer{},
 	}
