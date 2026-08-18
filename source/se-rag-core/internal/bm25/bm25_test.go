@@ -21,6 +21,48 @@ func TestTokenizeFiltersStopwords(t *testing.T) {
 	}
 }
 
+// 中文连续子串按 2-gram 滑窗切分："配置网络" → "配置" "置网" "网络"（精确 token 比对，非子串包含）。
+func TestTokenizeChineseBigram(t *testing.T) {
+	got := Tokenize("配置网络")
+	m := mEN(got)
+	for _, want := range []string{"配置", "网络", "置网"} {
+		if !m[want] {
+			t.Errorf("want 2-gram token %q in %v", want, got)
+		}
+	}
+	if len(got) == 0 {
+		t.Fatal("expected non-empty tokens")
+	}
+	// 英文/数字 token 保持原样，不被 bigram 切分
+	gotEn := mEN(Tokenize("SE7 BM1684X 芯片"))
+	for _, want := range []string{"se7", "bm1684x"} {
+		if !gotEn[want] {
+			t.Errorf("want alnum token %q in %v", want, got)
+		}
+	}
+}
+
+func mEN(toks []string) map[string]bool {
+	m := map[string]bool{}
+	for _, w := range toks {
+		m[w] = true
+	}
+	return m
+}
+
+// 中文查询片段比文档更长（无法整体命中原样子串）也应命中：bigram 滑窗保证片段重叠。
+func TestBM25ChineseSubstringMatch(t *testing.T) {
+	docs := []string{"本篇介绍如何配置网络服务", "OTA 升级 用于 更新 系统 镜像"}
+	idx := Build(docs, []string{"c0", "c1"})
+	got := idx.Search("配置网络", 3)
+	if len(got) == 0 {
+		t.Fatal("expected results for substring query")
+	}
+	if got[0].ChunkID != "c0" {
+		t.Errorf("top hit = %s want c0 (got: %+v)", got[0].ChunkID, got)
+	}
+}
+
 func TestBM25Ordering(t *testing.T) {
 	docs := []string{
 		"BM1684X 支持 PCIE 主机模式",

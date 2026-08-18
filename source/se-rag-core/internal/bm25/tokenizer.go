@@ -17,7 +17,8 @@ func init() {
 	}
 }
 
-// Tokenize 中英混合分词：中文连续子串整体一个 token；英文单词/数字各一个 token；滤停用词、滤单字符。
+// Tokenize 中英混合分词：汉字序列按 2-gram 滑窗切分（查询/文档片段重叠即可命中，
+// 与 jieba 效果对齐的轻量替代）；英文单词/数字各一个 token；滤停用词、滤单字符。
 func Tokenize(text string) []string {
 	lower := strings.ToLower(text)
 	runes := []rune(lower)
@@ -31,9 +32,13 @@ func Tokenize(text string) []string {
 			for j < n && unicode.Is(unicode.Han, runes[j]) {
 				j++
 			}
-			w := string(runes[i:j])
-			if _, ok := stopCN[w]; !ok {
-				tokens = append(tokens, w)
+			seq := runes[i:j]
+			// 滑窗 bigram：长度 <2 的单字序列信息量低，直接丢弃
+			for k := 0; k+1 < len(seq); k++ {
+				w := string(seq[k : k+2])
+				if _, ok := stopCN[w]; !ok {
+					tokens = append(tokens, w)
+				}
 			}
 			i = j
 		} else if isAlnum(r) {

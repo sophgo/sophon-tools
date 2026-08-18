@@ -2,9 +2,9 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
+	"time"
 
 	"se-rag-core/internal/bm25"
 	"se-rag-core/internal/chunker"
@@ -13,6 +13,10 @@ import (
 	"se-rag-core/internal/embed"
 	"se-rag-core/internal/vector"
 )
+
+// buildTimeout build 全量 embedding 的整体 deadline（query 单次为 120s；build 覆盖全部批次，取 5min）。
+// 网关吞连接（Worker 失联）时保证 build 有限时退出，不无限挂起。
+const buildTimeout = 5 * time.Minute
 
 // runCtx 供 build/query/doctor 共享的参数 + 可注入的 provider 工厂（测试/离线 fake）。
 // build 始终依据 docs 全量重建索引（docs 是唯一真源），无需 force 开关。
@@ -118,9 +122,13 @@ func runBuild(rc runCtx) error {
 		return fmt.Errorf("embedder init: %w", err)
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), buildTimeout)
+	defer cancel()
 	vecs := make([][]float32, 0, len(docsText))
+	vecIDs := make([]string, 0, len(docsText)) // 与 vecs 对齐的 chunkID（与 bm25/chunks 全量分开）
 	const batch = 10
+	var dim int
+	skipped := 0
 	for i := 0; i < len(docsText); i += batch {
 		end := i + batch
 		if end > len(docsText) {
@@ -130,16 +138,35 @@ func runBuild(rc runCtx) error {
 		if err != nil {
 			return fmt.Errorf("embed batch [%d:%d]: %w", i, end, err)
 		}
+		if len(ev) != end-i {
+			return fmt.Errorf("embed batch [%d:%d]: got %d vectors, want %d", i, end, len(ev), end-i)
+		}
 		for j := range ev {
-			vecs = append(vecs, vector.Normalize(ev[j]))
+			// 逐元素校验：nil/空向量 → 明确告警并跳过该 chunk 的向量（BM25 仍覆盖该 chunk）；
+			// 维度与已确定的第一维不一致 → 系统性漂移，直接报错中止。
+			v := ev[j]
+			if v == nil || len(v) == 0 {
+				fmt.Fprintf(os.Stderr, "WARNING: chunk %s returned empty embedding; vector skipped (BM25 fallback still covers it)\n", orders[i+j])
+				skipped++
+				continue
+			}
+			if dim == 0 {
+				dim = len(v)
+			} else if len(v) != dim {
+				return fmt.Errorf("embedding dim mismatch: chunk %s has %d dims, expected %d", orders[i+j], len(v), dim)
+			}
+			vecs = append(vecs, vector.Normalize(v))
+			vecIDs = append(vecIDs, orders[i+j])
 		}
 	}
-	if len(vecs) == 0 || vecs[0] == nil {
-		return fmt.Errorf("embedding returned empty vectors")
+	if len(vecs) == 0 {
+		return fmt.Errorf("embedding returned no valid vectors (skipped %d chunks)", skipped)
 	}
-	dim := len(vecs[0])
-	if dim == 0 {
-		return errors.New("embedding returned 0-dim vectors")
+	if skipped > 0 {
+		fmt.Printf("embedded: chunks=%d vectors=%d dim=%d (%d chunks skipped: empty embedding)\n",
+			len(allChunks), len(vecs), dim, skipped)
+	} else {
+		fmt.Printf("embedded: chunks=%d vectors=%d dim=%d\n", len(allChunks), len(vecs), dim)
 	}
 
 	// BM25
@@ -155,7 +182,7 @@ func runBuild(rc runCtx) error {
 		BuildVersion:        "1.0",
 	}
 	store := &docstore.Store{IndexDir: rc.indexDir}
-	if err := store.SaveIndex(rc.product, meta, vecs, orders, bmi, allChunks); err != nil {
+	if err := store.SaveIndex(rc.product, meta, vecs, vecIDs, bmi, allChunks); err != nil {
 		return err
 	}
 	fmt.Printf("index saved: label=%s chunks=%d dim=%d embed=%s -> %s\n",

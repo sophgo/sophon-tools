@@ -2,6 +2,8 @@ package chunker
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -145,4 +147,167 @@ func truncated(s string, n int) string {
 		return s
 	}
 	return string(r[:n])
+}
+
+// MYS-392：跨文件含相同段落文本时，ChunkID 必须互不相同（旧算法 md5(文本) 冲突，
+// 检索时 ChunkByID 后写覆盖导致来源文件错乱）。
+func TestChunkIDUniqueAcrossFiles(t *testing.T) {
+	text := "# 标题\n\n" + strings.Repeat("这是完全相同的共享段落内容，两个文档都会出现。", 60)
+	c := NewDefaultChunker()
+	a := c.ChunkFile(text, "a.md")
+	b := c.ChunkFile(text, "b.md")
+	if len(a) == 0 || len(b) == 0 {
+		t.Fatal("expected chunks")
+	}
+	seen := map[string]bool{}
+	for _, ch := range append(append([]Chunk{}, a...), b...) {
+		key := ch.SourceFile + ":" + ch.ChunkID
+		if seen[key] {
+			t.Errorf("duplicate ChunkID %q in %s (same text across files must differ)", ch.ChunkID, ch.SourceFile)
+		}
+		seen[key] = true
+	}
+}
+
+// MYS-392：同一文件内不同位置的 chunk（即使文本相同）ChunkID 也必须唯一。
+func TestChunkIDUniqueWithinFile(t *testing.T) {
+	text := "# 标题\n\n" + strings.Repeat("重复出现的段落内容。", 90) + "\n\n## 第二节\n\n" + strings.Repeat("重复出现的段落内容。", 90)
+	chunks := NewDefaultChunker().ChunkFile(text, "t.md")
+	ids := map[string]int{}
+	for _, ch := range chunks {
+		ids[ch.ChunkID]++
+	}
+	for id, n := range ids {
+		if n > 1 {
+			t.Errorf("duplicate ChunkID %q within one file (%d times)", id, n)
+		}
+	}
+}
+
+// MYS-392：文档含代码块（保护占位符改变文本长度）时，代码块之后 chunk 的行号不得错位。
+// 旧实现用 clean（含占位符）偏移套原 text 的行表，行号整体前移。
+func TestLineNumbersAfterCodeBlock(t *testing.T) {
+	pre := "# 标题\n" + strings.Repeat("这是代码块之前的文本。", 30)
+	code := "\n\n```go\nfunc main() {\n    println(\"hello\")\n}\n```"
+	post := "\n\n## 段落二\n\n" + strings.Repeat("这是代码块之后的文本。", 30)
+	chunks := NewDefaultChunker().ChunkFile(pre+code+post, "t.md")
+	if len(chunks) < 2 {
+		t.Fatalf("expected >= 2 chunks, got %d", len(chunks))
+	}
+	last := chunks[len(chunks)-1]
+	if !strings.Contains(last.Text, "段落二") {
+		t.Fatalf("expected last chunk to contain 段落二, got %q", last.Text)
+	}
+	// 手工数行：1 标题 / 2 长行 / 3 空 / 4-8 代码块 / 9 空 / 10 ## 段落二
+	if last.LineStart != 10 {
+		t.Errorf("last chunk LineStart = %d, want 10 (code block must not shift line numbers)", last.LineStart)
+	}
+}
+
+// MYS-392：文档含表格（同上保护区域）时，表格之后 chunk 的行号不得错位。
+func TestLineNumbersAfterTable(t *testing.T) {
+	pre := "# 标题\n" + strings.Repeat("这是表格之前的文本。", 30)
+	table := "\n\n| a | b |\n| c | d |\n"
+	post := "\n\n## 表格之后\n\n" + strings.Repeat("这是表格之后的文本。", 30)
+	chunks := NewDefaultChunker().ChunkFile(pre+table+post, "t.md")
+	if len(chunks) < 2 {
+		t.Fatalf("expected >= 2 chunks, got %d", len(chunks))
+	}
+	last := chunks[len(chunks)-1]
+	if !strings.Contains(last.Text, "表格之后") {
+		t.Fatalf("expected last chunk to contain 表格之后, got %q", last.Text)
+	}
+	// 行号：1 标题 / 2 长行 / 3 空 / 4-5 表格 / 6-7 空 / 8 ## 表格之后
+	// （table="\n\n|...|\n" 首尾共 3 个换行：空行 3、表格 4-5、空行 6；post 前导 \n\n 再补两个换行 → ## 表格之后 落在第 8 行）
+	if last.LineStart != 8 {
+		t.Errorf("last chunk LineStart = %d, want 8 (table must not shift line numbers)", last.LineStart)
+	}
+}
+
+// MYS-392：文档中重复出现（FAQ 常见）的相同文本块，各自 chunk 的行号必须指向各自位置。
+// 旧实现 strings.Index 取首次出现位置，所有副本行号都指向首处。
+func TestLineNumbersDuplicateParagraph(t *testing.T) {
+	line := "段落内容重复。"
+	block := strings.Repeat(line+"\n", 400) // > 800 token，递归切分成多 chunk
+	text := block + "\n## 分隔\n" + block     // 两个相同大块，中间夹分隔行
+	chunks := NewDefaultChunker().ChunkFile(text, "t.md")
+
+	firstLine := map[string]int{}
+	dupes := 0
+	for _, ch := range chunks {
+		if prevStart, ok := firstLine[ch.Text]; ok {
+			dupes++
+			if ch.LineStart == prevStart {
+				t.Errorf("duplicate chunk text mapped to first occurrence line %d (want its own line): %q", prevStart, ch.Text)
+			}
+		} else {
+			firstLine[ch.Text] = ch.LineStart
+		}
+	}
+	if dupes == 0 {
+		t.Fatal("test setup broken: expected duplicate chunk texts across the two blocks")
+	}
+}
+
+// MYS-392：ChunkID 掺源文件路径 + 块序号，任意维度变化都必须产生不同 ID。
+func TestChunkIDScoped(t *testing.T) {
+	if chunkID("a.md", 0, "text") == chunkID("b.md", 0, "text") {
+		t.Error("ChunkID must differ across files with identical text")
+	}
+	if chunkID("a.md", 0, "text") == chunkID("a.md", 1, "text") {
+		t.Error("ChunkID must differ across chunk indexes in one file")
+	}
+	if chunkID("a.md", 0, "text") == chunkID("a.md", 0, "other") {
+		t.Error("ChunkID must differ across texts")
+	}
+}
+
+// MYS-392：超长 chunk（charSplitChunks 路径）子块 ChunkID 掺文件路径+序号，行号随字节偏移递增。
+func TestCharSplitChunksIDsAndLines(t *testing.T) {
+	c := NewDefaultChunker()
+	seq := 0
+	text := strings.Repeat("abc\n", 1700) // 1700 行 * 4 = 6800 字节 > MaxChunkChars 6000
+	chs := c.charSplitChunks(text, "big.md", 10, &seq)
+	if len(chs) != 2 {
+		t.Fatalf("expected 2 sub-chunks, got %d", len(chs))
+	}
+	if chs[0].ChunkID == chs[1].ChunkID {
+		t.Error("sub-chunks of the same overlong chunk must have distinct ChunkIDs")
+	}
+	if chs[0].ChunkIndex != 0 || chs[1].ChunkIndex != 1 {
+		t.Errorf("ChunkIndex = %d,%d want 0,1", chs[0].ChunkIndex, chs[1].ChunkIndex)
+	}
+	if seq != 2 {
+		t.Errorf("seq = %d, want 2", seq)
+	}
+	if chs[0].LineStart != 10 || chs[0].LineEnd != 1510 { // 1500 行内有 1500 个 \n
+		t.Errorf("chunk0 lines = %d..%d want 10..1510", chs[0].LineStart, chs[0].LineEnd)
+	}
+	if chs[1].LineStart != 1510 || chs[1].LineEnd != 1710 {
+		t.Errorf("chunk1 lines = %d..%d want 1510..1710", chs[1].LineStart, chs[1].LineEnd)
+	}
+}
+
+// MYS-392：目录级分块后，所有文件的 ChunkID 全局唯一（消费端 ChunkByID 按 ID 索引）。
+func TestChunkDirectoryIDsUnique(t *testing.T) {
+	dir := t.TempDir()
+	text := "# 标题\n\n" + strings.Repeat("两个文档共享的段落文本。", 60)
+	for _, f := range []string{"a.md", "b.md"} {
+		if err := os.WriteFile(filepath.Join(dir, f), []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := NewDefaultChunker().ChunkDirectory(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]string{}
+	for file, chs := range got {
+		for _, ch := range chs {
+			if prev, ok := seen[ch.ChunkID]; ok {
+				t.Errorf("ChunkID %q shared by %s and %s", ch.ChunkID, prev, file)
+			}
+			seen[ch.ChunkID] = file
+		}
+	}
 }

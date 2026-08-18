@@ -184,21 +184,25 @@ func toRankedBM25(b []bm25.Result) []fusion.Ranked {
 	return out
 }
 
-// DimMismatchError 维度不匹配错误（替换供应商/模型导致索引需重建）。
-type DimMismatchError struct {
-	IndexDim int
-	QueryDim int
+// FingerprintMismatchError 索引指纹与当前配置不一致（供应商/模型/维度任一差异）→ 需重建。
+type FingerprintMismatchError struct {
+	IndexFp string
+	WantFp  string
 }
 
-func (e *DimMismatchError) Error() string {
-	return fmt.Sprintf("index rebuilt for %d-dim vectors, current query is %d-dim; run `se-rag build` to rebuild",
-		e.IndexDim, e.QueryDim)
+func (e *FingerprintMismatchError) Error() string {
+	return fmt.Sprintf("index built for %s, current config is %s; run `se-rag build` to rebuild",
+		e.IndexFp, e.WantFp)
 }
 
-// CheckFingerprint 校验索引维度 vs 期望维度；不一致返回 DimMismatchError 提示重建。
-func CheckFingerprint(indexDim, wantDim int) error {
-	if indexDim != 0 && wantDim != 0 && indexDim != wantDim {
-		return &DimMismatchError{IndexDim: indexDim, QueryDim: wantDim}
+// CheckFingerprint 校验索引完整指纹（provider.model@dim）vs 期望指纹；
+// 任一为空（历史索引缺指纹字段/配置缺失）视为无法验证 → 提示重建，安全优先。
+func CheckFingerprint(indexFp, wantFp string) error {
+	if indexFp == "" || wantFp == "" {
+		return &FingerprintMismatchError{IndexFp: indexFp, WantFp: wantFp}
+	}
+	if indexFp != wantFp {
+		return &FingerprintMismatchError{IndexFp: indexFp, WantFp: wantFp}
 	}
 	return nil
 }

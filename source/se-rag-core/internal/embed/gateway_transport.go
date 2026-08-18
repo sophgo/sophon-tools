@@ -27,8 +27,10 @@ var gatewayIPFallbacks = []string{"104.21.6.72", "172.67.134.151"}
 var dohServers = []string{"1.1.1.1", "8.8.8.8"}
 
 const (
-	dialTimeout = 5 * time.Second
-	dohTimeout  = 5 * time.Second
+	dialTimeout         = 5 * time.Second
+	dohTimeout          = 5 * time.Second
+	tlsHandshakeTimeout = 10 * time.Second
+	respHeaderTimeout   = 60 * time.Second
 )
 
 // DialContext 与 net.Dialer.DialContext 同签名，便于测试注入 mock 拨号。
