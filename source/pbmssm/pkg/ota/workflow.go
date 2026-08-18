@@ -90,11 +90,20 @@ func (e *Engine) Query(id string) (*Workflow, error) {
 // ---------------------------------------------------------------
 
 // startCmd 消费 worker，按 Step 分发。退出条件：quit 关闭。
+// 退出前排空缓冲：残留 flow（如已入队的 reboot 步骤）可能携带刷机互斥锁
+// （MYS-451），释放避免泄漏——quit 仅测试 Stop 与进程退出路径触发。
 func (e *Engine) startCmd() {
 	for {
 		select {
 		case <-e.quit:
-			return
+			for {
+				select {
+				case flow := <-e.worker:
+					releaseFlashGuard(&flow)
+				default:
+					return
+				}
+			}
 		case flow := <-e.worker:
 			e.processFlow(flow)
 		}

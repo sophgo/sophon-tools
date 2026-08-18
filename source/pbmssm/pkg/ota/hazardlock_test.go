@@ -183,15 +183,18 @@ func TestPCIEFlashWindowHoldsLockThroughRebootStep(t *testing.T) {
 	br := newBlockingRunner()
 	e.runner = br.run
 	e.Start()
+	// 注意：必须用 defer 而非 t.Cleanup 注册放行——t.Fatal 时先跑 defer 后跑
+	// Cleanup，defer e.Stop() 会阻塞等待 worker（worker 卡在被阻塞的 runner 上），
+	// 造成整个测试二进制挂起而非干净失败。defer 按 LIFO 执行：releaseNow 后注册
+	// 先于 e.Stop() 运行，先放行 worker 再停止引擎。
 	defer e.Stop()
-	t.Cleanup(hazard.HazardOps.Release)
-
 	// 卡住 doReboot 的最后一步 shutdown，制造"reboot 步骤执行中"的观测窗口
 	entered, release := br.blockOn("shutdown")
-	// 兜底：断言失败也要放行 worker，否则 e.Stop() 会死锁（worker 阻塞在 runner 上）
+	// 兜底：任何断言失败都要放行 worker，否则 e.Stop() 死锁
 	var releaseOnce sync.Once
 	releaseNow := func() { releaseOnce.Do(func() { close(release) }) }
-	t.Cleanup(releaseNow)
+	defer releaseNow()
+	t.Cleanup(hazard.HazardOps.Release)
 
 	flow := Workflow{Product: "SC5", ModuleName: "a53", FileName: "fw.bin", Type: TypeUpgrade}
 	if err := e.EnqueueFlow(&flow); err != nil {
