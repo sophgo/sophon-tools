@@ -66,19 +66,22 @@ func TestAiAgentRouterRequiresSSO(t *testing.T) {
 	}
 }
 
-// 与 OTA 对齐：OTA 路由挂 SSO 后本地无会话时仍放行（sophliteos 重启后 SSO 暂不生效）。
-// 不做断言，仅确保本测试不污染其他测试的会话状态。
-func TestAiAgentRouterSSONoSessionPassthrough(t *testing.T) {
+// MYS-378：SSO 删除"无活跃会话放行"分支后，无会话时受保护本地路由一律 401
+// （含 ai-agent，与 OTA 同一中间件语义）。
+func TestAiAgentRouterSSONoSessionRejected(t *testing.T) {
 	config.LoadConfig()
 	router := Routers(fstest.MapFS{
 		"index.html": {Data: []byte("<html></html>")},
 	})
 
-	// 无活跃会话：SSO 放行（与 OTA 同一中间件语义），此处只验证不 401
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/device/ai-agent/port", nil)
-	router.ServeHTTP(w, req)
-	if w.Code == http.StatusUnauthorized {
-		t.Fatalf("no active session must pass SSO (same semantics as OTA), got 401")
+	// 无活跃会话：一律 401（篡改前的旧行为是放行，正是 MYS-378 修复的漏洞）
+	for _, p := range []string{"/api/device/ai-agent/port", "/api/device/ai-agent/proxy/index.html"} {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, p, nil)
+		req.Header.Set("Authorization", "Bearer whatever")
+		router.ServeHTTP(w, req)
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("GET %s with no active session: status=%d want 401", p, w.Code)
+		}
 	}
 }

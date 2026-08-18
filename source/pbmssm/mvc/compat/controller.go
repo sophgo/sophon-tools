@@ -590,11 +590,11 @@ func (ctrl *Controller) Rollback(c *gin.Context) {
 		FlashData:  req.FlashData,
 	}
 	if err := ctrl.otaEngine.EnqueueFlow(&flow); err != nil {
-		ctrl.auditWrite(c, uname(c), "ota.upgrade", "ota", "failed")
+		ctrl.auditWrite(c, uname(c), "ota.rollback", "ota", "failed")
 		c.JSON(http.StatusInternalServerError, response.Fail(err.Error()))
 		return
 	}
-	ctrl.auditWrite(c, uname(c), "ota.upgrade", "ota", "success")
+	ctrl.auditWrite(c, uname(c), "ota.rollback", "ota", "success")
 	c.JSON(http.StatusOK, response.OK("add workflow success"))
 }
 

@@ -14,15 +14,16 @@ import (
 // errZipSlip zip-slip / 路径穿越检测。
 var errZipSlip = errors.New("zip-slip detected: entry path escapes destination directory")
 
-// maxExtractSize 单个解压条目大小上限（1GiB），防解压炸弹。
-const maxExtractSize = 1 << 30
-
-// maxExtractTotalBytes 单次解包累计解压上限（与 software 侧同口径 2GiB），
-// 防大量条目累计撑爆磁盘（MYS-389）。var 以便测试注入小值（生产常量等价）。
-var maxExtractTotalBytes = int64(2 << 30)
-
-// maxExtractEntries 单次解包条目数上限，防"百万小文件"耗尽 inode（MYS-389）。
-var maxExtractEntries = 8192
+// 解压上限（var 便于测试注入小值，生产常量等价）：
+//   - maxExtractSize      单个解压条目大小上限（1GiB）
+//   - maxExtractTotalBytes 单次解包累计解压上限（与 software 侧同口径 2GiB），
+//     防大量条目累计撑爆磁盘（MYS-389）
+//   - maxExtractEntries   单次解包条目数上限，防"百万小文件"耗尽 inode（MYS-389）
+var (
+	maxExtractSize       = int64(1 << 30)
+	maxExtractTotalBytes = int64(2 << 30)
+	maxExtractEntries    = 8192
+)
 
 // isSafeEntry 检查 tar 条目路径是否安全（解析后仍在 destDir 内）。
 func isSafeEntry(destDir, entryPath string) bool {
@@ -87,11 +88,17 @@ func extractTarGz(filePath, destDir string) error {
 			if err != nil {
 				return err
 			}
-			// 单条目限制 + 累计总量限制（防 tar 炸弹）
-			n, err := io.CopyN(out, tarReader, maxExtractSize)
+			// 单条目限制 + 累计总量限制（防 tar 炸弹）。
+			// CopyN 上限取 maxExtractSize+1：条目超过单条目上限时复制量恰好
+			// 超过上限并返回 nil（达到 limit），据此报错而非静默截断为 1GiB
+			// （旧实现还会把剩余数据吞掉导致后续条目解析错乱）。
+			n, err := io.CopyN(out, tarReader, maxExtractSize+1)
 			out.Close()
 			if err != nil && err != io.EOF {
 				return err
+			}
+			if n > maxExtractSize {
+				return fmt.Errorf("entry %s exceeds size limit (%d bytes)", header.Name, int64(maxExtractSize))
 			}
 			totalBytes += n
 			if totalBytes > maxExtractTotalBytes {

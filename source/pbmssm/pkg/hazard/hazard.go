@@ -26,14 +26,19 @@ type Lock struct {
 var HazardOps = &Lock{}
 
 // TryAcquire 尝试占用互斥锁；被占用时返回明确错误。
+// holder 为空表示"不占用锁"（并发安全场景，如软件批量安装）：返回 no-op Guard，
+// 其 Release 绝不触碰他人持有的锁。
 func (l *Lock) TryAcquire(holder string) (*Guard, error) {
+	if holder == "" {
+		return &Guard{}, nil
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.holder != "" {
 		return nil, fmt.Errorf("hazardous operation blocked: %s is already in progress", l.holder)
 	}
 	l.holder = holder
-	return &Guard{l: l}, nil
+	return &Guard{l: l, holder: holder}, nil
 }
 
 // Release 释放互斥锁（幂等）。
@@ -48,10 +53,23 @@ func (l *Lock) Release() {
 //	guard, err := hazard.HazardOps.TryAcquire("reboot")
 //	if err != nil { ... }
 //	defer guard.Release()
-type Guard struct{ l *Lock }
+type Guard struct {
+	l      *Lock
+	holder string
+}
 
-// Release 释放占用。显式调用的 Guard 方法便于首试失败时避免 nil 解引用。
-func (g *Guard) Release() { g.l.Release() }
+// Release 释放占用（幂等）。只释放自己持有的锁：若期间锁已被他人
+// 重新获取（如 no-op Guard 与真实占用交错），不会误清他人的持有。
+func (g *Guard) Release() {
+	if g.l == nil {
+		return
+	}
+	g.l.mu.Lock()
+	if g.l.holder == g.holder {
+		g.l.holder = ""
+	}
+	g.l.mu.Unlock()
+}
 
 // ---------------------------------------------------------------
 // 二次确认码

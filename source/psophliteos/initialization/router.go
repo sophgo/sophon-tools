@@ -51,8 +51,8 @@ func Routers(webFS fs.FS) *gin.Engine {
 
 	Router.Use(middleware.BlockerMiddleware())
 
-	// 单点登录（单会话）本地端点：查询活跃会话 / 注册新会话（踢旧）/ 注销。
-	// 不反代到 bmssm，仅 sophliteos web 层维护。
+	// 单点登录（单会话）本地端点：查询活跃会话 / 注册新会话（踢旧，需有效 bmssm JWT）/ 注销。
+	// 不反代到 bmssm，仅 sophliteos web 层维护；register 由 middleware.CheckBMSSMToken 本地校验。
 	Router.GET("/api/sso/active", func(c *gin.Context) {
 		u, ok := middleware.SSOActive()
 		c.JSON(http.StatusOK, gin.H{"active": ok, "username": u})
@@ -64,6 +64,14 @@ func Routers(webFS fs.FS) *gin.Engine {
 		}
 		if err := c.ShouldBindJSON(&req); err != nil || req.Username == "" || req.Token == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+			return
+		}
+		// 鉴权：token 必须是 bmssm 签发的有效 JWT，且其 sub 与请求的 username 一致，
+		// 防止未认证请求用任意 username/token 自造活跃会话（伪造活跃会话可顶掉合法
+		// 用户 → 登录 DoS）。sub 取自 bmssm 登录签发，与前端登录输入一致。
+		sub, _, err := middleware.CheckBMSSMToken(req.Token)
+		if err != nil || sub != req.Username {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 			return
 		}
 		middleware.SSORegister(req.Username, req.Token)

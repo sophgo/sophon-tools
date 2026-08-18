@@ -108,6 +108,7 @@ export const useUserStore = defineStore({
     ): Promise<GetUserInfoModel | null> {
       try {
         const { goHome = true, mode = 'none' as ErrorMessageMode, ...loginParams } = params;
+        const { t } = useI18n();
 
         // 单点登录预检：若已有"另一用户"在线，弹窗确认是否继续（继续将踢掉前者）。
         // 同用户重复登录不提示（视为刷新）。
@@ -125,7 +126,24 @@ export const useUserStore = defineStore({
         // 注册为活跃会话（踢掉之前的会话）。必须 await：register 要先于跳转后 overview
         // 发出的 /api/v1/* 鉴权请求到达服务端，否则此时活跃会话仍是旧用户，你的请求会被
         // SSO 中间件判为 401 SESSION_OFFLINE → 被弹回登录页（"登录后 overview 刷新跳登录"）。
-        await ssoRegister(loginParams.username, token).catch(() => {});
+        // register 失败（无活跃会话时受保护接口全部 401）→ 中止登录并明确提示，避免进入
+        // 首页又被弹回登录页的困惑体验。
+        try {
+          await ssoRegister(loginParams.username, token);
+        } catch (regError) {
+          this.setToken(undefined);
+          // 401/403（token 无效、bmssm 密钥不一致等）对用户都属于"建立会话失败"，
+          // 直接给友好文案；网络异常等才透出具体错误。
+          const status = (regError as any)?.response?.status;
+          const regErrMsg =
+            status === 401 || status === 403
+              ? t('sys.login.registerFailed')
+              : (regError as any)?.response?.data?.error ||
+                (regError as any)?.response?.data?.error_message ||
+                (regError as unknown as Error)?.message ||
+                t('sys.login.registerFailed');
+          return Promise.reject(new Error(regErrMsg));
+        }
         // ssm 返回 changePass 为 boolean 或 1，均视为需改密
         const needChange = changePass === true || changePass === 1;
         this.setFirstLogin(needChange);

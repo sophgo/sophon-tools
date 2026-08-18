@@ -94,3 +94,24 @@ func TestExtractNormalWithinLimits(t *testing.T) {
 		t.Fatalf("b.txt = %q err=%v", body, err)
 	}
 }
+
+// TestExtractSingleEntrySizeLimit 单条目超过上限必须报错（而非静默截断为 1GiB
+// 并把剩余数据吞掉——旧实现缺陷，MYS-389 一并修复）。
+func TestExtractSingleEntrySizeLimit(t *testing.T) {
+	old := maxExtractSize
+	maxExtractSize = 100
+	defer func() { maxExtractSize = old }()
+	oldTotal := maxExtractTotalBytes
+	maxExtractTotalBytes = 1 << 20
+	defer func() { maxExtractTotalBytes = oldTotal }()
+
+	err := extractBytes(t, writeTarGz(t, map[string]string{
+		"big.bin": strings.Repeat("x", 200),
+	}), t.TempDir())
+	if err == nil {
+		t.Fatal("expected single entry size limit error, got nil")
+	}
+	if !strings.Contains(err.Error(), "exceeds size limit") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}

@@ -16,5 +16,10 @@ db:
 
 # bmssm 反代目标。登录/鉴权全部由 bmssm 处理，sophliteos 不保存其凭据；
 # 部署时请确认 bmssm 侧口令强度。
+# authSecret：本地敏感路由（OTA/升级/metrics/version）校验 bmssm JWT 时使用的签名密钥。
+#   留空（推荐）：读取 bmssm 持久化随机 secret（/var/lib/bmssm/jwt_secret，默认部署一致）；
+#   仅当 bmssm 显式配置了 server.authSecret 时，此处才需配置相同值，否则两者不一致会导致
+#   /api/v1 登录成功后 /api/sso/register 校验失败（前端提示"建立会话失败"）。
 bmssm:
   server: '127.0.0.1:9779'
+  authSecret: ''
