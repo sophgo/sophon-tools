@@ -32,7 +32,6 @@ func Migrate(db *gorm.DB) {
 		{"vlm_enabled", "bool"},
 		{"vlm_override_model", "bool"},
 		{"forward_key", "text"},
-		{"forward_key_written", "bool"},
 	}
 	for _, c := range cols {
 		if db.Dialect().HasColumn("llm_proxy_config", c.name) {

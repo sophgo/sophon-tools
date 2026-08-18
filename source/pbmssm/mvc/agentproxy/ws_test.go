@@ -136,6 +136,57 @@ func TestWSAuthEmptyKeyAllowsAll(t *testing.T) {
 	conn.Close()
 }
 
+// TestHubKeyRotation 验证 MYS-387 轮换同步：SetKey 后旧子协议立即失效（403），
+// 新子协议放行——无需重启 bmssm。
+func TestHubKeyRotation(t *testing.T) {
+	mod := NewModule(DefaultConfig(), nil, nil)
+	h := newHub(mod, "old-key")
+	srv := httptest.NewServer(http.HandlerFunc(h.serveWS))
+	t.Cleanup(srv.Close)
+
+	// 轮换前：旧 key 放行
+	d0 := websocket.Dialer{Subprotocols: []string{"token.old-key"}}
+	conn0, _, err := d0.Dial(wsURL(srv.URL)+wsPath, nil)
+	if err != nil {
+		t.Fatalf("pre-rotation old key dial failed: %v", err)
+	}
+	conn0.Close()
+
+	// 轮换：新 key 生效
+	h.SetKey("new-key")
+
+	// 旧 key → 403（无升级）
+	d1 := websocket.Dialer{Subprotocols: []string{"token.old-key"}}
+	_, resp1, err1 := d1.Dial(wsURL(srv.URL)+wsPath, nil)
+	if err1 == nil {
+		t.Fatal("rotated-away old key should fail")
+	}
+	if resp1 == nil || resp1.StatusCode != http.StatusForbidden {
+		t.Fatalf("old key after rotation status = %v, want 403", resp1)
+	}
+
+	// 新 key → 连接成功
+	d2 := websocket.Dialer{Subprotocols: []string{"token.new-key"}}
+	conn2, resp2, err2 := d2.Dial(wsURL(srv.URL)+wsPath, nil)
+	if err2 != nil {
+		t.Fatalf("new key dial failed: %v", err2)
+	}
+	conn2.Close()
+	if resp2.Header.Get("Sec-Websocket-Protocol") != "token.new-key" {
+		t.Fatalf("echoed subproto = %q, want token.new-key", resp2.Header.Get("Sec-Websocket-Protocol"))
+	}
+
+	// 无子协议 → 403
+	d3 := websocket.Dialer{}
+	_, resp3, err3 := d3.Dial(wsURL(srv.URL)+wsPath, nil)
+	if err3 == nil {
+		t.Fatal("no subproto should fail after rotation")
+	}
+	if resp3 == nil || resp3.StatusCode != http.StatusForbidden {
+		t.Fatalf("no subproto status = %v, want 403", resp3)
+	}
+}
+
 // mockModuleForWS 构造一个带 ACP client 的模块（Client() 可交互）。
 // client 的事件回调链到模块 dispatchEvent（与真实装配一致），
 // Hub 通过 SetEventFn 注入后事件可路由到连接。

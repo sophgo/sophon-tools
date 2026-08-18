@@ -87,7 +87,7 @@ func (s *Service) SaveConfig(req SaveRequest) (Config, error) {
 		VLMApiKey:   nonEmpty(req.VLMApiKey, cur.VLMApiKey, ""),
 		// VLMModel 为空（未配置）时按 LLM API Base 分流默认模型（MYS-193）：
 		// Sophnet → qwen3-vl-plus；本地 LLM → 保持空（不经过描述化，直接带 image 透传）。
-		VLMModel: nonEmpty(req.VLMModel, defaultVLMModel(nonEmpty(req.LLMApiBase, cur.LLMApiBase))),
+		VLMModel:    nonEmpty(req.VLMModel, defaultVLMModel(nonEmpty(req.LLMApiBase, cur.LLMApiBase))),
 		VLMEnabled:  enabled(req.VLMEnabled, cur.VLMEnabled),
 		VLMOverride: enabled(req.VLMOverride, cur.VLMOverride),
 		ForwardKey:  cur.ForwardKey,
@@ -117,13 +117,6 @@ func (s *Service) ResetForwardKey() (string, error) {
 	return key, nil
 }
 
-// SetForwardKeyWritten 标记转发 key 已写入本地 picoclaw。
-func (s *Service) SetForwardKeyWritten() {
-	if s != nil && s.db != nil {
-		_ = s.db.Model(&Config{}).Where("id = ?", 1).Update("forward_key_written", true).Error
-	}
-}
-
 // SyncServerFromDB 依据库中 llm-proxy 配置同步转发 server（供 Agent 服务启停联动，
 // 需求 MYS-212）：LLM/VLM 任一启用则启动转发 server（18080），任一未启用则停止。
 // agentproxy 启用/禁用 reasonix 时调用，保证「reasonix 与 llm-proxy 一起开/关」。
@@ -136,32 +129,21 @@ func SyncServerFromDB(db *gorm.DB) error {
 	return nil
 }
 
-// ForwardKeyWritten 查询转发 key 是否已写入本地 picoclaw。
-func (s *Service) ForwardKeyWritten() bool {
-	if s == nil || s.db == nil {
-		return false
-	}
-	var written bool
-	_ = s.db.Model(&Config{}).Where("id = ?", 1).Pluck("forward_key_written", &written).Error
-	return written
-}
-
 // ToResponse 构造响应（脱敏 key；ForwardKey 明文）。
-func (c Config) ToResponse(written bool) ConfigResponse {
+func (c Config) ToResponse() ConfigResponse {
 	return ConfigResponse{
-		LLMApiBase:      c.LLMApiBase,
-		LLMModel:        c.LLMModel,
-		LLMEnabled:      c.LLMEnabled,
-		LLMOverride:     c.LLMOverride,
-		LLMHasKey:       c.LLMApiKey != "",
-		VLMApiBase:      c.VLMApiBase,
-		VLMModel:        c.VLMModel,
-		VLMEnabled:      c.VLMEnabled,
-		VLMOverride:     c.VLMOverride,
-		VLMHasKey:       c.VLMApiKey != "",
-		ForwardKey:      c.ForwardKey,
-		ForwardKeyReady: written,
-		UpdatedAt:       c.UpdatedAt,
+		LLMApiBase:  c.LLMApiBase,
+		LLMModel:    c.LLMModel,
+		LLMEnabled:  c.LLMEnabled,
+		LLMOverride: c.LLMOverride,
+		LLMHasKey:   c.LLMApiKey != "",
+		VLMApiBase:  c.VLMApiBase,
+		VLMModel:    c.VLMModel,
+		VLMEnabled:  c.VLMEnabled,
+		VLMOverride: c.VLMOverride,
+		VLMHasKey:   c.VLMApiKey != "",
+		ForwardKey:  c.ForwardKey,
+		UpdatedAt:   c.UpdatedAt,
 	}
 }
 

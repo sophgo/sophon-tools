@@ -3,8 +3,11 @@ package agentproxy
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 	"time"
+
+	"bmssm/mvc/llmproxy"
 )
 
 // TestProcessStartInitialize 用真实 mock 脚本验证：
@@ -319,5 +322,83 @@ func TestHomeDirDefault(t *testing.T) {
 	_ = os.Setenv("SOPHON_REASONIX_HOME", "/var/custom/home")
 	if got := pm.homeDir(); got != "/var/custom/home" {
 		t.Fatalf("homeDir() with env = %q, want /var/custom/home", got)
+	}
+}
+
+// TestBuildProcessEnvInjectForwardKey 验证 MYS-387 env 组装：
+// 继承 base env + HOME 覆盖 + envExtra 注入（DEEPSEEK_API_KEY=forward key）。
+func TestBuildProcessEnvInjectForwardKey(t *testing.T) {
+	env := buildProcessEnv(
+		[]string{"PATH=/usr/bin", "HOME=/real/home"},
+		"/data/sophon/reasonix-home",
+		func() []string { return []string{"DEEPSEEK_API_KEY=forward-key-abc"} },
+	)
+	joined := strings.Join(env, "\n")
+	for _, want := range []string{
+		"PATH=/usr/bin",
+		"HOME=/data/sophon/reasonix-home", // HOME 应被定制 home 覆盖
+		"DEEPSEEK_API_KEY=forward-key-abc",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("env missing %q: %v", want, env)
+		}
+	}
+}
+
+// TestNewModuleEnvInjectorUsesDBForwardKey 验证 NewModule 装配的 pm 注入器
+// 动态读取 llm_proxy_config.forward_key（DB 可读/不可读两种路径）。
+func TestNewModuleEnvInjectorUsesDBForwardKey(t *testing.T) {
+	// DB 可用：注入器产出 DEEPSEEK_API_KEY=DB 中的 forward key
+	db := newTestDB(t)
+	if err := db.AutoMigrate(&llmproxy.Config{}).Error; err != nil {
+		t.Fatalf("migrate llmproxy config: %v", err)
+	}
+	svc := llmproxy.NewService(db)
+	if _, err := svc.SaveConfig(llmproxy.SaveRequest{
+		LLMApiBase: "http://x/v1", LLMApiKey: "k", LLMModel: "m",
+	}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	_ = db.Model(&llmproxy.Config{}).Where("id = ?", 1).Update("forward_key", "db-key-123").Error
+
+	m := NewModule(Config{Enabled: true, Model: "test-model"}, db, nil)
+	m.pm.mu.Lock()
+	extra := m.pm.envExtra
+	m.pm.mu.Unlock()
+	if extra == nil {
+		t.Fatal("env injector not set")
+	}
+	found := false
+	for _, kv := range extra() {
+		if kv == "DEEPSEEK_API_KEY=db-key-123" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("injector output = %v, want DEEPSEEK_API_KEY=db-key-123", extra())
+	}
+
+	// DB nil：注入器为空（不 panic，无 key 可注）
+	m2 := NewModule(DefaultConfig(), nil, nil)
+	m2.pm.mu.Lock()
+	extra2 := m2.pm.envExtra
+	m2.pm.mu.Unlock()
+	if extra2 == nil {
+		t.Fatal("injector should be present even with nil db")
+	}
+	if kv := extra2(); len(kv) != 0 {
+		t.Fatalf("nil db injector should return nothing, got %v", kv)
+	}
+
+	// 轮换后：DB 更新 → 注入器动态读到新 key（进程重启后即生效，无需重启 bmssm）
+	_ = db.Model(&llmproxy.Config{}).Where("id = ?", 1).Update("forward_key", "rotated-key-999").Error
+	found2 := false
+	for _, kv := range extra() {
+		if kv == "DEEPSEEK_API_KEY=rotated-key-999" {
+			found2 = true
+		}
+	}
+	if !found2 {
+		t.Fatalf("injector should read rotated key from DB, got %v", extra())
 	}
 }

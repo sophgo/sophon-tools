@@ -11,7 +11,6 @@ import (
 )
 
 // ServiceStatus Reasonix 进程服务状态快照（供前端「服务管理」展示）。
-// 语义对齐旧 sophpicoclaw 上报结构，前端无需大改。
 type ServiceStatus struct {
 	Active       bool   `json:"active"`       // Reasonix 进程是否存活
 	ActiveState  string `json:"activeState"`  // 语义值：running / stopped

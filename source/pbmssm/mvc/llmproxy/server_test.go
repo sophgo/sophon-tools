@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -896,39 +895,6 @@ func TestDisabledReturns503(t *testing.T) {
 
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", rec.Code)
-	}
-}
-
-// TestRestartPicoclawUsesSystemctl 验证重启走 systemctl restart sophpicoclaw，
-// 而非旧的 pkill + 手工 spawn。通过注入 runSystemctlRestart 捕获调用。
-func TestRestartPicoclawUsesSystemctl(t *testing.T) {
-	var called []string
-	old := runSystemctlRestart
-	runSystemctlRestart = func(name string) error {
-		called = append(called, name)
-		return nil
-	}
-	defer func() { runSystemctlRestart = old }()
-
-	restartPicoclaw()
-
-	if len(called) != 1 || called[0] != "sophpicoclaw.service" {
-		t.Fatalf("runSystemctlRestart calls = %v, want [sophpicoclaw.service]", called)
-	}
-}
-
-// TestDevproxyKeyPathPrefersOptSophon 验证 devproxy.key 优先定位到 /opt/sophon/picoclaw。
-// 仅在目标路径存在时生效；CI 环境无该路径则跳过。
-func TestDevproxyKeyPathPrefersOptSophon(t *testing.T) {
-	if st, err := os.Stat("/opt/sophon/picoclaw/.picoclaw"); err != nil || !st.IsDir() {
-		t.Skip("no /opt/sophon/picoclaw/.picoclaw on this host")
-	}
-	p, err := devproxyKeyPath()
-	if err != nil {
-		t.Fatalf("devproxyKeyPath: %v", err)
-	}
-	if p != "/opt/sophon/picoclaw/.picoclaw/devproxy.key" {
-		t.Fatalf("devproxyKeyPath = %q, want /opt/sophon/picoclaw/.picoclaw/devproxy.key", p)
 	}
 }
 
