@@ -181,8 +181,7 @@ func TestRunSOCRunnerFails(t *testing.T) {
 
 func TestStatusSOCNoneRunning(t *testing.T) {
 	e, _, flags, _ := newTestEngine(t, false)
-	flags.success = false
-	flags.error = false
+	flags.mark(false, false)
 	st, _ := e.StatusSOC()
 	if st != StatusRunning {
 		t.Errorf("status = %d, want %d (Running)", st, StatusRunning)
@@ -191,7 +190,7 @@ func TestStatusSOCNoneRunning(t *testing.T) {
 
 func TestStatusSOCSuccess(t *testing.T) {
 	e, _, flags, _ := newTestEngine(t, false)
-	flags.success = true
+	flags.mark(true, false)
 	st, info := e.StatusSOC()
 	if st != StatusSuccess {
 		t.Errorf("status = %d, want %d", st, StatusSuccess)
@@ -203,7 +202,7 @@ func TestStatusSOCSuccess(t *testing.T) {
 
 func TestStatusSOCFail(t *testing.T) {
 	e, _, flags, _ := newTestEngine(t, false)
-	flags.error = true
+	flags.mark(false, true)
 	flags.panicLine = "LAST_PART_NOT_FLASH mode, check last part start [28602368] != [49573888]"
 	st, info := e.StatusSOC()
 	if st != StatusFail {
@@ -323,7 +322,7 @@ func TestRunSOCFlowSuccess(t *testing.T) {
 		"md5.txt":       "deadbeef boot.img\n",
 	})
 	// 预置 success 标志，pollOnce 首次即命中
-	flags.success = true
+	flags.mark(true, false)
 
 	flow := Workflow{Product: "SE7", FileName: "fw.tgz"}
 	if err := e.EnqueueFlow(&flow); err != nil {
@@ -352,7 +351,7 @@ func TestRunSOCFlowFail(t *testing.T) {
 
 	createOTAFixture(t, e.paths.SOCOTADir, "fw.tgz", map[string]string{"md5.txt": "x\n"})
 	// 预置 error 标志，poll 命中 Fail
-	flags.error = true
+	flags.mark(false, true)
 	flags.panicLine = "ota failed: gpt corrupt"
 
 	flow := Workflow{Product: "se9", FileName: "fw.tgz"}

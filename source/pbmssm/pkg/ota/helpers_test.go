@@ -45,7 +45,10 @@ func (r *recordingRunner) calls_() []runnerCall {
 
 // fakeFlags 内存 flag 检查器，按 PathConfig 的标志路径比对，可预设 success/error。
 // 用指针接收者，便于用例在运行中翻转标志（模拟 ota.sh 写入 /dev/shm 标志）。
+// 字段经 mu 保护：poll 协程（Exists/ReadTail/ReadPanicLine）与翻转标志的测试
+// 协程并发访问，不保护会被 -race 抓到。
 type fakeFlags struct {
+	mu        sync.Mutex
 	success   bool
 	error     bool
 	logTail   string
@@ -53,7 +56,17 @@ type fakeFlags struct {
 	paths     PathConfig
 }
 
+// mark 线程安全地更新 success/error 标志（测试协程调用，模拟 ota.sh 写入标志）。
+func (f *fakeFlags) mark(success, error bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.success = success
+	f.error = error
+}
+
 func (f *fakeFlags) Exists(path string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if path == f.paths.SuccessFlag {
 		return f.success
 	}
@@ -64,6 +77,8 @@ func (f *fakeFlags) Exists(path string) bool {
 }
 
 func (f *fakeFlags) ReadTail(path string, n int) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if path == f.paths.ShellLog {
 		return f.logTail
 	}
@@ -71,6 +86,8 @@ func (f *fakeFlags) ReadTail(path string, n int) string {
 }
 
 func (f *fakeFlags) ReadPanicLine(path string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if path == f.paths.ShellLog {
 		return f.panicLine
 	}

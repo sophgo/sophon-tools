@@ -6,7 +6,11 @@
 // workflow 引擎结构与状态流转对齐 bmssm pkg/workflow。
 package ota
 
-import "time"
+import (
+	"time"
+
+	"bmssm/pkg/hazard"
+)
 
 // ---------------------------------------------------------------
 // 状态 / 类型常量（对齐 bmssm）
@@ -63,6 +67,11 @@ type Workflow struct {
 	FlashData      bool      `gorm:"-" json:"flashData"`
 	CreateTime     time.Time `gorm:"column:create_time" json:"createTime"`
 	LastRebootTime time.Time `gorm:"column:last_reboot_time" json:"lastRebootTime"`
+
+	// guard 是刷机/回滚窗口高危互斥锁的占用句柄（MYS-451）。
+	// 仅内存态、不落库（gorm 忽略未导出字段）；随 flow 值拷贝流转，
+	// 从 handleFlash 持锁到该 flow 到达终态（Success/Fail）才释放。
+	guard *hazard.Guard
 }
 
 // TableName 自定义表名。

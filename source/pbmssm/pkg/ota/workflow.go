@@ -115,6 +115,12 @@ func (e *Engine) processFlow(flow Workflow) {
 // dryRun：直接标 Success（模拟）。
 // SOC 非干跑：runSOC 已置 Running + 启动轮询，ota.sh 自带 reboot。
 // PCIE/多节点非干跑：刷机成功后推进到 reboot 步骤并重新入队。
+//
+// MYS-451：非干跑刷机从本入口起全程持高危互斥锁（holder=HazardHolderFlash），
+// 直到本 flow 到达终态（Success/Fail）才释放——防止刷机/OTA 自带重启的窗口内
+// 被并发 reboot/shutdown 打断（brick 场景）。锁随 flow 拷贝携带：
+// SOC 由 pollSOC 终态判定后释放；PCIE/多节点随 flow 传递到 reboot 步骤执行完毕；
+// runCmd 失败与未知产品路径在本函数内释放。
 func (e *Engine) handleFlash(flow Workflow) {
 	if e.dryRun {
 		logger.Info("[dryRun] simulate flash success: product=%s file=%s flashData=%v", flow.Product, flow.FileName, flow.FlashData)
@@ -122,20 +128,29 @@ func (e *Engine) handleFlash(flow Workflow) {
 		return
 	}
 
+	// 已有人在刷机/高危操作中 → 本 flow 快速拒绝（不排队不等待），标 Fail 供查询。
+	if err := e.acquireFlashGuard(&flow); err != nil {
+		e.updateStatus(flow.ID, StatusFail, "hazard lock: "+err.Error())
+		return
+	}
+
 	if err := e.runCmd(flow); err != nil {
 		logger.Error("flash failed: product=%s wf=%s err=%v", flow.Product, flow.WorkflowID, err)
 		e.updateStatus(flow.ID, StatusFail, err.Error())
+		releaseFlashGuard(&flow)
 		return
 	}
 
 	switch productClass(flow.Product) {
 	case ClassSOC:
-		// runSOC 已置 Running 并启动轮询 goroutine，ota.sh 自带 reboot，无需推进。
+		// runSOC 已置 Running 并启动轮询 goroutine，ota.sh 自带 reboot，无需推进；
+		// 互斥锁由 pollSOC 在成功/失败终态判定后释放（flow.guard 随 flow 传入）。
 	case ClassPCIE, ClassMultiNode:
-		e.advanceToReboot(flow)
+		e.advanceToReboot(flow) // 锁随 flow 重新入队到 reboot 步骤，handleReboot 末尾释放
 	default:
 		logger.Warn("flash success but unknown product: %s", flow.Product)
 		e.updateStatus(flow.ID, StatusSuccess, "unknown product, marked success")
+		releaseFlashGuard(&flow)
 	}
 }
 
@@ -145,10 +160,16 @@ func (e *Engine) handleReboot(flow Workflow) {
 		e.updateStatus(flow.ID, StatusSuccess, "dryRun: reboot simulated")
 		return
 	}
+	// MYS-451：刷机窗口的互斥锁经 advanceToReboot 延续到此；reboot 步骤执行完毕
+	// 即该 flow 终态，延迟释放。doReboot 内 shutdown -r now 成功时进程随之重启、
+	// 内存锁随进程复位——此处显式释放是干净关闭的兜底（如重启命令失败的场景）。
+	defer releaseFlashGuard(&flow)
 	e.doReboot(flow)
 }
 
 // advanceToReboot 推进 flow 到 reboot 步骤并重新入队（对齐 bmssm nextStep+Strategy|=reboot）。
+// MYS-451：不重新入队即失败的路径（DB 更新失败 / worker 满）在此释放刷机互斥锁，
+// 避免锁被已失败 flow 泄漏。
 func (e *Engine) advanceToReboot(flow Workflow) {
 	newStrategy := flow.Strategy
 	if !strings.Contains(newStrategy, StrategyReboot) {
@@ -160,6 +181,7 @@ func (e *Engine) advanceToReboot(flow Workflow) {
 	}).Error; err != nil {
 		logger.Error("advanceToReboot update failed: %v", err)
 		e.updateStatus(flow.ID, StatusFail, "advance reboot step: "+err.Error())
+		releaseFlashGuard(&flow)
 		return
 	}
 	flow.Step = StepReboot
@@ -169,6 +191,7 @@ func (e *Engine) advanceToReboot(flow Workflow) {
 	default:
 		logger.Error("worker full when re-enqueueing reboot: wf=%s", flow.WorkflowID)
 		e.updateStatus(flow.ID, StatusFail, "worker queue full on reboot")
+		releaseFlashGuard(&flow)
 	}
 }
 

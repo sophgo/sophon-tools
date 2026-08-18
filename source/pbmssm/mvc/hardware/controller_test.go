@@ -13,6 +13,7 @@ import (
 	"bmssm/middleware"
 	"bmssm/pkg/auth"
 	"bmssm/pkg/hazard"
+	"bmssm/pkg/ota"
 	"bmssm/pkg/response"
 )
 
@@ -196,6 +197,60 @@ func TestRebootBlockedByActiveHazardOp409(t *testing.T) {
 	}
 	if rb.calls.Load() != 0 {
 		t.Fatalf("reboot must not run while hazard op active, calls=%d", rb.calls.Load())
+	}
+}
+
+// TestRebootBlockedDuringFlashWindowAndFreeAfter 覆盖 MYS-451 F2 用户可见契约：
+// worker 持锁（模拟 OTA 刷机窗口，holder 与 ota 引擎 handleFlash 一致）→
+// /hardware/reboot → 409 且 fake rebooter 未被调用（不实际执行 /sbin/reboot）；
+// 窗口结束（flow 终态、锁释放）→ 再次 reboot → 200 且正常执行。
+func TestRebootBlockedDuringFlashWindowAndFreeAfter(t *testing.T) {
+	setupHardwareTest(t)
+	fr := newFakeFileReader()
+	rb := &fakeRebooter{}
+	svc := NewService(&fakeCmdRunner{}, fr, rb)
+	ctrl := NewController(svc)
+
+	r := gin.New()
+	api := r.Group("/api/v1")
+	api.Use(middleware.Auth())
+	api.POST("/hardware/reboot", ctrl.Reboot)
+	token := makeAuthToken(t)
+
+	// 模拟刷机中：占用全局高危互斥锁（与 ota.Engine.handleFlash 的持有者一致）
+	guard, err := hazard.HazardOps.TryAcquire(ota.HazardHolderFlash)
+	if err != nil {
+		t.Fatalf("acquire flash window for test: %v", err)
+	}
+	t.Cleanup(guard.Release)
+
+	postReboot := func() *httptest.ResponseRecorder {
+		body, _ := json.Marshal(RebootRequest{Delay: 0, Confirm: hazard.NewConfirmCode()})
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/hardware/reboot", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	// 刷机窗口内：409（TryAcquire 冲突），且不实际执行重启
+	w := postReboot()
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409 while flash window open, got %d body=%s", w.Code, w.Body.String())
+	}
+	if rb.calls.Load() != 0 {
+		t.Fatalf("reboot must not run during flash window, calls=%d", rb.calls.Load())
+	}
+
+	// 窗口结束（flow 终态后引擎释放锁）→ reboot 正常 200 并执行
+	guard.Release()
+	w2 := postReboot()
+	if w2.Code != http.StatusOK {
+		t.Fatalf("expected 200 after flash window closed, got %d body=%s", w2.Code, w2.Body.String())
+	}
+	if rb.calls.Load() != 1 {
+		t.Fatalf("expected 1 reboot call after window closed, got %d", rb.calls.Load())
 	}
 }
 

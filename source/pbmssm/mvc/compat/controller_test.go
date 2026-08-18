@@ -772,6 +772,61 @@ func TestCompatRollback(t *testing.T) {
 	}
 }
 
+// TestCompatHazardBlockDuringFlashWindow 覆盖 MYS-451：OTA 刷机窗口
+// （引擎持 HazardHolderFlash 互斥锁）内，upgrade / rollback / shutdown
+// 请求一律 409（TryAcquire 冲突）且不实际执行——reboot/shutdown 在锁被占时
+// 直接短路（绝不真正关机）；窗口结束（锁释放）后 upgrade 恢复 200。
+func TestCompatHazardBlockDuringFlashWindow(t *testing.T) {
+	r := setupCompatTest(t)
+	token := getNormalToken(t, r)
+
+	guard, err := hazard.HazardOps.TryAcquire(ota.HazardHolderFlash)
+	if err != nil {
+		t.Fatalf("acquire flash window for test: %v", err)
+	}
+	t.Cleanup(guard.Release)
+
+	postSsm := func(path string, payload interface{}) *httptest.ResponseRecorder {
+		body, _ := json.Marshal(payload)
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, path, bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+token)
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	// 刷机窗口内：upgrade / rollback / shutdown → 409（不实际执行）
+	// 注意 confirm 码要在每个请求体内现取：NewConfirmCode 会覆盖全局码，
+	// 先取后发的码会因被下一次生成替换而失效（403）。
+	for _, path := range []string{"/api/v1/ota/upgrade", "/api/v1/ota/rollback"} {
+		w := postSsm(path, OtaVersion{Product: "SE7", FileName: "fw.tgz", Confirm: hazard.NewConfirmCode()})
+		if w.Code != http.StatusConflict {
+			t.Errorf("%s during flash window = %d, want 409, body=%s", path, w.Code, w.Body.String())
+		} else if !strings.Contains(w.Body.String(), ota.HazardHolderFlash) {
+			t.Errorf("%s 409 body should mention holder %q, got %s", path, ota.HazardHolderFlash, w.Body.String())
+		}
+	}
+	w := postSsm("/api/v1/hardware/shutdown", map[string]interface{}{"id": 1, "confirm": hazard.NewConfirmCode()})
+	if w.Code != http.StatusConflict {
+		t.Errorf("shutdown during flash window = %d, want 409, body=%s", w.Code, w.Body.String())
+	} else if !strings.Contains(w.Body.String(), ota.HazardHolderFlash) {
+		t.Errorf("shutdown 409 body should mention holder %q, got %s", ota.HazardHolderFlash, w.Body.String())
+	}
+
+	// 窗口结束（flow 终态、锁释放）→ upgrade 恢复 200 "add workflow success"
+	guard.Release()
+	body, _ := json.Marshal(OtaVersion{Product: "SE7", FileName: "fw.tgz", Confirm: hazard.NewConfirmCode()})
+	w = httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ota/upgrade", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("upgrade after flash window = %d, want 200, body=%s", w.Code, w.Body.String())
+	}
+}
+
 // ---------------------------------------------------------------
 // OTA 端到端：上传 → 升级 → 列表/查询
 // ---------------------------------------------------------------
