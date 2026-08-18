@@ -90,6 +90,9 @@ func Register(r *gin.Engine) {
 		api.POST("/user", userCtrl.CreateUser)
 		api.DELETE("/user/:name", userCtrl.DeleteUser)
 
+		// 高危操作二次确认码（MYS-389）：任何 reboot/shutdown/OTA/install 前先取码
+		api.GET("/hazard/challenge", hwCtrl.Challenge)
+
 		// 审计日志
 		api.GET("/audit", auditCtrl.ListLogs)
 

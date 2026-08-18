@@ -34,7 +34,7 @@ func (e *sophnetEmbedder) Embed(ctx context.Context, texts []string) ([][]float3
 	payload := map[string]any{"model": e.model, "input_texts": texts, "dimensions": e.dim}
 	url := e.baseURL + "/open-apis/projects/easyllms/embeddings"
 	var resp snEmbedResp
-	if err := postJSON(ctx, url, e.apiKey, payload, &resp); err != nil {
+	if err := postJSON(ctx, []string{url}, e.apiKey, payload, &resp); err != nil {
 		return nil, err
 	}
 	out := make([][]float32, len(texts))
@@ -79,7 +79,7 @@ func (r *sophnetReranker) Rerank(ctx context.Context, query string, docs []strin
 	payload := map[string]any{"model": r.model, "query": query, "documents": docs, "top_n": topN}
 	url := r.baseURL + "/open-apis/projects/rerank"
 	var resp snRerankResp
-	if err := postJSON(ctx, url, r.apiKey, payload, &resp); err != nil {
+	if err := postJSON(ctx, []string{url}, r.apiKey, payload, &resp); err != nil {
 		return nil, err
 	}
 	if resp.Status != 0 {

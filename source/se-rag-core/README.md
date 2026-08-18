@@ -12,6 +12,7 @@ SE 系列知识库的 **Go RAG 检索核心**，替代现行 Python 栈（numpy 
 - **多知识库兼容**：不同知识库用不同 `-index-dir` / `--docs-dir` 即可，复用同一检索核心仅换目录
 - **供应商可切换**：siliconflow / sophnet 两族 embedding 与 reranker，可配置不写死
 - **内置默认 key（混淆内嵌）**：预置 siliconflow 免费 key，源码中以 XOR 混淆字节内嵌（不落明文）；模型固定 `BAAI/bge-m3`（embedding）与 `BAAI/bge-reranker-v2-m3`（rerank）；使用内置 key 时强制限流（并发≤1、单次≤2段落）；用户自备 key 放开
+- **内置网关故障转移链**：内置 key 请求经自建网关转发 SiliconFlow——主网关 Cloudflare Worker（`*.workers.dev`）不可达（连接超时 / 5xx / DNS 失败）时自动切换阿里云函数计算（FC3.0）同协议网关（`*.fcapp.run`，国内直连）；两网关均不可达时降级纯 BM25（见下文「内置网关故障转移链」）
 - **供应商切换校验**：索引记录 embedding 指纹（`<provider>.<model>@<dim>`），切换供应商/模型后 `se-rag doctor` 检测并提示重建
 - **检索输出含来源信息**：每条结果标记源文件的相对路径与片段行号区间
 - **纯 Go，静态链接，零 C 依赖**：`CGO_ENABLED=0`，无 pip / aarch64 wheel 依赖
@@ -119,6 +120,25 @@ export SE_RAG_RERANK_KEY="sk-user-rerank-key"
 > throwaway key（限流，避免滥用）。生产/共享部署应通过 `SE_RAG_EMBED_KEY` / `SE_RAG_RERANK_KEY`
 > 环境变量注入自备 key（也即放开限流），切勿在公共镜像或日志中泄露内置 key。
 
+## 内置网关故障转移链
+
+内置 key 的上游链路为「网关 → SiliconFlow 源站」，网关承担鉴权与模型白名单（仅两模型）。为消除单点，
+内置网关部署了两份同协议镜像，请求按有序列表轮转、失败自动切换：
+
+| 优先级 | 网关 | 地址 | 说明 |
+|--------|------|------|------|
+| 1 | Cloudflare Worker（主） | `se-rag-gateway.zetao-zhang.workers.dev` | 默认路径；对 `*.workers.dev` DNS 污染走 IP 优先 + DoH 兜底拨号，作用范围仅限该域名 |
+| 2 | 阿里云函数计算 FC3.0（备） | `se-rag-gateway-chrzlcfiqt.cn-hangzhou.fcapp.run` | 国内直连免备案；`fcapp.run` 走系统 DNS，不受 IP 优先逻辑影响 |
+| 3 | 纯 BM25（兜底） | — | 两网关均不可达时自动降级，离线可用（`mode=bm25`） |
+
+行为约定：
+
+- 同一 key / 同路径（`/v1/embeddings`、`/v1/rerank`）/ 同模型白名单，内置 key 零改动
+- 5xx / 429 / 连接错误（超时、DNS 失败）→ 有界重试（最多 6 次）并轮转至 FC 网关；4xx 快速失败不转移
+- 故障转移链可配置：`Provider.BaseURL`（主）+ `Provider.FallbackBaseURL`（备，默认 FC 网关）；
+  两者相同即显式禁用故障转移；`se-rag` CLI 默认即启用
+- 用户自备 key 不经网关，直达官方 SiliconFlow，无故障转移项
+
 ## 多知识库扩展
 
 不同知识库用不同 `-index-dir` / `--docs-dir` 即可，无 `-product` 维度。新增 `se8` 知识库：
@@ -131,8 +151,11 @@ mkdir -p docs/se8
 ./bin/se-rag doctor -index-dir ./rag-se8
 ```
 
-索引直接落盘到各自 `-index-dir/`（`meta.json` + `vectors.gob` + `bm25.gob` + `chunks.gob`），
-各知识库互不影响，可并存。
+索引直接落盘到各自 `-index-dir/`（`meta.json` + `vectors.gob` + `bm25.gob` + `chunks.gob` +
+`.complete` 完成标记），各知识库互不影响，可并存。保存为原子写入：先写临时文件、移除旧
+完成标记、再 rename 替换、最后写回完成标记，构建中断只可能留下"无标记"状态而不会是半套
+/混合代索引；`.complete` 或 `bm25.gob` 缺失时 query 显式报错并提示重建。
+注意：本版本之前的旧索引目录（无 `.complete`）升级后需重新 `se-rag build` 一次。
 
 ## 测试
 

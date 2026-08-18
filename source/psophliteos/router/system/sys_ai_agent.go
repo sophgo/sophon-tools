@@ -13,8 +13,10 @@ type AiAgentRouter struct{}
 // InitAiAgentRouter 注册 AI Agent 本地端点（不经 bmssm 反代）。
 // LLM/VLM 配置由 bmssm 的 /api/v1/llm-proxy/config 管理（经 /api/v1/* 反代），
 // 此处仅保留 picoclaw 端口探测、本地模型样例与页面转发。
+// MYS-379：AI Agent 本地端点是 AI 助手页面/内部 API（聊天记录、Agent 控制）的
+// 直达入口，此前无任何鉴权；与 OTA 一致叠加 SSO 单会话校验。
 func (s *AiAgentRouter) InitAiAgentRouter(Router *gin.RouterGroup) (R gin.IRoutes) {
-	agentRouter := Router.Group("api/device/ai-agent", middleware.TimeoutMiddleware(global.TimeOut))
+	agentRouter := Router.Group("api/device/ai-agent", middleware.SSO(), middleware.TimeoutMiddleware(global.TimeOut))
 	api := v1.ApiGroupApp.SystemApiGroup.AiAgentApi
 	{
 		agentRouter.GET("port", api.Port)

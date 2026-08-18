@@ -14,6 +14,9 @@ enum Api {
 
 // 跳过信封解析的请求选项：返回裸 res.data，不弹错误提示。
 const RAW = { isTransformResponse: false } as const;
+// register 失败（401 等）由登录流程统一提示，避免此处自动 toast 造成双重提示
+// （默认 errorMessageMode='message' 会弹"会话已下线"误导文案）。
+const REGISTER_RAW = { isTransformResponse: false, errorMessageMode: 'none' } as const;
 
 export interface SsoActive {
   active: boolean;
@@ -25,9 +28,9 @@ export function getSsoActive() {
   return defHttp.get<SsoActive>({ url: Api.Active }, RAW);
 }
 
-// 登录成功后注册会话为活跃（踢掉之前的会话）。
+// 登录成功后注册会话为活跃（踢掉之前的会话）。失败由 user.ts login 流程提示。
 export function ssoRegister(username: string, token: string) {
-  return defHttp.post({ url: Api.Register, params: { username, token } }, RAW);
+  return defHttp.post({ url: Api.Register, params: { username, token } }, REGISTER_RAW);
 }
 
 // 注销：清除活跃会话（仅 token 匹配时）。

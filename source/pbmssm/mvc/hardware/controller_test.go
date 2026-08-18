@@ -12,6 +12,7 @@ import (
 	"bmssm/config"
 	"bmssm/middleware"
 	"bmssm/pkg/auth"
+	"bmssm/pkg/hazard"
 	"bmssm/pkg/response"
 )
 
@@ -120,7 +121,7 @@ func TestRebootWithAuth(t *testing.T) {
 
 	token := makeAuthToken(t)
 
-	body, _ := json.Marshal(RebootRequest{Delay: 5})
+	body, _ := json.Marshal(RebootRequest{Delay: 5, Confirm: hazard.NewConfirmCode()})
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/hardware/reboot", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -132,6 +133,69 @@ func TestRebootWithAuth(t *testing.T) {
 	}
 	if rb.calls.Load() != 1 {
 		t.Fatalf("expected 1 reboot call, got %d", rb.calls.Load())
+	}
+}
+
+func TestRebootWithoutConfirm403(t *testing.T) {
+	setupHardwareTest(t)
+	fr := newFakeFileReader()
+	rb := &fakeRebooter{}
+	svc := NewService(&fakeCmdRunner{}, fr, rb)
+	ctrl := NewController(svc)
+
+	r := gin.New()
+	api := r.Group("/api/v1")
+	api.Use(middleware.Auth())
+	api.POST("/hardware/reboot", ctrl.Reboot)
+
+	token := makeAuthToken(t)
+	body, _ := json.Marshal(RebootRequest{Delay: 0}) // 无 Confirm
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/hardware/reboot", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 without confirm, got %d body=%s", w.Code, w.Body.String())
+	}
+	if rb.calls.Load() != 0 {
+		t.Fatalf("reboot must not be triggered without confirm, calls=%d", rb.calls.Load())
+	}
+}
+
+func TestRebootBlockedByActiveHazardOp409(t *testing.T) {
+	setupHardwareTest(t)
+	fr := newFakeFileReader()
+	rb := &fakeRebooter{}
+	svc := NewService(&fakeCmdRunner{}, fr, rb)
+	ctrl := NewController(svc)
+
+	r := gin.New()
+	api := r.Group("/api/v1")
+	api.Use(middleware.Auth())
+	api.POST("/hardware/reboot", ctrl.Reboot)
+	token := makeAuthToken(t)
+
+	// 模拟 OTA 刷机进行中：占用全局高危互斥锁
+	guard, err := hazard.HazardOps.TryAcquire("ota.upgrade")
+	if err != nil {
+		t.Fatalf("acquire for test: %v", err)
+	}
+	defer guard.Release()
+
+	body, _ := json.Marshal(RebootRequest{Delay: 0, Confirm: hazard.NewConfirmCode()})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/hardware/reboot", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409 while hazard op active, got %d body=%s", w.Code, w.Body.String())
+	}
+	if rb.calls.Load() != 0 {
+		t.Fatalf("reboot must not run while hazard op active, calls=%d", rb.calls.Load())
 	}
 }
 
@@ -170,7 +234,7 @@ func TestRebootDelayTooLarge400(t *testing.T) {
 
 	token := makeAuthToken(t)
 
-	body, _ := json.Marshal(RebootRequest{Delay: 301})
+	body, _ := json.Marshal(RebootRequest{Delay: 301, Confirm: hazard.NewConfirmCode()})
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/hardware/reboot", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -197,7 +261,7 @@ func TestRebootNegativeDelay400(t *testing.T) {
 
 	token := makeAuthToken(t)
 
-	body, _ := json.Marshal(RebootRequest{Delay: -1})
+	body, _ := json.Marshal(RebootRequest{Delay: -1, Confirm: hazard.NewConfirmCode()})
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/hardware/reboot", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+token)

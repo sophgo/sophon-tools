@@ -12,7 +12,9 @@ type VersionRouter struct{}
 
 func (s *VersionRouter) InitVersionRouter(Router *gin.RouterGroup) (R gin.IRoutes) {
 
-	versionRouter := Router.Group("api/device", middleware.TimeoutMiddleware(global.TimeOut))
+	// 版本信息虽为只读，但同样纳入统一鉴权口径（SSO 单会话 + bmssm JWT），
+	// 未认证客户端不得探测设备软件版本。
+	versionRouter := Router.Group("api/device", middleware.SSO(), middleware.RequireBMSSMToken(), middleware.TimeoutMiddleware(global.TimeOut))
 	versionApi := v1.ApiGroupApp.SystemApiGroup.VersionApi
 	{
 		versionRouter.GET("version", versionApi.Version)

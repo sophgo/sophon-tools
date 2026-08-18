@@ -69,8 +69,22 @@ var (
 func DefaultService() *SoftwareService {
 	defaultServiceOnce.Do(func() {
 		defaultService = NewSoftwareService(DefaultSoftwareRoot, DefaultPkgDir, DefaultOTADir, maxSizeFromConfig())
+		// uploadId 记录仅存内存（MYS-389）：进程重启后旧记录全部失效，
+		// 启动时清理残留固件，避免 stale 文件占用 /tmp/ssm-ota（重启后状态一致）。
+		defaultService.cleanupStaleOTA()
 	})
 	return defaultService
+}
+
+// cleanupStaleOTA 清空 OTA 暂存目录中的残留固件（进程启动时调用一次）。
+func (s *SoftwareService) cleanupStaleOTA() {
+	entries, err := os.ReadDir(s.otaDir)
+	if err != nil {
+		return // 目录不存在也无需清理
+	}
+	for _, e := range entries {
+		_ = os.RemoveAll(filepath.Join(s.otaDir, e.Name()))
+	}
 }
 
 // NewSoftwareService 创建 SoftwareService（测试注入用）。

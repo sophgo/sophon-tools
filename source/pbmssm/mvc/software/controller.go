@@ -8,12 +8,16 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"bmssm/database"
+	"bmssm/mvc/audit"
+	"bmssm/pkg/hazard"
 	"bmssm/pkg/response"
 )
 
 // Controller 软件/OTA 模块 gin handler 集合。
 type Controller struct {
 	svc *SoftwareService
+	aud *audit.AuditService
 }
 
 // NewController 创建软件/OTA 控制器。
@@ -23,7 +27,36 @@ func NewController(svc *SoftwareService) *Controller {
 
 // DefaultController 构建默认控制器（使用包级 service）。
 func DefaultController() *Controller {
-	return NewController(DefaultService())
+	ctrl := NewController(DefaultService())
+	ctrl.aud = audit.NewService(database.DB())
+	return ctrl
+}
+
+// auditWrite 写入审计日志（忽略错误，不阻塞主流程）。
+func (ctrl *Controller) auditWrite(c *gin.Context, username, action, resource, result string) {
+	if ctrl.aud == nil {
+		return
+	}
+	_ = ctrl.aud.Write(username, action, resource, c.ClientIP(), result)
+}
+
+// requireHazardGuard 校验二次确认码并占用高危互斥锁（MYS-389）。
+// 返回 guard 与 bool：false 时已写出错误响应，直接 return。
+func (ctrl *Controller) requireHazardGuard(c *gin.Context, holder, action string, confirm string) (*hazard.Guard, bool) {
+	username, _ := c.Get("user")
+	uname, _ := username.(string)
+	if !hazard.VerifyConfirmCode(confirm) {
+		ctrl.auditWrite(c, uname, action, "software", "confirmation_failed")
+		c.JSON(http.StatusForbidden, response.Fail("confirmation required: fetch /api/v1/hazard/challenge first"))
+		return nil, false
+	}
+	guard, err := hazard.HazardOps.TryAcquire(holder)
+	if err != nil {
+		ctrl.auditWrite(c, uname, action, "software", "blocked")
+		c.JSON(http.StatusConflict, response.Fail(err.Error()))
+		return nil, false
+	}
+	return guard, true
 }
 
 // ---------------------------------------------------------------
@@ -57,6 +90,13 @@ func (ctrl *Controller) Upgrade(c *gin.Context) {
 
 // handleSoftwareUpload 处理软件包上传与安装/升级。
 func (ctrl *Controller) handleSoftwareUpload(c *gin.Context, action string) {
+	// MYS-389：二次确认 + 审计；软件安装允许并发（holder 为空不占排它锁）
+	guard, ok := ctrl.requireHazardGuard(c, "", "software."+action, c.PostForm("confirm"))
+	if !ok {
+		return
+	}
+	defer guard.Release()
+
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, response.Fail("missing file field"))
@@ -95,10 +135,16 @@ func (ctrl *Controller) handleSoftwareUpload(c *gin.Context, action string) {
 	}
 
 	if !resp.Success {
+		username, _ := c.Get("user")
+		uname, _ := username.(string)
+		ctrl.auditWrite(c, uname, "software."+action, "software", "failed")
 		c.JSON(http.StatusInternalServerError, response.Fail(resp.Message))
 		return
 	}
 
+	username, _ := c.Get("user")
+	uname, _ := username.(string)
+	ctrl.auditWrite(c, uname, "software."+action, "software", "success")
 	c.JSON(http.StatusOK, response.OK(resp))
 }
 
@@ -174,11 +220,23 @@ func (ctrl *Controller) OTAUpgrade(c *gin.Context) {
 		return
 	}
 
+	// MYS-389：二次确认 + 高危互斥 + 审计
+	guard, ok := ctrl.requireHazardGuard(c, "ota.upgrade", "ota.upgrade", c.Query("confirm"))
+	if !ok {
+		return
+	}
+	defer guard.Release()
+
 	resp, err := ctrl.svc.ExecuteUpgrade(uid)
 	if err != nil {
+		username, _ := c.Get("user")
+		uname, _ := username.(string)
+		ctrl.auditWrite(c, uname, "ota.upgrade", "ota", "failed")
 		c.JSON(http.StatusInternalServerError, response.Fail(err.Error()))
 		return
 	}
-
+	username, _ := c.Get("user")
+	uname, _ := username.(string)
+	ctrl.auditWrite(c, uname, "ota.upgrade", "ota", "success")
 	c.JSON(http.StatusOK, response.OK(resp))
 }

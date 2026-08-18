@@ -5,20 +5,39 @@ import (
 	"net/http"
 	"strconv"
 
+	"bmssm/database"
+	"bmssm/mvc/audit"
 	"bmssm/pkg/firewall"
+	"bmssm/pkg/hazard"
 	"bmssm/pkg/response"
 
 	"github.com/gin-gonic/gin"
 )
 
 // Controller holds a Service and exposes gin handler methods.
-type Controller struct{ svc *Service }
+type Controller struct {
+	svc *Service
+	// aud 审计服务（nil 安全）：防火墙 rebuild 属高危操作，记入 audit_logs（MYS-389）。
+	aud *audit.AuditService
+}
 
 // NewController creates a Controller with the given Service.
 func NewController(svc *Service) *Controller { return &Controller{svc: svc} }
 
 // DefaultController creates a Controller backed by the default (global-DB) Service.
-func DefaultController() *Controller { return NewController(DefaultService()) }
+func DefaultController() *Controller {
+	ctrl := NewController(DefaultService())
+	ctrl.aud = audit.NewService(database.DB())
+	return ctrl
+}
+
+// auditWrite 写入审计日志（忽略错误，不阻塞主流程）。
+func (ctrl *Controller) auditWrite(c *gin.Context, username, action, resource, result string) {
+	if ctrl.aud == nil {
+		return
+	}
+	_ = ctrl.aud.Write(username, action, resource, c.ClientIP(), result)
+}
 
 // envFail checks the firewall environment. Returns true and writes a 503
 // JSON response if the environment is unhealthy; returns false if healthy.
@@ -93,13 +112,39 @@ func (ctrl *Controller) DeleteIntent(c *gin.Context) {
 }
 
 // Rebuild handles POST /firewall/rebuild.
+// 高危操作防护（MYS-389）：与 reboot/shutdown/OTA 共享全局互斥锁与二次确认码
+// （防火墙 rebuild 期间重启/OTA 会留下半配置规则或打断刷机），并记审计。
 func (ctrl *Controller) Rebuild(c *gin.Context) {
 	if envFail(c) {
 		return
 	}
+	var req struct {
+		Confirm string `json:"confirm"`
+	}
+	// 空 body 视为无确认码（校验失败会给出引导性错误），不因解析失败直接 400
+	_ = c.ShouldBindJSON(&req)
+
+	username, _ := c.Get("user")
+	name, _ := username.(string)
+
+	if !hazard.VerifyConfirmCode(req.Confirm) {
+		ctrl.auditWrite(c, name, "firewall_rebuild", "firewall", "confirmation_failed")
+		c.JSON(http.StatusForbidden, response.Fail("confirmation required: fetch /api/v1/hazard/challenge first"))
+		return
+	}
+	guard, err := hazard.HazardOps.TryAcquire("firewall_rebuild")
+	if err != nil {
+		ctrl.auditWrite(c, name, "firewall_rebuild", "firewall", "blocked")
+		c.JSON(http.StatusConflict, response.Fail(err.Error()))
+		return
+	}
+	defer guard.Release()
+
 	if err := ctrl.svc.Rebuild(); err != nil {
+		ctrl.auditWrite(c, name, "firewall_rebuild", "firewall", "failed")
 		c.JSON(http.StatusInternalServerError, response.Fail(err.Error()))
 		return
 	}
+	ctrl.auditWrite(c, name, "firewall_rebuild", "firewall", "success")
 	c.JSON(http.StatusOK, response.OK(gin.H{"message": "rebuild ok"}))
 }

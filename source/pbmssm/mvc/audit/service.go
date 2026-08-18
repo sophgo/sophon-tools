@@ -50,7 +50,11 @@ func (s *AuditService) ListLogs(offset, limit int) (*PaginatedResult, error) {
 }
 
 // Write 写入一条审计日志（辅助方法，供其他模块调用）。
+// DB 不可用（服务或 db 为 nil）时静默跳过，不阻塞调用方主流程。
 func (s *AuditService) Write(username, action, resource, ip, result string) error {
+	if s == nil || s.db == nil {
+		return nil
+	}
 	entry := AuditLog{
 		Username: username,
 		Action:   action,
