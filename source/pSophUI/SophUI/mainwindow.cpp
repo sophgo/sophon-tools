@@ -2,6 +2,10 @@
 #include "ui_mainwindow.h"
 #include "qtermwidget.h"
 
+#include <cerrno>
+#include <csignal>
+#include <unistd.h>
+
 #define GET_BASH_INFO_ASYNC 0
 
 template <typename T>
@@ -394,6 +398,9 @@ void MainWindow::on_lan_button_2_clicked()
 }
 
 static QString qtKeyToEscapeSequence(Qt::Key key) {
+    /* qtermwidget 内部(Emulation::sendKeyEvent)已把按键的 text() 直接送入终端,
+       这里只负责补发 text() 为空的控制键(方向键/功能键等)的转义序列。
+       统一使用完整映射,不再按 qVersion() 分支(各 Qt 版本表现应当一致)。 */
     static const QHash<Qt::Key, QString> keyMap = {
         // Cursor keys
         {Qt::Key_Up, "\033[A"},
@@ -418,8 +425,6 @@ static QString qtKeyToEscapeSequence(Qt::Key key) {
         {Qt::Key_Delete, "\033[3~"},
         {Qt::Key_Home, "\033[H"},
         {Qt::Key_End, "\033[F"},
-        // {Qt::Key_PageUp, "\033[5~"},
-        // {Qt::Key_PageDown, "\033[6~"},
         {Qt::Key_Escape, "\033"},
         {Qt::Key_Tab, "\t"},
         {Qt::Key_Backspace, "\b"},
@@ -427,18 +432,7 @@ static QString qtKeyToEscapeSequence(Qt::Key key) {
         {Qt::Key_Enter, "\n"},
     };
 
-    static const QHash<Qt::Key, QString> keyMap_x11 = {
-        // Cursor keys
-        {Qt::Key_Up, "\033[A"},
-        {Qt::Key_Down, "\033[B"},
-        {Qt::Key_Right, "\033[C"},
-        {Qt::Key_Left, "\033[D"},
-    };
-
-    if (QString("5.14.0") == qVersion())
-        return keyMap.value(key, QString());
-    else
-        return keyMap_x11.value(key, QString());
+    return keyMap.value(key, QString());
 }
 
 void MainWindow::on_show_net_button_clicked()
@@ -468,10 +462,36 @@ void MainWindow::on_show_net_button_clicked()
     console->setShellProgram("/bin/bash");
     console->changeDir("/");
     console->setWorkingDirectory("/");
-    console->sendText(QString("export TERM=xterm\n"));
-    console->sendText("clear\n");
-    console->sendText(QString("echo 'login user: " + login_user + 
-                    "'; login " + login_user + "; exit 0;\n"));
+
+    /* 登录会话序列: 终端程序退出后窗口常驻,由 finished/看门狗重新拉起登录
+       (类似串口 tty/getty 的行为) */
+    auto loginSequence = [console, login_user]() {
+        console->sendText(QString("export TERM=xterm\n"));
+        console->sendText("clear\n");
+        console->sendText(QString("echo 'login user: " + login_user + "'; login " + login_user + "; exit 0;\n"));
+    };
+    auto restartLoginSession = [console, loginSequence]() {
+        console->startShellProgram();
+        loginSequence();
+    };
+
+    /* 终端内程序正常退出(finished)时自动重新登录,而不是关闭窗口;
+       延迟 100ms 先让 QProcess 的 finished 链完全退出,避免重入 */
+    QObject::connect(console, &QTermWidget::finished, console, [console, restartLoginSession]() {
+        QTimer::singleShot(100, console, restartLoginSession);
+    });
+    /* 异常退出(进程被信号杀死/崩溃)时 qtermwidget 不发 finished,由看门狗检测兜底:
+       会话已无运行进程(pid 已清零或 ESRCH)则重新拉起登录 */
+    QTimer *termWatchdog = new QTimer(&dialog);
+    QObject::connect(termWatchdog, &QTimer::timeout, console, [console, restartLoginSession]() {
+        const pid_t pid = (pid_t)console->getShellPID();
+        const bool sessionDead = pid <= 0
+            || (::kill(pid, 0) != 0 && errno == ESRCH);
+        if (sessionDead)
+            restartLoginSession();
+    });
+    termWatchdog->start(1000);
+
     console->setColorScheme(":/new/prefix1/WhiteOnBlack.colorscheme");
     if (fontId != -1) {
         QStringList fontFamilies = QFontDatabase::applicationFontFamilies(fontId);
@@ -495,15 +515,17 @@ void MainWindow::on_show_net_button_clicked()
     console->setScrollBarPosition(QTermWidget::ScrollBarRight);
     dialog.setLayout(boxLayout);
     QObject::connect(closeButton, &QPushButton::clicked, &dialog, &QDialog::accept);
-    QObject::connect(console, &QTermWidget::finished, &dialog, &QDialog::accept);
-    connect(console, &QTermWidget::termKeyPressed, [&](QKeyEvent *event) {
+    connect(console, &QTermWidget::termKeyPressed, [console](QKeyEvent *event) {
         qDebug() << "Key" << event;
-        if (event->type() == QEvent::KeyPress) {
-            console->sendText(qtKeyToEscapeSequence((Qt::Key)event->key()));
-        };
+        /* 可打印文本按键已由 qtermwidget 内部(Emulation)送入终端,这里只补发
+           text() 为空的控制键(方向键/功能键等)转义序列,避免重复输入 */
+        if (event->type() != QEvent::KeyPress || !event->text().isEmpty())
+            return;
+        console->sendText(qtKeyToEscapeSequence((Qt::Key)event->key()));
     });
     dialog.layout()->addWidget(scrollArea);
     dialog.layout()->addWidget(closeButton);
+    loginSequence();
     dialog.exec();
 }
 
