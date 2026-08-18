@@ -22,6 +22,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/http"
+	"sophliteos/logger"
 	"strings"
 	"sync"
 	"time"
@@ -187,6 +188,18 @@ func resolveQueryTicket(c *gin.Context) string {
 }
 
 // SSO 单会话中间件。受保护路由（/api/v1/* 除 login/password，以及本地敏感路由）校验：
+// SSOUserByToken 返回活跃会话的用户名：仅当 token 精确匹配当前活跃会话时
+// 才可解析。操作审计（SaveOptLog）用它在本地无 user 表（鉴权在 bmssm）的
+// 情况下把请求归因到已登录用户（MYS-382）；token 不匹配/无会话返回 ok=false。
+func SSOUserByToken(token string) (string, bool) {
+	ssoMu.RLock()
+	defer ssoMu.RUnlock()
+	if token == "" || ssoToken == "" || token != ssoToken {
+		return "", false
+	}
+	return ssoUser, true
+}
+
 // 请求 token 必须等于活跃 token（精确比对，同账号新登录也会顶掉旧会话）；
 // 否则 401 SESSION_OFFLINE。无活跃会话时一律 401（MYS-378：未认证客户端不得访问
 // 任何受保护数据，必须先经 /api/v1/login 登录并 /api/sso/register 建立会话）。
@@ -309,6 +322,11 @@ func SSOEvents(c *gin.Context) {
 
 	ctx := c.Request.Context()
 	for {
+		// 常规 WriteTimeout（默认 30s）对长连接式 SSE 过短：每轮循环（含 25s 心跳）
+		// 前刷新写 deadline 到 now+2m，超时窗口有界且始终覆盖下一次心跳（MYS-382）。
+		if err := http.NewResponseController(c.Writer).SetWriteDeadline(time.Now().Add(2 * time.Minute)); err != nil {
+			logger.Debug("sse set write deadline failed: %v", err)
+		}
 		select {
 		case <-ctx.Done():
 			return

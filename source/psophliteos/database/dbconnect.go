@@ -3,6 +3,7 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"os"
 	"regexp"
 	"sophliteos/logger"
 	"strings"
@@ -37,6 +38,20 @@ type DBUtil struct {
 
 func GetDBUtil(db *gorm.DB) *DBUtil {
 	return &DBUtil{db: db}
+}
+
+// adminPassword 返回本地 admin 占位记录的 MD5 口令（MYS-382）。
+// 明文口令不再随仓库提交：优先取部署期注入的环境变量 SOPHLITEOS_ADMIN_PASSWORD，
+// 其次为外部覆盖配置文件中的 server.admin-password（旧版模板/存量部署兼容），
+// 两者都缺省时返回空串（该记录无在线登录入口，登录走 bmssm 反代鉴权）。
+func adminPassword() string {
+	if p := os.Getenv("SOPHLITEOS_ADMIN_PASSWORD"); p != "" {
+		return p
+	}
+	conf := &config.Conf
+	conf.Lock()
+	defer conf.Unlock()
+	return conf.GetViper().GetString("server.admin-password")
 }
 
 func InitDB() {
@@ -76,7 +91,7 @@ func InitDB() {
 			UserID:     "admin",
 			Status:     "",
 			UserName:   admin,
-			Password:   v.GetString("server.admin-password"),
+			Password:   adminPassword(),
 			Token:      "",
 			Address:    "",
 			Role:       "",

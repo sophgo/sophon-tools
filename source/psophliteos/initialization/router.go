@@ -6,6 +6,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"sophliteos/config"
+	"sophliteos/global"
 	"sophliteos/logger"
 	"sophliteos/middleware"
 	"sophliteos/router"
@@ -106,7 +107,9 @@ func Routers(webFS fs.FS) *gin.Engine {
 	// 活跃会话校验与连接数/频率限制），被新登录踢掉时主动收 SESSION_OFFLINE
 	Router.GET("/api/sso/events", middleware.SSOEvents)
 
-	// /api/v1/* 反代到 bmssm（鉴权由 bmssm 处理）；前置 SSO 单会话校验
+	// /api/v1/* 反代到 bmssm（鉴权由 bmssm 处理）；前置 SSO 单会话校验。
+	// DeadlineMiddleware 把连接 deadline 延长到 ota-timeout：LLM 流式响应/
+	// 长文件下载经反代回流的耗时可能远超常规 30s（MYS-382 超时分离）。
 	bmssmTarget, err := url.Parse("http://" + bmssmServer)
 	if err == nil {
 		proxy := httputil.NewSingleHostReverseProxy(bmssmTarget)
@@ -121,17 +124,23 @@ func Routers(webFS fs.FS) *gin.Engine {
 			// 长连接支持（含 WebSocket）
 			MaxIdleConns: 100,
 		}
-		Router.Any("/api/v1/*any", middleware.SSO(), func(c *gin.Context) {
-			proxy.ServeHTTP(c.Writer, c.Request)
-		})
+		Router.Any("/api/v1/*any",
+			middleware.SSO(),
+			middleware.DeadlineMiddleware(global.OtaTimeOut),
+			func(c *gin.Context) {
+				proxy.ServeHTTP(c.Writer, c.Request)
+			})
 		// Reasonix agent WS：同源 8080 → bmssm 主 server /agent/ws。
 		// 复用同一 proxy（其 Director/Transport 已支持 WebSocket 升级）。
 		// 注意：不加 SSO 中间件。WS 升级请求来自同源页面，前端 PicoWs 以
 		// 子协议 token.<forward_key> 鉴权（bmssm serveWS 校验），不携带 SSO 所需的
-		// Authorization Bearer 头；SSO() 会因拿不到 token 而 401 中断升级。
-		Router.Any("/agent/ws", func(c *gin.Context) {
-			proxy.ServeHTTP(c.Writer, c.Request)
-		})
+		// Authorization Bearer 或 ?token=；SSO() 会因拿不到 token 而 401 中断升级。
+		// DeadlineMiddleware 延长 WS 数据期连接 deadline，避免空闲链路被常规超时掐断。
+		Router.Any("/agent/ws",
+			middleware.DeadlineMiddleware(global.OtaTimeOut),
+			func(c *gin.Context) {
+				proxy.ServeHTTP(c.Writer, c.Request)
+			})
 	} else {
 		logger.Error("bmssm server url parse error: %v", err)
 	}

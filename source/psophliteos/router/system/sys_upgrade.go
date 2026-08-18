@@ -15,7 +15,13 @@ func (s *UpgradeRouter) InitUpgradeRouter(Router *gin.RouterGroup) (R gin.IRoute
 	// 升级两段式：先上传暂存（upgrade），再确认执行（upgrade/confirm）。
 	// 升级/重启属敏感操作：叠加 SSO 单会话 + bmssm JWT 校验，与 /api/v1/* 反代
 	// 同一套活跃会话模型，避免未登录客户端直接触发；前端 defHttp 请求自动携带 token。
-	upgradeRouter := Router.Group("api", middleware.SSO(), middleware.RequireBMSSMToken(), middleware.TimeoutMiddleware(global.OtaTimeOut))
+	// DeadlineMiddleware 将连接读写 deadline 延长到 ota-timeout：固件升级执行
+	// 时间可远超常规 30s（MYS-382 超时分离）。
+	upgradeRouter := Router.Group("api",
+		middleware.SSO(),
+		middleware.RequireBMSSMToken(),
+		middleware.DeadlineMiddleware(global.OtaTimeOut),
+		middleware.TimeoutMiddleware(global.OtaTimeOut))
 	versionApi := v1.ApiGroupApp.SystemApiGroup.UpgradeApi
 	{
 		upgradeRouter.POST("upgrade", versionApi.Upgrade)

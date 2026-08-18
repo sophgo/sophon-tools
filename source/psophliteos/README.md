@@ -17,7 +17,7 @@
 - `build`/`scrip`/`release`: 构建脚本/部署脚本/产物落点
 
 ## 编译依赖
-- go >= 1.19
+- go >= 1.21（服务器超时加固使用了 Go 1.20+ 的 http.ResponseController，见 `middleware/deadline.go`）
 - arm64 静态交叉编译需要 aarch64-linux-musl-gcc（由 `build/fetch-musl-toolchain.sh` 自动下载，也可用系统包预装）
 - 前端构建需要 pnpm（或 yarn 兜底）
 
@@ -55,6 +55,23 @@ sudo dpkg -i release/sophliteos_soc_2.1.0.deb     # arm 设备
 sudo dpkg -i release/sophliteos_pcie_2.1.0.deb    # x86 开发机
 ```
 安装后由 systemd 服务 `sophliteos` 拉起，监听 :8080。前端页面由二进制内嵌资源提供，运行时不再需要独立 web 目录。
+
+## 配置
+
+部署配置为 `/opt/sophon/sophliteos/config/sophliteos.yaml`（deb conffile，升级保留改动）。
+
+- **admin 口令不随仓库提交**（MYS-382）。本地 sqlite 的 admin 占位记录（无在线登录入口，
+  登录走 bmssm 反代鉴权）密码由部署期注入：
+  ```bash
+  # systemd 环境变量或 EnvironmentFile 注入
+  echo 'Environment=SOPHLITEOS_ADMIN_PASSWORD=<md5>' >> /etc/systemd/system/sophliteos.service.d/override.conf
+  systemctl daemon-reload && systemctl restart sophliteos
+  ```
+  也可经外部覆盖配置文件（`server.admin-password`）。不注入则以空口令占位。
+- **超时配置**（升级相关与常规读超时分离）：
+  - `server.read-timeout`（默认 `30s`）：常规 HTTP 读/写超时，慢连接有界
+  - `server.read-header-timeout`（默认 `10s`）：请求头读取超时（防慢速请求头攻击）
+  - `server.ota-timeout`（默认 `12m`）：OTA 分片上传/固件升级长超时（兼容旧键 `server.timeout`）
 
 ---
 
