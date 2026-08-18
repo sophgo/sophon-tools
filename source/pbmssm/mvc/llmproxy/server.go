@@ -156,8 +156,8 @@ func handleModels(w http.ResponseWriter, r *http.Request) {
 
 // handleChatCompletions POST /v1/chat/completions —— OpenAI 兼容转发。
 // 流程（图片描述化，防止含图历史进入 VLM 导致推理质量下滑）：
-//  1. 转发 key 校验（MYS-171 放宽）：仅配置了 ForwardKey 且请求携带匹配 key 时视为已鉴权；
-//     未配置 / 未携带 / 不匹配均放行，不强制拦截。
+//  1. 转发 key 校验：对内（默认仅监听 127.0.0.1 回环）服务不做入站 key 校验与限流——
+//     本机组件凭操作系统访问边界信任；ForwardKey 仅作旧 picoclaw 链路的兼容配置保留。
 //  2. 遍历所有 messages 的 content：
 //     - 文本块 → 保留
 //     - 图片块（image_url/image）→ 提取图片数据 → 哈希查缓存：
@@ -169,14 +169,9 @@ func handleModels(w http.ResponseWriter, r *http.Request) {
 func handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	cfg := currentConfig()
 
-	// 1. 转发 key 校验（MYS-171：放宽策略，不做强制拦截）。
-	//    仅当配置了 ForwardKey 且请求携带匹配 key 时视为已鉴权；
-	//    key 未配置 / 请求未携带 / 不匹配均放行。18080 为内部回环代理，
-	//    仅本机可信进程（reasonix 等）调用，不做安全加固。
-	if cfg.ForwardKey != "" && !validForwardKey(r, cfg.ForwardKey) {
-		logger.Warn("llm proxy: forward key mismatch (config set, request key absent or wrong)")
-	}
-
+	// 1. 转发 key 校验：对内（默认仅监听 127.0.0.1 回环）服务不做入站 key 校验与限流——
+	//    本机组件凭操作系统访问边界信任；ForwardKey 仅作旧 picoclaw 链路的兼容配置保留。
+	//    （18080 为内部回环代理，仅本机可信进程调用，不做安全加固。）
 	body, err := io.ReadAll(r.Body)
 	r.Body.Close()
 	if err != nil {
@@ -207,16 +202,6 @@ func handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	// 4. 透传响应
 	w.WriteHeader(statusCode)
 	_, _ = w.Write(respBody)
-}
-
-// validForwardKey 校验请求携带的转发 key 与配置一致（Bearer <key>）。
-func validForwardKey(r *http.Request, want string) bool {
-	h := r.Header.Get("Authorization")
-	if !strings.HasPrefix(h, "Bearer ") {
-		return false
-	}
-	got := strings.TrimSpace(strings.TrimPrefix(h, "Bearer "))
-	return got != "" && got == want
 }
 
 // describeImagesInRequest 遍历所有 message，把图片块替换为文本描述块。
