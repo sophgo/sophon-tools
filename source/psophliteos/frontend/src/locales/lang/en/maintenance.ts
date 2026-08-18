@@ -180,5 +180,11 @@ export default {
     disabledOk: 'Disabled',
     toggleFail: 'Toggle failed',
     reset: 'Reset',
+    portAllow: 'Port Allow',
+    portDeny: 'Port Deny',
+    highRiskConfirmTitle: 'High-risk operation confirmation',
+    highRiskConfirmContent: 'Confirmation code: {code} (valid for {secs}s). This high-risk operation takes effect immediately. Please confirm.',
+    challengeFail: 'Failed to fetch confirmation code',
+    actionFail: 'Operation failed',
   },
 };

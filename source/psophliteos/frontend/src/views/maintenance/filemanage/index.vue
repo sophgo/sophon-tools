@@ -89,7 +89,9 @@
               <a-button size="small" @click="openChown(record)">{{
                 t('maintenance.fileManage.chown')
               }}</a-button>
+              <!-- 后端（MYS-390）明确拒绝删除目录（仅文件可删）：目录行不显示删除按钮 -->
               <a-popconfirm
+                v-if="!record.isDir"
                 :title="t('maintenance.fileManage.deleteConfirm')"
                 @confirm="removeFile(record)"
               >
