@@ -14,8 +14,8 @@ func NewEmbeddingLimiter(maxConcurrent int) *EmbeddingLimiter {
 // perCall 单次 embedding 最多段落数（内置 key 平台约束，需求限定单次≤2）。
 const perCall = 2
 
-// Embed 把 texts 拆成 ≤3 一段的子批，逐批调用 embedBatch（每批一次 HTTP 调用，真正
-// 以 ≤3 段落为载荷），整体并发受 sem 限制。返回按传入顺序排列的向量。
+// Embed 把 texts 拆成 ≤perCall 一段的子批，逐批调用 embedBatch（每批一次 HTTP 调用，
+// 真正以 ≤perCall 段落为载荷），整体并发受 sem 限制。返回按传入顺序排列的向量。
 func (l *EmbeddingLimiter) Embed(ctx context.Context, texts []string, embedBatch func([]string) ([][]float32, error)) ([][]float32, error) {
 	out := make([][]float32, len(texts))
 	for start := 0; start < len(texts); start += perCall {

@@ -174,9 +174,9 @@ func TestDoHResolverParsesAnswers(t *testing.T) {
 		b, _ := json.Marshal(map[string]any{
 			"Status": 0,
 			"Answer": []map[string]any{
-				{"name": gatewayHost, "type": 1, "data": "104.21.6.72"},   // A 重复项 → 去重
-				{"name": gatewayHost, "type": 1, "data": "104.21.6.72"},   // 重复
-				{"name": gatewayHost, "type": 1, "data": "172.67.134.151"}, // A
+				{"name": gatewayHost, "type": 1, "data": "104.21.6.72"},           // A 重复项 → 去重
+				{"name": gatewayHost, "type": 1, "data": "104.21.6.72"},           // 重复
+				{"name": gatewayHost, "type": 1, "data": "172.67.134.151"},        // A
 				{"name": gatewayHost, "type": 28, "data": "2606:4700:4700::1111"}, // AAAA → 忽略
 				{"name": gatewayHost, "type": 1, "data": "bogus"},                 // 非法 → 忽略
 			},

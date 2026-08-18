@@ -27,6 +27,29 @@ type runCtx struct {
 	rerankF    func(config.Provider) (embed.Reranker, error)
 }
 
+// applyUserKeys 按 -builtin-key 语义设置供应商 key：
+// useBuiltin=true（默认）交给内置 key 逻辑；false 时 key 必须来自环境变量，
+// 缺失即显式报错（不再静默回落内置 key + 限流）。SE_RAG_FAKE_EMBED=1 离线
+// 模式不校验（fake provider 不真正使用 key）。requireRerank 仅 query 需要。
+func applyUserKeys(p *config.Product, useBuiltin, requireRerank bool) error {
+	if useBuiltin {
+		return nil
+	}
+	p.Embedder.APIKey = os.Getenv("SE_RAG_EMBED_KEY")
+	p.Reranker.APIKey = os.Getenv("SE_RAG_RERANK_KEY")
+	if os.Getenv("SE_RAG_FAKE_EMBED") != "" {
+		return nil
+	}
+	if p.Embedder.APIKey == "" {
+		return fmt.Errorf("-builtin-key=false requires SE_RAG_EMBED_KEY (missing); set env or drop the flag")
+	}
+	if requireRerank && p.Reranker.APIKey == "" {
+		return fmt.Errorf("-builtin-key=false requires SE_RAG_RERANK_KEY (missing); set env or drop the flag")
+	}
+	return nil
+}
+
+// realEmbed 真实 embedding 工厂（测试可注入 fake）。
 func realEmbed(p config.Provider) (embed.Embedder, error)  { return embed.NewEmbedder(p) }
 func realRerank(p config.Provider) (embed.Reranker, error) { return embed.NewReranker(p) }
 
@@ -56,6 +79,13 @@ func runBuild(rc runCtx) error {
 	if rc.product == "" {
 		rc.product = metaProductLabel
 	}
+	// 先校验 key 配置（-builtin-key=false 缺 env key 属配置错误，优先报出）
+	cfg := config.DefaultConfig()
+	p := cfg.Products[0]
+	p.Name = rc.product
+	if err := applyUserKeys(&p, rc.useBuiltin, false); err != nil {
+		return err
+	}
 	if rc.docsDir == "" {
 		return fmt.Errorf("docs-dir is empty")
 	}
@@ -83,13 +113,6 @@ func runBuild(rc runCtx) error {
 	}
 
 	// embed
-	cfg := config.DefaultConfig()
-	p := cfg.Products[0]
-	p.Name = rc.product
-	if !rc.useBuiltin {
-		p.Embedder.APIKey = os.Getenv("SE_RAG_EMBED_KEY")
-		p.Reranker.APIKey = os.Getenv("SE_RAG_RERANK_KEY")
-	}
 	emb, err := rc.embedF(p.Embedder)
 	if err != nil {
 		return fmt.Errorf("embedder init: %w", err)

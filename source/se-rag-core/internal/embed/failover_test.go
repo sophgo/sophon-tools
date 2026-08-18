@@ -119,7 +119,7 @@ func TestSiliconflowRerankerFailover(t *testing.T) {
 	}))
 	defer fc.Close()
 
-	r, err := newSiliconflowReranker([]string{cf.URL, fc.URL}, "k", "BAAI/bge-reranker-v2-m3", false)
+	r, err := newSiliconflowReranker([]string{cf.URL, fc.URL}, "k", "BAAI/bge-reranker-v2-m3")
 	if err != nil {
 		t.Fatal(err)
 	}

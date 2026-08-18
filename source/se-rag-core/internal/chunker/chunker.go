@@ -48,15 +48,15 @@ func (c *MarkdownChunker) ChunkFile(text, sourceFile string) []Chunk {
 	raw := c.splitText(clean, 0)
 
 	var out []Chunk
+	pos := 0 // 上一片段 core 的结束偏移（各片段的 core 连续拼接即 clean，故按序累加定位）
 	for i, r := range raw {
-		if strings.TrimSpace(r) == "" {
+		text := r.overlap + r.core
+		startOff := pos
+		pos += len(r.core)
+		if strings.TrimSpace(text) == "" {
 			continue
 		}
-		restored := restoreProtected(r, regions)
-		startOff := strings.Index(clean, r)
-		if startOff < 0 {
-			startOff = 0
-		}
+		restored := restoreProtected(text, regions)
 		if len([]rune(restored)) > c.MaxChunkChars {
 			out = append(out, c.charSplitChunks(restored, sourceFile, offsetToLine(linePos, startOff))...)
 			continue
@@ -147,12 +147,29 @@ func offsetToLine(pos []int, offset int) int {
 	return lo + 1
 }
 
-func (c *MarkdownChunker) splitText(text string, depth int) []string {
+// splitPiece 一次分块结果：core 为核心正文，overlap 为拼在 core 之前的
+// 前导重叠（上一片段 core 的尾部文本；首段为空）。同一文本各片段的 core
+// 按序连续拼接即原文，因此可据此精确定位行号。
+type splitPiece struct {
+	core    string
+	overlap string
+}
+
+// overlapCharLen overlap 的字符数：OverlapChars 显式设置时用其值，
+// 否则按约 1.5 字符/token 由 Overlap 换算（与 MaxChars=800*1.5 同一启发式）。
+func (c *MarkdownChunker) overlapCharLen() int {
+	if c.OverlapChars > 0 {
+		return c.OverlapChars
+	}
+	return c.Overlap * 3 / 2
+}
+
+func (c *MarkdownChunker) splitText(text string, depth int) []splitPiece {
 	if estTokens(text) <= c.ChunkSize {
 		if strings.TrimSpace(text) == "" {
 			return nil
 		}
-		return []string{text}
+		return []splitPiece{{core: text}}
 	}
 	if depth > 10 {
 		return c.charSplit(text)
@@ -162,61 +179,103 @@ func (c *MarkdownChunker) splitText(text string, depth int) []string {
 			continue
 		}
 		parts := strings.Split(text, sep)
-		var out []string
+		var out []splitPiece
 		current := ""
+		overlap := "" // 待拼接到下一块的前导重叠（当前段 core 的尾部）
 		for i, p := range parts {
 			seg := p
 			if i > 0 {
 				seg = sep + p
 			}
-			if estTokens(current+seg) <= c.ChunkSize {
+			if estTokens(overlap+current+seg) <= c.ChunkSize {
 				current += seg
 			} else {
-				if strings.TrimSpace(current) != "" {
-					out = append(out, current)
+				if strings.TrimSpace(overlap+current) != "" {
+					out = append(out, splitPiece{core: current, overlap: overlap})
 				}
 				if estTokens(seg) > c.ChunkSize {
 					out = append(out, c.splitText(seg, depth+1)...)
+					overlap = ""
+					current = ""
 				} else {
-					current = seg
+					overlap = overlapTail(current, c.overlapCharLen())
+					current = seg // 触发溢出的 seg 成为下一段核心的开头
 				}
 			}
 		}
-		if strings.TrimSpace(current) != "" {
-			out = append(out, current)
+		if strings.TrimSpace(overlap+current) != "" {
+			out = append(out, splitPiece{core: current, overlap: overlap})
 		}
 		return out
 	}
 	return c.charSplit(text)
 }
 
-func (c *MarkdownChunker) charSplit(text string) []string {
-	var out []string
-	step := c.MaxChars - c.OverlapChars
+// overlapTail 取 s 尾部最多 n 个 rune 作为相邻块重叠；若切点落在保护占位符
+// __PROTECTED_N__ 中间，则回溯到占位符起点，保证占位符完整进入重叠文本。
+func overlapTail(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	cut := len(r) - n
+	const mkLen = len("__PROTECTED_")
+	for i := cut - 1; i >= 0; i-- {
+		if hasMarkerAt(r, i) {
+			// 最近的占位符起点距切点 ≤ 占位符全长（含 _N__ 后缀）时，认为切点落在占位符内
+			if cut-i <= mkLen+4 {
+				cut = i
+			}
+			break
+		}
+	}
+	return string(r[cut:])
+}
+
+// hasMarkerAt 判断 r[i:] 是否以保护占位符前缀"__PROTECTED_"开头。
+func hasMarkerAt(r []rune, i int) bool {
+	const mk = "__PROTECTED_"
+	if i+len(mk) > len(r) {
+		return false
+	}
+	for j := 0; j < len(mk); j++ {
+		if r[i+j] != rune(mk[j]) {
+			return false
+		}
+	}
+	return true
+}
+
+func (c *MarkdownChunker) charSplit(text string) []splitPiece {
+	var out []splitPiece
+	r := []rune(text)
+	step := c.MaxChars - c.overlapCharLen()
 	if step < 1 {
 		step = c.MaxChars
 	}
-	for i := 0; i < len(text); i += step {
+	for i := 0; i < len(r); i += step {
 		end := i + c.MaxChars
-		if end > len(text) {
-			end = len(text)
+		if end > len(r) {
+			end = len(r)
 		}
-		piece := text[i:end]
+		piece := string(r[i:end])
 		if strings.TrimSpace(piece) != "" {
-			out = append(out, piece)
+			out = append(out, splitPiece{core: piece})
 		}
 	}
 	return out
 }
 
+// charSplitChunks 超长 chunk 的字符级二切（runes 步进，保持 UTF-8 完整）。
 func (c *MarkdownChunker) charSplitChunks(text, sourceFile string, baseLine int) []Chunk {
 	var out []Chunk
-	for i := 0; i < len(text); i += c.MaxChunkChars {
+	r := []rune(text)
+	for i := 0; i < len(r); i += c.MaxChunkChars {
 		end := i + c.MaxChunkChars
-		if end > len(text) {
-			end = len(text)
+		if end > len(r) {
+			end = len(r)
 		}
-		piece := text[i:end]
+		piece := string(r[i:end])
 		if strings.TrimSpace(piece) != "" {
 			out = append(out, Chunk{
 				ChunkID:    md5Hex(piece),

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -14,6 +15,27 @@ import (
 	"se-rag-core/internal/chunker"
 	"se-rag-core/internal/vector"
 )
+
+// 索引文件大小上限（防御损坏/被篡改的 index 文件全量读入导致 OOM；正常索引远小于此）。
+// 向量 10 万 chunk × 1024 维 × 4B ≈ 400MB，留足余量取 2GiB；chunks/BM25 同理放宽。
+const (
+	maxMetaSize   = 1 << 20 // 1 MiB（meta.json，元信息）
+	maxVectorSize = 2 << 30 // 2 GiB（vectors.gob）
+	maxBM25Size   = 1 << 30 // 1 GiB（bm25.gob）
+	maxChunksSize = 1 << 30 // 1 GiB（chunks.gob）
+)
+
+// readFileChecked 读取文件前先用 stat 校验大小上限，超限报错而非全量读入。
+func readFileChecked(path string, max int64) ([]byte, error) {
+	st, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if st.Size() > max {
+		return nil, fmt.Errorf("%s: index file too large (%d bytes > %d limit)", path, st.Size(), max)
+	}
+	return os.ReadFile(path)
+}
 
 // Store 索引持久化：<IndexDir>/ 下直接存储（不同知识库用不同 IndexDir，无需 product 子目录）
 //
@@ -157,7 +179,7 @@ func (s *Store) Open(product string) (*Loaded, error) {
 	}
 	l := &Loaded{ChunkByID: map[string]chunker.Chunk{}}
 
-	mb, err := os.ReadFile(filepath.Join(dir, "meta.json"))
+	mb, err := readFileChecked(filepath.Join(dir, "meta.json"), maxMetaSize)
 	if err != nil {
 		return nil, err
 	}
@@ -165,7 +187,7 @@ func (s *Store) Open(product string) (*Loaded, error) {
 		return nil, err
 	}
 
-	vdata, err := os.ReadFile(filepath.Join(dir, "vectors.gob"))
+	vdata, err := readFileChecked(filepath.Join(dir, "vectors.gob"), maxVectorSize)
 	if err != nil {
 		return nil, err
 	}
@@ -175,16 +197,19 @@ func (s *Store) Open(product string) (*Loaded, error) {
 	}
 
 	// bm25.gob 为必选文件：缺失说明索引不完整（构建中断/被外部删除），显式报错而非静默容忍
-	bdata, err := os.ReadFile(filepath.Join(dir, "bm25.gob"))
+	bdata, err := readFileChecked(filepath.Join(dir, "bm25.gob"), maxBM25Size)
 	if err != nil {
-		return nil, fmt.Errorf("%w: bm25.gob missing at %s", ErrIncomplete, dir)
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, fmt.Errorf("%w: bm25.gob missing at %s", ErrIncomplete, dir)
+		}
+		return nil, err
 	}
 	l.BM25, err = bm25.Load(bdata)
 	if err != nil {
 		return nil, err
 	}
 
-	cdata, err := os.ReadFile(filepath.Join(dir, "chunks.gob"))
+	cdata, err := readFileChecked(filepath.Join(dir, "chunks.gob"), maxChunksSize)
 	if err != nil {
 		return nil, err
 	}
@@ -236,6 +261,8 @@ func gobEncode(v any) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// gobDecode 带消费上限解码（防御性；外层 readFileChecked 已限文件大小）。
 func gobDecode(data []byte, v any) error {
-	return gob.NewDecoder(bytes.NewReader(data)).Decode(v)
+	dec := gob.NewDecoder(io.LimitReader(bytes.NewReader(data), int64(len(data))))
+	return dec.Decode(v)
 }

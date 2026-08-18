@@ -25,14 +25,19 @@ type Index struct {
 	AvgDocLen    float64
 	DF           map[string]int   // term -> doc frequency
 	Postings     map[string][]int // term -> [docIndex,...]
-	Size         int
-	ChunkIDs     []string
+	// TF 查询期 term 频次预统计：term -> 与 Postings 平行的 doc 内频次。
+	// build 时随倒排一并生成，免去查询时对每个命中 doc 全量扫描统计 tf。
+	// 旧格式索引无此字段（gob 解码为 nil），Search 回退全量扫描，向后兼容。
+	TF       map[string][]int
+	Size     int
+	ChunkIDs []string
 }
 
 func Build(docs []string, chunkIDs []string) *Index {
 	idx := &Index{
 		DF:       map[string]int{},
 		Postings: map[string][]int{},
+		TF:       map[string][]int{},
 	}
 	n := len(docs)
 	corpus := make([][]string, 0, n)
@@ -47,7 +52,11 @@ func Build(docs []string, chunkIDs []string) *Index {
 				dfSeen[t] = struct{}{}
 				idx.DF[t]++
 				idx.Postings[t] = append(idx.Postings[t], len(corpus)-1)
+				idx.TF[t] = append(idx.TF[t], 1)
+				continue
 			}
+			// 同一 doc 内重复 term：tf +1（Postings 该条对应本 doc，TF 与其平行）
+			idx.TF[t][len(idx.TF[t])-1]++
 		}
 	}
 	idx.CorpusTokens = corpus
@@ -96,11 +105,20 @@ func (i *Index) Search(query string, topK int) []Result {
 			continue
 		}
 		idf := math.Log(1 + (float64(i.Size)-float64(df)+0.5)/(float64(df)+0.5))
-		for _, d := range i.Postings[term] {
+		// tf 优先取预统计（与 Postings 平行）；旧格式索引无 TF 时回退全量扫描
+		var tfs []int
+		if i.TF != nil {
+			tfs = i.TF[term]
+		}
+		for pi, d := range i.Postings[term] {
 			tf := 0.0
-			for _, t := range i.CorpusTokens[d] {
-				if t == term {
-					tf++
+			if tfs != nil {
+				tf = float64(tfs[pi])
+			} else {
+				for _, t := range i.CorpusTokens[d] {
+					if t == term {
+						tf++
+					}
 				}
 			}
 			dl := i.DocLen[d]
