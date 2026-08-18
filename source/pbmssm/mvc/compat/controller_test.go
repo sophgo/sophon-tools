@@ -3,6 +3,7 @@ package compat
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -512,10 +513,16 @@ func TestCompatSubscribeFlow(t *testing.T) {
 }
 
 // ---------------------------------------------------------------
-// 设备配置降级测试
+// 设备配置测试
 // ---------------------------------------------------------------
 
+// TestCompatSetBasic 真实实现：持久化 deviceName 到配置 + 调用 hostname 设置。
 func TestCompatSetBasic(t *testing.T) {
+	// hostname setter 注入 fake（单测环境无 CAP_SYS_ADMIN，不能真改 hostname）
+	var gotName string
+	hostnameSetter = func(name string) error { gotName = name; return nil }
+	t.Cleanup(func() { hostnameSetter = realSetHostname })
+
 	r := setupCompatTest(t)
 	token := getNormalToken(t, r)
 
@@ -529,9 +536,66 @@ func TestCompatSetBasic(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
-		t.Fatalf("set basic: expected 200, got %d", w.Code)
+		t.Fatalf("set basic: expected 200, got %d body=%s", w.Code, w.Body.String())
 	}
 	assertSsmOK(t, w.Body.Bytes(), "set basic")
+
+	if gotName != "my-device" {
+		t.Errorf("hostnameSetter called with %q, want my-device", gotName)
+	}
+	// 配置已持久化（GetCtrlBasic 的 deviceName 读取源）
+	config.Conf.RLock()
+	cfgName := config.Conf.GetViper().GetString("server.deviceName")
+	config.Conf.RUnlock()
+	if cfgName != "my-device" {
+		t.Errorf("config server.deviceName = %q, want my-device", cfgName)
+	}
+}
+
+// TestCompatSetBasicInvalidName 非法 deviceName 拒绝（400，不改配置不改 hostname）。
+func TestCompatSetBasicInvalidName(t *testing.T) {
+	var called bool
+	hostnameSetter = func(name string) error { called = true; return nil }
+	t.Cleanup(func() { hostnameSetter = realSetHostname })
+
+	r := setupCompatTest(t)
+	token := getNormalToken(t, r)
+
+	for _, bad := range []string{"", "bad name!", "a/b", "-leading"} {
+		body, _ := json.Marshal(BasicSettings{Name: bad, Type: "SE8"})
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/device/configure/basic", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+token)
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("name %q: expected 400, got %d", bad, w.Code)
+		}
+	}
+	if called {
+		t.Error("hostnameSetter must not be called for invalid names")
+	}
+}
+
+// TestCompatSetBasicHostnameError hostname 设置失败如实报错（不再假成功）。
+func TestCompatSetBasicHostnameError(t *testing.T) {
+	hostnameSetter = func(name string) error { return errors.New("operation not permitted") }
+	t.Cleanup(func() { hostnameSetter = realSetHostname })
+
+	r := setupCompatTest(t)
+	token := getNormalToken(t, r)
+
+	body, _ := json.Marshal(BasicSettings{Name: "ok-name", Type: "SE8"})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/device/configure/basic", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("set basic with hostname error: expected 500, got %d", w.Code)
+	}
+	assertSsmErr(t, w.Body.Bytes(), "set basic hostname error")
 }
 
 func TestCompatSetAlarm(t *testing.T) {
@@ -862,6 +926,10 @@ func TestCompatSCP(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+token)
 	r.ServeHTTP(w, req)
 
+	// 未实现：如实返回 501（MYS-390），杜绝调用方误以为成功
+	if w.Code != http.StatusNotImplemented {
+		t.Errorf("scp: expected 501, got %d", w.Code)
+	}
 	resp := assertSsmErr(t, w.Body.Bytes(), "scp")
 	if resp.ErrorMessage != "scp not supported" {
 		t.Errorf("scp: error_message = %q", resp.ErrorMessage)

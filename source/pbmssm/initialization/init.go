@@ -86,8 +86,6 @@ func InitBase() {
 	// 每 updateIntervalSeconds 秒采集硬件指标→更新 sophon_* gauge→/metrics 暴露。
 	metrics.StartCollection(conf, metrics.DeviceLabels{
 		DeviceID:  "0",
-		Model:     global.DeviceTypeEx,
-		Serial:    global.DeviceSnEx,
 		ChipType:  global.ModuleType,
 		BoardType: global.ModuleTypeEx,
 	})

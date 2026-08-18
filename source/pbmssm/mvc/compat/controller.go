@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 
 	"bytes"
@@ -95,7 +96,7 @@ func (ctrl *Controller) requireHazardGuard(c *gin.Context, holder, action, resou
 	return guard, true
 }
 
-// getSecret 从配置获取 JWT secret。
+// getSecret 从配置获取 JWT secret（TerminalWS query token 校验等使用）。
 func getSecret() string {
 	conf := &config.Conf
 	conf.RLock()
@@ -105,51 +106,6 @@ func getSecret() string {
 		secret = auth.DefaultSecret
 	}
 	return secret
-}
-
-// ---------------------------------------------------------------
-// Login
-// ---------------------------------------------------------------
-
-// Login POST /api/v1/login（compat 形态）
-// 与 user.Controller.Login 一致：默认密码登录返回临时 token + changePass=true。
-func (ctrl *Controller) Login(c *gin.Context) {
-	var req LoginRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, response.Fail("invalid request body"))
-		return
-	}
-
-	user, err := ctrl.userSvc.Login(req.UserName, req.Password)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, response.Fail(err.Error()))
-		return
-	}
-
-	temp := req.Password == getDefaultPassword()
-	tokenStr, _, err := auth.IssueToken(user.Username, getSecret(), temp)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, response.Fail("failed to issue token"))
-		return
-	}
-
-	c.JSON(http.StatusOK, response.OK(SystemLoginResponse{
-		Token:      tokenStr,
-		Role:       user.Role,
-		ChangePass: temp,
-	}))
-}
-
-// getDefaultPassword 从配置读取默认密码（用于判定是否需强制改密）。
-func getDefaultPassword() string {
-	conf := &config.Conf
-	conf.RLock()
-	defer conf.RUnlock()
-	p := conf.GetViper().GetString("server.defaultPassword")
-	if p == "" {
-		p = "admin"
-	}
-	return p
 }
 
 // ---------------------------------------------------------------
@@ -293,33 +249,8 @@ func (ctrl *Controller) DeleteNAT(c *gin.Context) {
 // 重启 / 关机
 // ---------------------------------------------------------------
 
-// Reboot POST /bitmain/v1/ssm/hardware/devices/reset
-// 复用 hardware.HardwareService 的 Rebooter（生产用 osRebooter）。
-func (ctrl *Controller) Reboot(c *gin.Context) {
-	var req struct {
-		CoreOpe
-		Confirm string `json:"confirm"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, response.Fail("invalid request body"))
-		return
-	}
-
-	// MYS-389：二次确认 + 高危互斥 + 审计
-	guard, ok := ctrl.requireHazardGuard(c, "reboot", "reboot", "hardware", req.Confirm)
-	if !ok {
-		return
-	}
-	defer guard.Release()
-
-	if err := ctrl.hwSvc.Reboot(0); err != nil {
-		ctrl.auditWrite(c, uname(c), "reboot", "hardware", "failed")
-		c.JSON(http.StatusInternalServerError, response.Fail(err.Error()))
-		return
-	}
-	ctrl.auditWrite(c, uname(c), "reboot", "hardware", "success")
-	c.JSON(http.StatusOK, response.OK(nil))
-}
+// 重启走已挂载的 hwCtrl.Reboot（router admin 组 /hardware/reboot，
+// 含 MYS-389 二次确认+高危互斥），compat 未挂载的 Reboot 已删除。
 
 // uname 从 gin context 取用户名（middleware.Auth 注入）。
 func uname(c *gin.Context) string {
@@ -404,17 +335,63 @@ func (ctrl *Controller) GetSubscription(c *gin.Context) {
 // 设备配置
 // ---------------------------------------------------------------
 
-// SetBasic POST /bitmain/v1/ssm/software/device/configure/basic
+// SetBasic POST /api/v1/device/configure/basic
+// 真实实现（MYS-390，不再静默假成功）：
+//   - 修改系统 hostname（运行时 + /etc/hostname 持久化），失败如实报 500
+//   - 持久化 server.deviceName 到配置（GetCtrlBasic 的 deviceName 读取源）
+//
+// deviceType 不落盘：设备型号由全局设备信息决定，不允许用户改写。
 func (ctrl *Controller) SetBasic(c *gin.Context) {
 	var req BasicSettings
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, response.Fail("invalid request body"))
 		return
 	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		c.JSON(http.StatusBadRequest, response.Fail("deviceName is required"))
+		return
+	}
+	if !hostnameRe.MatchString(name) {
+		c.JSON(http.StatusBadRequest, response.Fail("invalid deviceName: only letters, digits, '-' and '.' allowed"))
+		return
+	}
 
-	// 降级：不做真 hostname 修改，返回成功 SsmResult
-	_ = req
+	// 1) 系统 hostname（失败如实报错；此时配置未动，保持状态一致）
+	if err := hostnameSetter(name); err != nil {
+		c.JSON(http.StatusInternalServerError, response.Fail("set hostname: "+err.Error()))
+		return
+	}
+
+	// 2) 配置持久化（GetCtrlBasic 的 deviceName 读取源），
+	// WriteConfig 失败降级为仅内存更新（与 SetAlarm 同模式：主机名已生效）
+	config.Conf.Lock()
+	defer config.Conf.Unlock()
+	v := config.Conf.GetViper()
+	v.Set("server.deviceName", name)
+	if err := v.WriteConfig(); err != nil {
+		logger.Warn("SetBasic WriteConfig failed (in-memory only): %v", err)
+	}
 	c.JSON(http.StatusOK, response.OK(nil))
+}
+
+// hostnameRe 限定 deviceName 为合法 hostname：字母/数字开头结尾，中间含
+// 字母数字、'-'、'.'，最长 63。
+var hostnameRe = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9.-]{0,61}[A-Za-z0-9])?$`)
+
+// hostnameSetter 修改系统 hostname（包级变量，测试注入 fake 替换）。
+var hostnameSetter = realSetHostname
+
+// realSetHostname 运行时设置 hostname 并持久化到 /etc/hostname。
+func realSetHostname(name string) error {
+	if err := syscall.Sethostname([]byte(name)); err != nil {
+		return err
+	}
+	// 持久化失败不阻断：运行时已生效，仅告警
+	if err := os.WriteFile("/etc/hostname", []byte(name+"\n"), 0o644); err != nil {
+		logger.Warn("SetBasic persist /etc/hostname failed (runtime hostname applied): %v", err)
+	}
+	return nil
 }
 
 // SetAlarm POST /api/v1/device/configure/alarm
@@ -630,8 +607,9 @@ func (ctrl *Controller) GetWorkflow(c *gin.Context) {
 // ---------------------------------------------------------------
 
 // SCP POST /bitmain/v1/ssm/hardware/devices/scp
+// 未实现：如实返回 501 Not Implemented，杜绝调用方误以为操作成功（MYS-390）。
 func (ctrl *Controller) SCP(c *gin.Context) {
-	c.JSON(http.StatusOK, response.Fail("scp not supported"))
+	c.JSON(http.StatusNotImplemented, response.Fail("scp not supported"))
 }
 
 // Exec POST /bitmain/v1/ssm/hardware/devices/exec

@@ -60,7 +60,7 @@ func TestMetricsRegistryUpdateAndReset(t *testing.T) {
 		}
 	})
 	dev := DeviceLabels{
-		DeviceID: "0", Model: "SE5", Serial: "SN123",
+		DeviceID: "0",
 		ChipType: "BM1684", BoardType: "0x10",
 	}
 	hw := &HardwareMetrics{
@@ -103,8 +103,14 @@ func TestMetricsRegistryUpdateAndReset(t *testing.T) {
 		t.Fatal("no metrics in sophon_cpu_usage_percent")
 	}
 	labels := mf.Metric[0].GetLabel()
-	if len(labels) != 5 {
-		t.Errorf("expected 5 labels, got %d", len(labels))
+	if len(labels) != 3 {
+		t.Errorf("expected 3 labels, got %d", len(labels))
+	}
+	// 敏感 label（serial/model）不得出现在 /metrics 暴露的指标中（MYS-390）
+	for _, l := range labels {
+		if l.GetName() == "serial" || l.GetName() == "model" {
+			t.Errorf("sensitive label %q must not be exposed", l.GetName())
+		}
 	}
 
 	r.Reset()
@@ -117,9 +123,9 @@ func TestMetricsRegistryUpdateAndReset(t *testing.T) {
 }
 
 func TestLabelsForDevice(t *testing.T) {
-	d := DeviceLabels{DeviceID: "0", Model: "SE7", Serial: "ABC", ChipType: "BM1684X", BoardType: "3"}
+	d := DeviceLabels{DeviceID: "0", ChipType: "BM1684X", BoardType: "3"}
 	got := labelsForDevice(d)
-	if len(got) != 5 || got[0] != "0" || got[3] != "BM1684X" {
-		t.Errorf("labelsForDevice = %v, want [0 SE7 ABC BM1684X 3]", got)
+	if len(got) != 3 || got[0] != "0" || got[1] != "BM1684X" || got[2] != "3" {
+		t.Errorf("labelsForDevice = %v, want [0 BM1684X 3]", got)
 	}
 }

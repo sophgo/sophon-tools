@@ -3,6 +3,7 @@ package docker
 import (
 	"bytes"
 	"fmt"
+	"strconv"
 	"sync"
 
 	dockerclient "github.com/fsouza/go-dockerclient"
@@ -149,7 +150,24 @@ func (s *DockerService) RemoveImage(id string) error {
 	return s.client.RemoveImage(id)
 }
 
-// GetLogs 获取容器日志。
+// maxLogTailLines docker 日志 tail 上限：日志经 bytes.Buffer 整读进内存，
+// 限制行数防止 tail=all 时内存暴涨（MYS-390）。
+const maxLogTailLines = 5000
+
+// normalizeTail 将 docker log tail 参数钳制到 [1, maxLogTailLines]。
+// "all"/空/非法值按 maxLogTailLines 处理。
+func normalizeTail(tail string) string {
+	n, err := strconv.Atoi(tail)
+	if err != nil || n <= 0 {
+		return strconv.Itoa(maxLogTailLines)
+	}
+	if n > maxLogTailLines {
+		return strconv.Itoa(maxLogTailLines)
+	}
+	return tail
+}
+
+// GetLogs 获取容器日志。tail 强制钳制在 maxLogTailLines 内。
 func (s *DockerService) GetLogs(name string, tail string, since int64) (string, error) {
 	if !s.IsAvailable() {
 		return "", errUnavailable
@@ -160,7 +178,7 @@ func (s *DockerService) GetLogs(name string, tail string, since int64) (string, 
 		Container:    name,
 		OutputStream: &buf,
 		ErrorStream:  &buf,
-		Tail:         tail,
+		Tail:         normalizeTail(tail),
 		Since:        since,
 		Stdout:       true,
 		Stderr:       true,
