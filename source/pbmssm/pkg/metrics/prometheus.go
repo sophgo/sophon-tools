@@ -7,20 +7,20 @@ import (
 
 const namespace = "sophon"
 
-var defaultLabels = []string{"device_id", "model", "serial", "chip_type", "board_type"}
+// defaultLabels 指标标签。serial/model 属设备敏感信息，/metrics 公开抓取
+// （Prometheus scrape 不带 Authorization 头），不暴露给未授权内网用户（MYS-390）。
+var defaultLabels = []string{"device_id", "chip_type", "board_type"}
 
-// DeviceLabels Prometheus 标签值（对齐 Rust exporter 的 5 元组标签）。
+// DeviceLabels Prometheus 标签值（去敏感 label 后的 3 元组）。
 type DeviceLabels struct {
 	DeviceID  string
-	Model     string
-	Serial    string
 	ChipType  string
 	BoardType string
 }
 
 // labelsForDevice 将 DeviceLabels 转换为 Prometheus label values 切片。
 func labelsForDevice(d DeviceLabels) []string {
-	return []string{d.DeviceID, d.Model, d.Serial, d.ChipType, d.BoardType}
+	return []string{d.DeviceID, d.ChipType, d.BoardType}
 }
 
 // MetricsRegistry 持有全部 24 个 Prometheus gauge（对齐 Rust exporter 指标集）。

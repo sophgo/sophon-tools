@@ -93,9 +93,6 @@ func Register(r *gin.Engine) {
 		// 高危操作二次确认码（MYS-389）：任何 reboot/shutdown/OTA/install 前先取码
 		api.GET("/hazard/challenge", hwCtrl.Challenge)
 
-		// 审计日志
-		api.GET("/audit", auditCtrl.ListLogs)
-
 		// 系统日志下载（流式 tar.gz: /var/log/kern* + syslog*）
 		api.GET("/logs/download", logsCtrl.DownloadLogs)
 
@@ -210,6 +207,10 @@ func Register(r *gin.Engine) {
 		// 告警订阅（写）
 		admin.POST("/software/notify/subscribe", compatCtrl.SubscribeAlarm)
 		admin.POST("/software/notify/unsubscribe", compatCtrl.UnsubscribeAlarm)
+
+		// 审计日志（含全部用户登录 IP/操作记录）：并入 admin 组，
+		// 普通 user 不可查看他人操作痕迹（MYS-390）
+		admin.GET("/audit", auditCtrl.ListLogs)
 
 		// 文件管理（读 + 写均需 admin：涉及设备敏感文件）
 		// 注：download 保留在公开区（<a download> 需 query token 鉴权），见 public 段。
