@@ -1,6 +1,6 @@
 #!/bin/bash
 
-GET_INFO_VERSION="1.3.0"
+GET_INFO_VERSION="1.4.0"
 
 shopt -s compat31
 
@@ -472,24 +472,26 @@ DATE_TIME=$(date +"%Y-%m-%d %H:%M:%S %Z")
 CPU_MODEL=$(awk -F': ' '/model name/{print $2; exit}' /proc/cpuinfo)
 # ! [[ "$CPU_MODEL" == "" ]] || panic "cannot get cpu model from /proc/cpuinfo"
 
-# model name 兜底：CV84X2（SDK 标识 cv84x6）内核 compat 模式下可能输出 null/缺行/或 cv186ah
-#（0x27102014 & 0x7 常为 0x1 → 打印 "cv186ah"）。cv84x6 与 cv186ah 的 CLK/MCU 路径不同，必须区分。
-# 以 dts 为权威信号：CV84X2 内核 dts 递归含 "cvitek,cv84x6-*" compatible，而真实 bm1688/cv186ah
-# 的 dts 不含（且其根 compatible 同样为 "linux,dummy-virt" 不能直接判）。故当 CPU_MODEL 落入
-# 歧义集（null/空/cv186ah）且 dts 含 cv84x6 特征时，升级为 cv84x6，避免误入 PCIE 分支或 CV 家族共同路径。
-# 已确定的 bm1684x/bm1684/bm1688 model name 不作改写，保持既有行为。
-case "${CPU_MODEL}" in
-    ""|null|cv186ah)
-        if [ -d /proc/device-tree ]; then
-            _cv_match=$(find /proc/device-tree -name compatible -type f \
-                -exec grep -laE "cvitek,cv84x6-" {} + 2>/dev/null)
-            if [ -n "${_cv_match}" ]; then
-                CPU_MODEL="cv84x6"
-            fi
-            unset _cv_match
-        fi
-        ;;
+# CV84X2（SDK 标识 cv84x6）识别：model name 并不可靠——内核 cpuinfo.c 仅在 32-bit compat 模式下
+# 打印此行，且取 CHIP_INFO(0x27102014)&0x7 判定：CV84X2 上可能输出 null/缺行/cv186ah/bm1688。
+# 采用硬件/设备树两级识别，两级都不依赖 model name 的准确值：
+# 1) 首选 CPU part（MIDR 硬件直读，无条件打印）：Cortex-A55(0xd05) 仅 CV84X2/CV84X6，
+#    其余 SDK 芯片（bm1684x/bm1684/bm1688/cv186ah）均为 Cortex-A53(0xd03)，天然分开。
+# 2) 兜底 dts 信号：CV84X2 内核 dts 递归含 "cvitek,cv84x6-*" compatible（如 cvitek,cv84x6-clk/
+#    cv84x6-emmc/cv84x6-thermal），而真实 bm1688/cv186ah 的 dts 不含（根 compatible 同为
+#    "linux,dummy-virt" 不能直接判）。命中即升级为 cv84x6。
+CPU_PART=$(awk -F': ' '/CPU part/{print $2; exit}' /proc/cpuinfo)
+case "${CPU_PART}" in
+    *d05*|*D05*) CPU_MODEL="cv84x6" ;;
 esac
+if [[ "${CPU_MODEL}" != "cv84x6" ]] && [ -d /proc/device-tree ]; then
+    _cv_match=$(find /proc/device-tree -name compatible -type f \
+        -exec grep -laE "cvitek,cv84x6-" {} + 2>/dev/null)
+    if [ -n "${_cv_match}" ]; then
+        CPU_MODEL="cv84x6"
+    fi
+    unset _cv_match
+fi
 
 # WORK MODE
 SOC_MODE_CPU_MODEL=("bm1684x" "bm1684" "bm1688" "cv186ah" "cv84x6")
@@ -544,6 +546,8 @@ DDR_TYPE=""
 if [[ "${WORK_MODE}" == "SOC" ]]; then
     if [[ "${SOC_FAMILY}" == "cv" ]]; then
         DTS_MEM_FILE="/proc/device-tree/memory*/reg"
+        # get_ddr_info 依赖 bm1684 家族的 iio:device0 ADC 与 devmem 0x27102014/0x27013050：
+        # CV84X2 dts 无 iio/adc 节点，且 0x27013050 未定义 → 实测输出空，保持留空即可。
         DDR_TYPE=$(get_ddr_info 2>/dev/null)
     else
         DTS_MEM_FILE="/proc/device-tree/memory/reg"
@@ -885,11 +889,39 @@ BOARD_TYPE=""
 MCU_VERSION=""
 if [[ "${WORK_MODE}" == "SOC" ]]; then
     if [[ "${CPU_MODEL}" == "cv84x6" ]]; then
-        # CV84X6 MCU 挂在 I2C1 地址 0x17，版本走 I2C 命令字节（cmd 0x00/0x01/0x02），
-        # 协议与 bm1688 的 devmem 0x05026024 不同；初版留空，避免读错地址返回垃圾值。
-        # 后续如需补齐，走 i2cget -f -y 1 0x17 <cmd> 实验路径。
-        BOARD_TYPE=""
-        MCU_VERSION=""
+        # CV84X6 MCU 在 I2C 控制器1 地址 0x17，版本走 I2C 命令字节协议（libsophon 驱动
+        # 84x6_card.c bm84x6_get_board_version_from_mcu：bm_i2c_read_byte(i2c_index=1, cmd)，
+        # cmd 0x00/0x01/0x02 分别读 board_type / mcu_sw_version / hw_version）。
+        # 驱动为 DesignWare I2C「写命令字节→读字节」，等价 i2cget 的 read-byte-data：
+        #   i2cget -f -y <bus> 0x17 <cmd>
+        # 总线号无法静态确定（dts 无 i2c aliases，Linux 按 probe 顺序编号）：扫描 /dev/i2c-*，
+        # 直接对 0x17 发 3 个命令字节读取（无设备的总线 NACK 返回空，自动跳过）；三个均为
+        # 合法字节值且非 0xFF（空总线读回值）才输出，否则留空（避免读到垃圾值）。
+        # 真机协议与值域仍需复核。
+        if [[ "$(cmd_validate i2cget)" == "1" ]]; then
+            for _bus in /dev/i2c-*; do
+                [ -e "$_bus" ] || continue
+                _b=${_bus#/dev/i2c-}
+                _mcubt=$(i2cget -f -y "$_b" 0x17 0x00 2>/dev/null)
+                _mcusw=$(i2cget -f -y "$_b" 0x17 0x01 2>/dev/null)
+                _mcuhw=$(i2cget -f -y "$_b" 0x17 0x02 2>/dev/null)
+                if [[ "$_mcubt" =~ ^0x[0-9a-fA-F]{2}$ ]] && [[ "$_mcusw" =~ ^0x[0-9a-fA-F]{2}$ ]] \
+                    && [[ "$_mcuhw" =~ ^0x[0-9a-fA-F]{2}$ ]]; then
+                    _bt=$(( _mcubt ))
+                    _sw=$(( _mcusw ))
+                    if [ "$_bt" -ne 255 ] && [ "$_sw" -ne 255 ]; then
+                        if [ "$_bt" -eq 0 ]; then
+                            BOARD_TYPE="EVB"   # BOARD_TYPE_EVB=0x0（libsophon bm_pcie.h）
+                        else
+                            BOARD_TYPE=$_mcubt
+                        fi
+                        MCU_VERSION=$_sw
+                        break
+                    fi
+                fi
+            done
+            unset _bus _b _mcubt _mcusw _mcuhw _bt _sw
+        fi
     elif [[ "${SOC_FAMILY}" == "cv" ]]; then
         mcu_reg=$(busybox devmem 0x05026024 2>/dev/null)
         mcu_1=$(( (mcu_reg & 0xFF0000) >> 16 ))
