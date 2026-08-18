@@ -45,6 +45,8 @@ func printUsage() {
 	fmt.Println("Env:")
 	fmt.Println("  SE_RAG_EMBED_KEY / SE_RAG_RERANK_KEY   用户自备 key（放开内置限流）")
 	fmt.Println("  SE_RAG_FAKE_EMBED=1                    离线假 embedding（测试/离线验证）")
+	fmt.Println("Flags:")
+	fmt.Println("  -builtin-key=false                     用用户 key；此时上面两个 env key 必填，缺失报错退出")
 }
 
 func dispatch(args []string) int {

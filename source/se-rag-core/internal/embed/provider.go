@@ -36,7 +36,7 @@ func NewEmbedder(cfg config.Provider) (Embedder, error) {
 func NewReranker(cfg config.Provider) (Reranker, error) {
 	switch cfg.Type {
 	case "siliconflow":
-		return newSiliconflowReranker(cfg.EffectiveBaseURLs(), cfg.EffectiveKey(), cfg.Model, cfg.IsBuiltinKey())
+		return newSiliconflowReranker(cfg.EffectiveBaseURLs(), cfg.EffectiveKey(), cfg.Model)
 	case "sophnet":
 		return newSophnetReranker(cfg.BaseURL, cfg.EffectiveKey(), cfg.Model)
 	default:

@@ -1,7 +1,9 @@
 package docstore
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"se-rag-core/internal/bm25"
@@ -59,5 +61,30 @@ func TestOpenRoundTrip(t *testing.T) {
 	}
 	if _, ok := l.ChunkByID["c0"]; !ok {
 		t.Error("chunk index not restored")
+	}
+}
+
+func TestOpenRejectsOversizedGob(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "index")
+	s := &Store{IndexDir: dir}
+	chunks := []chunker.Chunk{{ChunkID: "c0", Text: "x", SourceFile: "a.md", LineStart: 1, LineEnd: 1}}
+	meta := s.BuildMeta("se7", "siliconflow", "BAAI/bge-m3", 2, chunks)
+	bmi := bm25.Build([]string{"x"}, []string{"c0"})
+	if err := s.SaveIndex("se7", meta, [][]float32{{1, 0}}, []string{"c0"}, bmi, chunks); err != nil {
+		t.Fatal(err)
+	}
+	// 篡改：把 chunks.gob 撑到超过上限（稀疏文件，不实际占磁盘）
+	f, err := os.Create(filepath.Join(dir, "chunks.gob"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(maxChunksSize + 1); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	if _, err := s.Open("se7"); err == nil {
+		t.Fatal("expected error for oversized chunks.gob")
+	} else if !strings.Contains(err.Error(), "too large") {
+		t.Fatalf("error should mention size limit, got: %v", err)
 	}
 }

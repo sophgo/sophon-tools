@@ -10,6 +10,19 @@ func TestNormalizeUnitLength(t *testing.T) {
 	}
 }
 
+func TestNormalizeZeroVectorCopy(t *testing.T) {
+	// 零向量：返回同 len 的副本而非输入别名，修改返回值不得影响原切片
+	z := []float32{0, 0}
+	out := Normalize(z)
+	if len(out) != 2 {
+		t.Fatalf("len(out) = %d want 2", len(out))
+	}
+	out[0] = 1
+	if z[0] != 0 {
+		t.Fatal("Normalize returned alias of input on zero vector")
+	}
+}
+
 func TestFlatIPFindMostSimilar(t *testing.T) {
 	idx := &Index{Dim: 4}
 	idx.Add(Normalize([]float32{1, 0, 0, 0}), "c0")

@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"se-rag-core/internal/config"
@@ -28,11 +29,87 @@ func TestProcessArgs(t *testing.T) {
 // fakeFactory 用固定 2 维 fake embedder/reranker，使 build/query/doctor 全链路可离线跑通。
 func fakeFactory() runCtx {
 	return runCtx{
-		indexDir: filepath.Join(os.TempDir(), "se-rag-test-index"),
-		product:  "se7",
-		topN:     5,
-		embedF:   func(config.Provider) (embed.Embedder, error) { return embed.NewFakeEmbedder(2), nil },
-		rerankF:  func(config.Provider) (embed.Reranker, error) { return embed.NewFakeReranker(), nil },
+		useBuiltin: true,
+		indexDir:   filepath.Join(os.TempDir(), "se-rag-test-index"),
+		product:    "se7",
+		topN:       5,
+		embedF:     func(config.Provider) (embed.Embedder, error) { return embed.NewFakeEmbedder(2), nil },
+		rerankF:    func(config.Provider) (embed.Reranker, error) { return embed.NewFakeReranker(), nil },
+	}
+}
+
+// keyTestCtx 返回带有效 docs/index/query 的 fake 上下文（供 key 校验测试，key 检查前的参数都能通过）。
+func keyTestCtx(t *testing.T) runCtx {
+	t.Helper()
+	dir := t.TempDir()
+	docsDir := filepath.Join(dir, "docs")
+	if err := os.MkdirAll(docsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(docsDir, "a.md"), []byte("# SE7\n\n## 网络\n\n配置 netplan 使能 dhcp4。"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rc := fakeFactory()
+	rc.useBuiltin = false
+	rc.docsDir = docsDir
+	rc.indexDir = filepath.Join(dir, "idx")
+	rc.query = "网络配置"
+	return rc
+}
+
+func TestBuiltinKeyFalseRequiresEnvKeys(t *testing.T) {
+	t.Setenv("SE_RAG_EMBED_KEY", "")
+	t.Setenv("SE_RAG_RERANK_KEY", "")
+	t.Setenv("SE_RAG_FAKE_EMBED", "")
+	rc := keyTestCtx(t)
+
+	err := runBuild(rc)
+	if err == nil {
+		t.Fatal("build: expected error for -builtin-key=false without SE_RAG_EMBED_KEY")
+	}
+	if !strings.Contains(err.Error(), "SE_RAG_EMBED_KEY") {
+		t.Fatalf("build: error should name the missing key, got: %v", err)
+	}
+
+	err = runQuery(rc)
+	if err == nil {
+		t.Fatal("query: expected error for -builtin-key=false without SE_RAG_EMBED_KEY")
+	}
+
+	// 只设 embed key：build 通过（不要求 rerank key），query 仍因缺少 rerank key 报错
+	t.Setenv("SE_RAG_EMBED_KEY", "sk-test-embed")
+	err = runBuild(rc)
+	if err != nil {
+		t.Fatalf("build with embed key only should pass, got: %v", err)
+	}
+	err = runQuery(rc)
+	if err == nil {
+		t.Fatal("query: expected error when SE_RAG_RERANK_KEY missing")
+	}
+	if !strings.Contains(err.Error(), "SE_RAG_RERANK_KEY") {
+		t.Fatalf("query: error should name the missing rerank key, got: %v", err)
+	}
+
+	// 两个 key 齐备：build/query 均通过
+	t.Setenv("SE_RAG_RERANK_KEY", "sk-test-rerank")
+	if err := runBuild(rc); err != nil {
+		t.Fatalf("build with both keys should pass, got: %v", err)
+	}
+	if err := runQuery(rc); err != nil {
+		t.Fatalf("query with both keys should pass, got: %v", err)
+	}
+}
+
+func TestBuiltinKeyFalseSkippedInFakeMode(t *testing.T) {
+	t.Setenv("SE_RAG_EMBED_KEY", "")
+	t.Setenv("SE_RAG_RERANK_KEY", "")
+	t.Setenv("SE_RAG_FAKE_EMBED", "1")
+	rc := keyTestCtx(t)
+	if err := runBuild(rc); err != nil {
+		t.Fatalf("fake mode should skip key check, got: %v", err)
+	}
+	if err := runQuery(rc); err != nil {
+		t.Fatalf("fake mode query should skip key check, got: %v", err)
 	}
 }
 

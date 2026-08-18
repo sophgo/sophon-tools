@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
+
 	"time"
 
 	"se-rag-core/internal/config"
@@ -18,17 +18,17 @@ func runQuery(rc runCtx) error {
 	if rc.product == "" {
 		rc.product = metaProductLabel
 	}
+	// 先校验 key 配置（-builtin-key=false 缺 env key 属配置错误，优先报出）
+	cfg := config.DefaultConfig()
+	p := cfg.Products[0]
+	p.Name = rc.product
+	if err := applyUserKeys(&p, rc.useBuiltin, true); err != nil {
+		return err
+	}
 	if rc.query == "" {
 		return fmt.Errorf("empty query")
 	}
 
-	cfg := config.DefaultConfig()
-	p := cfg.Products[0]
-	p.Name = rc.product
-	if !rc.useBuiltin {
-		p.Embedder.APIKey = os.Getenv("SE_RAG_EMBED_KEY")
-		p.Reranker.APIKey = os.Getenv("SE_RAG_RERANK_KEY")
-	}
 	emb, err := rc.embedF(p.Embedder)
 	if err != nil {
 		return fmt.Errorf("embedder init: %w", err)

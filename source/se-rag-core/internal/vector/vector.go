@@ -7,7 +7,7 @@ import (
 	"sort"
 )
 
-// Normalize 返回 v 的 L2 归一化副本（零向量原样返回）
+// Normalize 返回 v 的 L2 归一化副本（零向量返回零值副本而非输入别名，避免调用方误改输入）。
 func Normalize(v []float32) []float32 {
 	var norm float64
 	for _, x := range v {
@@ -15,7 +15,7 @@ func Normalize(v []float32) []float32 {
 	}
 	norm = math.Sqrt(norm)
 	if norm == 0 {
-		return v
+		return make([]float32, len(v))
 	}
 	out := make([]float32, len(v))
 	for i, x := range v {

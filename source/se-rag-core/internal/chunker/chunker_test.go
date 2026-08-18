@@ -66,3 +66,83 @@ func TestExtractProtectedNoTrailingNewlineTable(t *testing.T) {
 		_ = r
 	}
 }
+
+func TestChunkOverlapInMainPath(t *testing.T) {
+	// 主路径（分隔符切分）相邻块应共享约 Overlap 字符的重叠文本（README: 800/80）。
+	filler := "这是包含很多中文内容的一个段落，用于测试分块逻辑。"
+	text := "# 标题\n\n" + strings.Repeat(filler+"\n\n", 60)
+	c := NewDefaultChunker()
+	chunks := c.ChunkFile(text, "t.md")
+	if len(chunks) < 2 {
+		t.Fatalf("expected >=2 chunks, got %d", len(chunks))
+	}
+	// 每对相邻块：后一块应包含前一块的尾部片段（overlap>0），且整体大小不超限
+	for i := 1; i < len(chunks); i++ {
+		tail := chunks[i-1].Text
+		if len([]rune(tail)) > c.OverlapChars {
+			tail = string([]rune(tail)[len([]rune(tail))-c.OverlapChars:])
+		}
+		if !strings.HasPrefix(chunks[i].Text, tail) {
+			t.Errorf("chunk %d should overlap with chunk %d tail, got prefix %q... vs tail %q...",
+				i, i-1, truncated(chunks[i].Text, 30), truncated(tail, 30))
+		}
+	}
+	// 关键：重叠文本不应破坏保护占位符还原完整性
+	for _, ch := range chunks {
+		if strings.Contains(ch.Text, "__PROTECTED_") {
+			t.Errorf("chunk leaked protected placeholder: %.60q", ch.Text)
+		}
+	}
+}
+
+func TestChunkOverlapAcrossCodeBlock(t *testing.T) {
+	// 重叠边界落在保护占位符附近时，代码块/表格仍应完整还原、不残留占位符碎片。
+	filler := "长段中文文本用于撑大块长度，确保溢出切分多次。"
+	code := "```go\nfunc main() {\n    fmt.Println(\"hi\")\n}\n```"
+	text := strings.Repeat(filler+"\n\n", 30) + code + "\n\n" + strings.Repeat(filler+"\n\n", 30)
+	chunks := NewDefaultChunker().ChunkFile(text, "t.md")
+	if len(chunks) < 2 {
+		t.Fatalf("expected >=2 chunks, got %d", len(chunks))
+	}
+	joined := ""
+	for _, ch := range chunks {
+		joined += ch.Text
+		if strings.Contains(ch.Text, "__PROTECTED_") {
+			t.Errorf("chunk leaked protected placeholder: %.60q", ch.Text)
+		}
+	}
+	if !strings.Contains(joined, "func main()") {
+		t.Error("code block content lost across chunks")
+	}
+}
+
+func TestSplitPieceCoresConcatenateToSource(t *testing.T) {
+	// 不变量：各片段 core 按序拼接必须还原 clean 原文（依赖它做精确行号定位），
+	// 且重叠文本只作为前缀追加、不得修改核心内容。
+	c := NewDefaultChunker()
+	texts := []string{
+		"# 标题\n\n" + strings.Repeat("这是包含很多中文内容的一个段落，用于测试分块逻辑。\n\n", 60),
+		"前文\n\n```go\nfunc main() { println(\"hi\") }\n```\n\n" + strings.Repeat("无分隔长段中文文本，用于触发字符级兜底切分。"+"\n\n", 50),
+		"| a | b |\n| c | d |\n\n" + strings.Repeat("表格后面的正文段落，注意保护表格标记的完整性。"+"\n\n", 40),
+	}
+	for n, text := range texts {
+		clean, _ := extractProtected(text)
+		pieces := c.splitText(clean, 0)
+		joined := ""
+		for _, p := range pieces {
+			joined += p.core
+		}
+		if joined != clean {
+			t.Errorf("case %d: cores do not concatenate to source (joined %d runes, source %d runes)",
+				n, len([]rune(joined)), len([]rune(clean)))
+		}
+	}
+}
+
+func truncated(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n])
+}

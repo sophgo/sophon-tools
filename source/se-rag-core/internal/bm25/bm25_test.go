@@ -53,3 +53,31 @@ func TestBM25RoundTrip(t *testing.T) {
 		t.Errorf("search after round-trip mismatch: %+v", r)
 	}
 }
+
+func TestTFPrecomputedMatchesScanFallback(t *testing.T) {
+	// 同一查询预统计与全量扫描回退（TF=nil，模拟旧格式索引）结果必须一致。
+	docs := []string{
+		"SE7 SE7 SE7 芯片",
+		"BM1684X SDK 版本 SDK",
+		"SE7 与 BM1684X 协同工作 SE7",
+	}
+	idx := Build(docs, []string{"c0", "c1", "c2"})
+	pre := idx.Search("SE7 SDK", 5)
+	if len(pre) == 0 {
+		t.Fatal("no results with precomputed tf")
+	}
+	if idx.TF == nil {
+		t.Fatal("Build should populate TF")
+	}
+	legacy := *idx
+	legacy.TF = nil // 模拟旧索引（gob 无 TF 字段）
+	back := legacy.Search("SE7 SDK", 5)
+	if len(back) != len(pre) {
+		t.Fatalf("fallback results %d != precomputed %d", len(back), len(pre))
+	}
+	for i := range pre {
+		if pre[i].ChunkID != back[i].ChunkID || pre[i].Score != back[i].Score {
+			t.Errorf("rank %d: precomputed %+v != fallback %+v", i, pre[i], back[i])
+		}
+	}
+}

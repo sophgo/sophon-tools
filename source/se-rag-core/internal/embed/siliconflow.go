@@ -37,7 +37,7 @@ type sfEmbedResp struct {
 
 func (e *siliconflowEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
 	if e.limiter != nil {
-		// 内置 key：把 texts 拆成 ≤3 一段的子批逐批调用，真正限制单次载荷≤3 段落
+		// 内置 key：把 texts 拆成 ≤perCall 一段的子批逐批调用，真正限制单次载荷≤perCall 段落
 		return e.limiter.Embed(ctx, texts, func(batch []string) ([][]float32, error) {
 			return e.embedBatch(ctx, batch)
 		})
@@ -68,17 +68,16 @@ func NewSiliconflowEmbedderFromURL(baseURL string) (Embedder, error) {
 // ---- siliconflow reranker ----
 
 type siliconflowReranker struct {
-	baseURLs   []string
-	apiKey     string
-	model      string
-	useBuiltin bool
+	baseURLs []string
+	apiKey   string
+	model    string
 }
 
-func newSiliconflowReranker(baseURLs []string, key, model string, useBuiltinKey bool) (Reranker, error) {
+func newSiliconflowReranker(baseURLs []string, key, model string) (Reranker, error) {
 	if len(baseURLs) == 0 || baseURLs[0] == "" {
 		baseURLs = []string{"https://api.siliconflow.cn/v1"}
 	}
-	return &siliconflowReranker{baseURLs: baseURLs, apiKey: key, model: model, useBuiltin: useBuiltinKey}, nil
+	return &siliconflowReranker{baseURLs: baseURLs, apiKey: key, model: model}, nil
 }
 
 func (r *siliconflowReranker) Name() string { return "siliconflow." + r.model }
@@ -99,9 +98,7 @@ func (r *siliconflowReranker) Rerank(ctx context.Context, query string, docs []s
 	}
 	payload := map[string]any{"model": r.model, "query": query, "documents": docs, "top_n": topN}
 	var resp sfRerankResp
-	if r.useBuiltin {
-		// reranker 用并发1简单限流（单次调用本身段数由调用方控制）
-	}
+	// 注：rerank 单次调用段数由调用方控制，内置 key 暂不作额外限流
 	if err := postJSON(ctx, joinPaths(r.baseURLs, "/rerank"), r.apiKey, payload, &resp); err != nil {
 		return nil, err
 	}

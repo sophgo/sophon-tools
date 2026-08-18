@@ -112,13 +112,18 @@ export SE_RAG_RERANK_KEY="sk-user-rerank-key"
 ./bin/se-rag query -index-dir ./rag-data "问题" -builtin-key=false
 ```
 
-- 内置 key 启用的限流：并发 ≤ 1、单次 ≤ 2 段落
-- 用户自备 key（`-builtin-key=false`）：放开限流
+- 内置 key 启用的限流：并发 ≤ 1、单次 ≤ 2 段落（**进程内信号量**——单进程内有效；
+  多进程并发调用 se-rag 时，各进程独立限流，网关侧总体并发不受本限流约束）
+- 用户自备 key（`-builtin-key=false`）：放开限流；此时 key 必须由 `SE_RAG_EMBED_KEY` /
+  `SE_RAG_RERANK_KEY` 环境变量提供，缺失即报错退出（不静默回落内置 key）
 - 供应商切换（siliconflow ↔ sophnet）后，重建会用新指纹覆盖旧索引；用 `doctor` 校验
 
-> **关于内置 key**：内置 siliconflow key 以 XOR 混淆字节内嵌于源码（不落明文），是免费额度、用于默认开箱即用的
-> throwaway key（限流，避免滥用）。生产/共享部署应通过 `SE_RAG_EMBED_KEY` / `SE_RAG_RERANK_KEY`
-> 环境变量注入自备 key（也即放开限流），切勿在公共镜像或日志中泄露内置 key。
+> **关于内置 key**：「混淆内嵌」是**伪保护**：内置 key 以 XOR 单字节掩码（0x5A）混淆字节存于
+> 源码（密文与解码逻辑同文件），持有源码或二进制者可一键还原明文，不能视为机密。
+> 其安全模型真正依赖**网关侧护栏**（模型白名单 + 限流 + 免费额度），网关侧白名单/配额/
+> 吊销机制是否真实存在需向部署运维确认（仓库代码无法自证）。生产/共享部署应通过
+> `SE_RAG_EMBED_KEY` / `SE_RAG_RERANK_KEY` 环境变量注入自备 key（也即放开限流），
+> 切勿在公共镜像或日志中泄露内置 key。
 
 ## 内置网关故障转移链
 
@@ -135,6 +140,8 @@ export SE_RAG_RERANK_KEY="sk-user-rerank-key"
 
 - 同一 key / 同路径（`/v1/embeddings`、`/v1/rerank`）/ 同模型白名单，内置 key 零改动
 - 5xx / 429 / 连接错误（超时、DNS 失败）→ 有界重试（最多 6 次）并轮转至 FC 网关；4xx 快速失败不转移
+- 主网关的「IP 优先 + DoH 兜底」拨号依赖硬编码的 Cloudflare Anycast IP 与公共 DoH 服务器
+  （cf IP 段调整或 DoH 不可达时主路径失效；此时由 FC 备网关自动接管，FC 走系统 DNS 不受此影响）
 - 故障转移链可配置：`Provider.BaseURL`（主）+ `Provider.FallbackBaseURL`（备，默认 FC 网关）；
   两者相同即显式禁用故障转移；`se-rag` CLI 默认即启用
 - 用户自备 key 不经网关，直达官方 SiliconFlow，无故障转移项
