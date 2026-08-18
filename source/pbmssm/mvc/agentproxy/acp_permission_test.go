@@ -61,8 +61,8 @@ func TestResolvePermissionAllowRespondsRequest(t *testing.T) {
 
 	resp := tr.readRawLine(t, sc)
 	var frame struct {
-		ID     int64  `json:"id"`
-		Method string `json:"method,omitempty"`
+		ID     int64           `json:"id"`
+		Method string          `json:"method,omitempty"`
 		Result json.RawMessage `json:"result,omitempty"`
 	}
 	if err := json.Unmarshal(resp, &frame); err != nil {

@@ -20,12 +20,12 @@ func LoadConfig(db *gorm.DB) Config {
 	v := conf.GetViper()
 
 	cfg := Config{
-		Enabled:    v.GetBool("agentproxy.enabled"),
-		ListenIP:   v.GetString("agentproxy.listenIP"),
-		Port:       v.GetInt("agentproxy.port"),
-		BinaryPath: v.GetString("agentproxy.binaryPath"),
-		WorkDir:    v.GetString("agentproxy.workDir"),
-		Model:      v.GetString("agentproxy.model"),
+		Enabled:           v.GetBool("agentproxy.enabled"),
+		ListenIP:          v.GetString("agentproxy.listenIP"),
+		Port:              v.GetInt("agentproxy.port"),
+		BinaryPath:        v.GetString("agentproxy.binaryPath"),
+		WorkDir:           v.GetString("agentproxy.workDir"),
+		Model:             v.GetString("agentproxy.model"),
 		RestartBackoffMax: v.GetString("agentproxy.restartBackoffMax"),
 	}
 	// 若已通过「启用」开关持久化过状态，以持久化值为准（兼容 viper 未配置 enabled 的情形）。

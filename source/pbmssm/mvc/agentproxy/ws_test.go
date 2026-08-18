@@ -83,43 +83,41 @@ func bufioNewScanner(r io.Reader) *bufio.Scanner {
 	return bufio.NewScanner(r)
 }
 
-func TestWSAuthSubprotocol(t *testing.T) {
+// MYS-379 后续裁定：/agent/ws 与 18080 一致"不需要 key"——
+// 无论是否配置转发 key，客户端携带任意子协议（或完全不带）均可建立连接；
+// 服务端保留对所选子协议的回显（浏览器强制要求，否则握手失败）。
+func TestWSNoKeyRequired(t *testing.T) {
 	mod := NewModule(DefaultConfig(), nil, nil)
-	h := newHub(mod, "secret-key-123")
+	h := newHub(mod, "secret-key-123") // 模拟已配置转发 key
 	srv := httptest.NewServer(http.HandlerFunc(h.serveWS))
 	t.Cleanup(srv.Close)
 
-	// 正确子协议 → 升级成功
+	// 正确子协议 → 升级成功 + 回显
 	d := websocket.Dialer{Subprotocols: []string{"token.secret-key-123"}}
 	conn, resp, err := d.Dial(wsURL(srv.URL)+wsPath, nil)
 	if err != nil {
 		t.Fatalf("valid subproto dial failed: %v", err)
 	}
 	conn.Close()
-	// 浏览器强制要求服务端回显所选子协议，否则握手失败。
 	if got := resp.Header.Get("Sec-Websocket-Protocol"); got != "token.secret-key-123" {
 		t.Fatalf("echoed subproto = %q, want token.secret-key-123", got)
 	}
 
-	// 错误子协议 → 403（无升级）
+	// 错误子协议 → 仍升级成功（不再校验 key）
 	d2 := websocket.Dialer{Subprotocols: []string{"token.wrong"}}
-	_, resp2, err := d2.Dial(wsURL(srv.URL)+wsPath, nil)
-	if err == nil {
-		t.Fatal("wrong subproto should fail")
+	conn2, _, err := d2.Dial(wsURL(srv.URL)+wsPath, nil)
+	if err != nil {
+		t.Fatalf("wrong subproto must still connect without key check: %v", err)
 	}
-	if resp2 == nil || resp2.StatusCode != http.StatusForbidden {
-		t.Fatalf("wrong subproto status = %v, want 403", resp2)
-	}
+	conn2.Close()
 
-	// 无子协议 → 403
+	// 无子协议 → 仍升级成功（不再校验 key）
 	d3 := websocket.Dialer{}
-	_, resp3, err := d3.Dial(wsURL(srv.URL)+wsPath, nil)
-	if err == nil {
-		t.Fatal("no subproto should fail")
+	conn3, _, err := d3.Dial(wsURL(srv.URL)+wsPath, nil)
+	if err != nil {
+		t.Fatalf("no subproto must still connect without key check: %v", err)
 	}
-	if resp3 == nil || resp3.StatusCode != http.StatusForbidden {
-		t.Fatalf("no subproto status = %v, want 403", resp3)
-	}
+	conn3.Close()
 }
 
 func TestWSAuthEmptyKeyAllowsAll(t *testing.T) {
@@ -138,13 +136,16 @@ func TestWSAuthEmptyKeyAllowsAll(t *testing.T) {
 
 // TestHubKeyRotation 验证 MYS-387 轮换同步：SetKey 后旧子协议立即失效（403），
 // 新子协议放行——无需重启 bmssm。
+// TestHubKeyRotation MYS-379 裁定后 key 不再参与 WS 鉴权：
+// 轮换转发 key 不影响 /agent/ws 连接（任何子协议/无子协议均可建立），
+// SetKey 仅保留轮换同步语义（前端 PicoWs 子协议回显兼容）。
 func TestHubKeyRotation(t *testing.T) {
 	mod := NewModule(DefaultConfig(), nil, nil)
 	h := newHub(mod, "old-key")
 	srv := httptest.NewServer(http.HandlerFunc(h.serveWS))
 	t.Cleanup(srv.Close)
 
-	// 轮换前：旧 key 放行
+	// 轮换前：任意子协议均可连接
 	d0 := websocket.Dialer{Subprotocols: []string{"token.old-key"}}
 	conn0, _, err := d0.Dial(wsURL(srv.URL)+wsPath, nil)
 	if err != nil {
@@ -152,20 +153,21 @@ func TestHubKeyRotation(t *testing.T) {
 	}
 	conn0.Close()
 
-	// 轮换：新 key 生效
+	// 轮换：新 key 生效（不再影响鉴权，仅同步状态）
 	h.SetKey("new-key")
 
-	// 旧 key → 403（无升级）
+	// 已轮换掉的旧 key → 仍可连接（不再校验），子协议原样回显
 	d1 := websocket.Dialer{Subprotocols: []string{"token.old-key"}}
-	_, resp1, err1 := d1.Dial(wsURL(srv.URL)+wsPath, nil)
-	if err1 == nil {
-		t.Fatal("rotated-away old key should fail")
+	conn1, resp1, err1 := d1.Dial(wsURL(srv.URL)+wsPath, nil)
+	if err1 != nil {
+		t.Fatalf("old key after rotation must still connect (no key check): %v", err1)
 	}
-	if resp1 == nil || resp1.StatusCode != http.StatusForbidden {
-		t.Fatalf("old key after rotation status = %v, want 403", resp1)
+	conn1.Close()
+	if got := resp1.Header.Get("Sec-Websocket-Protocol"); got != "token.old-key" {
+		t.Fatalf("echoed subproto = %q, want token.old-key", got)
 	}
 
-	// 新 key → 连接成功
+	// 新 key → 连接成功 + 回显
 	d2 := websocket.Dialer{Subprotocols: []string{"token.new-key"}}
 	conn2, resp2, err2 := d2.Dial(wsURL(srv.URL)+wsPath, nil)
 	if err2 != nil {
@@ -176,15 +178,13 @@ func TestHubKeyRotation(t *testing.T) {
 		t.Fatalf("echoed subproto = %q, want token.new-key", resp2.Header.Get("Sec-Websocket-Protocol"))
 	}
 
-	// 无子协议 → 403
+	// 无子协议 → 仍可连接（不再校验 key）
 	d3 := websocket.Dialer{}
-	_, resp3, err3 := d3.Dial(wsURL(srv.URL)+wsPath, nil)
-	if err3 == nil {
-		t.Fatal("no subproto should fail after rotation")
+	conn3, _, err3 := d3.Dial(wsURL(srv.URL)+wsPath, nil)
+	if err3 != nil {
+		t.Fatalf("no subproto must still connect without key check: %v", err3)
 	}
-	if resp3 == nil || resp3.StatusCode != http.StatusForbidden {
-		t.Fatalf("no subproto status = %v, want 403", resp3)
-	}
+	conn3.Close()
 }
 
 // mockModuleForWS 构造一个带 ACP client 的模块（Client() 可交互）。
@@ -260,7 +260,7 @@ func TestWSMessageSendStreaming(t *testing.T) {
 
 	// 发送 message.send
 	_ = conn.WriteJSON(map[string]any{
-		"type": "message.send",
+		"type":    "message.send",
 		"payload": map[string]any{"content": "你好"},
 	})
 
@@ -403,7 +403,8 @@ func TestWSUnknownTypeIgnored(t *testing.T) {
 
 // TestHubDeliverRouting 验证 Hub.Deliver 把已格式化帧按 ACP sessionId 路由到绑定连接。
 // （duplicate 回归：内容流式现由 turn 的 consumeTurn→Deliver 单一来源投递，
-//  HandleEvent 已为 no-op，不再走 conn.adapter 双重转发。）
+//
+//	HandleEvent 已为 no-op，不再走 conn.adapter 双重转发。）
 func TestHubDeliverRouting(t *testing.T) {
 	mod, tr := mockModuleForWS(t)
 	h := newHub(mod, "key")
@@ -462,6 +463,7 @@ func TestHubDeliverRouting(t *testing.T) {
 // TestWSMultiSession 多会话验证：
 //   - 同一连接连续发送两条消息 → 复用同一 ACP 会话（只创建一个 session/new）
 //   - 新连接发送 → 创建新的 ACP 会话（第二个 session/new）
+//
 // sessionSummaries 从 session.list 帧提取摘要列表。
 func sessionSummaries(t *testing.T, conn *websocket.Conn) []map[string]any {
 	t.Helper()

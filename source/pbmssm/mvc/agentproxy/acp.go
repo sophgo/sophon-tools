@@ -62,7 +62,7 @@ type RPCDownlink struct {
 
 // InitResult initialize 握手结果。
 type InitResult struct {
-	ProtocolVersion int             `json:"protocolVersion"`
+	ProtocolVersion   int             `json:"protocolVersion"`
 	AgentCapabilities json.RawMessage `json:"agentCapabilities"`
 }
 
@@ -124,7 +124,7 @@ func (c *Client) Close() {
 // Initialize 执行 initialize 握手，返回能力声明。
 func (c *Client) Initialize(ctx context.Context) (*InitResult, error) {
 	params, _ := json.Marshal(map[string]any{
-		"protocolVersion":   1,
+		"protocolVersion":    1,
 		"clientCapabilities": map[string]any{},
 		"clientInfo": map[string]any{
 			"name":    "bmssm-agentproxy",
@@ -594,10 +594,10 @@ func parseFlatUpdate(raw json.RawMessage) *ACPSessionUpdate {
 		ev.Content = body.Content.Text
 	case "tool_call":
 		var body struct {
-			ToolCallID string `json:"toolCallId"`
-			Title      string `json:"title"`
-			Kind       string `json:"kind"`
-			Status     string `json:"status"`
+			ToolCallID string          `json:"toolCallId"`
+			Title      string          `json:"title"`
+			Kind       string          `json:"kind"`
+			Status     string          `json:"status"`
 			RawInput   json.RawMessage `json:"rawInput"`
 			Locations  []struct {
 				Path string `json:"path"`

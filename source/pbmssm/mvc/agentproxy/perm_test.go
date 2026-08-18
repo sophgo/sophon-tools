@@ -78,8 +78,8 @@ func TestModulePermissionRequestRoutedToWS(t *testing.T) {
 				return
 			}
 			var frame struct {
-				ID     *int64         `json:"id"`
-				Method string         `json:"method,omitempty"`
+				ID     *int64          `json:"id"`
+				Method string          `json:"method,omitempty"`
 				Result json.RawMessage `json:"result,omitempty"`
 			}
 			if err := json.Unmarshal(line, &frame); err != nil {
@@ -135,9 +135,9 @@ func TestModulePermissionRequestRoutedToWS(t *testing.T) {
 
 	// 用户允许：发 permission.respond
 	_ = conn.WriteJSON(map[string]any{
-		"type":        "permission.respond",
-		"session_id":  got.SessionID,
-		"payload":     map[string]any{"session_id": got.SessionID, "request_id": 77, "allow": true},
+		"type":       "permission.respond",
+		"session_id": got.SessionID,
+		"payload":    map[string]any{"session_id": got.SessionID, "request_id": 77, "allow": true},
 	})
 	time.Sleep(200 * time.Millisecond)
 }
@@ -313,7 +313,7 @@ func TestPermissionTimeoutAutoDeny(t *testing.T) {
 }
 
 // TestRespondPermissionByReqID 验证同一会话的多个待审批可按 reqID 独立应答
-//（若按会话单选，后者会覆盖前者导致其 reqID 无人应答而悬挂）。
+// （若按会话单选，后者会覆盖前者导致其 reqID 无人应答而悬挂）。
 func TestRespondPermissionByReqID(t *testing.T) {
 	mod, tr := mockModuleForWS(t)
 	client := mod.Client()

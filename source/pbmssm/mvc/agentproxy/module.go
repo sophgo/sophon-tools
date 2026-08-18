@@ -336,9 +336,10 @@ func ensureWorkDir(dir string) error {
 	return nil
 }
 
-// forwardKey 读取转发 key（WS 子协议 token.<key> 认证凭据）。
+// forwardKey 读取转发 key（供前端 PicoWs 携带子协议 token.<key> 使用）。
 // 复用 llm_proxy_config.forward_key（与 pico 模式完全一致，前端 PicoWS 零改动）。
-// 读失败返回空串（认证放行——DB 异常降级路径；正常路径 DB 恒有 key）。
+// MYS-379 后续裁定：/agent/ws 不再校验该 key（与 18080 转发一致"不需要 key"），
+// 此处仅保持兼容下发；读失败返回空串，不影响连接。
 func forwardKey(db *gorm.DB) string {
 	if db == nil {
 		return ""

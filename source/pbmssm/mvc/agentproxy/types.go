@@ -9,9 +9,9 @@ import "time"
 
 // 默认值。
 const (
-	DefaultPort      = 18990
-	DefaultWorkDir   = "/data/sophon/reasonix-home"
-	DefaultBinary    = "reasonix"
+	DefaultPort       = 18990
+	DefaultWorkDir    = "/data/sophon/reasonix-home"
+	DefaultBinary     = "reasonix"
 	DefaultBackoffMax = 30 * time.Second
 )
 
@@ -48,16 +48,16 @@ const (
 
 // WebchatSession webchatUI 会话模型（sqlite 持久化）。
 type WebchatSession struct {
-	ID           string       `json:"id"`   // uuid 主键（前端 localStorage 同一 id）
-	ACPSessionID string       `json:"acpSessionId"`
-	Title        string       `json:"title"`
-	Cwd          string       `json:"cwd"`
-	AutoApprove  bool         `json:"autoApprove"` // 自动审批开关（跨浏览器/设备持久化）
+	ID           string        `json:"id"` // uuid 主键（前端 localStorage 同一 id）
+	ACPSessionID string        `json:"acpSessionId"`
+	Title        string        `json:"title"`
+	Cwd          string        `json:"cwd"`
+	AutoApprove  bool          `json:"autoApprove"`                 // 自动审批开关（跨浏览器/设备持久化）
 	Messages     []ChatMessage `json:"messages,omitempty" gorm:"-"` // 历史快照（JSON 存 MessagesJSON）
-	MessagesJSON string       `json:"-"`                            // sqlite 存储用
-	State        SessionState `json:"state"`
-	CreatedAt    time.Time    `json:"createdAt"`
-	UpdatedAt    time.Time    `json:"updatedAt"`
+	MessagesJSON string        `json:"-"`                           // sqlite 存储用
+	State        SessionState  `json:"state"`
+	CreatedAt    time.Time     `json:"createdAt"`
+	UpdatedAt    time.Time     `json:"updatedAt"`
 }
 
 // TableName 指定表名。
@@ -65,28 +65,28 @@ func (WebchatSession) TableName() string { return "agent_session" }
 
 // ChatMessage 会话历史消息快照（渲染用；reasonix 侧 transcript 是权威上下文）。
 // Role 取值：user / assistant。Kind 区分渲染形态：text / thought / tool_calls
-//（user 消息 Kind 一般留空）。Model 记录 assistant 文本来源模型名。
+// （user 消息 Kind 一般留空）。Model 记录 assistant 文本来源模型名。
 type ChatMessage struct {
-	Role     string `json:"role"`     // user / assistant
-	Content  string `json:"content"`  // 文本或折叠块摘要
-	Kind     string `json:"kind,omitempty"`     // text / thought / tool_calls
-	Model    string `json:"model,omitempty"`    // assistant 模型名
-	ID       string `json:"id,omitempty"`       // 消息/工具 id（messageId / toolCallId）
+	Role    string `json:"role"`            // user / assistant
+	Content string `json:"content"`         // 文本或折叠块摘要
+	Kind    string `json:"kind,omitempty"`  // text / thought / tool_calls
+	Model   string `json:"model,omitempty"` // assistant 模型名
+	ID      string `json:"id,omitempty"`    // 消息/工具 id（messageId / toolCallId）
 }
 
 // ACPSessionUpdate ACP session/update 通知的通用载荷（判别子见 Discriminator）。
 type ACPSessionUpdate struct {
-	SessionID         string            `json:"sessionId,omitempty"`
-	Discriminator     string            `json:"discriminator,omitempty"`
-	MessageID         string            `json:"messageId,omitempty"`
-	Content           string            `json:"content,omitempty"`
-	ToolCallID        string            `json:"toolCallId,omitempty"`
-	ToolCallTitle     string            `json:"toolCallTitle,omitempty"`
-	ToolCallKind      string            `json:"toolCallKind,omitempty"`
-	ToolCallStatus    string            `json:"toolCallStatus,omitempty"`
-	ToolCallRawInput  string            `json:"toolCallRawInput,omitempty"`  // 工具调用 args 原始 JSON（命令/路径）
-	ToolCallLocations []string          `json:"toolCallLocations,omitempty"` // 工具触碰的文件路径
-	StopReason        string            `json:"stopReason,omitempty"`
-	Title             string            `json:"title,omitempty"`
-	Raw               map[string]any    `json:"-"`
+	SessionID         string         `json:"sessionId,omitempty"`
+	Discriminator     string         `json:"discriminator,omitempty"`
+	MessageID         string         `json:"messageId,omitempty"`
+	Content           string         `json:"content,omitempty"`
+	ToolCallID        string         `json:"toolCallId,omitempty"`
+	ToolCallTitle     string         `json:"toolCallTitle,omitempty"`
+	ToolCallKind      string         `json:"toolCallKind,omitempty"`
+	ToolCallStatus    string         `json:"toolCallStatus,omitempty"`
+	ToolCallRawInput  string         `json:"toolCallRawInput,omitempty"`  // 工具调用 args 原始 JSON（命令/路径）
+	ToolCallLocations []string       `json:"toolCallLocations,omitempty"` // 工具触碰的文件路径
+	StopReason        string         `json:"stopReason,omitempty"`
+	Title             string         `json:"title,omitempty"`
+	Raw               map[string]any `json:"-"`
 }

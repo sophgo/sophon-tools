@@ -22,7 +22,9 @@ func DefaultController() *Controller {
 
 // GetConfig GET /api/v1/llm-proxy/config
 // 返回已存配置（LLM/VLM 各 key 脱敏；ForwardKey 明文——仅 superuser/admin
-// 可访问，路由注册于 admin 组，MYS-386：forwardKey 是 /agent/ws 唯一凭据）。
+// 可访问，路由注册于 admin 组）。
+// key 裁定（MYS-379 后续）：/agent/ws 与 18080 转发均不再用 forwardKey 做认证，
+// 保留前端 PicoWs 携带子协议 token.<forward_key> 的兼容行为。
 func (ctrl *Controller) GetConfig(c *gin.Context) {
 	cfg := ctrl.svc.LoadConfig()
 	c.JSON(http.StatusOK, response.OK(cfg.ToResponse()))

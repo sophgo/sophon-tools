@@ -295,18 +295,18 @@ func TestToolCallSummaryShowsCommandAndPath(t *testing.T) {
 		wantIn string
 	}{
 		{
-			name: "bash command",
-			tc:   &ToolCallState{ID: "c1", Title: "bash", Kind: "execute", Status: "completed", RawInput: `{"command":"df -h","timeout":30}`},
+			name:   "bash command",
+			tc:     &ToolCallState{ID: "c1", Title: "bash", Kind: "execute", Status: "completed", RawInput: `{"command":"df -h","timeout":30}`},
 			wantIn: "bash: df -h",
 		},
 		{
-			name: "edit file via locations",
-			tc:   &ToolCallState{ID: "c2", Title: "edit_file", Kind: "edit", Status: "pending", RawInput: `{"path":"/data/x.go","replace":"y"}`, Locations: []string{"/data/x.go"}},
+			name:   "edit file via locations",
+			tc:     &ToolCallState{ID: "c2", Title: "edit_file", Kind: "edit", Status: "pending", RawInput: `{"path":"/data/x.go","replace":"y"}`, Locations: []string{"/data/x.go"}},
 			wantIn: "edit_file: /data/x.go",
 		},
 		{
-			name: "fallback to title-kind-status",
-			tc:   &ToolCallState{ID: "c3", Title: "grep", Kind: "bash", Status: "completed"},
+			name:   "fallback to title-kind-status",
+			tc:     &ToolCallState{ID: "c3", Title: "grep", Kind: "bash", Status: "completed"},
 			wantIn: "grep",
 		},
 	}

@@ -161,8 +161,8 @@ func TestInitialize(t *testing.T) {
 			t.Error("initialize should have id")
 		}
 		var params struct {
-			ProtocolVersion int             `json:"protocolVersion"`
-			ClientInfo      map[string]any  `json:"clientInfo"`
+			ProtocolVersion int            `json:"protocolVersion"`
+			ClientInfo      map[string]any `json:"clientInfo"`
 		}
 		_ = json.Unmarshal(req.Params, &params)
 		if params.ProtocolVersion != 1 {
@@ -335,12 +335,12 @@ func TestSessionPromptStream(t *testing.T) {
 // TestParseSessionUpdate 验证 session/update 各判别子解析。
 func TestParseSessionUpdate(t *testing.T) {
 	cases := []struct {
-		name        string
-		payload     string
-		disc        string
-		messageID   string
-		content     string
-		toolCallID  string
+		name       string
+		payload    string
+		disc       string
+		messageID  string
+		content    string
+		toolCallID string
 	}{
 		{
 			name:    "agent_message_chunk",
@@ -353,14 +353,14 @@ func TestParseSessionUpdate(t *testing.T) {
 			disc:    "agent_thought_chunk", messageID: "t1", content: "think",
 		},
 		{
-			name:       "tool_call",
-			payload:    `{"sessionId":"s1","update":{"sessionUpdate":{"tool_call":{"toolCallId":"tc1","title":"grep","kind":"bash","status":"pending"}}}}`,
-			disc:       "tool_call", toolCallID: "tc1",
+			name:    "tool_call",
+			payload: `{"sessionId":"s1","update":{"sessionUpdate":{"tool_call":{"toolCallId":"tc1","title":"grep","kind":"bash","status":"pending"}}}}`,
+			disc:    "tool_call", toolCallID: "tc1",
 		},
 		{
-			name:       "tool_call_update",
-			payload:    `{"sessionId":"s1","update":{"sessionUpdate":{"tool_call_update":{"toolCallId":"tc1","status":"completed"}}}}`,
-			disc:       "tool_call_update", toolCallID: "tc1",
+			name:    "tool_call_update",
+			payload: `{"sessionId":"s1","update":{"sessionUpdate":{"tool_call_update":{"toolCallId":"tc1","status":"completed"}}}}`,
+			disc:    "tool_call_update", toolCallID: "tc1",
 		},
 		{
 			name:    "session_info_update",
@@ -404,22 +404,22 @@ func TestParseSessionUpdate_ReasonixStringTag(t *testing.T) {
 		{
 			name:    "agent_message_chunk",
 			payload: `{"sessionId":"s1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"你好！有什么我可以帮你的吗？"}}}`,
-			disc: "agent_message_chunk", content: "你好！有什么我可以帮你的吗？",
+			disc:    "agent_message_chunk", content: "你好！有什么我可以帮你的吗？",
 		},
 		{
 			name:    "agent_thought_chunk",
 			payload: `{"sessionId":"s1","update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"用户要求我打招呼"}}}`,
-			disc: "agent_thought_chunk", content: "用户要求我打招呼",
+			disc:    "agent_thought_chunk", content: "用户要求我打招呼",
 		},
 		{
-			name:       "tool_call",
-			payload:    `{"sessionId":"s1","update":{"sessionUpdate":"tool_call","toolCallId":"tc1","title":"grep","kind":"bash","status":"pending"}}`,
-			disc: "tool_call", toolCallID: "tc1", toolStatus: "pending",
+			name:    "tool_call",
+			payload: `{"sessionId":"s1","update":{"sessionUpdate":"tool_call","toolCallId":"tc1","title":"grep","kind":"bash","status":"pending"}}`,
+			disc:    "tool_call", toolCallID: "tc1", toolStatus: "pending",
 		},
 		{
-			name:       "tool_call_update",
-			payload:    `{"sessionId":"s1","update":{"sessionUpdate":"tool_call_update","toolCallId":"tc1","status":"completed"}}`,
-			disc: "tool_call_update", toolCallID: "tc1", toolStatus: "completed",
+			name:    "tool_call_update",
+			payload: `{"sessionId":"s1","update":{"sessionUpdate":"tool_call_update","toolCallId":"tc1","status":"completed"}}`,
+			disc:    "tool_call_update", toolCallID: "tc1", toolStatus: "completed",
 		},
 	}
 	for _, tc := range cases {
