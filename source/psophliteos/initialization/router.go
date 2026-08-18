@@ -81,7 +81,29 @@ func Routers(webFS fs.FS) *gin.Engine {
 		middleware.SSOLogout(middleware.SSORequestToken(c))
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
-	// SSE 推送：旧端长连接，被新登录踢掉时主动收 SESSION_OFFLINE
+	// 一次性票据：下载/终端 WS 无法携带 Authorization 头，前端先带 Bearer 换票据，
+	// 真实请求以 ?ticket=<票据> 发起（SSO 中间件白名单路径校验并改写为 ?token= 转发）。
+	// 票据一次性 + 60s 过期，即使落入 URL/访问日志也无法复用。
+	Router.POST("/api/sso/ticket", func(c *gin.Context) {
+		act, ok := middleware.SSOActiveToken()
+		if !ok {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "no active session"})
+			return
+		}
+		// 请求必须以 Authorization 头携带当前活跃 token 才能换票（防任意换票）
+		if middleware.SSORequestToken(c) != act {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
+			return
+		}
+		ticket := middleware.SSOIssueTicket(act)
+		if ticket == "" {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to issue ticket"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ticket": ticket})
+	})
+	// SSE 推送：登录后长连接（Authorization Bearer 校验，见 middleware.SSOEvents 的
+	// 活跃会话校验与连接数/频率限制），被新登录踢掉时主动收 SESSION_OFFLINE
 	Router.GET("/api/sso/events", middleware.SSOEvents)
 
 	// /api/v1/* 反代到 bmssm（鉴权由 bmssm 处理）；前置 SSO 单会话校验
@@ -106,7 +128,7 @@ func Routers(webFS fs.FS) *gin.Engine {
 		// 复用同一 proxy（其 Director/Transport 已支持 WebSocket 升级）。
 		// 注意：不加 SSO 中间件。WS 升级请求来自同源页面，前端 PicoWs 以
 		// 子协议 token.<forward_key> 鉴权（bmssm serveWS 校验），不携带 SSO 所需的
-		// Authorization Bearer 或 ?token=；SSO() 会因拿不到 token 而 401 中断升级。
+		// Authorization Bearer 头；SSO() 会因拿不到 token 而 401 中断升级。
 		Router.Any("/agent/ws", func(c *gin.Context) {
 			proxy.ServeHTTP(c.Writer, c.Request)
 		})

@@ -134,7 +134,7 @@ func TestCLIBuildQueryDoctorHappyPath(t *testing.T) {
 	if err := runBuild(rc); err != nil {
 		t.Fatalf("build failed: %v", err)
 	}
-	for _, f := range []string{"meta.json", "vectors.gob", "bm25.gob", "chunks.gob"} {
+	for _, f := range []string{"meta.json", "vectors.gob", "bm25.gob", "chunks.gob", ".complete"} {
 		if _, err := os.Stat(filepath.Join(idx, f)); err != nil {
 			t.Errorf("expected %s at %s: %v", f, idx, err)
 		}

@@ -437,10 +437,11 @@
 
   // 下载：原生 <a download>，浏览器流式落盘（低内存），浏览器自带下载进度条。
   // 不再走 XHR blob + 应用内进度弹窗（大文件会撑爆浏览器内存）。
-  function download(record: FileInfo) {
+  // MYS-383：先换取一次性票据，URL 只带 ?ticket= 不带 JWT。
+  async function download(record: FileInfo) {
     const base = currentPath.value.endsWith('/') ? currentPath.value : currentPath.value + '/';
     const full = base + record.name;
-    const { url, name } = downloadFile(full);
+    const { url, name } = await downloadFile(full);
     const a = document.createElement('a');
     a.href = url;
     a.download = name;

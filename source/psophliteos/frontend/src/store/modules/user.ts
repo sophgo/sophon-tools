@@ -22,7 +22,8 @@ import { LoginStateEnum, useLoginState } from '/@/views/sys/login/useLogin';
 const { setLoginState } = useLoginState();
 
 // SSO 推送长连接（被新登录踢下线时服务端主动推送，无需刷新）。
-let ssoES: EventSource | null = null;
+// MYS-383：改用 fetch 流式读取以携带 Authorization 头，令牌不再进 URL。
+let ssoAbort: AbortController | null = null;
 
 interface UserState {
   userInfo: Nullable<UserInfo>;
@@ -256,36 +257,69 @@ export const useUserStore = defineStore({
     },
 
     // 建立 SSO 推送长连接：登录后监听"被新登录踢下线"事件，收到即弹窗并登出。
+    // 用 fetch + ReadableStream 代替 EventSource——EventSource 无法设置
+    // Authorization 头（MYS-383，令牌不再放 URL）；实现与 EventSource 相同的
+    // SSE 解析（按空行切块，取 event: 字段）。
     openSsoStream(token: string, username: string) {
       this.closeSsoStream();
       const base = (import.meta.env.VITE_GLOB_API_URL || '/api').replace(/\/$/, '');
-      const url = `${base}/sso/events?token=${encodeURIComponent(token)}`;
-      const es = new EventSource(url);
-      ssoES = es;
-      es.addEventListener('SESSION_OFFLINE', () => {
-        // 被踢：关连接 → 清本地登录态 → 弹窗提示 → 跳登录页
-        this.closeSsoStream();
-        this.setToken(undefined);
-        this.setUserInfo(null);
-        Modal.info({
-          title: '账号已在别处登录',
-          content: h(
-            'p',
-            { style: { lineHeight: '1.8' } },
-            `您的账号「${username}」已在另一处登录，本会话已下线。`,
-          ),
-          okText: '重新登录',
-          onOk: () => {
-            router.push(PageEnum.BASE_LOGIN);
-          },
-        });
+      const ab = new AbortController();
+      ssoAbort = ab;
+      const readStream = async () => {
+        try {
+          const resp = await fetch(`${base}/sso/events`, {
+            headers: { Authorization: `Bearer ${token}`, Accept: 'text/event-stream' },
+            signal: ab.signal,
+          });
+          if (!resp.ok || !resp.body) return; // 401/429 等：非关键通道，静默放弃
+          const reader = resp.body.getReader();
+          const decoder = new TextDecoder();
+          let buf = '';
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buf += decoder.decode(value, { stream: true });
+            let idx: number;
+            while ((idx = buf.indexOf('\n\n')) !== -1) {
+              const block = buf.slice(0, idx);
+              buf = buf.slice(idx + 2);
+              const event = block
+                .split('\n')
+                .find((l) => l.startsWith('event: '))
+                ?.slice(7)
+                .trim();
+              if (event === 'SESSION_OFFLINE') this.handleOffline(username);
+            }
+          }
+        } catch {
+          /* aborted（closeSsoStream）或网络中断：忽略 */
+        }
+      };
+      readStream();
+    },
+    // SESSION_OFFLINE 处理：关连接 → 清本地登录态 → 弹窗提示 → 跳登录页。
+    handleOffline(username: string) {
+      this.closeSsoStream();
+      this.setToken(undefined);
+      this.setUserInfo(null);
+      Modal.info({
+        title: '账号已在别处登录',
+        content: h(
+          'p',
+          { style: { lineHeight: '1.8' } },
+          `您的账号「${username}」已在另一处登录，本会话已下线。`,
+        ),
+        okText: '重新登录',
+        onOk: () => {
+          router.push(PageEnum.BASE_LOGIN);
+        },
       });
     },
     // 关闭 SSO 推送长连接。
     closeSsoStream() {
-      if (ssoES) {
-        ssoES.close();
-        ssoES = null;
+      if (ssoAbort) {
+        ssoAbort.abort();
+        ssoAbort = null;
       }
     },
   },

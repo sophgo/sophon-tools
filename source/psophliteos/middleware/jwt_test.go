@@ -133,12 +133,21 @@ func TestRequireBMSSMTokenMiddleware(t *testing.T) {
 		t.Fatalf("temp token: status=%d want 403", w.Code)
 	}
 
-	// 有效 token（query 形式同样放行）→ 200 + user
+	// 有效 token（Authorization 头）→ 200 + user
 	w = httptest.NewRecorder()
 	tok := issueToken(t, "admin", DefaultSecret, false)
-	req = httptest.NewRequest(http.MethodGet, "/protected?token="+tok, nil)
+	req = httptest.NewRequest(http.MethodGet, "/protected", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
 	router.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("valid token: status=%d want 200 body=%s", w.Code, w.Body.String())
+	}
+
+	// query 形式不再放行（MYS-383：与 requestToken 同为 Bearer-only，防令牌进 URL）→ 401
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/protected?token="+tok, nil)
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("query token: status=%d want 401 body=%s", w.Code, w.Body.String())
 	}
 }

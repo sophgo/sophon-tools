@@ -2,12 +2,15 @@ package retriever
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"se-rag-core/internal/bm25"
 	"se-rag-core/internal/chunker"
 	"se-rag-core/internal/docstore"
+	"se-rag-core/internal/vector"
 )
 
 type fakeEmbed struct {
@@ -107,5 +110,53 @@ func TestCheckFingerprintDimension(t *testing.T) {
 	}
 	if err := CheckFingerprint(3, 1024); err == nil {
 		t.Error("dim mismatch should error")
+	}
+}
+
+// TestSearchIncompleteIndexNoPanic 模拟缺 bm25.gob 的半套索引目录：
+// Open 显式报错（ErrIncomplete），query 返回错误而绝不 panic（回归 MYS-391 的 nil 解引用崩溃）。
+func TestSearchIncompleteIndexNoPanic(t *testing.T) {
+	s := buildTestStore(t)
+	if err := os.Remove(filepath.Join(s.IndexDir, "bm25.gob")); err != nil {
+		t.Fatal(err)
+	}
+	r := &Retriever{Store: s, Embedder: &fakeEmbed{vec: []float32{1, 0}}, Reranker: &fakeRerank{}}
+	if _, err := r.Search(context.Background(), "BM1684X 芯片", "se7", 8); err == nil {
+		t.Fatal("Search on incomplete index should error, got nil")
+	}
+}
+
+// TestHybridNilBM25VectorOnly 防御：loaded.BM25 为 nil 时 hybrid 退化为纯向量融合，不 panic。
+func TestHybridNilBM25VectorOnly(t *testing.T) {
+	v := &vector.Index{Dim: 2}
+	v.Add([]float32{1, 0}, "a")
+	v.Add([]float32{0, 1}, "b")
+	loaded := &docstore.Loaded{
+		Vector: v,
+		ChunkByID: map[string]chunker.Chunk{
+			"a": {ChunkID: "a", Text: "SE7 芯片", SourceFile: "sdk.md", LineStart: 1, LineEnd: 1},
+			"b": {ChunkID: "b", Text: "OTA 升级", SourceFile: "faq.md", LineStart: 3, LineEnd: 3},
+		},
+	}
+	r := &Retriever{}
+	res := r.hybrid(context.Background(), loaded, "SE7", []float32{1, 0}, 8)
+	if len(res) == 0 {
+		t.Fatal("expected vector-only results, got none")
+	}
+	if res[0].ChunkID != "a" {
+		t.Errorf("res[0] = %q, want pure vector hit %q", res[0].ChunkID, "a")
+	}
+}
+
+// TestBm25FallbackNilBM25Error 防御：loaded.BM25 为 nil 时兜底路径返回显式错误，不 panic。
+func TestBm25FallbackNilBM25Error(t *testing.T) {
+	loaded := &docstore.Loaded{ChunkByID: map[string]chunker.Chunk{}}
+	r := &Retriever{}
+	out, err := r.bm25Fallback(loaded, "SE7", 8, &SearchOutcome{}, time.Now())
+	if err == nil {
+		t.Fatal("bm25Fallback with nil BM25 should error, got nil")
+	}
+	if out != nil {
+		t.Errorf("out = %+v, want nil on error", out)
 	}
 }

@@ -14,12 +14,6 @@ import "bmssm/pkg/metrics"
 // 请求类型
 // ---------------------------------------------------------------
 
-// LoginRequest 登录请求（对应 bmssm ReqLogin/sophliteos LoginRequest）。
-type LoginRequest struct {
-	UserName string `json:"userName"`
-	Password string `json:"password"`
-}
-
 // IPSettings IP 设置请求（字段名对齐 sophliteos 前端：ipType/subnetMask + ipv6*）。
 //   - IPType 1=静态 2=DHCP；IPv6Type 0=不配置 1=静态 2=DHCP（与 IPv4 独立）
 //   - Mask/Prefix6 为 CIDR 或点分掩码，透传给 bm_set_ip
@@ -93,13 +87,6 @@ type OtaVersion struct {
 // ---------------------------------------------------------------
 // 响应类型
 // ---------------------------------------------------------------
-
-// SystemLoginResponse 系统登录响应（对应 bmssm RespLogin/sophliteos SystemLoginResponse）。
-type SystemLoginResponse struct {
-	Token      string `json:"token"`
-	Role       string `json:"role"`
-	ChangePass bool   `json:"changePass,omitempty"`
-}
 
 // Ip IP 信息（对应 sophliteos Ip）。
 type Ip struct {

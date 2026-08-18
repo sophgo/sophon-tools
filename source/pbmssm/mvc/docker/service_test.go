@@ -2,6 +2,7 @@ package docker
 
 import (
 	"errors"
+	"strconv"
 	"testing"
 	"time"
 
@@ -17,14 +18,16 @@ type fakeDockerClient struct {
 	images     []dockerclient.APIImages
 	logs       map[string]string // container name -> log text
 
+	lastTail string // 最近一次 Logs 请求的 Tail 参数（断言钳制用）
+
 	// 错误注入
-	listContainersErr error
-	startContainerErr error
-	stopContainerErr  error
+	listContainersErr  error
+	startContainerErr  error
+	stopContainerErr   error
 	removeContainerErr error
-	listImagesErr     error
-	removeImageErr    error
-	logsErr           error
+	listImagesErr      error
+	removeImageErr     error
+	logsErr            error
 }
 
 func newFakeDockerClient() *fakeDockerClient {
@@ -120,6 +123,7 @@ func (f *fakeDockerClient) RemoveImage(name string) error {
 }
 
 func (f *fakeDockerClient) Logs(opts dockerclient.LogsOptions) error {
+	f.lastTail = opts.Tail
 	if f.logsErr != nil {
 		return f.logsErr
 	}
@@ -319,6 +323,33 @@ func TestServiceGetLogs(t *testing.T) {
 	}
 	if logs == "" {
 		t.Fatal("expected non-empty logs")
+	}
+}
+
+// TestServiceGetLogsTailClamped tail=all / 超大值被钳制到 maxLogTailLines，
+// 防 tail=all 时日志整体读入内存（MYS-390）。
+func TestServiceGetLogsTailClamped(t *testing.T) {
+	fake := newFakeDockerClient()
+	fake.logs["nginx"] = "log line\n"
+	svc := NewDockerServiceWithClient(fake)
+
+	cases := []struct{ in, want string }{
+		{"100", "100"},
+		{"all", "5000"},
+		{"", "5000"},
+		{"999999", "5000"},
+		{"abc", "5000"},
+	}
+	for _, tc := range cases {
+		if _, err := svc.GetLogs("nginx", tc.in, 0); err != nil {
+			t.Fatalf("GetLogs(%q): %v", tc.in, err)
+		}
+		if fake.lastTail != tc.want {
+			t.Errorf("GetLogs tail=%q: forwarded tail=%q, want %q", tc.in, fake.lastTail, tc.want)
+		}
+	}
+	if got := strconv.Itoa(maxLogTailLines); got != "5000" {
+		t.Errorf("maxLogTailLines=%d, want 5000", maxLogTailLines)
 	}
 }
 
