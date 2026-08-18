@@ -104,12 +104,22 @@ func TestSearchFallbackBM25(t *testing.T) {
 	}
 }
 
-func TestCheckFingerprintDimension(t *testing.T) {
-	if err := CheckFingerprint(3, 3); err != nil {
-		t.Errorf("matching dim should pass, got %v", err)
+// CheckFingerprint 比较完整指纹串（provider.model@dim）；空指纹跳过比较（旧索引无指纹字段）。
+func TestCheckFingerprint(t *testing.T) {
+	if err := CheckFingerprint("siliconflow.BAAI/bge-m3@1024", "siliconflow.BAAI/bge-m3@1024"); err != nil {
+		t.Errorf("matching fingerprint should pass, got %v", err)
 	}
-	if err := CheckFingerprint(3, 1024); err == nil {
+	// 同 provider 同维度但维度不同 → 不匹配
+	if err := CheckFingerprint("siliconflow.BAAI/bge-m3@512", "siliconflow.BAAI/bge-m3@1024"); err == nil {
 		t.Error("dim mismatch should error")
+	}
+	// 同维度但 provider/model 不同 → 不匹配（换供应商/模型检测）
+	if err := CheckFingerprint("sophnet.bge-m3@1024", "siliconflow.BAAI/bge-m3@1024"); err == nil {
+		t.Error("provider/model mismatch should error")
+	}
+	// 空指纹（历史索引无 embedder_fingerprint 字段）→ 无法验证 → 提示重建（安全优先）
+	if err := CheckFingerprint("", "siliconflow.BAAI/bge-m3@1024"); err == nil {
+		t.Error("empty index fingerprint should error (rebuild needed, safety first)")
 	}
 }
 

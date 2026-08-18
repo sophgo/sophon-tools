@@ -15,6 +15,8 @@ SE 系列知识库的 **Go RAG 检索核心**，替代现行 Python 栈（numpy 
 - **内置网关故障转移链**：内置 key 请求经自建网关转发 SiliconFlow——主网关 Cloudflare Worker（`*.workers.dev`）不可达（连接超时 / 5xx / DNS 失败）时自动切换阿里云函数计算（FC3.0）同协议网关（`*.fcapp.run`，国内直连）；两网关均不可达时降级纯 BM25（见下文「内置网关故障转移链」）
 - **供应商切换校验**：索引记录 embedding 指纹（`<provider>.<model>@<dim>`），切换供应商/模型后 `se-rag doctor` 检测并提示重建
 - **检索输出含来源信息**：每条结果标记源文件的相对路径与片段行号区间
+- **中文分词（BM25 兜底召回）**：汉字序列按 2-gram 滑窗切分（无词典、纯 Go 静态实现），
+  查询/文档片段重叠即可命中（"如何配置网络" 可命中仅含 "配置网络" 的文档）；英文/数字保持单词 token
 - **纯 Go，静态链接，零 C 依赖**：`CGO_ENABLED=0`，无 pip / aarch64 wheel 依赖
 
 ## 目录结构
@@ -25,7 +27,7 @@ source/se-rag-core/
 ├── internal/
 │   ├── chunker/         Markdown 分块（800 token / 80 overlap，保护代码块/表格）
 │   ├── vector/          暴力内积向量索引 + L2 归一化 + gob 持久化
-│   ├── bm25/            BM25Okapi + 中英分词 + 倒排 + gob 持久化
+│   ├── bm25/            BM25Okapi + 中英分词（中文 2-gram）+ 倒排 + gob 持久化
 │   ├── embed/           Embedding / Reranker provider 抽象 + siliconflow/sophnet + 限流 + 重试
 │   ├── fusion/          RRF 融合
 │   ├── docstore/        索引持久化 + 指纹元信息
@@ -96,8 +98,10 @@ SE_RAG_FAKE_EMBED=1 ./bin/se-rag build --docs-dir example/se7/docs -index-dir ./
 # 输出示例：
 #   index  fp    : siliconflow.BAAI/bge-m3@1024
 #   index  dim   : 1024
-#   current dim  : 1024
+#   current fp    : siliconflow.BAAI/bge-m3@1024
+#   chunk count  : 40
 #   fingerprint OK: no rebuild needed
+# 指纹比对含 provider/model/维度：切换供应商或模型后输出 WARNING 并提示重建
 ```
 
 ## 供应商配置

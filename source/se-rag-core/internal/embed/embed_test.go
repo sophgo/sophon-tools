@@ -3,11 +3,13 @@ package embed
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // 限流：8 段文本按单次≤2 段拆 → 2+2+2+2 四批
@@ -160,3 +162,35 @@ func TestSophnetEmbedder(t *testing.T) {
 }
 
 var _ = json.Marshal
+
+// Transport 必须配置 ResponseHeaderTimeout / TLSHandshakeTimeout（网关吞连接时不会无限挂起）。
+func TestHTTPClientTimeouts(t *testing.T) {
+	tr, ok := httpClient.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("httpClient.Transport = %T, want *http.Transport", httpClient.Transport)
+	}
+	if tr.ResponseHeaderTimeout <= 0 {
+		t.Error("ResponseHeaderTimeout must be set (>0)")
+	}
+	if tr.TLSHandshakeTimeout <= 0 {
+		t.Error("TLSHandshakeTimeout must be set (>0)")
+	}
+}
+
+// 退避 sleep 感知 ctx：ctx 已取消时 postJSON 应立即返回，不走完 6 次指数退避。
+func TestPostJSONRetryRespectsContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	start := time.Now()
+	err := postJSON(ctx, []string{"http://127.0.0.1:1/v1/embeddings"}, "k", map[string]any{}, nil)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("want context.Canceled, got %v", err)
+	}
+	// 6 次退避累计约 5.1s；ctx 取消应立即返回
+	if d := time.Since(start); d > 1*time.Second {
+		t.Errorf("postJSON with canceled ctx took %v, want immediate return", d)
+	}
+}

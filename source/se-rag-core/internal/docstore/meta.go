@@ -24,3 +24,8 @@ func (m Meta) Fingerprint() string {
 func FpName(providerName, model string) string {
 	return providerName + "." + model
 }
+
+// FpFull 组合 provider/model/维度的完整指纹 "<provider>.<model>@<dim>"。
+func FpFull(providerName, model string, dim int) string {
+	return FpName(providerName, model) + "@" + strconv.Itoa(dim)
+}
