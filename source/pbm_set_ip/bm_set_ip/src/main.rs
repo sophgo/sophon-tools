@@ -14,7 +14,8 @@ struct Family {
     /// (地址, 前缀)
     addrs: Vec<(String, u8)>,
     gateway: Option<String>,
-    dns: Option<String>,
+    /// 逗号分隔的 DNS 列表 → 数组(空 vec = 无 DNS)
+    dns: Vec<String>,
     is_dhcp: bool,
 }
 
@@ -149,7 +150,7 @@ fn try_old_mode(net_device: &str, rest: &[String]) -> Result<Option<Config>, lex
     let (v4, v6) = if family1_is_v6 {
         validate_ip(&addr1, true)?;
         validate_opt_gateway(&gw, true)?;
-        validate_opt_dns(&dns)?;
+        let dnsv = parse_dns_opt(&dns, true)?;
         let prefix = match &nm {
             Some(m) => parse_prefix(m, 128)?,
             None => 128,
@@ -157,37 +158,36 @@ fn try_old_mode(net_device: &str, rest: &[String]) -> Result<Option<Config>, lex
         let v6f = Family {
             addrs: vec![(addr1, prefix)],
             gateway: gw,
-            dns,
+            dns: dnsv,
             is_dhcp: false,
         };
         (None, Some(v6f))
     } else {
         let is_dhcp4 = is_dhcp_token(&addr1);
+        let dnsv = parse_dns_opt(&dns, false)?;
         let v4f = if is_dhcp4 {
             validate_opt_gateway(&gw, false)?;
-            validate_opt_dns(&dns)?;
-            Family { addrs: vec![], gateway: gw, dns, is_dhcp: true }
+            Family { addrs: vec![], gateway: gw, dns: dnsv, is_dhcp: true }
         } else {
             validate_ip(&addr1, false)?;
             validate_opt_gateway(&gw, false)?;
-            validate_opt_dns(&dns)?;
             let prefix = match &nm {
                 Some(m) => mask_to_prefix_checked(m, 32)?,
                 None => 32,
             };
-            Family { addrs: vec![(addr1, prefix)], gateway: gw, dns, is_dhcp: false }
+            Family { addrs: vec![(addr1, prefix)], gateway: gw, dns: dnsv, is_dhcp: false }
         };
         let v6f = if ipv6.is_some() {
             let is_dhcp6 = ipv6.as_deref().map(is_dhcp_token).unwrap_or(false);
             if is_dhcp6 {
                 validate_opt_gateway(&ipv6_gateway, true)?;
-                validate_opt_dns(&ipv6_dns)?;
-                Some(Family { addrs: vec![], gateway: ipv6_gateway, dns: ipv6_dns, is_dhcp: true })
+                let dnsv6 = parse_dns_opt(&ipv6_dns, true)?;
+                Some(Family { addrs: vec![], gateway: ipv6_gateway, dns: dnsv6, is_dhcp: true })
             } else {
                 let a = ipv6.as_deref().unwrap();
                 validate_ip(a, true)?;
                 validate_opt_gateway(&ipv6_gateway, true)?;
-                validate_opt_dns(&ipv6_dns)?;
+                let dnsv6 = parse_dns_opt(&ipv6_dns, true)?;
                 let prefix = match &ipv6_prefix {
                     Some(m) => parse_prefix(m, 128)?,
                     None => 128,
@@ -195,7 +195,7 @@ fn try_old_mode(net_device: &str, rest: &[String]) -> Result<Option<Config>, lex
                 Some(Family {
                     addrs: vec![(a.to_string(), prefix)],
                     gateway: ipv6_gateway,
-                    dns: ipv6_dns,
+                    dns: dnsv6,
                     is_dhcp: false,
                 })
             }
@@ -244,12 +244,12 @@ fn parse_4tuple(net_device: &str, rest: &[String]) -> Result<Config, lexopt::Err
         validate_ip(&addr1, true)?;
         let (prefix, gw, dns) = read_3slots(rest, &mut i);
         validate_opt_gateway(&gw, true)?;
-        validate_opt_dns(&dns)?;
+        let dnsv = parse_dns_opt(&dns, true)?;
         let p = match &prefix {
             Some(m) => parse_prefix(m, 128)?,
             None => 128,
         };
-        v6 = Some(Family { addrs: vec![(addr1, p)], gateway: gw, dns, is_dhcp: false });
+        v6 = Some(Family { addrs: vec![(addr1, p)], gateway: gw, dns: dnsv, is_dhcp: false });
     } else if family1_is_dhcp {
         // dhcp 单 token。若紧跟 3 个空槽('' '' '')则消费之(对齐 4 元组),
         // 否则不动(向后兼容 dhcp 直接接路由/策略/family2)。
@@ -259,18 +259,18 @@ fn parse_4tuple(net_device: &str, rest: &[String]) -> Result<Config, lexopt::Err
         {
             i += 3;
         }
-        v4 = Some(Family { addrs: vec![], gateway: None, dns: None, is_dhcp: true });
+        v4 = Some(Family { addrs: vec![], gateway: None, dns: vec![], is_dhcp: true });
     } else {
         // v4 static family1:4 元组(addr1 已消费,读 mask/gw/dns)
         validate_ip(&addr1, false)?;
         let (mask, gw, dns) = read_3slots(rest, &mut i);
         validate_opt_gateway(&gw, false)?;
-        validate_opt_dns(&dns)?;
+        let dnsv = parse_dns_opt(&dns, false)?;
         let p = match &mask {
             Some(m) => mask_to_prefix_checked(m, 32)?,
             None => 32,
         };
-        v4 = Some(Family { addrs: vec![(addr1, p)], gateway: gw, dns, is_dhcp: false });
+        v4 = Some(Family { addrs: vec![(addr1, p)], gateway: gw, dns: dnsv, is_dhcp: false });
     }
 
     let mut routes: Vec<Route> = Vec::new();
@@ -292,17 +292,17 @@ fn parse_4tuple(net_device: &str, rest: &[String]) -> Result<Config, lexopt::Err
         if !family1_is_v6 && jumps_to_family2(&pos1) {
             i += 1; // 消费 pos1(family2 addr/dhcp)
             if is_dhcp_token(&pos1) {
-                v6 = Some(Family { addrs: vec![], gateway: None, dns: None, is_dhcp: true });
+                v6 = Some(Family { addrs: vec![], gateway: None, dns: vec![], is_dhcp: true });
             } else {
                 validate_ip(&pos1, true)?;
                 let (prefix, gw, dns) = read_3slots(rest, &mut i);
                 validate_opt_gateway(&gw, true)?;
-                validate_opt_dns(&dns)?;
+                let dnsv = parse_dns_opt(&dns, true)?;
                 let p = match &prefix {
                     Some(m) => parse_prefix(m, 128)?,
                     None => 128,
                 };
-                v6 = Some(Family { addrs: vec![(pos1, p)], gateway: gw, dns, is_dhcp: false });
+                v6 = Some(Family { addrs: vec![(pos1, p)], gateway: gw, dns: dnsv, is_dhcp: false });
             }
             // family2 之后不允许再有 token(组顺序:[family2] 必须是最后一个)
             if i < rest.len() {
@@ -616,17 +616,40 @@ fn validate_opt_gateway(opt: &Option<String>, is_v6: bool) -> Result<(), String>
     }
 }
 
-/// 校验可选 DNS(空则跳过);可为 IPv4 或 IPv6
-fn validate_opt_dns(opt: &Option<String>) -> Result<(), String> {
-    match opt {
-        Some(s) if !s.is_empty() => {
-            if is_valid_ipv4(s) || is_valid_ipv6(s) {
-                Ok(())
-            } else {
-                Err(format!("invalid DNS server '{}'", s))
-            }
+/// 解析逗号分隔的 DNS 列表 → 数组:逐项 trim 并校验,重复项去重。
+/// `is_v6` 指定族:与 family 族不一致的项(如 v4 family 里的 IPv6 DNS)
+/// 直接报错——各后端(nmcli ipv4.dns/ipv6.dns 等)按族隔离,混族会在运行时失败。
+/// 如 "8.8.8.8, 114.114.114.114" → ["8.8.8.8", "114.114.114.114"]。
+fn parse_dns(s: &str, is_v6: bool) -> Result<Vec<String>, String> {
+    let mut out: Vec<String> = Vec::new();
+    for item in s.split(',') {
+        let t = item.trim();
+        if t.is_empty() {
+            return Err(format!(
+                "invalid DNS server list '{}': empty entry (stray ',' or blank item)",
+                s
+            ));
         }
-        _ => Ok(()),
+        let ok = if is_v6 { is_valid_ipv6(t) } else { is_valid_ipv4(t) };
+        if !ok {
+            return Err(format!(
+                "invalid DNS server '{}': expected {} address (DNS list must be single-family, v4 and v6 cannot mix)",
+                t,
+                if is_v6 { "IPv6" } else { "IPv4" }
+            ));
+        }
+        if !out.iter().any(|x| x == t) {
+            out.push(t.to_string());
+        }
+    }
+    Ok(out)
+}
+
+/// 可选的 DNS 槽(None/空 → 空数组),调用方先过此转换再存 Family
+fn parse_dns_opt(opt: &Option<String>, is_v6: bool) -> Result<Vec<String>, String> {
+    match opt {
+        Some(s) if !s.is_empty() => parse_dns(s, is_v6),
+        _ => Ok(Vec::new()),
     }
 }
 
@@ -718,7 +741,7 @@ fn print_analyzed_config(cfg: &Config) {
                 println!("{}.is_dhcp={}", label, f.is_dhcp);
                 println!("{}.addrs={}", label, addrs.join(","));
                 println!("{}.gateway={}", label, f.gateway.as_deref().unwrap_or(""));
-                println!("{}.dns={}", label, f.dns.as_deref().unwrap_or(""));
+                println!("{}.dns={}", label, f.dns.join(","));
             }
             None => {
                 println!("{}.present=false", label);
@@ -971,10 +994,10 @@ fn netplan_render(cfg: &Config, existing_yaml: &str, target_file: &str) -> Resul
     }
     let mut dns_list = Vec::new();
     if let Some(v4f) = &cfg.v4 {
-        if let Some(d) = &v4f.dns { if !d.is_empty() { dns_list.push(Value::String(d.clone())); } }
+        for d in &v4f.dns { dns_list.push(Value::String(d.clone())); }
     }
     if let Some(v6f) = &cfg.v6 {
-        if let Some(d) = &v6f.dns { if !d.is_empty() { dns_list.push(Value::String(d.clone())); } }
+        for d in &v6f.dns { dns_list.push(Value::String(d.clone())); }
     }
     if !dns_list.is_empty() {
         let mut dns_map = serde_yaml::Mapping::new();
@@ -1152,11 +1175,9 @@ fn nmcli_render(cfg: &Config, allocated: &mut std::collections::HashMap<String, 
         if v4f.is_dhcp {
             args.push("ipv4.method".into());
             args.push("auto".into());
-            if let Some(dns) = &v4f.dns {
-                if !dns.is_empty() {
-                    args.push("ipv4.dns".into());
-                    args.push(dns.clone());
-                }
+            if !v4f.dns.is_empty() {
+                args.push("ipv4.dns".into());
+                args.push(v4f.dns.join(","));
             }
         } else if !v4f.addrs.is_empty() {
             let addrs: Vec<String> = v4f.addrs.iter().map(|(a, p)| format!("{}/{}", a, p)).collect();
@@ -1170,11 +1191,9 @@ fn nmcli_render(cfg: &Config, allocated: &mut std::collections::HashMap<String, 
                     args.push(gw.clone());
                 }
             }
-            if let Some(dns) = &v4f.dns {
-                if !dns.is_empty() {
-                    args.push("ipv4.dns".into());
-                    args.push(dns.clone());
-                }
+            if !v4f.dns.is_empty() {
+                args.push("ipv4.dns".into());
+                args.push(v4f.dns.join(","));
             }
         }
     }
@@ -1182,11 +1201,9 @@ fn nmcli_render(cfg: &Config, allocated: &mut std::collections::HashMap<String, 
         if v6f.is_dhcp {
             args.push("ipv6.method".into());
             args.push("auto".into());
-            if let Some(dns) = &v6f.dns {
-                if !dns.is_empty() {
-                    args.push("ipv6.dns".into());
-                    args.push(dns.clone());
-                }
+            if !v6f.dns.is_empty() {
+                args.push("ipv6.dns".into());
+                args.push(v6f.dns.join(","));
             }
         } else if !v6f.addrs.is_empty() {
             let addrs: Vec<String> = v6f.addrs.iter().map(|(a, p)| format!("{}/{}", a, p)).collect();
@@ -1200,11 +1217,9 @@ fn nmcli_render(cfg: &Config, allocated: &mut std::collections::HashMap<String, 
                     args.push(gw.clone());
                 }
             }
-            if let Some(dns) = &v6f.dns {
-                if !dns.is_empty() {
-                    args.push("ipv6.dns".into());
-                    args.push(dns.clone());
-                }
+            if !v6f.dns.is_empty() {
+                args.push("ipv6.dns".into());
+                args.push(v6f.dns.join(","));
             }
         }
     } else {
@@ -1356,10 +1371,10 @@ fn networkd_render(cfg: &Config) -> (String, String) {
     }
     let mut dns_list = Vec::new();
     if let Some(v4f) = &cfg.v4 {
-        if let Some(d) = &v4f.dns { if !d.is_empty() { dns_list.push(d.clone()); } }
+        for d in &v4f.dns { dns_list.push(d.clone()); }
     }
     if let Some(v6f) = &cfg.v6 {
-        if let Some(d) = &v6f.dns { if !d.is_empty() { dns_list.push(d.clone()); } }
+        for d in &v6f.dns { dns_list.push(d.clone()); }
     }
     if !dns_list.is_empty() {
         s.push_str(&format!("DNS={}\n", dns_list.join(" ")));
@@ -1532,14 +1547,14 @@ fn configure_with_ip(cfg: &Config) {
     // DNS:ip 兜底无声明式后端,收集 v4/v6 的 DNS 应用之(resolvconf 优先,否则直写 resolv.conf)
     let mut dns_list: Vec<String> = Vec::new();
     if let Some(v4f) = &cfg.v4 {
-        if let Some(d) = &v4f.dns {
+        for d in &v4f.dns {
             if !d.is_empty() && !dns_list.contains(d) {
                 dns_list.push(d.clone());
             }
         }
     }
     if let Some(v6f) = &cfg.v6 {
-        if let Some(d) = &v6f.dns {
+        for d in &v6f.dns {
             if !d.is_empty() && !dns_list.contains(d) {
                 dns_list.push(d.clone());
             }
@@ -1649,7 +1664,7 @@ mod tests {
             v4: Some(Family {
                 addrs: vec![("1.1.1.1".into(), 24)],
                 gateway: Some("1.1.1.254".into()),
-                dns: None,
+                dns: vec![],
                 is_dhcp: false,
             }),
             v6: None,
@@ -1808,8 +1823,8 @@ mod tests {
         Config {
             net_device: "eth1".into(),
             family1_is_v6: false,
-            v4: Some(Family { addrs: vec![], gateway: None, dns: None, is_dhcp: true }),
-            v6: Some(Family { addrs: vec![], gateway: None, dns: Some("2001:4860:4860::8888".into()), is_dhcp: true }),
+            v4: Some(Family { addrs: vec![], gateway: None, dns: vec![], is_dhcp: true }),
+            v6: Some(Family { addrs: vec![], gateway: None, dns: vec!["2001:4860:4860::8888".into()], is_dhcp: true }),
             routes: vec![],
             policies: vec![],
             dry_run: false,
@@ -1825,7 +1840,7 @@ mod tests {
             v6: Some(Family {
                 addrs: vec![("2001:db8::1".into(), 64)],
                 gateway: Some("fe80::1".into()),
-                dns: Some("2001:4860:4860::8888".into()),
+                dns: vec!["2001:4860:4860::8888".into()],
                 is_dhcp: false,
             }),
             routes: vec![],
@@ -1849,8 +1864,8 @@ mod tests {
         // v4 dhcp + v6 static:DHCP=ipv4 一行,另加 v6 地址
         let cfg = cfg_ip(vec![], vec![], false);
         let mut cfg = cfg;
-        cfg.v4 = Some(Family { addrs: vec![], gateway: None, dns: None, is_dhcp: true });
-        cfg.v6 = Some(Family { addrs: vec![("2001:db8::1".into(), 64)], gateway: Some("fe80::1".into()), dns: None, is_dhcp: false });
+        cfg.v4 = Some(Family { addrs: vec![], gateway: None, dns: vec![], is_dhcp: true });
+        cfg.v6 = Some(Family { addrs: vec![("2001:db8::1".into(), 64)], gateway: Some("fe80::1".into()), dns: vec![], is_dhcp: false });
         let (_path, content) = networkd_render(&cfg);
         assert_eq!(content.matches("DHCP=").count(), 1, "DHCP= 应只有一行:\n{}", content);
         assert!(content.contains("DHCP=ipv4"), "应为 DHCP=ipv4:\n{}", content);
@@ -1908,5 +1923,69 @@ mod tests {
         let yaml = netplan_render(&cfg, existing, "/etc/netplan/01-netcfg.yaml").unwrap();
         assert!(!yaml.contains("gateway4"), "应清除旧 gateway4:\n{}", yaml);
         assert!(yaml.contains("to: 0.0.0.0/0"), "应生成 routes 默认路由:\n{}", yaml);
+    }
+
+    fn cfg_multi_dns() -> Config {
+        let mut cfg = cfg_ip(vec![], vec![], false);
+        cfg.v4.as_mut().unwrap().dns = vec!["8.8.8.8".into(), "114.114.114.114".into()];
+        cfg
+    }
+
+    #[test]
+    fn netplan_render_multi_dns_array_items() {
+        // MYS-436:多 DNS 应渲染为数组的独立项,而非单串 "8.8.8.8,114.114.114.114"
+        let cfg = cfg_multi_dns();
+        let existing = "network:\n  version: 2\n  ethernets:\n    eth1:\n      mtu: 9000\n";
+        let yaml = netplan_render(&cfg, existing, "/etc/netplan/01-netcfg.yaml").unwrap();
+        assert!(
+            yaml.contains("- 8.8.8.8") && yaml.contains("- 114.114.114.114"),
+            "多 DNS 应为数组两项:\n{}",
+            yaml
+        );
+        assert!(
+            !yaml.contains("8.8.8.8,114.114.114.114"),
+            "不应出现逗号合并的单串 DNS 项:\n{}",
+            yaml
+        );
+        assert_eq!(yaml.matches("- 8.8.8.8").count(), 1, "8.8.8.8 应只出现一次:\n{}", yaml);
+    }
+
+    #[test]
+    fn networkd_render_multi_dns_space_separated() {
+        // MYS-436:networkd DNS= 应空格分隔多项
+        let cfg = cfg_multi_dns();
+        let (_path, content) = networkd_render(&cfg);
+        assert!(content.contains("DNS=8.8.8.8 114.114.114.114"), "DNS= 应空格分隔:\n{}", content);
+        assert!(!content.contains("DNS=8.8.8.8,"), "不应有逗号:\n{}", content);
+    }
+
+    #[test]
+    fn nmcli_render_multi_dns_comma_separated() {
+        // MYS-436:nmcli ipv4.dns 属性原生逗号分隔(单参数)
+        let cfg = cfg_multi_dns();
+        let mut allocated = HashMap::new();
+        let args = nmcli_render(&cfg, &mut allocated);
+        let joined = args.join(" ");
+        assert!(joined.contains("ipv4.dns 8.8.8.8,114.114.114.114"), "nmcli dns 应逗号分隔:\n{}", joined);
+    }
+
+    #[test]
+    fn parse_dns_splits_validates_dedups() {
+        // MYS-436:拆分/trim/去重/空项与非法项/族约束
+        assert_eq!(parse_dns("8.8.8.8,114.114.114.114", false).unwrap(), vec!["8.8.8.8", "114.114.114.114"]);
+        assert_eq!(parse_dns("8.8.8.8, 114.114.114.114", false).unwrap(), vec!["8.8.8.8", "114.114.114.114"]);
+        assert_eq!(parse_dns("2001:4860:4860::8888,2001:4860:4860::8844", true).unwrap(), vec!["2001:4860:4860::8888", "2001:4860:4860::8844"]);
+        assert_eq!(parse_dns("8.8.8.8,8.8.8.8", false).unwrap(), vec!["8.8.8.8"], "重复项应去重");
+        assert!(parse_dns("8.8.8.8,,1.1.1.1", false).is_err(), "连续逗号应报错");
+        assert!(parse_dns("8.8.8.8,", false).is_err(), "尾逗号应报错");
+        assert!(parse_dns("8.8.8.8, ,1.1.1.1", false).is_err(), "纯空白项应报错");
+        assert!(parse_dns("8.8.8.8,999.1.1.1", false).is_err(), "非法项应报错");
+        assert!(parse_dns("8.8.8.8,1.1.1.1/24", false).is_err(), "含 / 项应报错");
+        // 族约束:混族 DNS 必须拦截(nmcli ipv4.dns/ipv6.dns 分族)
+        assert!(parse_dns("8.8.8.8,2001:4860:4860::8888", false).is_err(), "v4 族混入 v6 DNS 应报错");
+        assert!(parse_dns("8.8.8.8", true).is_err(), "v6 族混入 v4 DNS 应报错");
+        assert!(parse_dns_opt(&Some("  8.8.8.8  ".into()), false).unwrap() == vec!["8.8.8.8"], "trim 后接受");
+        assert!(parse_dns_opt(&None, false).unwrap().is_empty(), "None → 空数组");
+        assert!(parse_dns_opt(&Some(String::new()), false).unwrap().is_empty(), "空串 → 空数组");
     }
 }
