@@ -1,6 +1,7 @@
 import { defHttp } from '/@/utils/http/axios';
 import { getToken } from '/@/utils/auth';
 import { useGlobSetting } from '/@/hooks/setting';
+import { getSsoTicket } from '/@/api/sso';
 
 const { apiUrl } = useGlobSetting();
 
@@ -57,13 +58,14 @@ export function getContent(path: string) {
 }
 
 // 下载：原生 <a download>，浏览器流式落盘（低内存，浏览器自带下载进度条）。
-// token 走 query（<a download> 无法带 Authorization 头），后端 /files/download 支持 query token。
-// 不再用 XHR responseType=blob，避免把整个文件缓冲进浏览器内存。
-export function downloadFile(path: string): { url: string; name: string } {
-  const token = getToken();
+// MYS-383：<a download> 无法带 Authorization 头，历史上把 JWT 拼进 query（令牌进
+// URL/访问日志）。改为先以 Bearer 头换取一次性票据（60s 过期、单次有效、绑定当前
+// 活跃会话），URL 只带 ?ticket=；后端校验后改写为 ?token= 转发，JWT 不再出 URL。
+export async function downloadFile(path: string): Promise<{ url: string; name: string }> {
+  const { ticket } = await getSsoTicket();
   const name = path.split('/').pop() || 'download';
-  const url = `${apiUrl}${Api.Download}?path=${encodeURIComponent(path)}&token=${encodeURIComponent(
-    token || '',
+  const url = `${apiUrl}${Api.Download}?path=${encodeURIComponent(path)}&ticket=${encodeURIComponent(
+    ticket,
   )}`;
   return { url, name };
 }

@@ -27,7 +27,9 @@ const setting: ProjectConfig = {
   permissionMode: PermissionModeEnum.ROUTE_MAPPING,
 
   // Permission-related cache is stored in sessionStorage or localStorage
-  permissionCacheType: CacheTypeEnum.LOCAL,
+  // MYS-383: token/userInfo 等认证数据存 sessionStorage（关浏览器即失效），
+  // 避免 JWT 长期残留在 localStorage 中被同源 XSS 窃取。
+  permissionCacheType: CacheTypeEnum.SESSION,
 
   // Session timeout processing
   sessionTimeoutProcessing: SessionTimeoutProcessingEnum.ROUTE_JUMP,

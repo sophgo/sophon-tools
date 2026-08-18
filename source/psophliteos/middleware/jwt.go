@@ -86,7 +86,8 @@ func CheckBMSSMToken(tokenString string) (username string, temp bool, err error)
 }
 
 // RequireBMSSMToken 本地敏感路由的 JWT 中间件：请求必须携带有效 bmssm JWT
-// （Authorization: Bearer 或 ?token=，与 requestToken 口径一致）。
+// （仅 Authorization: Bearer 头，与 requestToken 口径一致；
+// MYS-383：不再接受 ?token=，防令牌进 URL/访问日志）。
 // 临时 token（首次登录待改密）一律 403，与 bmssm Auth 中间件的
 // TEMP_TOKEN_RESTRICTED 口径一致。
 func RequireBMSSMToken() gin.HandlerFunc {

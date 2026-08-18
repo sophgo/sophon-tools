@@ -9,6 +9,7 @@ enum Api {
   Active = '/sso/active',
   Register = '/sso/register',
   Logout = '/sso/logout',
+  Ticket = '/sso/ticket',
 }
 
 // 跳过信封解析的请求选项：返回裸 res.data，不弹错误提示。
@@ -35,4 +36,14 @@ export function ssoRegister(username: string, token: string) {
 // 注销：清除活跃会话（仅 token 匹配时）。
 export function ssoLogout() {
   return defHttp.post({ url: Api.Logout }, RAW);
+}
+
+// 换取一次性票据（MYS-383）：<a download>、WebSocket 无法携带 Authorization 头，
+// 先以 Bearer 头换一次性票据（60s 过期、单次有效、绑定当前活跃会话），
+// 真实请求以 ?ticket=<票据> 发起，JWT 不再出现在 URL 中。
+export interface SsoTicket {
+  ticket: string;
+}
+export function getSsoTicket() {
+  return defHttp.post<SsoTicket>({ url: Api.Ticket }, RAW);
 }
