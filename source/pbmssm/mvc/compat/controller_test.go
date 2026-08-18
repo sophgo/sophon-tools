@@ -191,8 +191,8 @@ func getNormalToken(t *testing.T, r *gin.Engine) string {
 	t.Helper()
 	tempToken := loginTempToken(t, r)
 
-	// 改密（临时 token 可调 /password，不校验旧密码）
-	body, _ := json.Marshal(user.ChangePasswordRequest{NewPassword: "realpass"})
+	// 临时 token 改密：需校验旧密码（当前为默认密码 admin）；成功后不签发正式 token
+	body, _ := json.Marshal(user.ChangePasswordRequest{OldPassword: "admin", NewPassword: "realpass"})
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/password", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -305,13 +305,13 @@ func TestTempTokenRestricted(t *testing.T) {
 	}
 }
 
-// TestChangePasswordFlow 临时 token 改密 → 拿到正式 token → 正式 token 可访问受保护端点。
+// TestChangePasswordFlow 临时 token 改密（不签发正式 token）→ 新密码重新登录拿正式 token → 可访问受保护端点。
 func TestChangePasswordFlow(t *testing.T) {
 	r := setupCompatTest(t)
 	tempToken := loginTempToken(t, r)
 
-	// 临时 token 调 /password（不传 oldPassword）
-	body, _ := json.Marshal(user.ChangePasswordRequest{NewPassword: "brandnew"})
+	// 临时 token 调 /password（需带旧密码=默认密码）
+	body, _ := json.Marshal(user.ChangePasswordRequest{OldPassword: "admin", NewPassword: "brandnew"})
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/password", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -322,18 +322,40 @@ func TestChangePasswordFlow(t *testing.T) {
 	}
 	resp := assertSsmOK(t, w.Body.Bytes(), "change password")
 	m, _ := resp.Result.(map[string]interface{})
-	newToken, _ := m["token"].(string)
+	// 安全收紧：temp 改密成功不再签发正式 token，必须重新登录
+	if newToken, _ := m["token"].(string); newToken != "" {
+		t.Fatal("change password: temp token flow must not return a formal token")
+	}
+
+	// 用新密码重新登录拿正式 token
+	body2, _ := json.Marshal(user.LoginRequest{Username: "admin", Password: "brandnew"})
+	w2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest(http.MethodPost, "/api/v1/login", bytes.NewBuffer(body2))
+	req2.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("relogin: expected 200, got %d body=%s", w2.Code, w2.Body.String())
+	}
+	var resp2 response.Result
+	if err := json.Unmarshal(w2.Body.Bytes(), &resp2); err != nil {
+		t.Fatalf("relogin unmarshal: %v", err)
+	}
+	if resp2.Result == nil {
+		t.Fatal("relogin: empty result")
+	}
+	m2 := resp2.Result.(map[string]interface{})
+	newToken, _ := m2["token"].(string)
 	if newToken == "" {
-		t.Fatal("change password: should return new normal token")
+		t.Fatal("relogin: should return normal token")
 	}
 
 	// 新正式 token 可访问受保护端点
-	w2 := httptest.NewRecorder()
-	req2 := httptest.NewRequest(http.MethodGet, "/api/v1/device/basic", nil)
-	req2.Header.Set("Authorization", "Bearer "+newToken)
-	r.ServeHTTP(w2, req2)
-	if w2.Code != http.StatusOK {
-		t.Fatalf("new token access: expected 200, got %d body=%s", w2.Code, w2.Body.String())
+	w3 := httptest.NewRecorder()
+	req3 := httptest.NewRequest(http.MethodGet, "/api/v1/device/basic", nil)
+	req3.Header.Set("Authorization", "Bearer "+newToken)
+	r.ServeHTTP(w3, req3)
+	if w3.Code != http.StatusOK {
+		t.Fatalf("new token access: expected 200, got %d body=%s", w3.Code, w3.Body.String())
 	}
 }
 

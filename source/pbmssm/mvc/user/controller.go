@@ -60,6 +60,8 @@ func (ctrl *Controller) auditWrite(c *gin.Context, username, action, resource, r
 // Login 处理 POST /api/v1/login。
 // 若提供的密码等于配置的默认密码，视为用户未改密，签发临时 token 并返回 changePass=true，
 // 前端据此引导改密；否则签发正常 token。
+// 临时 token 仅限调用 /api/v1/password 完成首登改密（Auth 中间件 403 其余端点），
+// 且改密必须提供旧密码、新密码不得等于默认密码、改密后强制重新登录（见 ChangePassword）。
 func (ctrl *Controller) Login(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -200,10 +202,13 @@ func (ctrl *Controller) DeleteUser(c *gin.Context) {
 }
 
 // ChangePassword 处理 POST /api/v1/password（受保护，临时 token 可调）。
-//   - 临时 token（c.Get("temp")==true）：不校验旧密码，直接设新密码（首次改密场景）。
-//   - 正式 token：必须校验旧密码（svc.Login 验证），通过后才改。
-//
-// 改密成功后签发新的正式 token 返回。
+//   - 所有改密（含临时 token）必须提供并通过旧密码校验（svc.Login 验证），
+//     防止持有默认密码之外的凭据者（如 token 泄露）擅自改密。
+//   - 新密码不得等于配置的默认密码，确保改密后默认凭据永久失效（bcrypt 不再匹配），
+//     关闭"默认密码可登录 → 临时 token → 改密"的循环接管链。
+//   - 临时 token 改密成功后不签发正式 token：临时通道仅用于首登改密，
+//     必须用新密码重新登录获得正式 token，避免临时授权自动升级为完整能力。
+//   - 正式 token 改密成功后签发新的正式 token 返回（保持既有行为）。
 func (ctrl *Controller) ChangePassword(c *gin.Context) {
 	var req ChangePasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -218,16 +223,26 @@ func (ctrl *Controller) ChangePassword(c *gin.Context) {
 		return
 	}
 
+	if req.OldPassword == "" {
+		c.JSON(http.StatusBadRequest, response.Fail("old password required"))
+		return
+	}
+
 	tempVal, _ := c.Get("temp")
 	isTemp, _ := tempVal.(bool)
 
-	// 正式 token 需校验旧密码
-	if !isTemp {
-		if _, err := ctrl.svc.Login(usernameStr, req.OldPassword); err != nil {
-			ctrl.auditWrite(c, usernameStr, "change_password", "auth", "failed")
-			c.JSON(http.StatusUnauthorized, response.Fail("invalid old password"))
-			return
-		}
+	// 无论临时/正式 token，改密都必须校验旧密码
+	if _, err := ctrl.svc.Login(usernameStr, req.OldPassword); err != nil {
+		ctrl.auditWrite(c, usernameStr, "change_password", "auth", "failed")
+		c.JSON(http.StatusUnauthorized, response.Fail("invalid old password"))
+		return
+	}
+
+	// 新密码不得等于默认密码（默认凭据一旦改掉即永久失效）
+	if req.NewPassword == getDefaultPassword() {
+		ctrl.auditWrite(c, usernameStr, "change_password", "auth", "failed")
+		c.JSON(http.StatusBadRequest, response.Fail("new password must not be the default password"))
+		return
 	}
 
 	if err := ctrl.svc.ChangePassword(usernameStr, req.NewPassword); err != nil {
@@ -236,7 +251,14 @@ func (ctrl *Controller) ChangePassword(c *gin.Context) {
 		return
 	}
 
-	// 改密成功，签发正式 token
+	// 临时 token 改密成功：不签发正式 token，强制用新密码重新登录
+	if isTemp {
+		ctrl.auditWrite(c, usernameStr, "change_password", "auth", "success")
+		c.JSON(http.StatusOK, response.OK(gin.H{"message": "password changed, please re-login"}))
+		return
+	}
+
+	// 正式 token 改密成功，签发新的正式 token
 	var role string
 	if u, err := ctrl.svc.FindUser(usernameStr); err == nil {
 		role = u.Role
