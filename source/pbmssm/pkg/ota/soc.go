@@ -94,17 +94,22 @@ func (e *Engine) pollOnce(flow Workflow) (status int, info string, done bool) {
 }
 
 // pollSOC 轮询 StatusSOC 直到终态或 quit，更新 DB。ota.sh 自带 reboot，无需重启步骤。
+// MYS-451：终态判定同一处释放刷机互斥锁（flow.guard，随 handleFlash→runSOC→pollSOC
+// 传递）——SOC 刷机窗口以 success/error 标志为终点；quit（引擎退出/进程重启）同样释放，
+// 避免把内存锁泄漏给后续流程（如测试间隔离）。
 func (e *Engine) pollSOC(flow Workflow) {
 	ticker := time.NewTicker(e.pollInterval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-e.quit:
+			releaseFlashGuard(&flow)
 			return
 		case <-ticker.C:
 			st, info, done := e.pollOnce(flow)
 			if done {
 				e.updateStatus(flow.ID, st, info)
+				releaseFlashGuard(&flow)
 				return
 			}
 		}
