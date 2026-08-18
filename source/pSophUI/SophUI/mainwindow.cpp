@@ -9,23 +9,6 @@
 #define GET_BASH_INFO_ASYNC 0
 
 template <typename T>
-static void __setFontRecursively(T *inObject, qint64 fontSize=15)
-{
-    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-    QString fontSizeStr = env.value("SOPHON_QT_FONT_SIZE");
-    fontSize = fontSizeStr.toInt() > 0?fontSizeStr.toInt():fontSize;
-    QFont font = inObject->font();
-    font.setPixelSize(fontSize);
-    inObject->setFont(font);
-    QObject *object = inObject;
-    QList<T *> childObjects = object->findChildren<T *>();
-    for (T *childObject : childObjects)
-    {
-        __setFontRecursively(childObject,fontSize);
-    }
-}
-
-template <typename T>
 static void __updateWidgets(T *inObject)
 {
     inObject->update();
@@ -41,7 +24,12 @@ QString MainWindow::executeLinuxCmd(QString strCmd)
 {
     QProcess p;
     p.start("bash", QStringList() << "-c" << strCmd);
-    p.waitForFinished();
+    /* 该方法在 UI 线程同步调用: 加超时保护, 命令挂起时最多阻塞 5s 即终止,
+       避免 SophUI 界面被永久冻结(如网络/传感器类命令无响应) */
+    if (!p.waitForFinished(5000)) {
+        p.kill();
+        p.waitForFinished(1000);
+    }
     QString strResult = p.readAllStandardOutput();
     qDebug() << "run " + strCmd + " ret: " + strResult;
     return strResult;
@@ -201,8 +189,7 @@ bool MainWindow::getDemos(void)
             streamSophUIDEMO << "chmod +x " << SophUIDEMOPath << endl;
             streamSophUIDEMO << SophUIDEMOPath << endl;
             streamSophUIDEMO << "ret=$?" << endl;
-            /* 由于当前的demo没有任何方式可以自主退出,所以假定demo永远正确地退出 */
-            streamSophUIDEMO << "exit 0" << endl;
+            /* demo 退出码透传给看门脚本(run_hdmi_show.sh),失败时可被感知 */
             streamSophUIDEMO << "exit $ret" << endl;
             fileSophUIDEMO.close();
         }
@@ -289,10 +276,9 @@ void MainWindow::_flash_show_info()
 
 void MainWindow::_show_current_time()
 {
-    QDateTime *date_time = new QDateTime(QDateTime::currentDateTime());
-    ui->TIME_LABLE->setText(QString("%1\n").arg(date_time->toString("hh:mm:ss"))
-              + QString("%1").arg(date_time->toString("yyyy-MM-dd ddd")));
-    delete date_time;
+    QDateTime date_time(QDateTime::currentDateTime());
+    ui->TIME_LABLE->setText(QString("%1\n").arg(date_time.toString("hh:mm:ss"))
+              + QString("%1").arg(date_time.toString("yyyy-MM-dd ddd")));
 }
 
 bool MainWindow::__set_network(
@@ -302,7 +288,7 @@ bool MainWindow::__set_network(
     const QString& ipv6, const QString& ipv6_net,
     const QString& ipv6_gate, const QString& ipv6_dns) {
 
-    MyMessageBox msgBox;
+    QMessageBox msgBox;
     __setFontRecursively<QWidget>(&msgBox);
 
     msgBox.setWindowTitle("WARNING!");
@@ -442,7 +428,7 @@ void MainWindow::on_show_net_button_clicked()
     qDebug() << "qreal is " << typeName;
     if (typeName == "float") {
         qDebug() << "qreal = float";
-        MyMessageBox msgBox;
+        QMessageBox msgBox;
         __setFontRecursively<QWidget>(&msgBox);
 
         msgBox.setWindowTitle("WARNING!");
@@ -455,6 +441,9 @@ void MainWindow::on_show_net_button_clicked()
     }
     QString login_user = env.value("SOPHON_QT_LOGIN_USER");
     login_user = login_user.isEmpty() ? "linaro" : login_user;
+    /* 校验用户名只含合法字符, 防止经 shell 命令串注入任意命令 */
+    if (!login_user.contains(QRegularExpression(QStringLiteral("^[A-Za-z0-9_.-]+$"))))
+        login_user = "linaro";
     qDebug() << "login user:" << login_user;
     QDialog dialog;
     QTermWidget *console = new QTermWidget(&dialog);

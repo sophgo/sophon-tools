@@ -92,6 +92,7 @@ if [ "$CPU_MODEL" == "bm1688" ] || [ "$CPU_MODEL" == "cv186ah" ] || [ "$CPU_MODE
 
         systemctl stop getty@tty1.service
         set +x
+        sophui_pid=""
         while true; do
         # get hdmi status
         new_hdmi_status=$(cat "$status_file")
@@ -105,14 +106,26 @@ if [ "$CPU_MODEL" == "bm1688" ] || [ "$CPU_MODEL" == "cv186ah" ] || [ "$CPU_MODE
                                 echo "HDMI connected and card0 not in use. Starting SophUI."
                                 # start SophUI
                                 ./SophUI 1>/dev/null 2>&1 &
+                                sophui_pid=$!
                         else
                                 echo "HDMI connected.However card0 is in use,can't start SophUI"
                         fi
                 else
                         echo "HDMI disconnected. Stopping SophUI."
-                        # stop SophUI
-                        pkill -f "SophUI"
+                        # stop SophUI (精确匹配二进制进程,避免 pkill -f 匹配到
+                        # 本脚本自身 argv(路径含 SophonHDMI)导致看门脚本被自杀)
+                        pkill -f "SophUI$"
+                        sophui_pid=""
                 fi
+        fi
+        # SophUI 意外退出(含"运行 Demo"后的 QCoreApplication::quit)时自动重启;
+        # HDMI 断开时不拉起,避免 card0 被其它程序占用后反复抢占
+        if [ "$hdmi_status" = "connected" ] && \
+           ( [ -z "$sophui_pid" ] || ! kill -0 "$sophui_pid" 2>/dev/null ) && \
+           [ ! -n "$(lsof /dev/dri/card0|head -n 1)" ]; then
+                echo "SophUI exited. Restarting."
+                ./SophUI 1>/dev/null 2>&1 &
+                sophui_pid=$!
         fi
         # sleep
         sleep 1

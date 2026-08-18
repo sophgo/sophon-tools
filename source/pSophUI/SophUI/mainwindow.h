@@ -56,6 +56,22 @@ QT_BEGIN_NAMESPACE
 namespace Ui { class MainWindow; }
 QT_END_NAMESPACE
 
+/* 递归设置字体大小(支持嵌套控件), 默认值可被环境变量 SOPHON_QT_FONT_SIZE 覆盖 */
+template <typename T>
+static void __setFontRecursively(T *inObject, qint64 fontSize = 15)
+{
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    QString fontSizeStr = env.value("SOPHON_QT_FONT_SIZE");
+    fontSize = fontSizeStr.toInt() > 0 ? fontSizeStr.toInt() : fontSize;
+    QFont font = inObject->font();
+    font.setPixelSize(fontSize);
+    inObject->setFont(font);
+    QObject *object = inObject;
+    QList<T *> childObjects = object->findChildren<T *>();
+    for (T *childObject : childObjects)
+        __setFontRecursively(childObject, fontSize);
+}
+
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
@@ -176,12 +192,4 @@ private:
     QProcessEnvironment env;
 };
 
-class MyMessageBox : public QMessageBox {
-protected:
-void showEvent(QShowEvent* event) {
-QMessageBox::showEvent(event);
-qDebug() << "set dialg size";
-//setFixedSize(800*2, 600*2);
-}
-};
 #endif // MAINWINDOW_H
