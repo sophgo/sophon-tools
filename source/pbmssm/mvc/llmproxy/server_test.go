@@ -106,8 +106,8 @@ func TestServiceLoadWhenDBEmpty(t *testing.T) {
 	}
 }
 
-// TestForwardKeyRelaxed 验证 MYS-171 放宽后的 key 策略：
-// 配置了 ForwardKey 时，无 key / 错误 key 均不再 401（放行到上游）。
+// TestForwardKeyRelaxed 锁定对内不校验 key 的行为（防回归）：
+// 即使配置了 ForwardKey，无 key / 错误 key / 匹配 key 一律放行到上游。
 func TestForwardKeyRelaxed(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
@@ -156,7 +156,7 @@ func TestForwardKeyRelaxed(t *testing.T) {
 	}
 }
 
-// TestForwardKeyUnset 验证未配置 ForwardKey 时同样放行（不要求鉴权）。
+// TestForwardKeyUnset 验证未配置 ForwardKey 时同样放行（对内不要求鉴权）。
 func TestForwardKeyUnset(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
