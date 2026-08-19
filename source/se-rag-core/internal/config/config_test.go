@@ -44,9 +44,9 @@ func TestEffectiveKeyUsesBuiltinWhenEmpty(t *testing.T) {
 func TestEffectiveBaseURL(t *testing.T) {
 	d := DefaultConfig()
 	p := d.Products[0].Embedder
-	// 内置 → 默认网关
-	if p.EffectiveBaseURL() != GatewayBaseURL {
-		t.Errorf("builtin effective base url = %q, want gateway %q", p.EffectiveBaseURL(), GatewayBaseURL)
+	// 内置 → 默认网关（FC 主）
+	if p.EffectiveBaseURL() != GatewayFCBaseURL {
+		t.Errorf("builtin effective base url = %q, want gateway %q", p.EffectiveBaseURL(), GatewayFCBaseURL)
 	}
 	// 自备 key → 回落官方 SiliconFlow，直达不被网关替换
 	u := p
@@ -77,15 +77,15 @@ func TestGatewayFCBaseURLShape(t *testing.T) {
 		t.Errorf("GatewayFCBaseURL %q should be the Alibaba FC gateway host", GatewayFCBaseURL)
 	}
 	if GatewayFCBaseURL == GatewayBaseURL {
-		t.Errorf("FC fallback must differ from CF gateway, got %q", GatewayFCBaseURL)
+		t.Errorf("FC primary must differ from CF gateway, got %q", GatewayFCBaseURL)
 	}
 }
 
-// 故障转移链：内置 key → [CF 网关, FC 网关]；自备 key → 官方 SiliconFlow 直达（无故障转移项）。
+// 故障转移链：内置 key → [FC 网关（主）, CF 网关（备）]；自备 key → 官方 SiliconFlow 直达（无故障转移项）。
 func TestEffectiveBaseURLs(t *testing.T) {
 	d := DefaultConfig()
 	p := d.Products[0].Embedder
-	want := []string{GatewayBaseURL, GatewayFCBaseURL}
+	want := []string{GatewayFCBaseURL, GatewayBaseURL}
 	if got := p.EffectiveBaseURLs(); fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Errorf("builtin effective base urls = %v, want %v", got, want)
 	}
@@ -98,7 +98,7 @@ func TestEffectiveBaseURLs(t *testing.T) {
 	}
 }
 
-// 显式指定主/备地址与去重：主地址为空回落默认 CF；备与主相同则去重为单地址。
+// 显式指定主/备地址与去重：主地址为空回落默认 FC；备与主相同则去重为单地址。
 func TestEffectiveBaseURLsExplicitAndDedup(t *testing.T) {
 	d := DefaultConfig()
 	p := d.Products[0].Embedder
@@ -112,8 +112,8 @@ func TestEffectiveBaseURLsExplicitAndDedup(t *testing.T) {
 
 	// 备与主相同 → 去重（显式禁用故障转移）
 	dup := p
-	dup.FallbackBaseURL = GatewayBaseURL
-	if got := dup.EffectiveBaseURLs(); fmt.Sprint(got) != fmt.Sprint([]string{GatewayBaseURL}) {
+	dup.FallbackBaseURL = GatewayFCBaseURL
+	if got := dup.EffectiveBaseURLs(); fmt.Sprint(got) != fmt.Sprint([]string{GatewayFCBaseURL}) {
 		t.Errorf("dedup base urls = %v", got)
 	}
 }
