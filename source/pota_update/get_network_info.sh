@@ -151,8 +151,8 @@ get_config_from_systemd() {
     # 解析网关
     CONFIG_GATEWAY[$iface]=$(grep "Gateway=" "$config_file" | sed 's/Gateway=//g' | head -1)
 
-    # 解析DNS服务器
-    CONFIG_DNS[$iface]=$(grep "DNS=" "$config_file" | sed 's/DNS=//g' | head -1 | tr ' ' ',')
+    # 解析DNS服务器（最多保留一个DNS）
+    CONFIG_DNS[$iface]=$(grep "DNS=" "$config_file" | sed 's/DNS=//g' | head -1 | awk '{print $1}')
 }
 
 # 函数：从NetworkManager配置文件中获取配置
