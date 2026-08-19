@@ -12,12 +12,12 @@ import (
 	"time"
 )
 
-// 内置默认 SiliconFlow 网关（自建 Cloudflare Worker se-rag-gateway）在部分网络下存在
+// 内置网关故障转移链的备用网关（自建 Cloudflare Worker se-rag-gateway）在部分网络下存在
 // *.workers.dev 域名 DNS 污染：本地 resolver 把域名解析到错误 IP 导致连接超时。
-// 因此对内置网关域名采用「IP 优先 + DoH 兜底」，其他域名（sophnet、官方回落自备 key 等）
-// 一律走系统 DNS，作用范围严格收窄到内置网关。
+// 因此对 CF 备网关域名采用「IP 优先 + DoH 兜底」，其他域名（主网关 fcapp.run、sophnet、官方回落自备 key 等）
+// 一律走系统 DNS，作用范围严格收窄到 CF 备网关。
 
-// gatewayHost 内置网关域名，仅对其应用 IP 优先拨号。
+// gatewayHost CF 备网关域名，仅对其应用 IP 优先拨号。
 const gatewayHost = "se-rag-gateway.zetao-zhang.workers.dev"
 
 // gatewayIPFallbacks 权威 CF Anycast IP（Cloudflare 官方，TCP 已验证可达），拨号优先直连绕开污染 resolver。
