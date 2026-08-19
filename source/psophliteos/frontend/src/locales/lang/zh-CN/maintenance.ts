@@ -185,5 +185,11 @@ export default {
     disabledOk: '已禁用',
     toggleFail: '切换失败',
     reset: '重置',
+    portAllow: '端口放行',
+    portDeny: '端口拒绝',
+    highRiskConfirmTitle: '高危操作二次确认',
+    highRiskConfirmContent: '二次确认码：{code}（{secs} 秒内有效）。高危操作将立即生效，请确认执行。',
+    challengeFail: '获取二次确认码失败',
+    actionFail: '操作失败',
   },
 };
