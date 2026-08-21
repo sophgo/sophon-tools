@@ -188,6 +188,8 @@ func (sm *SessionManager) Close(ctx context.Context, client *Client, webchatID s
 }
 
 // Delete 删除会话（ACP session/delete + 本地记录删除）。
+// MYS-637: client 可能为 nil(reasonix 未启动)A CP 调用会 nil panic——本地删除
+// 始终执行,ACP session/delete 仅 client 存在时尽力而为(失败仅告警,不阻塞本地删除)。
 func (sm *SessionManager) Delete(ctx context.Context, client *Client, webchatID string) error {
 	sm.mu.Lock()
 	s, ok := sm.sessions[webchatID]
@@ -199,8 +201,10 @@ func (sm *SessionManager) Delete(ctx context.Context, client *Client, webchatID 
 	if !ok {
 		return nil
 	}
-	if err := client.DeleteSession(ctx, s.ACPSessionID); err != nil {
-		logger.Warn("agentproxy: acp session/delete failed: %v", err)
+	if client != nil {
+		if err := client.DeleteSession(ctx, s.ACPSessionID); err != nil {
+			logger.Warn("agentproxy: acp session/delete failed: %v", err)
+		}
 	}
 	if sm.db != nil {
 		if err := sm.db.Where("id = ?", webchatID).Delete(&WebchatSession{}).Error; err != nil {
