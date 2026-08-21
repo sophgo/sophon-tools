@@ -1,6 +1,6 @@
 #!/bin/bash
 
-GET_INFO_VERSION="1.4.0"
+GET_INFO_VERSION="1.4.1"
 
 shopt -s compat31
 
@@ -547,8 +547,13 @@ if [[ "${WORK_MODE}" == "SOC" ]]; then
     if [[ "${SOC_FAMILY}" == "cv" ]]; then
         DTS_MEM_FILE="/proc/device-tree/memory*/reg"
         # get_ddr_info 依赖 bm1684 家族的 iio:device0 ADC 与 devmem 0x27102014/0x27013050：
-        # CV84X2 dts 无 iio/adc 节点，且 0x27013050 未定义 → 实测输出空，保持留空即可。
-        DDR_TYPE=$(get_ddr_info 2>/dev/null)
+        # CV84X2 dts 无 iio/adc 节点，且 0x27013050 未定义。ADC 读空会让 vol_val_ddr 的算术
+        # 展开失败、各电压区间判断全部落空（此前输出为空属侥幸行为）；在装有 busybox devmem
+        # 的系统上 gpio117_val 还可能读到任意值，落入错误分支输出伪 DDR 类型。显式跳过，
+        # CV84X2 的 DDR_TYPE 保持留空。
+        if [[ "${CPU_MODEL}" != "cv84x6" ]]; then
+            DDR_TYPE=$(get_ddr_info 2>/dev/null)
+        fi
     else
         DTS_MEM_FILE="/proc/device-tree/memory/reg"
     fi
@@ -850,6 +855,13 @@ fi
 # TPU_USAGE
 TPU_USAGE=""
 if [[ "${WORK_MODE}" == "SOC" ]]; then
+    if [[ "${CPU_MODEL}" == "cv84x6" ]]; then
+        # CV84X6 的 npu_usage 被 driver 的 timer_on 门控（libsophon bm_attr.c npu_usage_show：
+        # timer_on==0 时输出 "Please, set [Usage enable] to 1"，默认 0）→ 直接读恒为空。
+        # 监测线程 bm_monitor 一直在后台采样（约 10ms/次），使能后立即可读：
+        #   echo 1 > /sys/class/bm-tpu/bm-tpu0/device/npu_usage_enable
+        write_to_file /sys/class/bm-tpu/bm-tpu0/device/npu_usage_enable 1
+    fi
     if [[ "${SOC_FAMILY}" == "cv" ]]; then
         TPU_USAGE=$(cat /sys/class/bm-tpu/bm-tpu0/device/npu_usage 2>/dev/null| awk -F':' '{print $2}' | awk '{print $1}' | tr '\n' ' ' | sed 's/ *$//')
     else
@@ -861,7 +873,14 @@ fi
 VPU_USAGE=""
 VPP_USAGE=""
 if [[ "${WORK_MODE}" == "SOC" ]]; then
-    if [[ "${SOC_FAMILY}" == "cv" ]]; then
+    if [[ "${CPU_MODEL}" == "cv84x6" ]]; then
+        # VPU 与其他 CV 系一致走 /proc/soph/vpuinfo（vc_drv_proc.h，PLATFORM_SOC）；
+        # VPP 则不同（osdrv vpss_proc.c，CV84X6 宏下无 soph/ 前缀）：/proc/vppinfo。
+        # vppinfo 的 usage 行格式为 {"id":N, "usage(instant|long)":  12%|  34%，
+        # 数值前有空格，且每核输出 instant|long 两个值——只取冒号后紧跟的 instant 值。
+        VPU_USAGE=$(cat /proc/soph/vpuinfo 2>/dev/null| tr -d '\n' | grep -ao ':[0-9]*%' | tr -d ':' | tr '\n' ',' | tr -d '%' | sed 's/ $//' | sed 's/,$//')
+        VPP_USAGE=$(cat /proc/vppinfo 2>/dev/null | tr -d '\n' | grep -aoE ':[[:space:]]*[0-9]+%' | tr -d ': ' | tr '\n' ',' | tr -d '%' | sed 's/,$//')
+    elif [[ "${SOC_FAMILY}" == "cv" ]]; then
         VPU_USAGE=$(cat /proc/soph/vpuinfo 2>/dev/null| tr -d '\n' | grep -ao ':[0-9]*%' | tr -d ':' | tr '\n' ',' | tr -d '%' | sed 's/ $//' | sed 's/,$//')
     else
         VPU_USAGE=$(cat /proc/vpuinfo 2>/dev/null| tr -d '\n' | grep -ao ':[0-9]*%' | tr -d ':' | tr '\n' ',' | tr -d '%' | sed 's/ $//' | sed 's/,$//')
