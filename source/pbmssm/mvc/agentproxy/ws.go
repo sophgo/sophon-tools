@@ -17,10 +17,12 @@ import (
 // wsPath WebSocket 端点路径（对齐设计文档 §6.3）。
 const wsPath = "/agent/ws"
 
-// wsIdleTimeout 连接 30 分钟无任何消息即关闭。
-const wsIdleTimeout = 30 * time.Minute
+// wsIdleTimeout 连接无任何消息(含客户端应用层 ping)即关闭。
+// MYS-632:原 30 分钟过长,半开连接最长假死 30 分钟;缩短到 3 分钟,
+// 配合 25s 客户端 ping 与服务端 30s 控制帧 ping,数次错过即可判定死连接。
+const wsIdleTimeout = 3 * time.Minute
 
-// wsPingInterval 心跳间隔。
+// wsPingInterval 服务端控制帧心跳间隔。
 const wsPingInterval = 30 * time.Second
 
 // clientFrame 客户端（webchatUI）发来的 WS 帧。
@@ -240,14 +242,18 @@ func (c *conn) pushFrames(frames []WSFrame) {
 func (c *conn) readLoop() {
 	defer c.close()
 
-	// 心跳：定期 ping
+	// 心跳：定期 ping；写失败说明对端已半开/TCP 已坏，立即关闭连接，不再静默忽略。
 	ticker := time.NewTicker(wsPingInterval)
 	defer ticker.Stop()
 	go func() {
 		for {
 			select {
 			case <-ticker.C:
-				_ = c.writePing()
+				if err := c.writePing(); err != nil {
+					logger.Warn("agentproxy: ws ping write failed, closing %s: %v", c.addr, err)
+					c.close()
+					return
+				}
 			case <-c.done:
 				return
 			}
@@ -270,6 +276,8 @@ func (c *conn) readLoop() {
 		if msgType != websocket.TextMessage {
 			continue
 		}
+		// 任何客户端消息(含应用层 ping)都刷新读空闲超时,防半开误杀。
+		_ = c.ws.SetReadDeadline(time.Now().Add(wsIdleTimeout))
 		var frame clientFrame
 		if err := json.Unmarshal(data, &frame); err != nil {
 			logger.Warn("agentproxy: invalid ws frame from %s: %v", c.addr, err)
@@ -288,6 +296,9 @@ func (c *conn) handleFrame(frame clientFrame) {
 	defer c.mu.Unlock()
 
 	switch frame.Type {
+	case "ping":
+		// 应用层心跳（MYS-632）：客户端 PicoWs 周期发 ping 探测连接是否真正可用，
+		// 半开连接下发送会失败触发前端重连。服务端无需回包，readLoop 已刷新读超时。
 	case "message.send":
 		c.handleMessageSendLocked(frame)
 	case "session.switch":
@@ -473,6 +484,15 @@ func (c *conn) handleSessionHistoryLocked(frame clientFrame) {
 		c.enqueueErrorLocked("会话不存在", "session_not_found")
 		return
 	}
+	// MYS-632 (P0-1): 拉取某会话历史即表示关注其实时流——重连后前端只发
+	// session.list + session.history 来恢复,若不绑定 byACP,该会话在途回合的
+	// message.create/typing.stop/session.busy=false 帧会经 Deliver 查询落空被丢弃,
+	// 表现为「切走切回后本回合回答丢失,需刷新才能恢复」。这里绑定即可重新订阅流。
+	// 只更新 byACP 路由,不动 c.session(连接的业务会话仍由 message.send 语义管理);
+	// 也不发 session.create 帧,避免与新建会话帧语义混淆。
+	c.hub.mu.Lock()
+	c.hub.byACP[s.ACPSessionID] = c
+	c.hub.mu.Unlock()
 	f := WSFrame{
 		Type:      "session.history",
 		SessionID: sid,
