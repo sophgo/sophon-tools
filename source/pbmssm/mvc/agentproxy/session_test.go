@@ -140,6 +140,26 @@ func TestSessionDelete(t *testing.T) {
 	}
 }
 
+// TestSessionDeleteNilClientNoPanic MYS-637：client 为 nil(reasonix 未启动)时
+// Delete 不 panic,本地记录仍删除(ACP session/delete 尽力而为)。
+func TestSessionDeleteNilClientNoPanic(t *testing.T) {
+	db := newTestDB(t)
+	sm := NewSessionManager(db, t.TempDir())
+	ctx := context.Background()
+	// 直接植入会话,跳过 ACP 创建(reasonix 未启动场景)
+	s := &WebchatSession{ID: "web-nil-client", ACPSessionID: "acp-nil-client", Title: "t"}
+	sm.mu.Lock()
+	sm.sessions[s.ID] = s
+	sm.mu.Unlock()
+
+	if err := sm.Delete(ctx, nil, s.ID); err != nil {
+		t.Fatalf("Delete with nil client: %v", err)
+	}
+	if _, ok := sm.Get(s.ID); ok {
+		t.Fatal("session still present after delete with nil client")
+	}
+}
+
 // TestSessionSwitchResume 验证 Switch：closed 会话 resume 后 active。
 func TestSessionSwitchResume(t *testing.T) {
 	db := newTestDB(t)

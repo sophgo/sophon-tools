@@ -357,8 +357,15 @@ func (c *conn) handleMessageSendLocked(frame clientFrame) {
 				return
 			}
 			c.resumeSessionLocked(sw)
+		} else if c.session != nil {
+			// MYS-635 (P1-3): 本连接已绑定会话却收到未知 wid(会话被另一标签页删除/
+			// 服务端清库)→ 回错误帧,不再静默新建。否则新会话 id 与前端已 serverBound
+			// 的本地 id 不一致,回包被会话隔离过滤,用户看到「已发送没回」+ 幽灵「新会话」。
+			c.enqueueErrorLocked("会话不存在,可能已被删除", "session_not_found")
+			return
 		}
-		// wid 存在但 Get 未命中 → 视为未知会话，落回新建分支（向后兼容）
+		// wid 存在但 Get 未命中 → 未知会话;若本连接尚未绑定任何会话(全新连接/前端
+		// 本地新会话首消息,服务端尚无该 id),落回新建分支创建(向后兼容)。
 	}
 	if c.session == nil {
 		if err := c.ensureSessionLocked(); err != nil {
@@ -467,8 +474,10 @@ func (c *conn) handleSessionListLocked() {
 	}
 }
 
-// handleSessionHistoryLocked session.history：返回指定 webchat 会话的全量消息。
-// 前置：持 c.mu。
+// handleSessionHistoryLocked session.history：返回指定 webchat 会话的消息。
+// 支持分页：payload.limit 限制返回条数(最近 N 条),payload.before 传已加载的
+// 最早消息索引(从后往前第 N 条起再往前取),返回附带 hasMore 供前端判断上翻可续。
+// 不带 limit/before 时保持旧行为返回全量(向前兼容旧前端/测试)。前置：持 c.mu。
 func (c *conn) handleSessionHistoryLocked(frame clientFrame) {
 	sid := frame.SessionID
 	if sid == "" {
@@ -493,20 +502,57 @@ func (c *conn) handleSessionHistoryLocked(frame clientFrame) {
 	c.hub.mu.Lock()
 	c.hub.byACP[s.ACPSessionID] = c
 	c.hub.mu.Unlock()
+
+	// MYS-635 (P1-4): 分页窗口。history 一次全量传输在长会话(数百条)下拖慢重连/切换;
+	// 前端滚动懒加载窗口按 limit 取最近 N 条,before=已载的最早索引时继续往前取。
+	messages := s.Messages
+	hasMore := false
+	if limit, ok := intFromPayload(frame.Payload, "limit"); ok && limit > 0 {
+		total := len(messages)
+		end := total // 截断终点(不含)
+		if before, ok := intFromPayload(frame.Payload, "before"); ok && before > 0 && before <= total {
+			end = total - before
+		}
+		start := end - limit
+		if start < 0 {
+			start = 0
+		}
+		hasMore = start > 0 // 前面还有更早消息
+		messages = messages[start:end]
+	}
 	f := WSFrame{
 		Type:      "session.history",
 		SessionID: sid,
 		Payload: map[string]any{
-			"session_id":  sid,
-			"messages":    s.Messages,
-			"title":       s.Title,
-			"autoApprove": s.AutoApprove, // 自动审批开关（跨浏览器/设备持久化）
+			"session_id": sid,
+			"messages":   messages,
+			"title":      s.Title,
+			// 自动审批开关（跨浏览器/设备持久化）
+			"autoApprove": s.AutoApprove,
 			"running":     c.module.HasTurn(s.ACPSessionID),
+			"hasMore":     hasMore, // MYS-635 P1-4: 是否还有更早消息可翻页
 		},
 	}
 	select {
 	case c.send <- []WSFrame{f}:
 	case <-c.done:
+	}
+}
+
+// intFromPayload 从 map 读取 int 型字段(容忍 float64/int 两种 JSON 解码形态)。
+func intFromPayload(payload map[string]any, key string) (int, bool) {
+	if payload == nil {
+		return 0, false
+	}
+	switch v := payload[key].(type) {
+	case float64:
+		return int(v), true
+	case int:
+		return v, true
+	case int64:
+		return int(v), true
+	default:
+		return 0, false
 	}
 }
 
