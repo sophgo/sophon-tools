@@ -27,6 +27,11 @@ interface PicoWsOpts {
   onStatus?: (status: WsStatus) => void;
 }
 
+// 应用层心跳间隔（MYS-632 P0-2）：浏览器 WebSocket 无法主动发 control ping，
+// 用 25s 一条 {type:'ping'} 帧保持服务端读空闲不超时；半开连接时客户端消息也
+// 到不了服务端，服务端 3 分钟读超时关闭 → TCP 断开信号经 onclose 回到客户端。
+const HEARTBEAT_INTERVAL = 25_000;
+
 export class PicoWs {
   url: string;
   token: string;
@@ -39,6 +44,7 @@ export class PicoWs {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectCount = 0;
   private queue: any[] = [];
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(opts: PicoWsOpts) {
     this.url = opts.url;
@@ -55,6 +61,7 @@ export class PicoWs {
       return;
     }
     this.closed = false;
+    this.bindNetworkEvents();
     this.emitStatus('connecting');
     try {
       this.ws = new WebSocket(this.url, ['token.' + this.token]);
@@ -66,6 +73,7 @@ export class PicoWs {
     this.ws.onopen = () => {
       this.ready = true;
       this.reconnectCount = 0;
+      this.startHeartbeat();
       this.flushQueue();
       this.emitStatus('open');
     };
@@ -84,6 +92,8 @@ export class PicoWs {
     this.ws.onclose = () => {
       const wasReady = this.ready;
       this.ready = false;
+      this.stopHeartbeat();
+      this.unbindNetworkEvents();
       if (wasReady) this.emitStatus('closed');
       this.scheduleReconnect();
     };
@@ -122,6 +132,8 @@ export class PicoWs {
   close(): void {
     this.closed = true;
     this.queue = [];
+    this.stopHeartbeat();
+    this.unbindNetworkEvents();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -135,6 +147,59 @@ export class PicoWs {
       this.ws = null;
     }
     this.ready = false;
+  }
+
+  // ---------- 心跳（MYS-632 P0-2） ----------
+  // 浏览器 WebSocket 不允许发送 control ping，应用层 ping 帧让服务端保持读空闲
+  // 不超时；半开连接时消息到不了服务端，服务端 3 分钟读超时关闭连接，触发本地
+  // onclose → scheduleReconnect，从而结束「已连接但发消息无反应」的假死。
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+    this.heartbeatTimer = setInterval(() => {
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+      try {
+        this.ws.send(JSON.stringify({ type: 'ping' }));
+      } catch (e) {
+        // 发送抛异常说明连接已坏，交给 onclose/reconnect 恢复
+      }
+    }, HEARTBEAT_INTERVAL);
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+  }
+
+  // ---------- 网络事件（MYS-632 P0-2） ----------
+  // 页面切回前台 / 网络恢复：若连接已半开（ws.ready 仍 true 但实际已断），主动
+  // reconnect 而非被动等 onclose；若连接已断开则恢复重连调度。
+  private onVisibilityChange = () => {
+    if (document.visibilityState !== 'visible') return;
+    if (this.closed) return;
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      this.reconnect();
+    }
+  };
+
+  private onOnline = () => {
+    if (this.closed) return;
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      this.reconnect();
+    }
+  };
+
+  private bindNetworkEvents(): void {
+    if (typeof window === 'undefined') return;
+    window.addEventListener('visibilitychange', this.onVisibilityChange);
+    window.addEventListener('online', this.onOnline);
+  }
+
+  private unbindNetworkEvents(): void {
+    if (typeof window === 'undefined') return;
+    window.removeEventListener('visibilitychange', this.onVisibilityChange);
+    window.removeEventListener('online', this.onOnline);
   }
 
   private buildFrame(sessionId?: string, content?: string, media?: string[]): any {

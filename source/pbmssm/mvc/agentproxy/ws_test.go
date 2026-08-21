@@ -893,3 +893,105 @@ func TestWSNoDuplicateFrames(t *testing.T) {
 		t.Fatalf("message.create delivered %d times, want exactly 1 (duplicate bug)", creates)
 	}
 }
+
+// TestWSHistoryBindsACP MYS-632 (P0-1)：拉取某会话历史即绑定 byACP 订阅其实时流。
+// 重连后前端只发 session.list + session.history,若不绑定,该会话在途回合的
+// message.create/typing.stop/busy=false 帧会经 Deliver 查询落空被丢弃。
+func TestWSHistoryBindsACP(t *testing.T) {
+	mod, _ := mockModuleForWS(t)
+	h := newHub(mod, "key")
+	mod.hub = h
+	srv := httptest.NewServer(http.HandlerFunc(h.serveWS))
+	t.Cleanup(srv.Close)
+
+	sm := mod.sessions
+	sm.mu.Lock()
+	sm.sessions["web-h"] = &WebchatSession{
+		ID: "web-h", ACPSessionID: "acp-h", Title: "绑定",
+		Messages: []ChatMessage{{Role: "user", Content: "hi"}},
+	}
+	sm.mu.Unlock()
+
+	conn := dialWS(t, wsURL(srv.URL)+wsPath, "token.key")
+	// 重连场景：新连接不发 message.send,只发 session.history
+	_ = conn.WriteJSON(map[string]any{"type": "session.history", "session_id": "web-h"})
+
+	// 先消费 session.history 响应帧（读到为止）
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		m := readFrame(t, conn)
+		if m["type"] == "session.history" {
+			break
+		}
+	}
+
+	// 拉历史后 byACP 已绑定到本连接 → Deliver 在途帧可达
+	h.Deliver("acp-h", []WSFrame{{
+		Type:      "message.create",
+		SessionID: "web-h",
+		Payload:   map[string]any{"content": "在途答案", "kind": "text", "message_id": "mh"},
+	}})
+
+	deadline = time.Now().Add(3 * time.Second)
+	found := false
+	for time.Now().Before(deadline) {
+		m := readFrame(t, conn)
+		if m["type"] == "message.create" && m["payload"].(map[string]any)["content"] == "在途答案" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("in-flight turn frames dropped after history-only reconnect (byACP not bound)")
+	}
+}
+
+// TestWSPingFrame 客户端应用层 ping 帧不产生回包、不关闭连接,可继续收发。
+func TestWSPingFrame(t *testing.T) {
+	mod, tr := mockModuleForWS(t)
+	h := newHub(mod, "key")
+	mod.hub = h
+	srv := httptest.NewServer(http.HandlerFunc(h.serveWS))
+	t.Cleanup(srv.Close)
+
+	go func() {
+		sc := bufioNewScanner(tr.in)
+		req, err := tr.readRequestErr(sc)
+		if err != nil {
+			return
+		}
+		_ = tr.reply(map[string]any{"jsonrpc": "2.0", "id": *req.ID, "result": map[string]any{"sessionId": "acp-p"}})
+		req2, err := tr.readRequestErr(sc)
+		if err != nil {
+			return
+		}
+		_ = tr.reply(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"sessionId": "acp-p", "update": map[string]any{"sessionUpdate": map[string]any{"agent_message_chunk": map[string]any{"messageId": "mp", "content": map[string]any{"text": "ping后仍有回复"}}}}}})
+		_ = tr.reply(map[string]any{"jsonrpc": "2.0", "id": *req2.ID, "result": map[string]any{"stopReason": "end_turn"}})
+	}()
+
+	conn := dialWS(t, wsURL(srv.URL)+wsPath, "token.key")
+	// 发送应用层 ping
+	_ = conn.WriteJSON(map[string]any{"type": "ping"})
+	_ = conn.WriteJSON(map[string]any{"type": "message.send", "payload": map[string]any{"content": "问"}})
+
+	// ping 后消息仍能正常收发（连接未被 ping 帧关闭/无回包干扰）
+	deadline := time.Now().Add(4 * time.Second)
+	gotCreate, gotTypingStop := false, false
+	for time.Now().Before(deadline) {
+		m := readFrame(t, conn)
+		switch m["type"] {
+		case "ping":
+			t.Fatal("server must not echo client ping frame")
+		case "message.create":
+			gotCreate = true
+		case "typing.stop":
+			gotTypingStop = true
+		}
+		if gotCreate && gotTypingStop {
+			break
+		}
+	}
+	if !gotCreate || !gotTypingStop {
+		t.Fatalf("after ping: gotCreate=%v gotTypingStop=%v, want both", gotCreate, gotTypingStop)
+	}
+}

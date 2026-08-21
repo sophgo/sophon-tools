@@ -234,6 +234,10 @@
 
   let ws: PicoWs | null = null;
   let forwardKey = '';
+  // P1-1：配置拉取重试句柄（失败 30s 内重试 3 次，成功后更新 token 供后续重连使用）
+  let configRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  // P1-2：最近一次发送成功时间（sending 在途标记超时兜底用）
+  let lastSendAt = 0;
   // 本地 message 渲染序号（避免重复 key）
   let msgSeq = 0;
   // 兜底：agent 回答完仍转圈的动画 BUG（MYS-199）。
@@ -555,6 +559,10 @@
         break;
       case 'typing.stop':
         typing.value = false;
+        // MYS-632 P1-2：typing.stop 在首个内容 chunk 到达时也会下发一次
+        // （protocol.go messageChunk 停打字指示器），并非只对应回合结束——不能在此
+        // 复位 sending，否则快速连发两条仍会让第二条 StartTurn 取消第一条。
+        // sending 仅在 busy=false / error / turn.error 时复位（见对应分支）。
         // 回合结束：思考已结束，后续新思考应另起折叠块
         clearOpenThought();
         break;
@@ -566,7 +574,19 @@
         break;
       case 'session.busy':
         // 需求 2：会话忙碌状态（agent 正在干活）的转圈标记
-        setSessionBusy(msg.session_id || payload.session_id, !!payload.busy);
+        {
+          const bsid = msg.session_id || payload.session_id;
+          const wasBusy = !!sessions.value.find((x) => x.id === bsid)?.busy;
+          setSessionBusy(bsid, !!payload.busy);
+          if (!payload.busy) {
+            // 回合结束：允许下一条消息（MYS-632 P1-2）
+            sending.value = false;
+            // MYS-632 P0-1：回合可能在重连/切会话期间结束，本回合 assistant 只在
+            // 服务端回合结束才落库，若流式帧因重连丢失，本地看不到答案。收到
+            // busy=false 对该会话补拉一次 history reconcile（mergeHistory 幂等）。
+            if (wasBusy && bsid) pullHistory(bsid);
+          }
+        }
         break;
       case 'session.updated':
         // 需求 3：自定义标题后的回执 + 自动审批开关跨浏览器同步回执
@@ -578,6 +598,13 @@
         break;
       case 'permission.responded':
         markPermissionDone(payload.request_id, !!payload.allow);
+        break;
+      case 'turn.error':
+        // MYS-632 P1-2：回合错误与 error 同语义，终止在途标记（否则 sending 卡死）
+        errorMsg.value = payload.message || '发生错误';
+        sending.value = false;
+        typing.value = false;
+        setSessionBusy(msg.session_id || activeId.value, false);
         break;
       case 'error':
         errorMsg.value = payload.message || '发生错误';
@@ -685,6 +712,13 @@
       delete busyCalibAt[s.id];
       if (s.busy && now - (sessionLastWsAt[s.id] || 0) >= BUSY_CALIBRATE_WINDOW) {
         s.busy = false;
+        // 复位 busy 同步复位发送/输入态：终结态帧丢失时用户仍可继续发消息（MYS-632 P1-2）
+        if (s.id === activeId.value) {
+          sending.value = false;
+          typing.value = false;
+        }
+        // MYS-632 P0-1：校准复位可能是回合已完成但终态帧丢失，补拉 reconcile 幂等
+        if (ws && ws.ready) pullHistory(s.id, true);
       }
     });
   }
@@ -700,6 +734,14 @@
       if (!s.busy) return;
       if (now - (sessionLastWsAt[s.id] || 0) > BUSY_STALL_TIMEOUT) {
         s.busy = false;
+        // 复位 busy 同步复位发送/输入态：终结态帧丢失时用户仍可继续发消息（MYS-632 P1-2）
+        if (s.id === activeId.value) {
+          sending.value = false;
+          typing.value = false;
+        }
+        // MYS-632 P0-1：回合实际结束但终态帧丢失的兜底——补拉历史把落库答案
+        // reconcile 回本地；mergeHistory 幂等，可安全重复。
+        if (ws && ws.ready) pullHistory(s.id, true);
       }
     });
   }
@@ -1052,12 +1094,16 @@
     }
   }
 
+  // 校准/超时复位引发的 history 补拉：只合并消息做 reconcile，不恢复 busy。
+  // 若恢复 busy，服务端 running=true 又会重设校准窗口 → 复位 → 再补拉 → 无限循环。
+  const reconcileOnly = new Set<string>();
+
   function handleSessionHistory(payload: any) {
     const sid = payload.session_id;
     const raw = Array.isArray(payload.messages) ? payload.messages : [];
     const s = sessions.value.find((x) => x.id === sid);
     if (!s) return;
-    // 需求(MYS-209)：后端一轮回答会按 message_id 拆成多条 message.create，落库后
+    const onlyReconcile = reconcileOnly.delete(sid); // 在合并前消费标记
     // history 里会出现成段的相邻 text 小片段（agent 一条完整回答被切成 text-1..text-N），
     // 且一句话中间可能夹 thought / tool_calls（内部思考、工具调用）。若这些把 text
     // 切断成多泡，会把「同一条连续回答」显示成碎片。故加载历史时，把相邻的 assistant
@@ -1100,7 +1146,9 @@
     if (payload.title && s.title !== payload.title) s.title = payload.title;
     // 自动审批开关跨浏览器同步：以 bmssm 服务端为准
     if (typeof payload.autoApprove === 'boolean') s.autoApprove = payload.autoApprove;
-    restoreBusy(s.id, !!payload.running); // 需求 4：恢复 busy 时走一次性校准
+    if (!onlyReconcile) {
+      restoreBusy(s.id, !!payload.running); // 需求 4：恢复 busy 时走一次性校准
+    }
     clearOpenThought();
     saveSessions();
     resetRenderWindow(); // 懒加载：历史到达后只渲染尾部窗口，避免一次性渲染全部导致卡顿
@@ -1112,8 +1160,9 @@
     ws.sendFrame({ type: 'session.list' }, { queued: true });
   }
 
-  function pullHistory(sessionId: string) {
+  function pullHistory(sessionId: string, onlyReconcile = false) {
     if (!ws || !ws.ready || !sessionId) return;
+    if (onlyReconcile) reconcileOnly.add(sessionId);
     ws.sendFrame({ type: 'session.history', session_id: sessionId }, { queued: true });
   }
 
@@ -1147,7 +1196,11 @@
 
     try {
       ws.send(serverId, content, []);
-      sending.value = false;
+      lastSendAt = Date.now();
+      // 在途标记：保持 sending=true 直到本轮回合结束信号（session.busy=false /
+      // turn.error / error）到达，期间用户再 Enter 会被 sendMessage 顶部的
+      // `if (sending.value) return` 拦下，避免第二条 StartTurn 取消第一条的回答
+      // （MYS-632 P1-2）。
     } catch (err: any) {
       sending.value = false;
       errorMsg.value = err.message || '发送失败，请检查连接';
@@ -1237,19 +1290,26 @@
   }
 
   // ---------- 连接 ----------
+  // P1-1：配置拉取短退避周期重试（30s 内最多重试 3 次，累计 ~3s/10s/25s）。
+  // 服务端 /agent/ws 自 MYS-379 起不再校验子协议 key，配置失败不阻塞建连；
+  // 重试成功后更新 forwardKey，供后续重建连接时携带子协议 token（兼容回显）。
+  async function refreshAgentConfig(retries: number): Promise<void> {
+    const cfg = await getAgentConfig();
+    if (cfg?.forwardKey) {
+      forwardKey = cfg.forwardKey;
+      if (ws) ws.token = cfg.forwardKey;
+      return;
+    }
+    if (retries >= 3) return;
+    const delays = [3000, 7000, 15000];
+    configRetryTimer = setTimeout(() => refreshAgentConfig(retries + 1), delays[retries]);
+  }
+
   async function connect() {
     if (!forwardKey) {
-      const cfg = await getAgentConfig();
-      forwardKey = cfg?.forwardKey || '';
-    }
-    // MYS-386：llm-proxy/config 已改为 admin-only。非管理员（或配置读取
-    // 失败）拿不到 forwardKey，空 token 会持续 WS 握手失败重连，这里
-    // 明确提示并跳过连接，避免无限重连。
-    if (!forwardKey) {
-      statusText.value = '未连接';
-      statusClass.value = 'bad';
-      errorMsg.value = '无法连接智能体：配置读取失败（需管理员权限，或服务未就绪），请刷新页面重试';
-      return;
+      // 异步读取配置（首个尝试等快速失败），拿到失败/超时结果前直接建连——
+      // 非 admin / bmssm 刚启动配置未就绪的场景也能立即进入对话页。
+      void refreshAgentConfig(0);
     }
     if (ws) {
       ws.close();
@@ -1287,6 +1347,11 @@
     busyStallTimer = setInterval(() => {
       clearStalledBusy();
       calibrateRestoredBusy();
+      // P1-2 兜底：sending 在途标记长期不落位（终态帧丢失/回合卡死）会阻塞后续
+      // 发送，超时后复位（busy 走 BUSY_STALL_TIMEOUT 同一阈值）。
+      if (sending.value && Date.now() - lastSendAt > BUSY_STALL_TIMEOUT) {
+        sending.value = false;
+      }
     }, BUSY_SCAN_INTERVAL);
   });
 
@@ -1294,6 +1359,10 @@
     if (busyStallTimer) {
       clearInterval(busyStallTimer);
       busyStallTimer = null;
+    }
+    if (configRetryTimer) {
+      clearTimeout(configRetryTimer);
+      configRetryTimer = null;
     }
     if (renderTimer) clearTimeout(renderTimer);
     if (ws) ws.close();
