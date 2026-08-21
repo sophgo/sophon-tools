@@ -372,7 +372,7 @@
           key && sessionId && activeId.value === sessionId && activeSess.value?.messages.some((x) => x.key === key);
         if (stillActive && m.__renderSeq === mark) {
           m.html = html;
-          saveSessions();
+          scheduleSave(); // 渲染结果写回,流式期间高频 → 防抖合并
         }
       })
       .catch(() => {
@@ -455,9 +455,40 @@
           }),
         };
       });
-      localStorage.setItem(SESSIONS_KEY, JSON.stringify(snap));
-    } catch (e) {
-      /* ignore */
+      const serialized = JSON.stringify(snap);
+      localStorage.setItem(SESSIONS_KEY, serialized);
+    } catch (e: any) {
+      // MYS-635 P1-4：写入失败(通常 QuotaExceeded)不再静默吞掉——提示一次,避免
+      // 用户以为已持久化实际刷新即丢。仅在阈值外提示,防长回话说一句刷屏。
+      if (e && (e.name === 'QuotaExceededError' || e.code === 22 || e.code === 1014)) {
+        const now = Date.now();
+        if (now - (lastStorageQuotaWarnAt || 0) > 60_000) {
+          lastStorageQuotaWarnAt = now;
+          console.warn('[sophon-webchat] localStorage 容量超限,会话本地持久化失效(服务端仍在线,刷新后历史由 session.history 恢复)', e);
+        }
+      }
+    }
+  }
+
+  // MYS-635 P1-4：流式写入防抖——每个流式 chunk 都 saveSessions() 全量序列化所有会话,
+  // 长会话下每 chunk 都写 localStorage 拖慢 UI。结构性操作(新建/删除/切换/绑定/权限)仍
+  // 调 saveSessions() 立即落盘;高频流式(handleCreate/handleUpdate)改走本函数 500ms 合并,
+  // 一轮连发多个 chunk 只写一次。
+  let saveTimer: ReturnType<typeof setTimeout> | null = null;
+  let lastStorageQuotaWarnAt = 0;
+  function scheduleSave() {
+    if (saveTimer) return;
+    saveTimer = setTimeout(() => {
+      saveTimer = null;
+      saveSessions();
+    }, 500);
+  }
+  // 组件卸载时冲刷防抖缓冲,避免「刷新/关闭瞬间丢失最后一段内容」。
+  function flushScheduleSave() {
+    if (saveTimer) {
+      clearTimeout(saveTimer);
+      saveTimer = null;
+      saveSessions();
     }
   }
 
@@ -503,8 +534,10 @@
     // 先同步到服务端真实删除（此前只做本地移除，重连后 session.list 会把服务端仍在的
     // 会话拉回来 → 点击消失又复现）。后端 handleSessionDeleteLocked 会删除服务端会话
     // 并解绑本连接对该会话的 byACP 订阅，此后重连 session.list 不再返回它。
-    if (ws && ws.ready) {
-      ws.sendFrame({ type: 'session.delete', session_id: id, payload: { session_id: id } });
+    // MYS-635 P1-3：queued:true —— 断线期间删除入队,重连后 flush 真正送达服务端,
+    // 避免「删了又复活」(旧行为仅本地移除,断线删除静默失败,重连拉回)。
+    if (ws) {
+      ws.sendFrame({ type: 'session.delete', session_id: id, payload: { session_id: id } }, { queued: true });
     }
     sessions.value = sessions.value.filter((s) => s.id !== id);
     if (activeId.value === id) {
@@ -857,7 +890,7 @@
         open: false,
       });
     }
-    saveSessions();
+    scheduleSave(); // 流式创建,高频 → 防抖合并(MYS-635 P1-4)
     scrollToBottom();
   }
 
@@ -894,7 +927,7 @@
       if (last && last.role === 'assistant' && last.kind === 'thought')
         last.content = accumulate(last.content, content);
     }
-    saveSessions();
+    scheduleSave(); // 每个流式 chunk 高频 → 防抖合并,一轮只写一次 localStorage (MYS-635 P1-4)
     scrollToBottom();
   }
 
@@ -1074,10 +1107,12 @@
         autoApprove: typeof ss.autoApprove === 'boolean' ? ss.autoApprove : existing ? !!existing.autoApprove : false,
       };
     });
-    // 保留本地尚未同步到服务端的会话
+    // 保留本地尚未同步到服务端的会话——仅未绑定(serverBound=false)的本地临时新会话。
+    // 已绑定且服务端不存在的本地会话视为「已被删除(另一标签页/清库)」,同步移除,
+    // 避免「删了又复活」与长期幽灵会话(MYS-635 P1-3)。
     const storedIds = new Set(stored.map((s) => s.id));
     sessions.value.forEach((s) => {
-      if (!storedIds.has(s.id)) stored.push(s);
+      if (!storedIds.has(s.id) && !s.serverBound) stored.push(s);
     });
     sessions.value = stored;
     if (!sessions.value.some((s) => s.id === activeId.value)) {
@@ -1365,6 +1400,7 @@
       configRetryTimer = null;
     }
     if (renderTimer) clearTimeout(renderTimer);
+    flushScheduleSave(); // 冲刷防抖缓冲,退出页面前最后落盘一次 (MYS-635 P1-4)
     if (ws) ws.close();
   });
 </script>

@@ -995,3 +995,174 @@ func TestWSPingFrame(t *testing.T) {
 		t.Fatalf("after ping: gotCreate=%v gotTypingStop=%v, want both", gotCreate, gotTypingStop)
 	}
 }
+
+// TestWSMessageSendUnknownWidOnBoundConn MYS-635 (P1-3)：本连接已绑定会话却携带
+// 未知 wid → 回 session_not_found,不再静默新建。防「已发送没回」+ 幽灵「新会话」。
+func TestWSMessageSendUnknownWidOnBoundConn(t *testing.T) {
+	mod, tr := mockModuleForWS(t)
+	h := newHub(mod, "key")
+	mod.hub = h
+	srv := httptest.NewServer(http.HandlerFunc(h.serveWS))
+	t.Cleanup(srv.Close)
+
+	go func() {
+		sc := bufioNewScanner(tr.in)
+		req, err := tr.readRequestErr(sc)
+		if err != nil {
+			return
+		}
+		// 首次 message.send(无 wid) → session/new 创建会话
+		_ = tr.reply(map[string]any{"jsonrpc": "2.0", "id": *req.ID, "result": map[string]any{"sessionId": "acp-ok"}})
+		req2, err := tr.readRequestErr(sc)
+		if err != nil {
+			return
+		}
+		_ = tr.reply(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"sessionId": "acp-ok", "update": map[string]any{"sessionUpdate": map[string]any{"agent_message_chunk": map[string]any{"messageId": "m1", "content": map[string]any{"text": "第一条"}}}}}})
+		_ = tr.reply(map[string]any{"jsonrpc": "2.0", "id": *req2.ID, "result": map[string]any{"stopReason": "end_turn"}})
+	}()
+
+	conn := dialWS(t, wsURL(srv.URL)+wsPath, "token.key")
+	// 首次正常发消息,连接绑定到会话
+	_ = conn.WriteJSON(map[string]any{"type": "message.send", "payload": map[string]any{"content": "hi"}})
+	waitFor(t, 3*time.Second, "session bound", func() bool {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		return len(h.byACP) == 1
+	})
+
+	// 绑定后发送未知 wid(会话已被删/清库)→ 期望 session_not_found,而非新建
+	_ = conn.WriteJSON(map[string]any{"type": "message.send", "session_id": "deleted-session-xyz", "payload": map[string]any{"content": "hello", "session_id": "deleted-session-xyz"}})
+
+	deadline := time.Now().Add(3 * time.Second)
+	gotErr := false
+	for time.Now().Before(deadline) {
+		m := readFrame(t, conn)
+		if m["type"] == "error" {
+			p := m["payload"].(map[string]any)
+			if p["code"] == "session_not_found" {
+				gotErr = true
+				break
+			}
+		}
+	}
+	if !gotErr {
+		t.Fatal("unknown wid on bound conn: expected session_not_found error, got none")
+	}
+}
+
+// TestWSHistoryPagination MYS-635 (P1-4)：session.history 支持 limit/before 分页,
+// 返回最近 limit 条 + hasMore;before 往前翻页。
+func TestWSHistoryPagination(t *testing.T) {
+	mod, _ := mockModuleForWS(t)
+	h := newHub(mod, "key")
+	srv := httptest.NewServer(http.HandlerFunc(h.serveWS))
+	t.Cleanup(srv.Close)
+
+	sm := mod.sessions
+	sm.mu.Lock()
+	msgs := make([]ChatMessage, 0, 25)
+	for i := 0; i < 25; i++ {
+		msgs = append(msgs, ChatMessage{Role: "user", Content: "m" + strconv.Itoa(i)})
+	}
+	sm.sessions["web-page"] = &WebchatSession{
+		ID: "web-page", ACPSessionID: "acp-page", Title: "分页",
+		Messages: msgs,
+	}
+	sm.mu.Unlock()
+
+	conn := dialWS(t, wsURL(srv.URL)+wsPath, "token.key")
+
+	// 第一页：limit=10,期望返回最后 10 条,hasMore=true
+	_ = conn.WriteJSON(map[string]any{"type": "session.history", "session_id": "web-page", "payload": map[string]any{"limit": 10}})
+	deadline := time.Now().Add(3 * time.Second)
+	var gotHasMore bool
+	var firstLen int
+	for time.Now().Before(deadline) {
+		m := readFrame(t, conn)
+		if m["type"] != "session.history" {
+			continue
+		}
+		p := m["payload"].(map[string]any)
+		firstLen = len(p["messages"].([]any))
+		if b, ok := p["hasMore"].(bool); ok && b {
+			gotHasMore = true
+		}
+		// 最后一条应为 m24
+		msgsAny := p["messages"].([]any)
+		last := msgsAny[len(msgsAny)-1].(map[string]any)
+		if last["content"] != "m24" {
+			t.Fatalf("first page last = %v, want m24", last["content"])
+		}
+		break
+	}
+	if firstLen != 10 {
+		t.Fatalf("first page len = %d, want 10", firstLen)
+	}
+	if !gotHasMore {
+		t.Fatal("first page hasMore = false, want true")
+	}
+
+	// 第二页：before=10(跳过尾部 10 条),再往前取 10 条(m5..m14),hasMore=true
+	_ = conn.WriteJSON(map[string]any{"type": "session.history", "session_id": "web-page", "payload": map[string]any{"limit": 10, "before": 10}})
+	deadline = time.Now().Add(3 * time.Second)
+	var secondFirst, secondLast string
+	var secondLen int
+	for time.Now().Before(deadline) {
+		m := readFrame(t, conn)
+		if m["type"] != "session.history" {
+			continue
+		}
+		p := m["payload"].(map[string]any)
+		msgsAny := p["messages"].([]any)
+		secondLen = len(msgsAny)
+		secondFirst = msgsAny[0].(map[string]any)["content"].(string)
+		secondLast = msgsAny[len(msgsAny)-1].(map[string]any)["content"].(string)
+		break
+	}
+	if secondLen != 10 {
+		t.Fatalf("second page len = %d, want 10", secondLen)
+	}
+	if secondFirst != "m5" || secondLast != "m14" {
+		t.Fatalf("second page range = %s..%s, want m5..m14 (before=跳过尾部N条)", secondFirst, secondLast)
+	}
+
+	// 第三页：before=20,剩余前 5 条(m0..m4),hasMore=false
+	_ = conn.WriteJSON(map[string]any{"type": "session.history", "session_id": "web-page", "payload": map[string]any{"limit": 10, "before": 20}})
+	deadline = time.Now().Add(3 * time.Second)
+	var lastHasMore *bool
+	var thirdFirst, thirdLast string
+	for time.Now().Before(deadline) {
+		m := readFrame(t, conn)
+		if m["type"] != "session.history" {
+			continue
+		}
+		p := m["payload"].(map[string]any)
+		msgsAny := p["messages"].([]any)
+		thirdFirst = msgsAny[0].(map[string]any)["content"].(string)
+		thirdLast = msgsAny[len(msgsAny)-1].(map[string]any)["content"].(string)
+		b := p["hasMore"].(bool)
+		lastHasMore = &b
+		break
+	}
+	if thirdFirst != "m0" || thirdLast != "m4" {
+		t.Fatalf("third page range = %s..%s, want m0..m4", thirdFirst, thirdLast)
+	}
+	if lastHasMore == nil || *lastHasMore {
+		t.Fatalf("third page hasMore = %v, want false", lastHasMore)
+	}
+
+	// 不带 limit → 全量(向后兼容)
+	_ = conn.WriteJSON(map[string]any{"type": "session.history", "session_id": "web-page"})
+	deadline = time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		m := readFrame(t, conn)
+		if m["type"] != "session.history" {
+			continue
+		}
+		p := m["payload"].(map[string]any)
+		if n := len(p["messages"].([]any)); n != 25 {
+			t.Fatalf("no-limit history len = %d, want 25 (backward compat)", n)
+		}
+		break
+	}
+}
