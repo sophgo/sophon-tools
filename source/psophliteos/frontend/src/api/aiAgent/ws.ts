@@ -114,7 +114,10 @@ export class PicoWs {
   sendFrame(frame: any, opts?: { queued?: boolean }): boolean {
     const o = opts || {};
     const value = JSON.stringify(frame);
-    if (this.ready && this.ws && this.ws.readyState === WebSocket.OPEN && !o.queued) {
+    // MYS-637 修复：优先发送——连接就绪时即使标记 queued 也直接发送，避免
+    // 「入队后立刻被 next reconnect 清队」导致帧从不送达（session.delete 在线删除回归）。
+    // queued 语义收敛为「仅未就绪时入队,等重连 flush」。
+    if (this.ready && this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(value);
       return true;
     }
@@ -125,13 +128,13 @@ export class PicoWs {
   }
 
   reconnect(): void {
-    this.close();
+    this.close({ keepQueue: true }); // 跨重连保留未发送帧（断线期间的 delete 等）,onopen flush
     this.connect();
   }
 
-  close(): void {
+  close(opts?: { keepQueue?: boolean }): void {
     this.closed = true;
-    this.queue = [];
+    if (!opts?.keepQueue) this.queue = [];
     this.stopHeartbeat();
     this.unbindNetworkEvents();
     if (this.reconnectTimer) {
