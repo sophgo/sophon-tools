@@ -1,7 +1,7 @@
 #!/bin/bash
 # bmssm .deb 打包：交叉编译 arm64 静态二进制 + 组装 deb 数据树 + dpkg-deb。
 # 用法: bash build/build-deb-bmssm.sh [VERSION] [ARCH] [REASONIX_BIN]
-#   VERSION      默认 2.1.0（与 build/version.sh 一致）
+#   VERSION      默认 2.3.0（与 build/version.sh 一致）
 #   ARCH         默认 arm64（设备）；amd64 用于 PCIE/开发机
 #   REASONIX_BIN 可选：reasonix arm64 二进制路径。提供则把 Reasonix 一并嵌入 deb，
 #               安装到 /opt/sophon/reasonix/bin/reasonix，并在 bmssm.yaml 里把
@@ -16,7 +16,7 @@
 set -e
 
 cd "$(dirname "$0")/.."
-VERSION="${1:-2.1.0}"
+VERSION="${1:-2.3.0}"
 VERSION="${VERSION//\//-}"
 ARCH="${2:-arm64}"
 REASONIX_BIN="${3:-${REASONIX_BIN:-}}"
@@ -88,7 +88,7 @@ assemble_deb() {
     mkdir -p "$SK/rag/data_se7_go"
     cp "$SE7_SRC/SKILL.md" "$SK/SKILL.md"
     cp -r "$SE7_SRC/docs/." "$SK/docs/"
-    cp "$SE7_SRC/rag-data/se7/"* "$SK/rag/data_se7_go/"
+    cp -a "$SE7_SRC/rag-data/se7/." "$SK/rag/data_se7_go/"   # 含 .complete 完成标记（Open 依赖）
     # 3) SE7 agent 提示词
     mkdir -p "$RXM/prompts"
     cp "$SE7_SRC/prompts/system.md" "$RXM/prompts/system.md"
