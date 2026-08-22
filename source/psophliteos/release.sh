@@ -2,7 +2,7 @@
 # psophliteos 统一构建接口 (M1 规范 v0.1)
 # 用法: bash release.sh [ARCH] [VERSION]
 #   ARCH:    arm64(soc) | amd64(pcie) | all（默认 arm64）
-#   VERSION: 显式版本号（默认 2.1.0，与 build/version.sh 一致）
+#   VERSION: 显式版本号（默认 2.2.0，与 build/version.sh 一致）
 #   env OUTPUT_DIR: 产物目录（默认 <repo>/output/psophliteos/）
 # 产物: sophliteos_soc_<ver>.deb + sophliteos_pcie_<ver>.deb（单文件二进制，前端 go:embed 内嵌）
 set -euo pipefail
@@ -10,7 +10,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ARCH="${1:-arm64}"
-VERSION="${2:-2.1.0}"
+VERSION="${2:-2.2.0}"
 OUTPUT_DIR="${OUTPUT_DIR:-$REPO_ROOT/output/psophliteos}"
 
 case "$ARCH" in

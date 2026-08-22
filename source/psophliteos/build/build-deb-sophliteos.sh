@@ -1,7 +1,7 @@
 #!/bin/bash
 # sophliteos .deb 打包（docker-free）：pnpm 前端 + go 交叉编译（前端 go:embed 内嵌）+ dpkg-deb。
 # 用法: bash build/build-deb-sophliteos.sh [VERSION] [soc|pcie]
-#   VERSION 默认 2.1.0
+#   VERSION 默认 2.2.0
 #   soc=arm64（设备，默认）；pcie=amd64（开发机）
 # 产物: release/sophliteos_<PRODUCT>_<VERSION>.deb（单文件二进制，前端内嵌）
 #
@@ -12,7 +12,7 @@
 set -e
 
 cd "$(dirname "$0")/.."
-VERSION="${1:-2.1.0}"
+VERSION="${1:-2.2.0}"
 PRODUCT="${2:-soc}"
 if [ "$PRODUCT" != "soc" ] && [ "$PRODUCT" != "pcie" ]; then
   echo "PRODUCT 必须是 soc 或 pcie" >&2; exit 1
