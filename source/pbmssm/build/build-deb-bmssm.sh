@@ -88,7 +88,7 @@ assemble_deb() {
     mkdir -p "$SK/rag/data_se7_go"
     cp "$SE7_SRC/SKILL.md" "$SK/SKILL.md"
     cp -r "$SE7_SRC/docs/." "$SK/docs/"
-    cp "$SE7_SRC/rag-data/se7/"* "$SK/rag/data_se7_go/"
+    cp -a "$SE7_SRC/rag-data/se7/." "$SK/rag/data_se7_go/"   # 含 .complete 完成标记（Open 依赖）
     # 3) SE7 agent 提示词
     mkdir -p "$RXM/prompts"
     cp "$SE7_SRC/prompts/system.md" "$RXM/prompts/system.md"
