@@ -1,6 +1,6 @@
 #!/bin/bash
 
-GET_INFO_VERSION="1.4.1"
+GET_INFO_VERSION="1.5.0"
 
 shopt -s compat31
 
@@ -516,6 +516,11 @@ case "${CPU_MODEL}" in
 esac
 
 # SHUTDOWN_REASON
+# CV84X2 不可抗说明（真机 + SDK 源码双证据，2026-08-26）：
+# /root/.boot/*.txt 机制是 bm1684x/bm1684 的 ramdisk 开机脚本功能（MCU 记录关机原因、
+# 开机转储成 txt）；CV 系（含 cv84x6）ramdisk/rootfs 无任何 .boot 相关脚本，真机
+# /root/.boot 不存在；内核无 reset-reason 驱动，EVB MCU（I2C0x17）cmd 空间（0x00-0x5F
+# 只读扫描）无关机原因寄存器。CV 系保持留空。
 SHUTDOWN_REASON=""
 if [[ "${WORK_MODE}" == "SOC" ]]; then
     declare -A SHUTDOWN_REASON_HEX_MAP
@@ -547,10 +552,16 @@ if [[ "${WORK_MODE}" == "SOC" ]]; then
     if [[ "${SOC_FAMILY}" == "cv" ]]; then
         DTS_MEM_FILE="/proc/device-tree/memory*/reg"
         # get_ddr_info 依赖 bm1684 家族的 iio:device0 ADC 与 devmem 0x27102014/0x27013050：
-        # CV84X2 dts 无 iio/adc 节点，且 0x27013050 未定义。ADC 读空会让 vol_val_ddr 的算术
-        # 展开失败、各电压区间判断全部落空（此前输出为空属侥幸行为）；在装有 busybox devmem
-        # 的系统上 gpio117_val 还可能读到任意值，落入错误分支输出伪 DDR 类型。显式跳过，
-        # CV84X2 的 DDR_TYPE 保持留空。
+        # CV84X2 dts 无 iio/adc 节点（真机 /sys/bus/iio/devices 为空），且 0x27013050 未定义。
+        # ADC 读空会让 vol_val_ddr 的算术展开失败、各电压区间判断全部落空（此前输出为空属侥幸行为）；
+        # 在装有 busybox devmem 的系统上 gpio117_val 还可能读到任意值，落入错误分支输出伪 DDR 类型。
+        # 显式跳过。CV84X2 的 DDR_TYPE 无运行时来源（不可抗，2026-08-26 真机+源码核实）：
+        # - DDR 类型为 FSBL 编译期选定（EVB defconfig：CONFIG_DDR_CFG_lp5x_2r_8533，
+        #   build/boards/84x6/edge_84x6_wevb_emmc/），fip.bin 固化后不再暴露；
+        # - fsbl ddr_pkg_info.c 的 ddr_info_save()（写 PM_SRAM 供 u-boot 读）整函数被注释；
+        # - eMMC boot1 OEM 布局（u-boot cmd/84x6-oem.c oem_fields）无 DDR_TYPE 字段，
+        #   read_oem.sh 的 DDR_TYPE 段亦被注释；
+        # - ddr_auto（ADC 分压识别）对 cv84x6 无实现。DDR_TYPE 保持留空。
         if [[ "${CPU_MODEL}" != "cv84x6" ]]; then
             DDR_TYPE=$(get_ddr_info 2>/dev/null)
         fi
@@ -584,6 +595,11 @@ VPP_MEM="0"
 if [[ "${WORK_MODE}" == "SOC" ]]; then
     SYSTEM_MEM=$(vmstat -s 2>/dev/null | grep "total memory" | awk '{print $1}')
     if [[ "${SOC_FAMILY}" == "cv" ]]; then
+        # CV84X2 ion heap 由 dts 保留内存节点决定（内核 cvitek_ion.c cvi_ion_heap_list 按
+        # "cvitek,carveout_npu/vpu/vpp" compatible 建 heap）：真机 dts reserved-memory 仅有
+        # ion_npu_mem / ion_vpp_mem，无 carveout_vpu → 无 vpu heap，VPU 显存走 system/cma。
+        # 故 VPU_MEM/VPU_MEM_USAGE 恒 0 属硬件内存布局使然（不可抗），非读取失败；
+        # TPU_MEM/VPP_MEM 在 sudo 下可读（debugfs root-only，非 sudo 恒 0）。
         TPU_MEM=$(cat /sys/kernel/debug/ion/cvi_npu_heap_dump/total_mem 2>/dev/null | tr -d '\0')
         VPP_MEM=$(cat /sys/kernel/debug/ion/cvi_vpp_heap_dump/total_mem 2>/dev/null | tr -d '\0')
     else
@@ -701,7 +717,18 @@ function get_cpu_all() {
 DTS_NAME=""
 if [[ "${WORK_MODE}" == "SOC" ]]; then
     if [[ "${SOC_FAMILY}" == "cv" ]]; then
+        # 首选 eMMC boot1 OEM 区 0xA0（u-boot cmd/84x6-oem.c oem_fields 的 DTS_TYPE 偏移）。
+        # EVB 出厂未烧写 OEM（boot1 前 4KB 全零）→ 恒空，此时回退读 u-boot env：
+        # u-boot board/cvitek/cv84x6/board.c setup_sophgo_dts() 在 OEM 为空时会用编译期
+        # 默认值（config-<chip>_<board>）填充 env 的 DTS_TYPE（本机即 bootcmd 引用的
+        # config-cv84x6_wevb_emmc）；量产烧写 OEM 后该 env 同样承载烧写值。
+        # /boot/u-boot.env 为 vfat 分区上的 world-readable 文件（4 字节头 + \0 分隔的
+        # key=value），无需 sudo 即可解析。
         DTS_NAME=$(od_read_char 160 32 "/dev/mmcblk0boot1")
+        if [[ -z "${DTS_NAME}" ]] && [[ -r /boot/u-boot.env ]]; then
+            DTS_NAME=$(tr '\0' '\n' < /boot/u-boot.env 2>/dev/null \
+                | grep -m1 '^DTS_TYPE=' | cut -d'=' -f2-)
+        fi
     else
         DTS_NAME=$(cat /proc/device-tree/info/file-name 2>/dev/null | tr -d '\0')
     fi
@@ -711,9 +738,15 @@ fi
 DEVICE_MODEL=""
 if [[ "${WORK_MODE}" == "SOC" ]]; then
     if [[ "${SOC_FAMILY}" == "cv" ]]; then
+        # boot1 OEM 区 product(0xD0) + module type(0x70)。CV84X2 EVB 不可抗说明
+        # （2026-08-26 真机核实）：boot1 前 4KB 全零（OEM 未烧写），开机转储的
+        # /factory/OEMconfig.ini（read_oem.sh 从 boot1 生成）PRODUCT/MODULE_TYPE
+        # 同为空 → 输出留空。量产烧写 OEM 后此处自然取到值。
         DEVICE_MODEL_PRODUCT=$(od_read_char 208 16 "/dev/mmcblk0boot1")
         DEVICE_MODEL_MODULE_TYPE=$(od_read_char 112 16 "/dev/mmcblk0boot1")
         DEVICE_MODEL="${DEVICE_MODEL_PRODUCT} ${DEVICE_MODEL_MODULE_TYPE}"
+        # 两者皆空时避免输出单个空格
+        DEVICE_MODEL=$(echo "${DEVICE_MODEL}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
     else
         DEVICE_MODEL=$(grep "model" /sys/class/i2c-dev/i2c-1/device/1-0017/information 2>/dev/null | awk -F'"' '{print $4}')
     fi
@@ -749,7 +782,10 @@ DEVICE_SN=""
 if [[ "${WORK_MODE}" == "SOC" ]]; then
     if [[ "${SOC_FAMILY}" == "cv" ]]; then
         # CV 系（bm1688/cv186ah/cv84x6）SN 烧录于 eMMC boot1 分区；
-        # CV84X6 u-boot 同样从 boot1 读 DTS 名(0xa0)/MAC(0x40)，SN 沿用偏移 0/32
+        # CV84X6 u-boot 同样从 boot1 读 DTS 名(0xa0)/MAC(0x40)，SN 沿用偏移 0/32。
+        # CV84X2 EVB 不可抗说明（2026-08-26 真机核实）：boot1 OEM 区 0x00/0x20 全零
+        # （出厂未烧写 SN），/factory/OEMconfig.ini 的 SN/DEVICE_SN 同为空 → 留空。
+        # 读取路径本身正确，量产烧写后自然取到值。
         CHIP_SN=$(od_read_char 0 32 "/dev/mmcblk0boot1")
         DEVICE_SN=$(od_read_char 32 32 "/dev/mmcblk0boot1")
     else
@@ -781,6 +817,13 @@ if [[ "${WORK_MODE}" == "SOC" ]]; then
                 BOARD_TEMP=$(cat /sys/class/thermal/thermal_zone1/temp 2>/dev/null| tr -d '\0')
                 BOARD_TEMP=$(( BOARD_TEMP / 1000 ))
         fi
+        # CV84X2 不可抗说明（2026-08-26 真机核实）：无独立板温传感器。
+        # - 真机 /sys/class/thermal 仅 thermal_zone0/1/2，dts 对应 soc_thermal_0/1/2
+        #   （cv84x6_wevb_emmc.dts），全部是 SoC 片内传感器，非板温；借读 zone1 会输出伪值。
+        # - /sys/class/hwmon 为空；EVB MCU（i2c10@0x17）按 bm1684 协议 cmd 0x04/0x05
+        #   （chip/board temp，bm_attr.c bm_read_mcu_temp）读回 0x01/0x00（1°C/0°C），
+        #   8 核满载 45s 压测中冻结不变，为无意义寄存器而非温度。
+        # 故 CV84X2 板温保持 0。
 fi
 
 # FAN_FREQUENCY
@@ -796,6 +839,15 @@ if [[ "${WORK_MODE}" == "SOC" ]]; then
                         FAN_RPM=0
                 fi
         fi
+        # CV84X2 不可抗说明（2026-08-26 真机核实）：EVB 无风扇转速采集链路。
+        # - 内核无 bm-tach 驱动（/sys/class/bm-tach 不存在），/sys/class/pwm、
+        #   /sys/class/hwmon 均为空；
+        # - dts 无任何 fan 节点；u-boot board.c 中 FAN0/FAN1 引脚复用为 GPIO79/80，
+        #   风扇 PWM 走 PWM11，均无 tach 输入；
+        # - EVB MCU（i2c10@0x17）cmd 0x00-0x7F 只读全扫描（0x24/0x25 为 bm1684 协议
+        #   的 12V 功率寄存器）无风扇相关寄存器（除 0x00/0x01/0x02 外仅 0x04/0x05/
+        #   0x18/0x30/0x31/0x7C-0x7F 有非 0xFF 值，无连续变化的转速值）。
+        # 故 CV84X2 FAN_FREQUENCY/FAN_RPM 保持 0。
 fi
 
 # DTS_THERMAL_TEMP
@@ -812,6 +864,26 @@ if [[ "${WORK_MODE}" == "SOC" ]]; then
         temp=$(od_read_dec_big 0 32 /proc/device-tree/thermal-zones/soc/trips/soc_crit_trip/temperature)
         temp=$(($temp / 1000))
         DTS_THERMAL_TEMP="$DTS_THERMAL_TEMP $temp"
+    elif [[ "${CPU_MODEL}" == "cv84x6" ]]; then
+        # CV84X2/CV84X6 dts 的 thermal-zones 为 soc_thermal_0..N（真机 EVB 共 3 个 zone，
+        # 各含 1 个 soc_thermal_crtical_N trip，125000m°C=125°C）。zone 数量与 trip 名
+        # 随 dts 配置变化，遍历所有 zone 的 trip 点读取，输出顺序与 zone 号一致。
+        for _tz in /proc/device-tree/thermal-zones/soc_thermal_*; do
+            [ -d "${_tz}" ] || continue
+            for _trip in "${_tz}"/trips/*/; do
+                [ -d "${_trip}" ] || continue
+                temp=$(od_read_dec_big 0 4 "${_trip}temperature")
+                if [ "${temp}" -gt 0 ] 2>/dev/null; then
+                    temp=$(( temp / 1000 ))
+                    if [ -n "${DTS_THERMAL_TEMP}" ]; then
+                        DTS_THERMAL_TEMP="${DTS_THERMAL_TEMP} ${temp}"
+                    else
+                        DTS_THERMAL_TEMP="${temp}"
+                    fi
+                fi
+            done
+        done
+        unset _tz _trip temp
     fi
 fi
 
@@ -820,6 +892,15 @@ VTPU_POWER=""
 VTPU_VOLTAGE=""
 VDDC_POWER=""
 VDDC_VOLTAGE=""
+# CV84X2 不可抗说明（2026-08-26 真机核实）：EVB 无电源监控通道，VTPU/VDDC 功率电压
+# 及 V12_POWER 均保持留空。
+# - 无 pmbus 设备：真机 11 条 i2c 总线扫描，bus0/1 的 0x50/0x55（bm1684 的 PMBUS
+#   电源监控地址）均无响应；dts 全部 i2c 节点无 pmbus/power-monitor 子节点。
+# - EVB MCU（i2c10@0x17，board_type=0xb7）cmd 0x24-0x27（bm1684 协议 12V 功率/
+#   电压寄存器，bm_attr.c bm_read_mcu_current/bm_read_mcu_voltage）全部读回 0xFF，
+#   该固件不实现电源监控；cmd 0x00-0x7F 只读全扫描无其他连续变化寄存器。
+# - /sys/class/hwmon 为空，无 in/power 类传感器节点。
+# 整机形态（SE13 等）带电源监控 MCU 后可复用 pmbus/MCU 路径，届时再适配。
 if [[ "$GET_INFO_PMBUS_ENABLE" == "1" ]]; then
     if [[ "${WORK_MODE}" == "SOC" ]]; then
             if [[ "${CPU_MODEL}" == "bm1684x" ]] || [[ "${CPU_MODEL}" == "bm1684" ]]; then
@@ -894,6 +975,10 @@ VPU_MEM_USAGE="0"
 VPP_MEM_USAGE="0"
 if [[ "${WORK_MODE}" == "SOC" ]]; then
     if [[ "${SOC_FAMILY}" == "cv" ]]; then
+        # CV84X2：使用率=ion heap 的 alloc_mem/total_mem（debugfs root-only，sudo 下可读，
+        # 非 sudo 恒 0）。真机 EVB 无负载时 alloc_mem=0 → 0% 为真实值而非读取失败；
+        # VPU_MEM_USAGE 恒 0 因 dts 无 carveout_vpu 保留内存节点、无 vpu heap（见
+        # MEM_INFO 段注释），属硬件内存布局使然。
         TPU_MEM_USAGE=$(get_ion_usage "/sys/kernel/debug/ion/cvi_npu_heap_dump")
         VPP_MEM_USAGE=$(get_ion_usage "/sys/kernel/debug/ion/cvi_vpp_heap_dump")
     else
