@@ -23,11 +23,23 @@ ARCH="$([ "$PRODUCT" = "pcie" ] && echo amd64 || echo arm64)"
 bash build/version.sh "V$VERSION"
 
 # 2. 前端 dist（本地 pnpm，无 docker；无 node_modules 时自动 install）
+# pnpm<10 会把仅含 allowBuilds（无 packages:）的 pnpm-workspace.yaml 当 workspace 根，
+# pnpm install/run 均报 "packages field missing or empty"——构建期临时移开，完事还原。
 cd frontend
+_WS="pnpm-workspace.yaml"
+_WS_BAK=""
+if [ -f "$_WS" ] && ! grep -qE '^[[:space:]]*packages:' "$_WS"; then
+  _PNPM_MAJOR="$(pnpm --version 2>/dev/null | cut -d. -f1 || true)"
+  if [ -z "$_PNPM_MAJOR" ] || [ "$_PNPM_MAJOR" -lt 10 ] 2>/dev/null; then
+    _WS_BAK="${_WS}.build-bak"
+    mv "$_WS" "$_WS_BAK"
+  fi
+fi
 if [ ! -d node_modules ]; then
   pnpm install || yarn install
 fi
 pnpm run build || yarn build
+[ -n "$_WS_BAK" ] && mv "$_WS_BAK" "$_WS"
 cd ..
 # 合入内嵌暂存目录 dist/（覆盖占位的 dist/index.html），go:embed 即在下一步编译期把整套前端打进二进制
 cp -r frontend/dist/. dist/
