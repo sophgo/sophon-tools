@@ -89,7 +89,9 @@ CPU_MODEL=$(awk -F': ' '/model name/{print $2; exit}' /proc/cpuinfo)
 case "${CPU_MODEL}" in
     ""|null|cv186ah)
         if [ -d /proc/device-tree ]; then
-            _cv_match=$(find /proc/device-tree -name compatible -type f \
+            # /proc/device-tree 是指向 /sys/firmware/devicetree/base 的符号链接，
+            # find 必须加 -L 才会遍历（否则恒返回空，兜底失效）
+            _cv_match=$(find -L /proc/device-tree -name compatible -type f \
                 -exec grep -laE "cvitek,cv84x6-" {} + 2>/dev/null)
             if [ -n "${_cv_match}" ]; then
                 CPU_MODEL="cv84x6"

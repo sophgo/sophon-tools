@@ -57,7 +57,9 @@ ROOTFS_INCLUDE_PATHS=' ./var/log/nginx ./var/log/redis ./var/log/mosquitto ./var
 
 declare -A -g PART_EXCLUDE_FLAGS
 PART_EXCLUDE_FLAGS["boot"]=' --exclude=./spi_flash.bin.socBakNew --exclude=./u-boot.env '
-PART_EXCLUDE_FLAGS["data"]='  '
+# socrepack 为 socbak 自身产物目录：当外置存储缺省、产物直接落在 /data/socrepack 时，
+# 若不排除会把正在生成的 *.tgz 打进 data 包（自包含递归）。rootfs 侧已有同样排除。
+PART_EXCLUDE_FLAGS["data"]=' --exclude=./socrepack '
 
 # These parameters define several generated files and
 # their default sizes for repackaging. Users can modify
@@ -130,7 +132,11 @@ socbak_cleanup() {
 	umount ${TGZ_FILES_PATH}/sparse-path* &>/dev/null
 	exit 0
 }
-trap socbak_cleanup EXIT ERR SIGHUP SIGINT SIGQUIT SIGTERM
+# 注意：不能挂 ERR。tar 打包运行中的根文件系统时，"File removed before we read it"
+# 等瞬态警告会使 tar 以 1 退出（属预期、可容忍，追加 pass 本就带 --ignore-failed-read），
+# ERR trap 会把这类警告当成致命错误：cleanup 提前退出且 exit 0，备份被静默截断还报成功
+# （CV84X2 真机实测踩坑）。关键步骤失败由各处的 "$?" 显式检查处理。
+trap socbak_cleanup EXIT SIGHUP SIGINT SIGQUIT SIGTERM
 
 SOCBAK_GET_TAR_SIZE_KB=0
 socbak_get_tar_size() {
@@ -164,6 +170,18 @@ if [[ "$(busybox devmem 0x50010000 2>/dev/null)" == "0x16860000" ]]; then
 elif [[ "$(busybox devmem 0x50010000 2>/dev/null)" == "0x16840000" ]]; then
 	SOC_NAME="bm1684"
 fi
+# cv84x6（CV84X2，SDK 标识 cv84x6）识别：/proc/device-tree/model 根 compatible 可能为通用
+# "linux,dummy-virt"（或缺失），不能直接判。与 get_info 一致采用两级信号：
+# 1) 首选 CPU part（MIDR 硬件直读）：Cortex-A55(0xd05) 仅 cv84x6（CV84X2），其余 SDK 芯片
+#    （bm1684x/bm1684/bm1688/cv186ah）均为 Cortex-A53(0xd03)，天然分开；
+# 2) 兜底 dts 信号：内核 dts 递归含 "cvitek,cv84x6-*" compatible。注意 /proc/device-tree 是
+#    指向 /sys/firmware/devicetree/base 的符号链接，find 必须加 -L 才会遍历（真机踩坑，
+#    不加 -L 时 find 返回空导致 CV84X2 真机识别失败退出）。
+# 检测到即按 CV 系（bm1688/cv186ah/cv84x6）路径打包。
+CPU_PART=$(awk -F': ' '/CPU part/{print $2; exit}' /proc/cpuinfo 2>/dev/null)
+if [[ "${SOC_NAME}" == "" ]] && [[ "${CPU_PART}" == "0xd05" || "${CPU_PART}" == "d05" ]]; then
+	SOC_NAME="cv84x6"
+fi
 if [[ "${SOC_NAME}" == "" ]]; then
 	if [[ "$(grep -ai "bm1688" '/proc/device-tree/model' 2>/dev/null | wc -l)" != "0" ]]; then
 		SOC_NAME="bm1688"
@@ -171,11 +189,8 @@ if [[ "${SOC_NAME}" == "" ]]; then
 		SOC_NAME="bm1688"
 	fi
 fi
-# cv84x6（CV84X2，SDK 标识 cv84x6）兜底：/proc/device-tree/model 根 compatible 可能为通用
-# "linux,dummy-virt"，不能直接判。以内核 dts 递归含 "cvitek,cv84x6-*" compatible 为权威信号
-#（与 get_info 的判法一致），检测到即按 CV 系（bm1688/cv186ah/cv84x6）路径打包。
 if [[ "${SOC_NAME}" == "" ]] && [ -d /proc/device-tree ]; then
-	if [ -n "$(find /proc/device-tree -name compatible -type f \
+	if [ -n "$(find -L /proc/device-tree -name compatible -type f \
 		-exec grep -laE "cvitek,cv84x6-" {} + 2>/dev/null)" ]; then
 		SOC_NAME="cv84x6"
 	fi
@@ -471,7 +486,7 @@ else
 				echo "INFO: tar $TGZ_FILE flags : $ROOTFS_EXCLUDE_FLAGS ..."
 				systemctl enable resize-helper.service
 				rm -rf $TGZ_FILES_PATH/$TGZ_FILE.tar
-				tar --checkpoint=500 --checkpoint-action=ttyout='[%d sec]: C%u, %T%*\r' -capSf $TGZ_FILES_PATH/$TGZ_FILE.tar --numeric-owner $ROOTFS_EXCLUDE_FLAGS "./"
+				tar --checkpoint=500 --checkpoint-action=ttyout='[%d sec]: C%u, %T%*\r' --ignore-failed-read --numeric-owner -capSf $TGZ_FILES_PATH/$TGZ_FILE.tar $ROOTFS_EXCLUDE_FLAGS "./"
 				tar --checkpoint=500 --checkpoint-action=ttyout='[%d sec]: C%u, %T%*\r' --ignore-failed-read -rapSf $TGZ_FILES_PATH/$TGZ_FILE.tar --numeric-owner $ROOTFS_INCLUDE_PATHS
 				systemctl disable resize-helper.service
 				echo "INFO: gzip tar file..."
@@ -486,7 +501,7 @@ else
 				set +u
 				EXT_FLAG="${PART_EXCLUDE_FLAGS["$TGZ_FILE"]}"
 				set -u
-				tar --checkpoint=500 --checkpoint-action=ttyout='[%d sec]: C%u, %T%*\r' -I ${PIGZ_GZIP_COM} -cpSf $TGZ_FILES_PATH/$TGZ_FILE.tgz --numeric-owner ${EXT_FLAG} "./"
+				tar --checkpoint=500 --checkpoint-action=ttyout='[%d sec]: C%u, %T%*\r' --ignore-failed-read -I ${PIGZ_GZIP_COM} -cpSf $TGZ_FILES_PATH/$TGZ_FILE.tgz --numeric-owner ${EXT_FLAG} "./"
 				if [ $TGZ_FILE == "data" ]; then
 					TAR_SIZE=$((512*1024))
 				else
@@ -590,6 +605,9 @@ fi
 echo "</physical_partition>" >> $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
 cat $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
 
+# output 目录仅在 all-in-one 模式下提前创建，tgz-only 模式走到这里不存在，
+# 直接 pushd 会报 "No such file or directory"（CV84X2 真机实测踩坑，不影响产物）
+mkdir -p $TGZ_FILES_PATH/output
 pushd $TGZ_FILES_PATH/output
 if [[ "${SOC_BAK_FIXED_DATA_START}" != "" ]]; then
 	advcp -g  ${TGZ_FILES_PATH}/binTools/mk_gpt .
