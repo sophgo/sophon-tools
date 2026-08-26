@@ -56,6 +56,10 @@ type MetricsRegistry struct {
 	PowerUsage   *prometheus.GaugeVec
 	HealthStatus *prometheus.GaugeVec
 
+	CPUFreq *prometheus.GaugeVec
+	TPUFreq *prometheus.GaugeVec
+	VPUFreq *prometheus.GaugeVec
+
 	ChipInfo *prometheus.GaugeVec
 }
 
@@ -96,6 +100,12 @@ func NewMetricsRegistry() *MetricsRegistry {
 		PowerUsage:   newGaugeVec("power_usage_watts", "Power usage in watts"),
 		HealthStatus: newGaugeVec("health_status", "Device health status (1=healthy, 0=unhealthy)"),
 
+		// 频率（Hz，debugfs clk，对齐 get_info CPU_CLK/TPU_CLK/VPU_CLK；
+		// 采集自 CollectAll 的 CPUFreqMHz/TPUFreqMHz/VPUFreqMHz × 1e6）
+		CPUFreq: newGaugeVec("cpu_frequency_hz", "CPU frequency in hertz (debugfs clk)"),
+		TPUFreq: newGaugeVec("tpu_frequency_hz", "TPU frequency in hertz (debugfs clk)"),
+		VPUFreq: newGaugeVec("vpu_frequency_hz", "VPU frequency in hertz (debugfs clk)"),
+
 		ChipInfo: newGaugeVec("chip_info", "Chip information"),
 	}
 
@@ -114,6 +124,7 @@ func NewMetricsRegistry() *MetricsRegistry {
 		r.VPPUsage, r.JPUUsage,
 		r.ChipTemp, r.BoardTemp, r.FanSpeed, r.PowerUsage,
 		r.HealthStatus, r.ChipInfo,
+		r.CPUFreq, r.TPUFreq, r.VPUFreq,
 	} {
 		prometheus.MustRegister(g)
 	}
@@ -176,6 +187,11 @@ func (r *MetricsRegistry) Update(hw *HardwareMetrics, dev DeviceLabels) {
 	// 健康状态
 	set(r.HealthStatus, float64(hw.HealthStatus))
 
+	// 频率（MHz → Hz，对齐 get_info CPU_CLK/TPU_CLK/VPU_CLK）
+	setInt(r.CPUFreq, hw.CPUFreqMHz*1e6)
+	setInt(r.TPUFreq, hw.TPUFreqMHz*1e6)
+	setInt(r.VPUFreq, hw.VPUFreqMHz*1e6)
+
 	// 芯片信息（值为 1 表示设备存在）
 	set(r.ChipInfo, 1.0)
 }
@@ -199,6 +215,7 @@ func (r *MetricsRegistry) Reset() {
 		r.VPPUsage, r.JPUUsage,
 		r.ChipTemp, r.BoardTemp, r.FanSpeed, r.PowerUsage,
 		r.HealthStatus, r.ChipInfo,
+		r.CPUFreq, r.TPUFreq, r.VPUFreq,
 	} {
 		g.Reset()
 	}

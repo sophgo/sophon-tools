@@ -24,7 +24,15 @@ func (c *Collector) ChipTemp() int {
 // BoardTemp 读取板温（thermal_zone1），milli-celsius → 整数 ℃。
 // 对齐 pget_info：BOARD_TEMP=$(cat thermal_zone1/temp); /1000。
 // 失败返 0。
+//
+// CV84X2 不可抗说明（2026-08-26 真机核实，与 get_info v1.5.1 结论对齐）：
+// 无独立板温传感器——thermal_zone0/1/2 全是 SoC 片内传感器（dts soc_thermal_0/1/2），
+// 借读 zone1 会输出伪板温；EVB MCU 温度寄存器读回无意义值（压测冻结）。
+// 故 cv84x6 板温恒返 0（get_info 同样输出 0），不再借读 zone1。
 func (c *Collector) BoardTemp() int {
+	if c.ChipType() == "cv84x6" {
+		return 0
+	}
 	return c.readTempC(boardTempPath)
 }
 

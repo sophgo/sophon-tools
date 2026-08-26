@@ -22,6 +22,7 @@ func TestNewMetricsRegistry(t *testing.T) {
 			r.VPPUsage, r.JPUUsage,
 			r.ChipTemp, r.BoardTemp, r.FanSpeed, r.PowerUsage,
 			r.HealthStatus, r.ChipInfo,
+			r.CPUFreq, r.TPUFreq, r.VPUFreq,
 		} {
 			prometheus.Unregister(g)
 		}
@@ -55,6 +56,7 @@ func TestMetricsRegistryUpdateAndReset(t *testing.T) {
 			r.VPPUsage, r.JPUUsage,
 			r.ChipTemp, r.BoardTemp, r.FanSpeed, r.PowerUsage,
 			r.HealthStatus, r.ChipInfo,
+			r.CPUFreq, r.TPUFreq, r.VPUFreq,
 		} {
 			prometheus.Unregister(g)
 		}
