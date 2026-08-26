@@ -34,9 +34,10 @@
 
   const props = defineProps<{ layout: MemoryLayout | null | undefined }>();
 
-  // CV 家族（bm1688/cv186ah/cv84x6）的 VPP 分区实际对应 VPSS，用"VPSS内存"标签贴合硬件命名
+  // CV 家族（bm1688/cv186ah/cv84x6/CV84X2）的 VPP 分区实际对应 VPSS，用"VPSS内存"标签贴合硬件命名。
+  // 大小写不敏感：bmssm 侧命名链可能输出展示名（如 "CV84X2"），此处只做家族归类、不重复造映射。
   const isVPSS = (chip: string) =>
-    ['bm1688', 'cv186ah', 'cv84x6'].includes(chip);
+    ['bm1688', 'cv186ah', 'cv84x6', 'cv84x2'].includes((chip || '').toLowerCase());
 
   const regions = computed(() => {
     const lay = props.layout;

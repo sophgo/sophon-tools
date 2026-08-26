@@ -11,6 +11,7 @@ export default {
   device: {
     name: 'Name',
     type: 'Device Type',
+    chipName: 'Chip Name',
     editType: 'Edit Device name',
     systemRunTime: 'system running time',
     softVersion: 'system version',

@@ -60,6 +60,10 @@
           <a-descriptions-item :label="t('overview.device.type')">{{
             originData.deviceType
           }}</a-descriptions-item>
+          <!-- 芯片名称：透传 bmssm memoryLayout.chipType（命名链在 bmssm 侧一处定义，前端不做映射） -->
+          <a-descriptions-item :label="t('overview.device.chipName')">{{
+            chipName
+          }}</a-descriptions-item>
           <a-descriptions-item :label="t('overview.device.sn')">{{
             originData.deviceSn
           }}</a-descriptions-item>
@@ -195,6 +199,12 @@
     if (!v6 && list.length === 0) return fallbackIp || '未分配';
     return list.join('、');
   };
+
+  // 芯片名称：bmssm 侧命名链（cv84x6 → 展示名 CV84X2）在 memoryLayout.chipType 输出，
+  // 前端透传显示；取不到时显示 '-'（空值容忍，不影响其它芯片展示）。
+  const chipName = computed(
+    () => originData.value?.memoryLayout?.chipType || '-',
+  );
 
   // 动态运行时间
   const dynTime = computed(() => {
