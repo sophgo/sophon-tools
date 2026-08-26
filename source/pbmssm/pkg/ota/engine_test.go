@@ -30,6 +30,10 @@ func TestProductClass(t *testing.T) {
 		{"se9 v02", ClassSOC},
 		{"SC5 pro", ClassPCIE},
 		{"se8 v1", ClassMultiNode},
+		// SE13（CV84X2 单板）为 SOC 设备：接口/展示层面归类 SOC，
+		// 刷机走通用 pota_update 流程（真机刷机未验证，不在本任务范围）
+		{"SE13", ClassSOC},
+		{"se13 v1", ClassSOC},
 	}
 	for _, tt := range cases {
 		got := productClass(tt.product)

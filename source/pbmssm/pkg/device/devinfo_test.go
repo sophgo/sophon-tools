@@ -374,6 +374,7 @@ func resetGlobals() {
 	DeviceSnEx = ""
 	ChipSn = ""
 	ModuleType = ""
+	ModuleTypeEx = ""
 }
 
 // TestParseOEMConfigSE9Format SE9 用 SN + DEVICE_SN 独立键（非两条 SN 行）。
@@ -474,5 +475,149 @@ func TestReadSnFromRawCv84x6(t *testing.T) {
 	}
 	if DeviceSnEx != "CV84X6DEVSN001" {
 		t.Errorf("DeviceSnEx=%q, want CV84X6DEVSN001", DeviceSnEx)
+	}
+}
+
+// TestReadCpuModelPartD05 真机场景：CV84X2 上 model name 误报 bm1688，
+// 但 CPU part 0xd05（Cortex-A55，仅 CV84X2/CV84X6）是硬件直读、可靠。
+// ReadCpuModel 应返回 cv84x6（对齐 get_info.sh CPU part 两级识别）。
+func TestReadCpuModelPartD05(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "cpuinfo")
+	content := `processor : 0
+model name : bm1688
+CPU part : 0xd05
+`
+	if err := os.WriteFile(f, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if got := ReadCpuModel(f); got != "cv84x6" {
+		t.Errorf("cpuModel=%q, want cv84x6 (part 0xd05 优先于 model name)", got)
+	}
+}
+
+// writeBoot1Fixture 生成 256 字节 boot1 夹具：offset 0/32 为 SN，
+// 0xD0(208) 为 PRODUCT，0x70(112) 为 MODULE_TYPE（各 16 字节，NUL 填充）。
+func writeBoot1Fixture(t *testing.T, chipSn, deviceSn, product, moduleType string) string {
+	t.Helper()
+	buf := make([]byte, 256)
+	copy(buf[0:], chipSn)
+	copy(buf[32:], deviceSn)
+	copy(buf[Boot1ProductOffset:], product)
+	copy(buf[Boot1ModuleOffset:], moduleType)
+	p := filepath.Join(t.TempDir(), "boot1")
+	if err := os.WriteFile(p, buf, 0644); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// writeCpuinfoFixture 生成 cpuinfo 夹具。part 传空则不含 CPU part 行。
+func writeCpuinfoFixture(t *testing.T, modelName, part string) string {
+	t.Helper()
+	content := "processor : 0\nmodel name : " + modelName + "\n"
+	if part != "" {
+		content += "CPU part : " + part + "\n"
+	}
+	p := filepath.Join(t.TempDir(), "cpuinfo")
+	if err := os.WriteFile(p, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// TestApplyCv84x6FallbackSE13Default SE13 真机场景：I2C 无、OEM 全空、
+// boot1 OEM 区未烧写（全 0）→ 兜底默认 SE13 / 芯片名 CV84X2 / SOC 单板角色。
+func TestApplyCv84x6FallbackSE13Default(t *testing.T) {
+	cpuinfo := writeCpuinfoFixture(t, "bm1688", "0xd05")
+	boot1 := writeBoot1Fixture(t, "", "", "", "")
+
+	resetGlobals()
+	applyCv84x6Fallback(cpuinfo, boot1)
+
+	if DeviceType != SOC_DEV {
+		t.Errorf("DeviceType=%q, want soc", DeviceType)
+	}
+	if DeviceRole != SE5 {
+		t.Errorf("DeviceRole=%q, want SE", DeviceRole)
+	}
+	if DeviceTypeEx != "SE13" {
+		t.Errorf("DeviceTypeEx=%q, want SE13", DeviceTypeEx)
+	}
+	if ModuleType != "CV84X2" {
+		t.Errorf("ModuleType=%q, want CV84X2", ModuleType)
+	}
+	if ModuleTypeEx != "" {
+		t.Errorf("ModuleTypeEx=%q, want empty (boot1 OEM 未烧写)", ModuleTypeEx)
+	}
+}
+
+// TestApplyCv84x6FallbackBoot1OEM boot1 OEM 区已烧写：0xD0 PRODUCT 与
+// 0x70 MODULE_TYPE 生效（对齐 get_info.sh cv 家族 DEVICE_MODEL 读取），SN 同步读取。
+func TestApplyCv84x6FallbackBoot1OEM(t *testing.T) {
+	cpuinfo := writeCpuinfoFixture(t, "bm1688", "0xd05")
+	boot1 := writeBoot1Fixture(t, "CVCHIPSN0001", "CVDEVSN0001", "SE9", "16-BP1-11")
+
+	resetGlobals()
+	applyCv84x6Fallback(cpuinfo, boot1)
+
+	if DeviceTypeEx != "SE9" {
+		t.Errorf("DeviceTypeEx=%q, want SE9 (boot1 0xD0 PRODUCT)", DeviceTypeEx)
+	}
+	if ModuleTypeEx != "16-BP1-11" {
+		t.Errorf("ModuleTypeEx=%q, want 16-BP1-11 (boot1 0x70)", ModuleTypeEx)
+	}
+	if ChipSn != "CVCHIPSN0001" {
+		t.Errorf("ChipSn=%q, want CVCHIPSN0001 (boot1 offset 0)", ChipSn)
+	}
+	if DeviceSnEx != "CVDEVSN0001" {
+		t.Errorf("DeviceSnEx=%q, want CVDEVSN0001 (boot1 offset 32)", DeviceSnEx)
+	}
+}
+
+// TestApplyCv84x6FallbackKeepsHigherSource 有更高优先级信息（I2C model /
+// OEM PRODUCT 已填 DeviceTypeEx，OEM CHIP 已填 ModuleType）时不覆盖——
+// "有明确 product 信息时以设备侧为准"。
+func TestApplyCv84x6FallbackKeepsHigherSource(t *testing.T) {
+	cpuinfo := writeCpuinfoFixture(t, "bm1688", "0xd05")
+	boot1 := writeBoot1Fixture(t, "", "", "SE7 V1", "XX-MODULE")
+
+	resetGlobals()
+	DeviceType = SOC_DEV
+	DeviceRole = SE5
+	DeviceTypeEx = "SE7 V1"
+	ModuleType = "BM1684X"
+	applyCv84x6Fallback(cpuinfo, boot1)
+
+	if DeviceTypeEx != "SE7 V1" {
+		t.Errorf("DeviceTypeEx=%q, want SE7 V1 (设备侧信息优先)", DeviceTypeEx)
+	}
+	if ModuleType != "BM1684X" {
+		t.Errorf("ModuleType=%q, want BM1684X (设备侧信息优先)", ModuleType)
+	}
+	// ModuleTypeEx 在 i2c/OEM 链路中本就为空（无更高优先级来源），boot1 0x70 兜底补上
+	if ModuleTypeEx != "XX-MODULE" {
+		t.Errorf("ModuleTypeEx=%q, want XX-MODULE (boot1 0x70 兜底)", ModuleTypeEx)
+	}
+}
+
+// TestApplyCv84x6FallbackNonCv84x6 非 cv84x6 芯片（如 bm1684x，part 0xd03）
+// 不触发兜底：无 i2c/OEM 时维持原 PCIE 降级结果。
+func TestApplyCv84x6FallbackNonCv84x6(t *testing.T) {
+	cpuinfo := writeCpuinfoFixture(t, "bm1684x", "0xd03")
+	boot1 := writeBoot1Fixture(t, "", "", "SE9", "16-BP1-11")
+
+	resetGlobals()
+	DeviceType = PCIE_DEV
+	DeviceTypeEx = "PCIE"
+	applyCv84x6Fallback(cpuinfo, boot1)
+
+	if DeviceType != PCIE_DEV {
+		t.Errorf("DeviceType=%q, want pcie (非 cv84x6 不兜底)", DeviceType)
+	}
+	if DeviceTypeEx != "PCIE" {
+		t.Errorf("DeviceTypeEx=%q, want PCIE", DeviceTypeEx)
+	}
+	if ModuleType != "" {
+		t.Errorf("ModuleType=%q, want empty", ModuleType)
 	}
 }

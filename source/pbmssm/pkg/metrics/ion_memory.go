@@ -3,6 +3,8 @@ package metrics
 import (
 	"strconv"
 	"strings"
+
+	"bmssm/pkg/system"
 )
 
 // ion heap sumary 路径（按芯片类型）。
@@ -14,14 +16,12 @@ const (
 	ionVppHeapV2 = "/sys/kernel/debug/ion/cvi_vpp_heap_dump/summary"
 )
 
-// ChipType 读取 /proc/cpuinfo 的 model name，返回小写芯片型号。
+// ChipType 读取 /proc/cpuinfo，返回小写芯片型号。
 // "bm1684x", "bm1684", "bm1688", "cv186ah", "cv84x6"，失败返空串。
+// 经 system.DetectCpuModel 两级识别：CPU part 0xd05 优先于 model name
+// （CV84X2 上 model name 可能误报 bm1688/cv186ah），dts compatible 兜底。
 func (c *Collector) ChipType() string {
-	content := c.readStr(cpuInfoPath)
-	if content == "" {
-		return ""
-	}
-	s := strings.ToLower(modelLine(content))
+	s := c.cpuModel()
 	switch {
 	case strings.Contains(s, "bm1684x"):
 		return "bm1684x"
@@ -36,6 +36,15 @@ func (c *Collector) ChipType() string {
 	default:
 		return ""
 	}
+}
+
+// cpuModel 返回规范化芯片型号（小写，经 CPU part/dts 两级识别）。
+func (c *Collector) cpuModel() string {
+	content := c.readStr(cpuInfoPath)
+	if content == "" {
+		return ""
+	}
+	return system.DetectCpuModel(content, system.DeviceTreeRoot)
 }
 
 // chipFamily 归一化芯片家族：bm1684（含 bm1684x）/ cv（bm1688、cv186ah、cv84x6）。
