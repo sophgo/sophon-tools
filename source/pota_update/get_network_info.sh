@@ -206,6 +206,84 @@ get_config_from_nm() {
         grep "dns=" | cut -d'=' -f2 | cut -d',' -f1 | cut -d';' -f1 | head -1)
 }
 
+# 函数：从netplan yaml配置中获取配置
+# 参数1：网卡名；参数2（可选）：yaml文件路径（测试用），缺省取 /etc/netplan/ 下
+# 第一个包含该网卡的 yaml。systemd-networkd 渲染出的 .network 文件在部分系统上
+# 权限为 root:systemd-network 0640（如 CV84X2 真机 Ubuntu 22.04 rootfs），非 root
+# 用户不可读，此时回退解析 world-readable 的 netplan 源 yaml。
+get_config_from_netplan() {
+    local iface=$1
+    local yaml_file=${2:-}
+
+    # 网卡名仅允许安全字符，防止拼进 awk 动态正则
+    [[ "$iface" =~ ^[A-Za-z0-9._-]+$ ]] || return 1
+
+    if [ -z "$yaml_file" ]; then
+        for f in /etc/netplan/*.yaml; do
+            [ -r "$f" ] || continue
+            if grep -qE "^[[:space:]]+${iface}[[:space:]]*:" "$f" 2>/dev/null; then
+                yaml_file=$f
+                break
+            fi
+        done
+    fi
+    [ -n "$yaml_file" ] && [ -r "$yaml_file" ] || return 1
+
+    # 提取 iface 键下缩进更深的所有行（直到同级或更浅缩进的下一个键）
+    local block
+    block=$(awk -v iface="$iface" '
+        !found && $0 ~ ("^[[:space:]]+" iface "[[:space:]]*:") {
+            found=1; match($0, /^[[:space:]]*/); ind=RLENGTH; next
+        }
+        found {
+            match($0, /^[[:space:]]*/); cur=RLENGTH
+            if (cur <= ind) exit
+            print
+        }' "$yaml_file")
+    [ -n "$block" ] || return 1
+
+    # 解析dhcp4（netplan 布尔：yes/no/true/false）
+    if echo "$block" | grep -qE "^[[:space:]]*dhcp4:[[:space:]]*(yes|true)[[:space:]]*$"; then
+        CONFIG_DHCP[$iface]="dhcp"
+    fi
+
+    # 解析addresses（inline 列表或多行列表），取第一个地址
+    local address=""
+    address=$(echo "$block" | grep -E "^[[:space:]]*addresses:" | head -1 | \
+sed 's/^[[:space:]]*addresses:[[:space:]]*//')
+    if [[ "$address" == "["* ]]; then
+        # inline 列表：addresses: [a/24, b/24]
+        address=$(echo "$address" | tr -d '[]' | awk -F',' '{print $1}' | tr -d ' ')
+    elif [ -z "$address" ]; then
+        # 多行列表：取其后第一个 "- ip/prefix" 行
+        address=$(echo "$block" | grep -E "^[[:space:]]*-[[:space:]]*[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/" | \
+head -1 | sed 's/^[[:space:]]*-[[:space:]]*//')
+    fi
+    if [ -n "$address" ] && [[ "$address" == *"/"* ]]; then
+        local parsed=$(parse_cidr "$address")
+        if [[ $parsed == *" "* ]]; then
+            CONFIG_IP[$iface]=$(echo "$parsed" | awk '{print $1}')
+            CONFIG_NETMASK[$iface]=$(echo "$parsed" | awk '{print $2}')
+        else
+            CONFIG_IP[$iface]=$parsed
+        fi
+        # 无 dhcp4 行但配置了地址时按静态处理（与 systemd 解析器语义一致）
+        if [ -z "${CONFIG_DHCP[$iface]}" ]; then
+            CONFIG_DHCP[$iface]="static"
+        fi
+    fi
+
+    # 解析网关（legacy gateway4；路由式 routes: to: default 不在范例支持范围）
+    CONFIG_GATEWAY[$iface]=$(echo "$block" | grep -E "^[[:space:]]*gateway4:" | head -1 | \
+sed 's/^[[:space:]]*gateway4:[[:space:]]*//')
+
+    # 解析DNS服务器（最多保留一个DNS，与 #133 修复保持一致）
+    CONFIG_DNS[$iface]=$(echo "$block" | grep -A 5 -E "^[[:space:]]*nameservers:" | \
+grep -E "^[[:space:]]*addresses:" | head -1 | \
+sed 's/^[[:space:]]*addresses:[[:space:]]*//' | tr -d '[]' | \
+awk -F',' '{print $1}' | tr -d ' ')
+}
+
 # 函数：获取网口配置信息
 get_interface_config() {
     local iface=$1
@@ -223,8 +301,16 @@ get_interface_config() {
         "systemd-networkd")
             config_file=$(find_systemd_network_config "$iface")
             if [ -n "$config_file" ]; then
-                echo -e "${YELLOW}配置文件：${NC}$config_file"
-                get_config_from_systemd "$config_file" "$iface"
+                if [ -r "$config_file" ]; then
+                    echo -e "${YELLOW}配置文件：${NC}$config_file"
+                    get_config_from_systemd "$config_file" "$iface"
+                else
+                    echo -e "${YELLOW}配置文件：${NC}$config_file（无读权限，回退解析 netplan yaml）"
+                    get_config_from_netplan "$iface"
+                fi
+            else
+                # 找不到 .network 文件时同样回退 netplan 源 yaml
+                get_config_from_netplan "$iface"
             fi
             ;;
         "NetworkManager")
@@ -233,6 +319,9 @@ get_interface_config() {
                 echo -e "${YELLOW}配置文件：${NC}$config_file"
                 get_config_from_nm "$config_file" "$iface"
             fi
+            ;;
+        "netplan")
+            get_config_from_netplan "$iface"
             ;;
     esac
 

@@ -31,6 +31,11 @@
 3. 针对BM1688和CV186AH平台，适用于1.5-最新release版本（边侧）的OTA升级
 4. 针对CV84X2（cv84x6）平台，与BM1688/CV186AH 同属 CV 系，走相同刷机/烧录路径
 
+> CV84X2（cv84x6）平台注意：
+> - CV84X2 刷机包的 partition xml 使用 `size_in_sectors`（512B/扇区）单位，v1.5.0 起自动折算，无需手工处理
+> - CV84X2 EVB 的 U-Boot 未编入 `led` 与 `bm_savelog` 命令，刷机期间的 LED 状态指示与 U-Boot 阶段日志保存不可用（脚本不会中断，属功能降级），进度与错误请通过串口日志观察
+> - 刷机前 `get_network_info.sh` 保留网络配置流程：部分系统（如 CV84X2 真机 Ubuntu 22.04 rootfs）的 `/run/systemd/network/*.network` 为 root-only（0640），非 root 运行会自动回退解析 `/etc/netplan/` 源 yaml（v1.5.1 起）
+
 ## 使用条件
 
 1. 准备sd卡卡刷包，且sd卡卡刷包可以正常刷机并启动新的系统
