@@ -51,17 +51,23 @@ case "$ic_name" in
         ;;
 esac
 
-# 硬件探测（参数校验通过后进行）
-reg1=$(sudo phytool read eth1/0/0x02)  # PHY ID1
-reg2=$(sudo phytool read eth1/0/0x03)  # PHY ID2
+# 硬件探测（参数校验通过后进行，按用户指定的 device/phy_addr 读取 PHY ID，不再固定读 eth1）
+reg1=$(sudo phytool read ${device}/${phy_addr}/0x02 2>/dev/null)  # PHY ID1
+reg2=$(sudo phytool read ${device}/${phy_addr}/0x03 2>/dev/null)  # PHY ID2
 
-reg1_dec=$((reg1))
-reg2_dec=$((reg2))
+if [ -n "$reg1" ] && [ -n "$reg2" ]; then
+    reg1_dec=$((reg1))
+    reg2_dec=$((reg2))
 
-combined_dec=$(( (reg1_dec << 16) | reg2_dec ))
-combined_hex=$(printf "0x%08x" $combined_dec)
+    combined_dec=$(( (reg1_dec << 16) | reg2_dec ))
+    combined_hex=$(printf "0x%08x" $combined_dec)
 
-echo "[info]: PHY chip ID: $combined_hex"
+    echo "[info]: PHY chip ID: $combined_hex"
+else
+    echo "[Warning]: read PHY ID failed on ${device}/${phy_addr}, device or phy_addr may be wrong."
+    echo "[Warning]: you can run 'sudo phytool read ${device}/${phy_addr}/0x02' to check the real error."
+    exit 1
+fi
 
 function read_phy_reg() {
 	device=$1
