@@ -49,6 +49,17 @@ for bm1688, please use "memory_edit.sh -c -npu 2048 -vpu 0 -vpp 2048"
 3. 将新生成的itb文件cp到/boot目录下替换同名文件，然后执行sync并重启
 4. 修改完成
 
+### CV84X2（CV84X6）说明
+
+CV84X2 与 bm1688 同用 `/boot/boot.itb`，脚本按 multi.its 中的 dts 节点名自动识别
+cv84x6（板名含 cv84x6 前缀）。与 bm1688 的差异：
+
+- CV84X2 的 boot1 分区（/dev/mmcblk0boot1 offset160）**不存放板名**，multi.its 仅含
+  一个 fdt 节点时自动回退采用该节点（v2.12.1 起）；
+- vpu 不可配置，仅 npu/vpp（用法同 bm1688：`-c -npu 2048 -vpu 0 -vpp 2048`）；
+- 32GB 单条内存基址 0x10_00000000，ion 区域 ddr 索引固定 0x10；
+- vpp 顶部 2MB 为 FREERTOS 预留，vpp 校验上限 8GB。
+
 ### 设备树文件二次修改说明
 
 0. 获取memory_edit [https://github.com/sophgo/sophon-tools/releases](https://github.com/sophgo/sophon-tools/releases)

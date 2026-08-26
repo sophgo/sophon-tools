@@ -4,7 +4,7 @@
 #   ARCH:    arm64（唯一支持平台）。bintools（cpio/dtc/dumpimage/file/mkimage）
 #            为 aarch64 预编译二进制，无 x86_64 版本，故本包仅产出 arm64 deb。
 #            传 amd64 会报错退出，避免与 arm64 产物混淆。
-#   VERSION: 显式版本号（默认从 source/memory_edit/memory_edit.sh 提取 2.12）
+#   VERSION: 显式版本号（默认从 source/memory_edit/memory_edit.sh 提取 2.12.1）
 #   env OUTPUT_DIR: 产物目录（默认 <repo>/output/pmemory_edit/）
 set -uo pipefail
 
