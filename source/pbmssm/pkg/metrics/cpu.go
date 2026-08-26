@@ -63,20 +63,21 @@ func modelLine(content string) string {
 	return ""
 }
 
-// cpuFrequency 读 scaling_cur_freq（kHz），fallback cpuinfo_max_freq，转 MHz。
+// cpuFrequency 读 scaling_cur_freq（kHz），fallback cpuinfo_max_freq，
+// 再 fallback debugfs clk（CPUFrequencyClk，按芯片选 clk_* 路径）。
+// CV84X2 无 cpufreq 驱动（/sys/.../cpufreq 不存在），此前恒返 0；
+// debugfs clk_ap_ca55 与 get_info CPU_CLK 同源（对齐 get_info v1.5.1）。
 func (c *Collector) cpuFrequency() int {
 	s := c.readStr(cpuFreqPath)
 	if s == "" {
 		s = c.readStr(cpuFreqMaxPath)
 	}
-	if s == "" {
-		return 0
+	if s != "" {
+		if v, err := strconv.Atoi(s); err == nil {
+			return v / 1000 // kHz → MHz
+		}
 	}
-	v, err := strconv.Atoi(s)
-	if err != nil {
-		return 0
-	}
-	return v / 1000 // kHz → MHz
+	return int(c.CPUFrequencyClk()) // Hz → MHz（accelerator.go）
 }
 
 // cpuUtilization /proc/stat 双采样：首行 "cpu " 的 user,nice,sys,idle,iowait,irq,softirq
