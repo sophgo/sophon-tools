@@ -282,6 +282,12 @@ sed 's/^[[:space:]]*gateway4:[[:space:]]*//')
 grep -E "^[[:space:]]*addresses:" | head -1 | \
 sed 's/^[[:space:]]*addresses:[[:space:]]*//' | tr -d '[]' | \
 awk -F',' '{print $1}' | tr -d ' ')
+    if [ -z "${CONFIG_DNS[$iface]}" ]; then
+        # 多行列表：取 nameservers 块内第一个 "- ip" 条目（netplan 常见格式）
+        CONFIG_DNS[$iface]=$(echo "$block" | grep -A 5 -E "^[[:space:]]*nameservers:" | \
+grep -E "^[[:space:]]*-[[:space:]]*[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" | head -1 | \
+sed 's/^[[:space:]]*-[[:space:]]*//')
+    fi
 }
 
 # 函数：获取网口配置信息
