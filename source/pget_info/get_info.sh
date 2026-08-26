@@ -1,6 +1,6 @@
 #!/bin/bash
 
-GET_INFO_VERSION="1.5.0"
+GET_INFO_VERSION="1.5.1"
 
 shopt -s compat31
 
@@ -485,7 +485,9 @@ case "${CPU_PART}" in
     *d05*|*D05*) CPU_MODEL="cv84x6" ;;
 esac
 if [[ "${CPU_MODEL}" != "cv84x6" ]] && [ -d /proc/device-tree ]; then
-    _cv_match=$(find /proc/device-tree -name compatible -type f \
+    # -L：/proc/device-tree 是指向 /sys/firmware/devicetree/base 的符号链接，
+    # 不跟随则恒返回空（真机实测 0 vs 147 条），兜底形同虚设（psocbak PR #146 同款问题）。
+    _cv_match=$(find -L /proc/device-tree -name compatible -type f \
         -exec grep -laE "cvitek,cv84x6-" {} + 2>/dev/null)
     if [ -n "${_cv_match}" ]; then
         CPU_MODEL="cv84x6"
