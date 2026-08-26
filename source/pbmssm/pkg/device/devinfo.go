@@ -21,6 +21,10 @@ const (
 	SOC_DEV     = "soc"
 	UNKNOWN_DEV = "unknown"
 
+	// DeviceTypeExPCIEFallback：三段探测（i2c/OEM/SE6 裸板）皆无信息时的 deviceTypeEx
+	// 兜底猜测值，非设备侧事实；cv84x6 下应被 boot1/SE13 链覆盖（见 applyCv84x6Fallback）。
+	DeviceTypeExPCIEFallback = "PCIE"
+
 	SE5      = "SE"
 	SE6_CTRL = "SE-CTRL"
 	SE6_CORE = "SE-CORE" // 预留：SE6 核心板角色，后续硬件子项目启用。
@@ -270,7 +274,7 @@ func detectFromI2COrOEM(i2cPath, oemPath, boardIPPath string) {
 
 	// 3) 无 i2c 也无 OEM：可能是 SE6 控制器裸板
 	DeviceType = PCIE_DEV
-	DeviceTypeEx = "PCIE"
+	DeviceTypeEx = DeviceTypeExPCIEFallback
 	if ok1, _ := system.PathExists(CTRLShell); ok1 {
 		DeviceRole = SE6_CTRL
 		DeviceTypeEx = "SE8"
@@ -298,7 +302,10 @@ func applyCv84x6Fallback(cpuinfo, boot1 string) {
 	if DeviceRole == "" {
 		DeviceRole = SE5
 	}
-	if DeviceTypeEx == "" {
+	if DeviceTypeEx == "" || DeviceTypeEx == DeviceTypeExPCIEFallback {
+		// "PCIE" 是 detectFromI2COrOEM 三段探测皆无信息时的兜底猜测值（SE6 裸板路径），
+		// 非设备侧事实。cv84x6 下视为未定：开机竞态（bmssm 先于 /factory/OEMconfig.ini
+		// 转储启动，socbak 整卡恢复真机实测复现）会走到该分支，须被 boot1/SE13 链覆盖。
 		DeviceTypeEx = readFixedStringAt(boot1, Boot1ProductOffset, Boot1ProductLen)
 		if DeviceTypeEx == "" {
 			DeviceTypeEx = DeviceModelSE13

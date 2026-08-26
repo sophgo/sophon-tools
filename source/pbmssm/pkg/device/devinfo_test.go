@@ -621,3 +621,23 @@ func TestApplyCv84x6FallbackNonCv84x6(t *testing.T) {
 		t.Errorf("ModuleType=%q, want empty", ModuleType)
 	}
 }
+
+// TestApplyCv84x6FallbackOverridesPCIEFallback cv84x6 下 "PCIE" 兜底猜测值
+// 应被覆盖：开机竞态（bmssm 先于 /factory/OEMconfig.ini 转储启动，整卡恢复真机复现）
+// 走到 detectFromI2COrOEM 分支 3 时 deviceTypeEx="PCIE"，须回退 boot1/SE13 链。
+func TestApplyCv84x6FallbackOverridesPCIEFallback(t *testing.T) {
+	cpuinfo := writeCpuinfoFixture(t, "cv84x6", "0xd05")
+	boot1 := writeBoot1Fixture(t, "", "", "", "") // boot1 OEM 未烧写
+
+	resetGlobals()
+	DeviceType = PCIE_DEV
+	DeviceTypeEx = DeviceTypeExPCIEFallback
+	applyCv84x6Fallback(cpuinfo, boot1)
+
+	if DeviceTypeEx != DeviceModelSE13 {
+		t.Errorf("DeviceTypeEx=%q, want %q (PCIE 兜底值应被 SE13 覆盖)", DeviceTypeEx, DeviceModelSE13)
+	}
+	if DeviceType != SOC_DEV {
+		t.Errorf("DeviceType=%q, want soc", DeviceType)
+	}
+}
