@@ -8,6 +8,31 @@ set -e
 # 日志目录由 postinst 确保存在。
 mkdir -p /var/lib/sophliteos/db /var/log/sophliteos
 
+# 清理 ≤1.1.2 升级残留：旧包把二进制装在 /bin/sophliteos，且 /etc/systemd/system 下
+# 指向它的旧 unit 优先级高于包内 unit，二者叠加会持续拉起旧版本（Web 表现为数据全空、
+# 请求打到已废弃的 /bitmain 路径 404）。升级到本包时一并清除（CV84X2 真机实测踩坑）。
+if [ -e /bin/sophliteos ]; then
+    echo "postinst: removing legacy /bin/sophliteos (≤1.1.2)" >&2
+    rm -f /bin/sophliteos
+fi
+ETC_UNIT=/etc/systemd/system/sophliteos.service
+if [ -f "$ETC_UNIT" ] && ! grep -q "^ExecStart=/opt/sophon/sophliteos/bin/sophliteos" "$ETC_UNIT"; then
+    echo "postinst: removing stale $ETC_UNIT (points to old path)" >&2
+    rm -f "$ETC_UNIT"
+fi
+
+# CV84X2 Ubuntu 22.04 rootfs（overlay）上 systemd 实测不识别 /usr/lib/systemd/system 下的
+# 新装 unit（unit-paths 含该路径但 cat/status 均报 not found，bmssm 同现象），此处兜底：
+# daemon-reload 后 unit 仍不可见则显式落到 /etc/systemd/system（优先级最高，必定生效）。
+LIB_UNIT=/usr/lib/systemd/system/sophliteos.service
+if [ -f "$LIB_UNIT" ]; then
+    systemctl daemon-reload
+    if ! systemctl cat sophliteos >/dev/null 2>&1; then
+        echo "postinst: unit not visible from $LIB_UNIT, installing to $ETC_UNIT" >&2
+        cp "$LIB_UNIT" "$ETC_UNIT"
+    fi
+fi
+
 systemctl daemon-reload
 systemctl enable sophliteos 2>/dev/null || true
 # 升级时重启新版本；首次安装时启动。失败不阻断 dpkg（避免卡死包管理）
