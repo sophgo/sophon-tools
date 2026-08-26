@@ -5,7 +5,9 @@ d2f4121431ae31a6658212b2aa9f22a0  ./binTools/advmv
 0d2c7e010a5b7bf934a9da0e006cb752  ./binTools/chattr
 1e326dae2194ff6ec6dc4723027ca3a8  ./binTools/compile_et
 09c12d470d7e14298895201c9ceb42c7  ./binTools/debugfs
+b0a0527f516529b20c94d667a9cfa443  ./binTools/dtc
 0e9be3dc0430fd1d1b4c7e19a19d7590  ./binTools/dumpe2fs
+8620b74073ad2f449220fa872d647522  ./binTools/dumpimage
 97bc8115220d85a7ec67f5fcb6a42792  ./binTools/e2freefrag
 dc4bb5f19ce70115a245a17592ca5b02  ./binTools/e2fsck
 4273b5e836e83b9b0a2275bb04d494da  ./binTools/e2image
@@ -21,6 +23,7 @@ dc4bb5f19ce70115a245a17592ca5b02  ./binTools/fsck.ext2
 dc4bb5f19ce70115a245a17592ca5b02  ./binTools/fsck.ext3
 dc4bb5f19ce70115a245a17592ca5b02  ./binTools/fsck.ext4
 bd96ac752eb087e40214470b0d425fce  ./binTools/fsck.fat
+39765e591d7fc5a8f38f1cf37defad96  ./binTools/gdisk
 0d3f1844147342bf95e4e387b79a04f9  ./binTools/logsave
 7f7176aad87b2533b5495c839b31deb4  ./binTools/lsattr
 9cdc2a394d21e61586b4e105b6956ac2  ./binTools/mk_cmds
@@ -30,6 +33,7 @@ d276591d7a5a0fd43dfdc2c14af8064e  ./binTools/mkfs.ext2
 d276591d7a5a0fd43dfdc2c14af8064e  ./binTools/mkfs.ext3
 d276591d7a5a0fd43dfdc2c14af8064e  ./binTools/mkfs.ext4
 68996f5d08d25bbbcd1eb233ee5e85e1  ./binTools/mkfs.fat
+ea1486773c9b04d6c4640aec8a725f9a  ./binTools/mkimage
 bb3291056ad6e04adaa6244cac412c29  ./binTools/mklost+found
 c404535e7cc8a4fa1f64524e33211ff7  ./binTools/pigz
 6fb7cbf88f19f5dd2a4816a5d148461b  ./binTools/resize2fs
@@ -38,11 +42,7 @@ c404535e7cc8a4fa1f64524e33211ff7  ./binTools/pigz
 c404535e7cc8a4fa1f64524e33211ff7  ./binTools/unpigz
 7af141f019a16db2fd3a1d925b9e1a44  ./binTools/uuidd
 f2a59885f1550f3b0909176521f42ca6  ./binTools/uuidgen
-b0a0527f516529b20c94d667a9cfa443  ./binTools/dtc
-8620b74073ad2f449220fa872d647522  ./binTools/dumpimage
-ea1486773c9b04d6c4640aec8a725f9a  ./binTools/mkimage
-39765e591d7fc5a8f38f1cf37defad96  ./binTools/gdisk
 608ca6d0a3e1b5c55d67b5396617b698  ./script/bm1684/bm_make_package.sh
-b7976ce3c29844855a1a00a6b4d2d514  ./script/bm1688/bm_make_package.sh
+24dd21756fb680231e087305e006e2e5  ./script/bm1688/bm_make_package.sh
 7864745c1a0c7e0b72e2a6c68e7e78f9  ./script/bm1688/raw2cimg_edge.py
-8deec607fb2c9627b5e910d94bed5669  ./script/ota_update/ota_update.sh
+12710b5833813b255b8f45bfffb2df2c  ./script/ota_update/ota_update.sh
