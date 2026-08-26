@@ -313,7 +313,7 @@ ddr1_size=0
 ddr2_size=0
 ddr3_size=0
 ddr4_size=0
-echo "INFO: version: 2.12"
+echo "INFO: version: 2.12.1"
 if ( [ $# -eq 1 ] || [ $# -eq 2 ] ) && [ "$1" == "-p" ]; then
 	# 仅打印信息
 	print_info=1
@@ -380,7 +380,17 @@ else
 		# dts_file_name="athena2_wevb_1686a_emmc.dts"
 		sudo dd if=/dev/mmcblk0boot1 of=${memory_edit_PWD}/bm1688_dts_name.log count=32 bs=1 skip=160 2> /dev/null
 		dts_file_name=$(tr -d '\0' < ${memory_edit_PWD}/bm1688_dts_name.log)
-		get_dts_node_info ${memory_edit_PWD}/multi.its "${dts_file_name} " "fdt =" >> $log_file_path; fdt_node_name=$(echo "$get_dts_node_info_data" | awk -F'"' '{print $2}')
+		if [[ "$dts_file_name" != "" ]]; then
+			get_dts_node_info ${memory_edit_PWD}/multi.its "${dts_file_name} " "fdt =" >> $log_file_path; fdt_node_name=$(echo "$get_dts_node_info_data" | awk -F'"' '{print $2}')
+		fi
+		if [[ "$fdt_node_name" == "" ]]; then
+			# CV84X2 的 boot1 分区 offset160 处不存放板名（bm1688 存放），按板名查找失效；
+			# 回退：multi.its 仅含一个 fdt 配置节点时直接采用该节点
+			if [[ "$(grep -c "fdt = " ${memory_edit_PWD}/multi.its)" == "1" ]]; then
+				fdt_node_name=$(grep "fdt = " ${memory_edit_PWD}/multi.its | awk -F'"' '{print $2}')
+				echo "Info: no board name in boot1, use the only fdt node: $fdt_node_name" | tee -a $log_file_path
+			fi
+		fi
 		get_dts_node_info ${memory_edit_PWD}/multi.its "${fdt_node_name} " "data =" >> $log_file_path; dts_file_name=$(echo "$get_dts_node_info_data" | awk -F'"' '{print $2}' | awk -F'/' '{print $2}')
 	fi
 	fi

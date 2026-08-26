@@ -14,6 +14,31 @@ openssl在windows中使用opensslv3，在linux中使用opensslv1.1.1(ubuntu18)
 
 需要将最新版本的memory_edit.tar.xz文件cp到当前目录
 
+> 统一构建入口 `docker/pqt/build-pqt.sh --project pqt_memory_edit --linux` 会自动执行
+> `source/pmemory_edit/release.sh` 生成并复制该文件，无需手动操作。
+
+## CV84X2（CV84X6）使用说明
+
+工具本身（Qt + libssh2）不含芯片判断，芯片识别由内嵌的 memory_edit 后端完成；
+CV84X2/CV84X6 支持自 memory_edit v2.12.1 起完整可用（dts 名自动识别 cv84x6：
+boot 文件为 boot.itb 时按 dts 节点名区分 bm1688/cv84x6；CV84X2 的 boot1 分区
+不存放板名，multi.its 仅含一个 fdt 节点时自动回退采用该节点）。
+
+真机（CV84X2 EVB，Ubuntu 22.04，32GB DDR）实测行为：
+
+- **获取信息（读路径，只读安全）**：走 NPU+VPP 合并模式——VPU 输入框锁定为 0，
+  NPU 与 VPP 输入框联动约束（NPU+VPP 合计 ≤ 30376 MiB），VPP 单独上限 8192 MiB；
+  当前值 NPU 24320 MiB / VPP 4094 MiB，过程文件（含重新打包的 boot.itb）回传为
+  `memory_edit_p_<ip>_<port>_<时间戳>.tgz`。
+- **进行配置 / 批量配置（写路径）**：后端按 cv84x6 规则校验（vpp 顶部避开 2MB
+  FREERTOS 预留、ddr 索引 0x10 即基址 0x10_00000000、vpp 上限 8GB），修改后写
+  `/boot/boot.itb`（自动备份为 `boot.itb.memeditBak`），重启生效。**修改内存布局
+  属高风险操作，务必先确认获取信息显示的数值合理再执行。**
+
+批量配置预设（`batchConf/`）中的 inSE6conf.json / outSE6conf.json 仅为 SE6 集群
+示例设备清单，与本机芯片无关；CV84X2 设备直接在表格/JSON 中按
+`IP/Port/Username/Password` 填写即可。
+
 ## linux中编译方式
 
 ### 实机编译
