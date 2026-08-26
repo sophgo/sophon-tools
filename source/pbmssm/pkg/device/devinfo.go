@@ -32,6 +32,23 @@ const (
 	CTRLShell2    = "/root/se_ctrl/sectr.sh"
 )
 
+// CV84X2 产品命名（一处定义，sophliteos 前端透传消费，不重复造映射）。
+// CV84X2 与 CV84X6 是同一芯片的不同称呼：SDK/内核侧标识为 cv84x6，
+// 对外产品命名（芯片名称/设备型号）统一显示 CV84X2 / SE13。
+const (
+	CpuModelCv84x6  = "cv84x6" // SDK 标识（/proc/cpuinfo model name，经 CPU part 0xd05 修正）
+	ChipNameCv84x2  = "CV84X2" // 芯片对外显示名（cv84x6 → CV84X2）
+	DeviceModelSE13 = "SE13"   // CV84X2 单板默认设备型号
+)
+
+// boot1 OEM 区布局（对齐 pget_info get_info.sh cv 家族 DEVICE_MODEL 读取）。
+const (
+	Boot1ProductOffset = 208 // 0xD0：OEM PRODUCT，16 字节
+	Boot1ProductLen    = 16
+	Boot1ModuleOffset  = 112 // 0x70：OEM MODULE_TYPE，16 字节
+	Boot1ModuleLen     = 16
+)
+
 // 进程级状态（与 global 同步：GetDeviceInfo 会回写 global，见 initialization）。
 var (
 	DeviceType   string
@@ -157,23 +174,15 @@ func readSnFromRawWithPaths(cpuinfo, boot1, nvmem string) {
 	}
 }
 
-// ReadCpuModel 从 /proc/cpuinfo 读 "model name" 字段（小写），对齐 get_info.sh CPU_MODEL。
+// ReadCpuModel 从 /proc/cpuinfo 读芯片型号（小写），对齐 get_info.sh CPU_MODEL。
+// 经 system.DetectCpuModel 两级识别：CPU part 0xd05（Cortex-A55，仅 CV84X2/CV84X6）
+// 优先于 model name（CV84X2 上 model name 可能误报 bm1688/cv186ah），dts compatible 兜底。
 func ReadCpuModel(path string) string {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return ""
 	}
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "model name") {
-			eq := strings.Index(line, ":")
-			if eq < 0 {
-				continue
-			}
-			return strings.ToLower(strings.TrimSpace(line[eq+1:]))
-		}
-	}
-	return ""
+	return system.DetectCpuModel(string(data), system.DeviceTreeRoot)
 }
 
 // readSnFromMmcblkBoot1 从 /dev/mmcblk0boot1 读 CHIP_SN(offset 0) 和 DEVICE_SN(offset 32)，
@@ -219,6 +228,8 @@ func GetDeviceInfo() {
 }
 
 // getDeviceInfo 接受路径参数，供测试注入临时路径。
+// 推断链（高 → 低）：I2C JSON model → OEMconfig PRODUCT → CV84X2 兜底
+// （boot1 OEM 0xD0 PRODUCT → 默认 SE13）。
 func getDeviceInfo(i2cPath, oemPath, boardIPPath string) {
 	// 清旧值，避免二次调用（重检测/测试）时上一分支残留污染本次结果
 	DeviceType = UNKNOWN_DEV
@@ -229,6 +240,15 @@ func getDeviceInfo(i2cPath, oemPath, boardIPPath string) {
 	ModuleType = ""
 	ModuleTypeEx = ""
 
+	detectFromI2COrOEM(i2cPath, oemPath, boardIPPath)
+
+	// CV84X2（cv84x6）兜底：SE13 等 cv 家族新平台 I2C/OEM 均未烧写时，
+	// 按 CPU 识别补默认型号/角色/芯片名（有明确 product 信息时不覆盖）。
+	applyCv84x6Fallback(CpuInfoPath, Mmcblk0Boot1Path)
+}
+
+// detectFromI2COrOEM 原有 I2C → OEMconfig.ini → SE6 控制器裸板三段探测。
+func detectFromI2COrOEM(i2cPath, oemPath, boardIPPath string) {
 	// 1) I2C device information 优先（与 bmssm 顺序一致）
 	if ok, _ := system.PathExists(i2cPath); ok {
 		DeviceType = SOC_DEV
@@ -258,6 +278,53 @@ func getDeviceInfo(i2cPath, oemPath, boardIPPath string) {
 		DeviceRole = SE6_CTRL
 		DeviceTypeEx = "SE8"
 	}
+}
+
+// applyCv84x6Fallback CV84X2（cv84x6）兜底：仅在设备侧无更高优先级信息时补默认值，
+// 有明确 product 信息（I2C model / OEM PRODUCT / boot1 0xD0）时以设备侧为准。
+//
+//	DeviceTypeEx：boot1 OEM 0xD0 PRODUCT，未烧写则默认 SE13
+//	ModuleTypeEx：boot1 OEM 0x70 MODULE_TYPE（未烧写留空）
+//	ModuleType：芯片显示名 CV84X2（供 health 展示与 ChipCapacity 查算力）
+//	DeviceType/DeviceRole：SOC / SE5（SE13 为单板）
+//	SN：boot1 offset 0/32（与 get_info.sh cv 家族 SN 布局一致）
+func applyCv84x6Fallback(cpuinfo, boot1 string) {
+	if ReadCpuModel(cpuinfo) != CpuModelCv84x6 {
+		return
+	}
+	if DeviceType != SOC_DEV {
+		DeviceType = SOC_DEV
+	}
+	if DeviceRole == "" {
+		DeviceRole = SE5
+	}
+	if DeviceTypeEx == "" {
+		DeviceTypeEx = readFixedStringAt(boot1, Boot1ProductOffset, Boot1ProductLen)
+		if DeviceTypeEx == "" {
+			DeviceTypeEx = DeviceModelSE13
+		}
+	}
+	if ModuleTypeEx == "" {
+		if m := readFixedStringAt(boot1, Boot1ModuleOffset, Boot1ModuleLen); m != "" {
+			ModuleTypeEx = m
+		}
+	}
+	if ModuleType == "" {
+		ModuleType = ChipNameCv84x2
+	}
+	if ChipSn == "" || DeviceSnEx == "" {
+		readSnFromRawWithPaths(cpuinfo, boot1, NvmemSnPath)
+	}
+}
+
+// readFixedStringAt 打开 path，在 offset 处读 n 字节，去掉 \0 与首尾空白。
+func readFixedStringAt(path string, offset int64, n int) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	return readFixedString(f, offset, n)
 }
 
 // loadFromI2C 读取 i2c information（JSON），按 model 推断角色，并提取 chip/product sn。

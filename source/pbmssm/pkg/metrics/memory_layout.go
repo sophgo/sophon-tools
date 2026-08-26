@@ -1,5 +1,18 @@
 package metrics
 
+import "strings"
+
+// ChipDisplayName 芯片对外显示名（SE13/CV84X2 产品命名，一处定义：
+// sophliteos 前端透传 memoryLayout.chipType 显示"芯片名称"，不重复造映射）。
+// cv84x6（SDK/内核标识）对外显示 CV84X2——CV84X2 与 CV84X6 是同一芯片的不同称呼；
+// 其余芯片显示大写型号（bm1684x → BM1684X）。
+func ChipDisplayName(chip string) string {
+	if chip == "cv84x6" {
+		return "CV84X2"
+	}
+	return strings.ToUpper(chip)
+}
+
 // MemoryLayout 返回设备内存布局：系统 + TPU + VPU + VPP 四区域（MB + 使用率 0-100）。
 // 复用 Memory()/TpuMemory/VpuMemory/VppMemory（均经 c.readStr，root 可读 debugfs）。
 // bytes→MB（/1024/1024，与 Memory().Total 的 kB→MB 口径区分：ion heap 原值是字节）。
@@ -14,7 +27,8 @@ func (c *Collector) MemoryLayout() MemoryLayout {
 		sysAvail = sys.Free
 	}
 	layout := MemoryLayout{
-		ChipType: chip,
+		// 对外输出显示名（cv84x6 → CV84X2），前端"芯片名称"透传此值
+		ChipType: ChipDisplayName(chip),
 		System:   memRegionMBFloat(sys.Total, sys.Total-sysAvail),
 	}
 	tpuT, tpuU := c.TpuMemory(chip)

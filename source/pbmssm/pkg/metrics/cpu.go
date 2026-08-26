@@ -29,7 +29,8 @@ func (c *Collector) CPUInfo() CPU {
 	content := c.readStr(cpuInfoPath)
 	if content != "" {
 		cpu.Cores = countCores(content)
-		cpu.Type = modelLine(content)
+		// 经 CPU part 0xd05 修正的型号（CV84X2 上 model name 可能误报 bm1688）
+		cpu.Type = c.cpuModel()
 	}
 	cpu.Frequency = c.cpuFrequency()
 	cpu.UtilizationRate = c.cpuUtilization()

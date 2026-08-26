@@ -87,6 +87,19 @@ func TestChipCapacity(t *testing.T) {
 			wantCalcCapacity: 16,
 			wantChipType:     3,
 		},
+		{
+			// CV84X2 与 CV84X6 为同一芯片的不同称呼（设备侧命名链输出 CV84X2）
+			name:             "CV84X2 (display name)",
+			chipModel:        "CV84X2",
+			wantCalcCapacity: 16,
+			wantChipType:     3,
+		},
+		{
+			name:             "lowercase cv84x2",
+			chipModel:        "cv84x2",
+			wantCalcCapacity: 16,
+			wantChipType:     3,
+		},
 	}
 
 	for _, tt := range tests {

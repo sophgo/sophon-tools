@@ -8,7 +8,7 @@ import "strings"
 //
 //	BM1684X (0x1686)      → 32 TOPS, chipType 2
 //	BM1688  (0x1688)      → 16 TOPS, chipType 3
-//	CV84X6  (0x1694)      → 16 TOPS, chipType 3  (占位，对齐 BM1688 档位；真机确认后修正)
+//	CV84X6/CV84X2 (0x1694) → 16 TOPS, chipType 3  (占位，对齐 BM1688 档位；真机确认后修正)
 //	BM1684  (non-X)       → 16 TOPS, chipType 1
 //	unknown / empty       → 16 TOPS, chipType 1  (bmssm default branch)
 //
@@ -16,7 +16,8 @@ import "strings"
 func ChipCapacity(chipModel string) (calcCapacity float64, chipType int) {
 	upper := strings.ToUpper(chipModel)
 	switch {
-	case strings.Contains(upper, "84X6"):
+	case strings.Contains(upper, "84X6"), strings.Contains(upper, "84X2"):
+		// CV84X2 与 CV84X6 为同一芯片的不同称呼，同一档位
 		return 16, 3
 	case strings.Contains(upper, "1686") || strings.Contains(upper, "1684X"):
 		return 32, 2

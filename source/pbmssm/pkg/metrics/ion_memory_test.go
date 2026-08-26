@@ -80,6 +80,36 @@ func TestChipTypeMissing(t *testing.T) {
 	}
 }
 
+// TestChipTypePartD05Override 真机场景：CV84X2 上 model name 误报 bm1688，
+// CPU part 0xd05（Cortex-A55，仅 CV84X2/CV84X6）应把 ChipType 修正为 cv84x6，
+// 使时钟（clk_ap_ca55 等）/ion heap（cvi_）/SDK 版本走 cv84x6 路径。
+func TestChipTypePartD05Override(t *testing.T) {
+	fr := &fakeFileReader{files: map[string]string{
+		"/proc/cpuinfo": "model name	: bm1688\nCPU part	: 0xd05\n",
+	}}
+	c := NewCollector(fr, nil)
+	if got := c.ChipType(); got != "cv84x6" {
+		t.Errorf("ChipType() = %q, want cv84x6 (part 0xd05 优先于误报的 model name)", got)
+	}
+}
+
+// TestChipDisplayName 芯片显示名映射（一处定义）：cv84x6 → CV84X2，
+// 其余芯片大写。空串保持空串（前端显示 '-'）。
+func TestChipDisplayName(t *testing.T) {
+	cases := []struct{ chip, want string }{
+		{"cv84x6", "CV84X2"},
+		{"bm1684x", "BM1684X"},
+		{"bm1688", "BM1688"},
+		{"cv186ah", "CV186AH"},
+		{"", ""},
+	}
+	for _, tt := range cases {
+		if got := ChipDisplayName(tt.chip); got != tt.want {
+			t.Errorf("ChipDisplayName(%q) = %q, want %q", tt.chip, got, tt.want)
+		}
+	}
+}
+
 // realDeviceIonSummary 是真机 BM1684X 上 cat summary 的实际输出格式：
 //
 //	Summary:\n
@@ -222,8 +252,8 @@ func TestMemoryLayoutBM1684X(t *testing.T) {
 	c := NewCollector(fr, nil)
 	lay := c.MemoryLayout()
 
-	if lay.ChipType != "bm1684x" {
-		t.Fatalf("ChipType = %q, want bm1684x", lay.ChipType)
+	if lay.ChipType != "BM1684X" {
+		t.Fatalf("ChipType = %q, want BM1684X (显示名)", lay.ChipType)
 	}
 	// 系统：6277 MB total，used = 6277-5781(available) = 496，使用率 ~7.90%
 	// （buff/cache 可回收不计入，available 口径）
@@ -274,8 +304,8 @@ func TestMemoryLayoutBM1688(t *testing.T) {
 	c := NewCollector(fr, nil)
 	lay := c.MemoryLayout()
 
-	if lay.ChipType != "bm1688" {
-		t.Fatalf("ChipType = %q, want bm1688", lay.ChipType)
+	if lay.ChipType != "BM1688" {
+		t.Fatalf("ChipType = %q, want BM1688 (显示名)", lay.ChipType)
 	}
 	if !approxEqual(lay.TPU.TotalMB, 1536, 0.01) {
 		t.Errorf("TPU.TotalMB = %v, want 1536", lay.TPU.TotalMB)
@@ -288,7 +318,8 @@ func TestMemoryLayoutBM1688(t *testing.T) {
 	}
 }
 
-// TestMemoryLayoutCv84x6 CV84X2 内存布局：cvi_ ion heap + chipType 识别为 cv84x6。
+// TestMemoryLayoutCv84x6 CV84X2 内存布局：cvi_ ion heap + chipType 输出显示名 CV84X2
+// （cv84x6 → CV84X2 映射在 bmssm 一处定义，sophliteos 前端透传显示"芯片名称"）。
 func TestMemoryLayoutCv84x6(t *testing.T) {
 	fr := &fakeFileReader{files: map[string]string{
 		"/proc/cpuinfo": "model name\t: cv84x6\n",
@@ -299,8 +330,8 @@ func TestMemoryLayoutCv84x6(t *testing.T) {
 	c := NewCollector(fr, nil)
 	lay := c.MemoryLayout()
 
-	if lay.ChipType != "cv84x6" {
-		t.Fatalf("ChipType = %q, want cv84x6", lay.ChipType)
+	if lay.ChipType != "CV84X2" {
+		t.Fatalf("ChipType = %q, want CV84X2 (显示名)", lay.ChipType)
 	}
 	if !approxEqual(lay.TPU.TotalMB, 1536, 0.01) {
 		t.Errorf("TPU.TotalMB = %v, want 1536", lay.TPU.TotalMB)

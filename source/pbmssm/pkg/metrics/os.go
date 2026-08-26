@@ -104,7 +104,8 @@ var socModels = map[string]bool{
 //	  - PCIE（model name 非 SOC 型号）：/proc/bmsophon/driver_version 冒号第 2 字段再取第 1 词
 //	主分支失败/不命中返空串。
 func (c *Collector) SdkVersion() string {
-	cpu := modelLine(c.readStr(cpuInfoPath))
+	// 经 CPU part 0xd05 修正的型号（CV84X2 上 model name 可能误报 bm1688）
+	cpu := c.cpuModel()
 	kernel := c.kernelVersion()
 
 	if socModels[cpu] {

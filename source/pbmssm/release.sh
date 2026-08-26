@@ -2,7 +2,7 @@
 # pbmssm 统一构建接口 (M1 规范 v0.1)
 # 用法: bash release.sh [ARCH] [VERSION] [REASONIX_BIN]
 #   ARCH:          arm64 | amd64 | all（默认 arm64）
-#   VERSION:       显式版本号（默认 2.3.0，与 build/version.sh 一致）
+#   VERSION:       显式版本号（默认 2.3.1，与 build/version.sh 一致）
 #   REASONIX_BIN:  可选 reasonix arm64 二进制路径；与 build-deb-bmssm.sh 语义一致，
 #                  传入则把 Reasonix 一并打进 deb。
 #   env OUTPUT_DIR: 产物目录（默认 <repo>/output/pbmssm/）
@@ -12,7 +12,7 @@ SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 cd "$SCRIPT_DIR"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ARCH="${1:-arm64}"
-VERSION="${2:-2.3.0}"
+VERSION="${2:-2.3.1}"
 REASONIX_BIN="${3:-${REASONIX_BIN:-}}"
 OUTPUT_DIR="${OUTPUT_DIR:-$REPO_ROOT/output/pbmssm}"
 
