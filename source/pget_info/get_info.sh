@@ -779,15 +779,28 @@ fi
 # SN
 CHIP_SN=""
 DEVICE_SN=""
+# 从 /factory/OEMconfig.ini 读指定字段（值去引号/空白/CR；字段缺失或文件不存在返回空）
+function get_oem_ini_value() {
+    grep -m1 "^${1} *=" "${2}" 2>/dev/null | cut -d'=' -f2- | tr -d '"' | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+}
 if [[ "${WORK_MODE}" == "SOC" ]]; then
     if [[ "${SOC_FAMILY}" == "cv" ]]; then
-        # CV 系（bm1688/cv186ah/cv84x6）SN 烧录于 eMMC boot1 分区；
-        # CV84X6 u-boot 同样从 boot1 读 DTS 名(0xa0)/MAC(0x40)，SN 沿用偏移 0/32。
-        # CV84X2 EVB 不可抗说明（2026-08-26 真机核实）：boot1 OEM 区 0x00/0x20 全零
-        # （出厂未烧写 SN），/factory/OEMconfig.ini 的 SN/DEVICE_SN 同为空 → 留空。
-        # 读取路径本身正确，量产烧写后自然取到值。
-        CHIP_SN=$(od_read_char 0 32 "/dev/mmcblk0boot1")
-        DEVICE_SN=$(od_read_char 32 32 "/dev/mmcblk0boot1")
+        # BM1688 方案优先（SE 系列官方查询方式，SE9 用户手册 FAQ「查看 SN：cat
+        # /factory/OEMconfig.ini」）：read_oem.sh 开机将 boot1 OEM 区转储为
+        # /factory/OEMconfig.ini（SN=SN0 chip sn、DEVICE_SN=SN1 整机 sn）。该文件
+        # world-readable，非 sudo 也可取到值（boot1 直读需 root）。
+        # ini 缺失或字段为空时回退直读 boot1 0x00/0x20（bm1688/cv186ah 原路径，
+        # SE9 OEM 布局 SN0=0x00/SN1=0x20 与 CV84X2 一致）。
+        # CV84X2 EVB 真机（2026-08-26）：boot1 OEM 区全零（出厂未烧写），ini 的
+        # SN/DEVICE_SN 同为空 → 留空；量产烧写 OEM 后两路均自然取到值。
+        CHIP_SN=$(get_oem_ini_value "SN" "/factory/OEMconfig.ini")
+        DEVICE_SN=$(get_oem_ini_value "DEVICE_SN" "/factory/OEMconfig.ini")
+        if [[ -z "${CHIP_SN}" ]]; then
+            CHIP_SN=$(od_read_char 0 32 "/dev/mmcblk0boot1")
+        fi
+        if [[ -z "${DEVICE_SN}" ]]; then
+            DEVICE_SN=$(od_read_char 32 32 "/dev/mmcblk0boot1")
+        fi
     else
         # CHIP_SN=$(grep "product sn" /sys/class/i2c-dev/i2c-1/device/1-0017/information 2>/dev/null | awk -F'"' '{print $4}')
         CHIP_SN=$(od_read_char 0 32 "/sys/bus/nvmem/devices/1-006a0/nvmem")
