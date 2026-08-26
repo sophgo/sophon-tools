@@ -11,6 +11,7 @@ export default {
   device: {
     name: '名称',
     type: '设备类型',
+    chipName: '芯片名称',
     editType: '编辑设备名称',
     systemRunTime: '系统运行时间',
     softVersion: '系统软件版本',

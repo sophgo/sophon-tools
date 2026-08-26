@@ -23,7 +23,8 @@ enum deviceRunningSatus {
 export const useDeviceInfo = defineStore({
   id: 'app-device-info',
   state: () => ({
-    singleBoardArr: ['se5', 'se7', 'se9', 'cv84x6', 'cv186ah', '84x6', 'cv84x2', '84x2'],
+    // SE13（CV84X2/CV84X6 单板）必须命中单板视图；'84x6'/'84x2' 子串兜底非 SE13 命名
+    singleBoardArr: ['se5', 'se7', 'se9', 'se13', 'cv84x6', 'cv186ah', '84x6', 'cv84x2', '84x2'],
     deviceInfo: {
       deviceName: '',
       deviceSn: '',
