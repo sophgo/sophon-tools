@@ -149,8 +149,9 @@
     sinceStart: '',
   });
 
-  // 本机 IP（页面同源访问设备），用于生成可直接复制的抓取配置
-  const host = computed(() => window.location.hostname || '<device-ip>');
+  // 本机 host（含端口，页面同源访问设备），用于生成可直接复制的抓取配置——
+  // 经端口转发/反代访问时跟随实际入口，不固定 8080
+  const host = computed(() => window.location.host || '<device-ip>:8080');
 
   const promConfig = computed(
     () => `scrape_configs:
@@ -159,7 +160,7 @@
     authorization:
       credentials: ${token.value}
     static_configs:
-      - targets: ["${host.value}:8080"]`,
+      - targets: ["${host.value}"]`,
   );
 
   function fmtTime(v: string) {
