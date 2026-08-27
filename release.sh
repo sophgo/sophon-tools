@@ -3,7 +3,7 @@
 # sophon-tools 一键全量 release（M4 统一入口 / M5 单镜像；各子项目默认平台）
 #
 # 用法:
-#   bash release.sh [--project <子项目>] [--version <版本号>] [--no-image-check]
+#   bash release.sh [--project <子项目>] [--no-image-check]
 #
 # 行为:
 #   1. 检查统一构建镜像 sophon-tools-build:unified（M5 单镜像, ubuntu:20.04 基座）
@@ -41,7 +41,6 @@ ARGS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --project) ARGS+=(--project "$2"); shift 2; continue ;;
-    --version) ARGS+=(--version "$2"); shift 2; continue ;;
     --image) IMAGE="$2"; shift 2; continue ;;
     --no-image-check) NO_IMAGE_CHECK=1; shift ;;
     -h|--help)

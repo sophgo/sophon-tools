@@ -1,7 +1,7 @@
 #!/bin/bash
 # bmssm .deb 打包：交叉编译 arm64 静态二进制 + 组装 deb 数据树 + dpkg-deb。
 # 用法: bash build/build-deb-bmssm.sh [VERSION] [ARCH] [REASONIX_BIN]
-#   VERSION      默认 2.3.3（与 build/version.sh 一致）
+#   VERSION      默认从 version.sh DEFAULT_VERSION 提取
 #   ARCH         默认 arm64（设备）；amd64 用于 PCIE/开发机
 #   REASONIX_BIN 可选：reasonix arm64 二进制路径。提供则把 Reasonix 一并嵌入 deb，
 #               安装到 /opt/sophon/reasonix/bin/reasonix，并在 bmssm.yaml 里把
@@ -16,7 +16,8 @@
 set -e
 
 cd "$(dirname "$0")/.."
-VERSION="${1:-2.3.3}"
+# 版本默认值从 version.sh 的 DEFAULT_VERSION（唯一权威）提取，禁止在此硬编码
+VERSION="${1:-$(grep -oE '^DEFAULT_VERSION="[^"]+"' "$(dirname "$0")/version.sh" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')}"
 VERSION="${VERSION//\//-}"
 ARCH="${2:-arm64}"
 REASONIX_BIN="${3:-${REASONIX_BIN:-}}"
