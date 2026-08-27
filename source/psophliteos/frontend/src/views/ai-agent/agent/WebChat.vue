@@ -859,22 +859,18 @@
         open: false,
       });
     } else if (kind === 'thought') {
-      // 同一逻辑思考常被后端拆成多个 message.create（thought-1/thought-2）：
-      // 累积到当前打开的思考折叠块，避免同一段思考被拆成两个「思考过程」气泡。
+      // thought 分段独立成泡，不做跨 message_id 合并（MYS-774）：服务端
+      // RoundAssistants 落库时相邻 thought 不合并、按 message_id 各存一条；若前端
+      // 把 thought-2 续接到 thought-1 上，history 合并时本地合并版与落库的两条
+      // keyOf 均不匹配 → 该回合思考被重复渲染（合并泡 + 两泡落库版）。各自成泡后
+      // 本地与落库形态一致，mergeHistory 可正确去重（同一 message_id 的增量更新
+      // 走 handleUpdate 的 openThoughtKey 累积，不受影响）。
       const existing = messageId
         ? s.messages.find((m) => m.key === messageId && m.kind === 'thought')
         : null;
       if (existing) {
         existing.content = accumulate(existing.content, content);
         openThoughtKey = existing.key as string;
-      } else if (openThoughtKey) {
-        const target = s.messages.find((m) => m.key === openThoughtKey);
-        if (target && target.kind === 'thought') {
-          target.content += content;
-        } else {
-          openThoughtKey = null;
-          pushThought(messageId, content);
-        }
       } else {
         pushThought(messageId, content);
       }
