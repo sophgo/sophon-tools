@@ -4,7 +4,8 @@
 #   VERSION      默认从 version.sh DEFAULT_VERSION 提取
 #   ARCH         默认 arm64（设备）；amd64 用于 PCIE/开发机
 #   REASONIX_BIN 可选：reasonix arm64 二进制路径。提供则把 Reasonix 一并嵌入 deb，
-#               安装到 /opt/sophon/reasonix/bin/reasonix，并在 bmssm.yaml 里把
+#               安装到 /opt/sophon/reasonix/bin/reasonix（嵌入前自动 strip 去
+#               debug 信息减体积，MYSWY 要求 2026-08-27），并在 bmssm.yaml 里把
 #               agentproxy.binaryPath 指向它（出厂即带 AI Agent 后端）。
 #               省略则只打 bmssm（Reasonix 需后续单独部署）。
 #
@@ -63,6 +64,32 @@ assemble_deb() {
     mkdir -p "$DEBROOT/opt/sophon/reasonix/bin"
     cp "$REASONIX_BIN" "$DEBROOT/opt/sophon/reasonix/bin/reasonix"
     chmod 0755 "$DEBROOT/opt/sophon/reasonix/bin/reasonix"
+    # 去 debug 信息减体积（MYSWY 要求，2026-08-27）：对 deb 树内副本 strip，
+    # 不动源文件（可能是 git 跟踪的内置二进制）；已 stripped 的输入幂等无害。
+    # 与 build-bmssm-arm64.sh 同款风格：交叉 strip 优先，失败降级警告不阻断。
+    strip_reasonix() {
+      local dest="$DEBROOT/opt/sophon/reasonix/bin/reasonix"
+      case "$ARCH" in
+        arm64) for c in aarch64-linux-musl-strip aarch64-linux-gnu-strip; do
+                 command -v "$c" >/dev/null 2>&1 && "$c" --strip-unneeded \
+                   --remove-section=.comment --remove-section=.note.go.buildid "$dest" \
+                   && return 0
+               done ;;
+        amd64) for c in x86_64-linux-gnu-strip strip llvm-strip; do
+                 command -v "$c" >/dev/null 2>&1 && "$c" --strip-unneeded \
+                   --remove-section=.comment --remove-section=.note.go.buildid "$dest" \
+                   && return 0
+               done ;;
+      esac
+      return 1
+    }
+    if [ -n "$REASONIX_BIN" ]; then RX_BEFORE_MB=$(( $(stat -c%s "$DEBROOT/opt/sophon/reasonix/bin/reasonix") / 1024 / 1024 )); fi
+    if strip_reasonix; then
+      RX_AFTER_MB=$(( $(stat -c%s "$DEBROOT/opt/sophon/reasonix/bin/reasonix") / 1024 / 1024 ))
+      echo "  ✓ [$suffix] reasonix strip: ${RX_BEFORE_MB}MB → ${RX_AFTER_MB}MB"
+    else
+      echo "  WARN: [$suffix] reasonix strip 未执行（无可用 strip 工具），保留原样" >&2
+    fi
     sed -i \
       -e 's|^  enabled: false.*|  enabled: true|' \
       -e "s|^  binaryPath: \"\".*|  binaryPath: \"/opt/sophon/reasonix/bin/reasonix\"|" \
