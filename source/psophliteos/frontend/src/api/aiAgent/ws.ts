@@ -2,8 +2,9 @@
  * Reasonix WebSocket 客户端（sophliteos 原生接入，PicoWS 的 TS 移植）。
  *
  * 职责：
- *   - 建立与 Reasonix agentproxy 的 WS 连接：ws://<host>:8080/agent/ws
- *     （端口 8080 为 sophliteos 同源入口，/agent/ws 由 sophliteos 反向代理转发到 bmssm 主服务）
+ *   - 建立与 Reasonix agentproxy 的 WS 连接：同源 ws(s)://<当前页面host>/agent/ws
+ *     （默认同源入口，/agent/ws 由 sophliteos 反向代理转发到 bmssm 主服务；
+ *     经端口转发/反代访问时自动跟随实际入口端口，不固定 8080）
  *   - 用子协议 token.<forward_key> 认证（浏览器无法设 Header，对齐 agentproxy ws.go）
  *   - 发送 message.send / session.list / session.history，接收 message.create /
  *     message.update / typing.* / session.create / error 等帧
@@ -241,7 +242,17 @@ export class PicoWs {
   }
 }
 
-export function defaultReasonixWsUrl(hostname: string, port?: number): string {
+/**
+ * 构造 agent WS 地址。
+ * 不传参数：同源模式——跟随当前页面的协议与 host（含端口），经端口转发/反向代理
+ * 访问（如 socat 18080 引出）时 WS 与页面走同一入口，不再固定 8080。
+ * 传 hostname（兼容旧调用）：默认 8080 端口，可由 port 覆盖。
+ */
+export function defaultReasonixWsUrl(hostname?: string, port?: number): string {
+  if (!hostname && !port) {
+    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    return `${proto}://${window.location.host}${REASONIX_WS_PATH}`;
+  }
   const p = port || REASONIX_DEFAULT_PORT;
   return `ws://${hostname}:${p}${REASONIX_WS_PATH}`;
 }

@@ -1350,7 +1350,10 @@
       ws.close();
       ws = null;
     }
-    const url = defaultReasonixWsUrl(window.location.hostname);
+    // 同源：跟随当前访问的协议/host（含端口），经 socat 等端口转发访问时
+    // WS 与页面同一入口，不再固定 8080（此前 18080 引出访问时 WS 连
+    // <host>:8080 失败，页面一直"重连中"）。
+    const url = defaultReasonixWsUrl();
     ws = new PicoWs({
       url,
       token: forwardKey,
