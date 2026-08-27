@@ -543,7 +543,7 @@ func TestApplyCv84x6FallbackSE13Default(t *testing.T) {
 	if DeviceTypeEx != "SE13" {
 		t.Errorf("DeviceTypeEx=%q, want SE13", DeviceTypeEx)
 	}
-	if ModuleType != "CV84X2" {
+	if ModuleType != "CV84X6" {
 		t.Errorf("ModuleType=%q, want CV84X2", ModuleType)
 	}
 	if ModuleTypeEx != "" {

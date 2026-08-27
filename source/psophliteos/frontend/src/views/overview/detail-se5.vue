@@ -161,11 +161,17 @@
 
   const cpuCard = computed(() => {
     const cpu = originData.value.cpu || {};
+    // CV84X6 家族显示官方规格（规格表：8核 Cortex-A55@2.5GHz）；EVB 实际运行
+    // clk_ap_ca55=2GHz，规格与实测的差异属正常（规格为芯片能力标称值）
+    const isCv84x6 = `${cpu.type || ''}`.toLowerCase().includes('84x6');
+    const specText = `${cpu.cores ?? 0}${t('overview.core')} Cortex-A55@2.5GHz`;
     return {
       usage: +(cpu.utilizationRate ?? cpu.usage ?? 0).toFixed(1),
-      text: `${cpu.cores ?? 0}${t('overview.core')}${
-        cpu.frequency ? (cpu.frequency / 1000).toFixed(1) : 0
-      }GHz`,
+      text: isCv84x6
+        ? specText
+        : `${cpu.cores ?? 0}${t('overview.core')}${
+            cpu.frequency ? (cpu.frequency / 1000).toFixed(1) : 0
+          }GHz`,
     };
   });
 
@@ -200,7 +206,7 @@
     return list.join('、');
   };
 
-  // 芯片名称：bmssm 侧命名链（cv84x6 → 展示名 CV84X2）在 memoryLayout.chipType 输出，
+  // 芯片名称：bmssm 侧命名链（cv84x6 → 展示名 CV84X6）在 memoryLayout.chipType 输出，
   // 前端透传显示；取不到时显示 '-'（空值容忍，不影响其它芯片展示）。
   const chipName = computed(
     () => originData.value?.memoryLayout?.chipType || '-',

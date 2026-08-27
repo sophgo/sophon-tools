@@ -154,7 +154,7 @@
 
   const promConfig = computed(
     () => `scrape_configs:
-  - job_name: "cv84x2-se13"
+  - job_name: "cv84x6-se13"
     metrics_path: /metrics
     authorization:
       credentials: ${token.value}

@@ -72,32 +72,32 @@ func TestChipCapacity(t *testing.T) {
 		{
 			name:             "CV84X6",
 			chipModel:        "CV84X6",
-			wantCalcCapacity: 16,
+			wantCalcCapacity: 64,
 			wantChipType:     3,
 		},
 		{
 			name:             "lowercase cv84x6",
 			chipModel:        "cv84x6",
-			wantCalcCapacity: 16,
+			wantCalcCapacity: 64,
 			wantChipType:     3,
 		},
 		{
 			name:             "84X6 substring",
 			chipModel:        "CV84X6-PROD",
-			wantCalcCapacity: 16,
+			wantCalcCapacity: 64,
 			wantChipType:     3,
 		},
 		{
 			// CV84X2 与 CV84X6 为同一芯片的不同称呼（设备侧命名链输出 CV84X2）
 			name:             "CV84X2 (display name)",
 			chipModel:        "CV84X2",
-			wantCalcCapacity: 16,
+			wantCalcCapacity: 64,
 			wantChipType:     3,
 		},
 		{
 			name:             "lowercase cv84x2",
 			chipModel:        "cv84x2",
-			wantCalcCapacity: 16,
+			wantCalcCapacity: 64,
 			wantChipType:     3,
 		},
 	}
@@ -112,5 +112,21 @@ func TestChipCapacity(t *testing.T) {
 				t.Errorf("ChipCapacity(%q) chipType = %d, want %d", tt.chipModel, gotType, tt.wantChipType)
 			}
 		})
+	}
+}
+
+// TestFpCapacityCv84x6 官方规格：cv84x6 FP16=32、FP32=2；其他芯片走 /4 /8 派生。
+func TestFpCapacityCv84x6(t *testing.T) {
+	if got := Fp16Capacity("cv84x6", 64); got != 32 {
+		t.Errorf("Fp16Capacity(cv84x6) = %v, want 32", got)
+	}
+	if got := Fp32Capacity("cv84x6", 64); got != 2 {
+		t.Errorf("Fp32Capacity(cv84x6) = %v, want 2", got)
+	}
+	if got := Fp16Capacity("BM1684X", 32); got != 8 {
+		t.Errorf("Fp16Capacity(BM1684X) = %v, want 8 (历史派生 /4)", got)
+	}
+	if got := Fp32Capacity("bm1688", 16); got != 2 {
+		t.Errorf("Fp32Capacity(bm1688) = %v, want 2 (历史派生 /8)", got)
 	}
 }

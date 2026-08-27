@@ -314,8 +314,10 @@ func (s *CompatService) BuildCtrlResource() []CtrlResource {
 							Memory:                  tpuMem,
 							CalculationCapacity:     calcCapacity,
 							CalculationCapacityInt8: calcCapacity,
-							CalculationCapacityFp16: calcCapacity / 4,
-							CalculationCapacityFp32: calcCapacity / 8,
+							// cv84x6 用官方规格（FP16/BF16 32 TFLOPS、FP32 2 TFLOPS）；
+							// 其余芯片沿用 /4 /8 派生（历史行为）
+							CalculationCapacityFp16: metrics.Fp16Capacity(global.ModuleType, calcCapacity),
+							CalculationCapacityFp32: metrics.Fp32Capacity(global.ModuleType, calcCapacity),
 							ChipType:                chipType,
 						},
 					},

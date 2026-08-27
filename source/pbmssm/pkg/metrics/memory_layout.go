@@ -2,13 +2,13 @@ package metrics
 
 import "strings"
 
-// ChipDisplayName 芯片对外显示名（SE13/CV84X2 产品命名，一处定义：
+// ChipDisplayName 芯片对外显示名（SE13 产品命名，一处定义：
 // sophliteos 前端透传 memoryLayout.chipType 显示"芯片名称"，不重复造映射）。
-// cv84x6（SDK/内核标识）对外显示 CV84X2——CV84X2 与 CV84X6 是同一芯片的不同称呼；
+// cv84x6（SDK/内核标识）对外显示 CV84X6（2026-08-27 MYSWY 指示：型号名称统一用 CV84X6）；
 // 其余芯片显示大写型号（bm1684x → BM1684X）。
 func ChipDisplayName(chip string) string {
 	if chip == "cv84x6" {
-		return "CV84X2"
+		return "CV84X6"
 	}
 	return strings.ToUpper(chip)
 }
