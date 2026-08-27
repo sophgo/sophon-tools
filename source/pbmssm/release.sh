@@ -3,8 +3,9 @@
 # 用法: bash release.sh [ARCH] [VERSION] [REASONIX_BIN]
 #   ARCH:          arm64 | amd64 | all（默认 arm64）
 #   VERSION:       显式版本号（默认从 build/version.sh DEFAULT_VERSION 提取）
-#   REASONIX_BIN:  可选 reasonix arm64 二进制路径；与 build-deb-bmssm.sh 语义一致，
-#                  传入则把 Reasonix 一并打进 deb。
+#   REASONIX_BIN:  reasonix arm64 二进制路径。不传（或未设 env）时默认取
+#                  build/reasonix/bin/ 下的仓库内置版本（bmssm 包必须内置
+#                  reasonix——MYSWY 要求）；显式传第 3 个参数（含空串 ""）可跳过/覆盖。
 #   env OUTPUT_DIR: 产物目录（默认 <repo>/output/pbmssm/）
 set -euo pipefail
 
@@ -14,7 +15,18 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ARCH="${1:-arm64}"
 # 版本默认值从 build/version.sh 的 DEFAULT_VERSION（唯一权威）提取，禁止在此硬编码
 VERSION="${2:-$(grep -oE '^DEFAULT_VERSION="[^"]+"' "$SCRIPT_DIR/build/version.sh" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')}"
-REASONIX_BIN="${3:-${REASONIX_BIN:-}}"
+# Reasonix 内嵌默认：仓库内置二进制（build/reasonix/bin/），存在即内嵌；
+# 第 3 个参数显式提供（含空串跳过）时不自动探测。此前默认不传导致 deb 无
+# reasonix 二进制，真机 Agent 服务开关报 "executable file not found in $PATH"
+# （2026-08-27 复现）。
+if [ $# -ge 3 ]; then
+  REASONIX_BIN="$3" # 显式传参（含空串 "" 跳过内嵌）优先
+elif [ -z "${REASONIX_BIN:-}" ]; then
+  for _f in "$SCRIPT_DIR"/build/reasonix/bin/reasonix-arm64*; do
+    [ -f "$_f" ] && REASONIX_BIN="$_f" && break
+  done
+fi
+unset _f
 OUTPUT_DIR="${OUTPUT_DIR:-$REPO_ROOT/output/pbmssm}"
 
 case "$ARCH" in
