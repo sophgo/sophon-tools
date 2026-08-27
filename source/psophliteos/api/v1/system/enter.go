@@ -5,5 +5,6 @@ type ApiGroup struct {
 	VersionApi
 	UpgradeApi
 	MetricsSelApi
+	MetricsFwdApi
 	AiAgentApi
 }

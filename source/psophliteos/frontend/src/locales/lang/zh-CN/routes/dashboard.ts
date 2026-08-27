@@ -10,6 +10,7 @@ export default {
   logs: '日志管理',
   warning: '告警日志',
   operate: '操作日志',
+  metricsForward: '指标转发',
   threshold: '告警阈值',
   maintenance: '设备运维',
   appSoft: '应用升级',
