@@ -162,7 +162,12 @@ export const useDeviceInfo = defineStore({
               desc: 'FP32',
             };
           } else if (key === 'cpuCount') {
-            this.deviceInfo[key] = { total: cpuInfo?.cores ?? 0, desc: cpuInfo?.type ?? '' };
+            // CV84X6 家族显示官方规格（Cortex-A55@2.5GHz），其余芯片保持原 desc
+            const cv84x6 = `${cpuInfo?.type || ''}`.toLowerCase().includes('84x6');
+            this.deviceInfo[key] = {
+              total: cpuInfo?.cores ?? 0,
+              desc: cv84x6 ? 'Cortex-A55@2.5GHz' : cpuInfo?.type ?? '',
+            };
           } else if (key === 'memoryCount') {
             this.deviceInfo[key] = { total: memory?.total ?? 0, unit: 'MB' };
           } else if (key === 'eMMCCount') {

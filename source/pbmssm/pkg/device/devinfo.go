@@ -36,12 +36,12 @@ const (
 	CTRLShell2    = "/root/se_ctrl/sectr.sh"
 )
 
-// CV84X2 产品命名（一处定义，sophliteos 前端透传消费，不重复造映射）。
+// CV84X6 产品命名（一处定义，sophliteos 前端透传消费，不重复造映射）。
 // CV84X2 与 CV84X6 是同一芯片的不同称呼：SDK/内核侧标识为 cv84x6，
-// 对外产品命名（芯片名称/设备型号）统一显示 CV84X2 / SE13。
+// 对外芯片名称统一显示 CV84X6（2026-08-27 MYSWY 指示），设备型号默认 SE13。
 const (
 	CpuModelCv84x6  = "cv84x6" // SDK 标识（/proc/cpuinfo model name，经 CPU part 0xd05 修正）
-	ChipNameCv84x2  = "CV84X2" // 芯片对外显示名（cv84x6 → CV84X2）
+	ChipNameCv84x6  = "CV84X6" // 芯片对外显示名（cv84x6 → CV84X6，2026-08-27 统一用 CV84X6）
 	DeviceModelSE13 = "SE13"   // CV84X2 单板默认设备型号
 )
 
@@ -317,7 +317,7 @@ func applyCv84x6Fallback(cpuinfo, boot1 string) {
 		}
 	}
 	if ModuleType == "" {
-		ModuleType = ChipNameCv84x2
+		ModuleType = ChipNameCv84x6
 	}
 	if ChipSn == "" || DeviceSnEx == "" {
 		readSnFromRawWithPaths(cpuinfo, boot1, NvmemSnPath)

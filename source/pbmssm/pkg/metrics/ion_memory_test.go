@@ -97,7 +97,7 @@ func TestChipTypePartD05Override(t *testing.T) {
 // 其余芯片大写。空串保持空串（前端显示 '-'）。
 func TestChipDisplayName(t *testing.T) {
 	cases := []struct{ chip, want string }{
-		{"cv84x6", "CV84X2"},
+		{"cv84x6", "CV84X6"},
 		{"bm1684x", "BM1684X"},
 		{"bm1688", "BM1688"},
 		{"cv186ah", "CV186AH"},
@@ -330,7 +330,7 @@ func TestMemoryLayoutCv84x6(t *testing.T) {
 	c := NewCollector(fr, nil)
 	lay := c.MemoryLayout()
 
-	if lay.ChipType != "CV84X2" {
+	if lay.ChipType != "CV84X6" {
 		t.Fatalf("ChipType = %q, want CV84X2 (显示名)", lay.ChipType)
 	}
 	if !approxEqual(lay.TPU.TotalMB, 1536, 0.01) {
