@@ -11,7 +11,7 @@ LOGFILE="$(readlink -f "${BASH_SOURCE[0]}").log"
 rm -f $LOGFILE*
 exec > >(tee -a "$LOGFILE") 2>&1
 
-echo "VERSION: v1.2.1"
+echo "VERSION: v1.3.0"
 date '+%Y-%m-%d %H:%M:%S'
 
 export SOC_BAK_ALL_IN_ONE=${SOC_BAK_ALL_IN_ONE:-}
