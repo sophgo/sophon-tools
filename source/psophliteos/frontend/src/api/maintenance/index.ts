@@ -253,3 +253,24 @@ export function shutdownApi() {
   return defHttp.post({ url: '/v1/hardware/shutdown' });
 }
 
+
+// ===== 指标转发（sophliteos 本地端点，不走 bmssm 反代） =====
+enum MetricsFwdApi {
+  Status = '/device/metrics-forward',
+  Token = '/device/metrics-forward/token',
+}
+
+// 转发状态：enabled/token/统计/bmssm 可达性
+export function getMetricsForward() {
+  return defHttp.get({ url: MetricsFwdApi.Status });
+}
+
+// 开/关转发
+export function setMetricsForward(enabled: boolean) {
+  return defHttp.put({ url: MetricsFwdApi.Status, params: { enabled } });
+}
+
+// 轮换 token
+export function rotateMetricsForwardToken() {
+  return defHttp.post({ url: MetricsFwdApi.Token });
+}

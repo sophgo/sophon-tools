@@ -152,6 +152,7 @@ func Routers(webFS fs.FS) *gin.Engine {
 		systemRouter.InitVersionRouter(LocalGroup)
 		systemRouter.InitUpgradeRouter(LocalGroup)
 		systemRouter.InitMetricsSelRouter(LocalGroup)
+		systemRouter.InitMetricsFwdRouter(LocalGroup)
 		systemRouter.InitAiAgentRouter(LocalGroup)
 	}
 

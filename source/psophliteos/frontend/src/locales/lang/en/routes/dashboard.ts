@@ -10,6 +10,7 @@ export default {
   logs: 'Logs',
   warning: 'Alarm',
   operate: 'Operation',
+  metricsForward: 'Metrics Forward',
   threshold: 'Threshold',
   maintenance: 'Maintenance',
   appSoft: 'Application Upgrade',

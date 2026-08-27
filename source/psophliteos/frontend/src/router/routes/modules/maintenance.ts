@@ -80,6 +80,14 @@ const maintenance: AppRouteModule = {
       },
     },
     {
+      path: 'metricsForward',
+      name: 'MetricsForward',
+      component: () => import('/@/views/maintenance/metricsForward/index.vue'),
+      meta: {
+        title: t('routes.dashboard.metricsForward'),
+      },
+    },
+    {
       path: 'terminal',
       name: 'Terminal',
       component: () => import('/@/views/maintenance/terminal/index.vue'),
