@@ -19,8 +19,11 @@ ARCH="${1:-arm64}"
 OUTPUT_DIR="${OUTPUT_DIR:-$REPO_ROOT/output/pSophUI}"
 
 # 版本号默认从 deb control 提取（sophgo-hdmi_1.6.8_arm64.deb）
+# 版本唯一来源：deb control（工具侧代码）。提取失败直接报错，不做硬编码兜底（防漂移）。
 VERSION="${2:-$(grep -oE '[0-9]+\.[0-9]+\.[0-9]+' "$SCRIPT_DIR/SophUI/deb/DEBIAN/control" 2>/dev/null | head -1)}"
-VERSION="${VERSION:-1.6.8}"
+if [ -z "$VERSION" ]; then
+  echo "ERROR: 无法从 SophUI/deb/DEBIAN/control 提取版本号" >&2; exit 1
+fi
 
 QT_CROSS_PREFIX="${QT_CROSS_PREFIX:-/env/qt_5.12.8_nosysroot}"
 # 交叉编译器: 默认用系统 aarch64-linux-gnu-gcc（apt, GCC 9.4），替代原 Linaro GCC 6.3

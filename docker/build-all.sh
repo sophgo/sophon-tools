@@ -11,7 +11,6 @@
 # 统一接口 (M1 规范 v0.1):
 #   bash release.sh [ARCH] [VERSION]
 #     ARCH:    arm64 | amd64 | all（默认按子项目）
-#     VERSION: 显式版本号（缺省用子项目版本来源）
 #     env OUTPUT_DIR: 覆盖产物目录（默认 <repo>/output/<子项目>/）
 #
 # 范围: 16 个子项目（pmulti_video_qt 已按 MYSWY 决定排除）
@@ -21,7 +20,6 @@
 #   bash docker/build-all.sh --project pbmssm   # 只构建指定子项目
 #   bash docker/build-all.sh --arch arm64       # 只构建指定架构
 #   bash docker/build-all.sh --image sophon-tools-build:unified
-#   bash docker/build-all.sh --version 2.1.0    # 统一显式版本号（透传给所有 release.sh）
 #   bash docker/build-all.sh --list             # 列出子项目与平台
 #
 # 产物: 全部汇聚到仓库根 output/<子项目>/ (与根 release.sh 一致)
@@ -44,14 +42,12 @@ if [[ -z "${IMAGE:-}" ]]; then
 fi
 ONLY_PROJECT=""
 ONLY_ARCH=""
-BUILD_VERSION=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --project) ONLY_PROJECT="$2"; shift 2; continue ;;
     --arch) ONLY_ARCH="$2"; shift 2; continue ;;
     --image) IMAGE="$2"; shift 2; continue ;;
-    --version) BUILD_VERSION="$2"; shift 2; continue ;;
     --list) LIST_ONLY=1 ;;
     -h|--help) grep -E '^#' "$0" | sed 's/^# \{0,1\}//' | head -40; exit 0 ;;
     *) echo "未知参数: $1" >&2; exit 1 ;;
@@ -160,8 +156,10 @@ run_one() {
       git config --global --add safe.directory '*' 2>/dev/null || true
       git config --global --add safe.directory /workspace/sophon-tools 2>/dev/null || true
       ${extra_env}
-      echo '  >> bash release.sh ${arch} ${BUILD_VERSION}'
-      bash release.sh ${arch} ${BUILD_VERSION} 2>&1 | tail -20
+      # 版本号规范：各子项目 release.sh 自行从工具代码提取默认版本（build/version.sh
+#      的 DEFAULT_VERSION 等），统一入口禁止传版本号（MYSWY 规范 2026-08-27）。
+      echo '  >> bash release.sh ${arch}'
+      bash release.sh ${arch} 2>&1 | tail -20
     " 2>&1 | sed 's/^/    /'
   rc=${PIPESTATUS[0]}
   echo "  [${p}] 退出码: ${rc}"
