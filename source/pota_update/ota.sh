@@ -205,7 +205,7 @@ LOGFILE="$(readlink -f "${BASH_SOURCE[0]}").log"
 rm -f "${LOGFILE}"*
 exec > >(tee -a "$LOGFILE") 2>&1
 
-echo "[INFO] ota update tool, version: v1.5.1"
+echo "[INFO] ota update tool, version: v1.5.2"
 
 WORK_DIR=""
 if [ ! -d "${RUN_WORK_DIR}/sdcard" ]; then
@@ -486,6 +486,37 @@ OTA_EMMC_UPDATE_CMD_FILE=$(grep -a "^${OTA_PACK_READ_FILE_CMD}" boot_emmc.cmd | 
 grep boot_emmc | awk -F' ' '{print $NF}' | awk -F'/' '{print $NF}')
 OTA_FIP_UPDATE_CMD_FILE=$(grep -a "^${OTA_PACK_READ_FILE_CMD}" boot.cmd | \
 head -n1 | awk -F' ' '{print $NF}' | awk -F'/' '{print $NF}')
+# 分区刷机段完整性校验（2026-08-28 OTA 死循环事故）：
+# 残缺包（构建时 mcopy 失败、分区 .gz 镜像缺失）的 boot_emmc.cmd 只剩 gpt 段，
+# 后续流程会静默生成仅含 fip+gpt 的刷机脚本，刷完无收尾（不恢复 /boot/boot.scr.emmc）
+# → 设备陷入 OTA 循环。这里在预检阶段拦截：
+# ① 每个 boot_emmc-*.cmd 引用的分区镜像 .gz 必须存在且非空；
+# ② boot_emmc.cmd 至少要含 4 个分区刷机段（gpt+boot+rootfs+data 是最小可用集）。
+if [[ -z "${OTA_EMMC_UPDATE_CMD_FILE// /}" ]]; then
+    panic "boot_emmc.cmd has no boot_emmc-*.cmd partition sections, package looks incomplete"
+fi
+OTA_EMMC_SECTION_COUNT=0
+for _sec in ${OTA_EMMC_UPDATE_CMD_FILE}; do
+    [[ -z "$_sec" ]] && continue
+    file_validate "${_sec}"
+    OTA_EMMC_SECTION_COUNT=$((OTA_EMMC_SECTION_COUNT + 1))
+    # 校验该段引用的每个分区镜像文件（.scr 是 mkimage 二进制，load 行可直接 grep -a）
+    for _img in $(grep -a "^${OTA_PACK_READ_FILE_CMD} " "${_sec}" | awk -F' ' '{print $NF}' \
+| awk -F'/' '{print $NF}'); do
+        [[ -z "$_img" ]] && continue
+        [[ "$_img" == *.cmd || "$_img" == *.scr ]] && continue
+        if [[ ! -s "$_img" ]]; then
+            panic "partition image $_img (referenced by ${_sec}) is missing or empty, \
+package looks incomplete (broken build?)"
+        fi
+    done
+done
+unset _sec _img
+if [[ "$OTA_EMMC_SECTION_COUNT" -lt 4 ]]; then
+    panic "boot_emmc.cmd only has ${OTA_EMMC_SECTION_COUNT} partition section(s), \
+expect at least 4 (gpt/boot/rootfs/data), package looks incomplete"
+fi
+echo "[INFO] boot_emmc.cmd partition sections: ${OTA_EMMC_SECTION_COUNT}, images all present"
 file_validate "${OTA_FIP_UPDATE_CMD_FILE}"
 OTA_FIP_FILE=$(grep -a "^${OTA_PACK_READ_FILE_CMD}" "$OTA_FIP_UPDATE_CMD_FILE" | \
 awk -F' ' '{print $NF}' | awk -F'/' '{print $NF}')
