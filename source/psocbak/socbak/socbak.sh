@@ -60,6 +60,10 @@ PART_EXCLUDE_FLAGS["boot"]=' --exclude=./spi_flash.bin.socBakNew --exclude=./u-b
 # socrepack 为 socbak 自身产物目录：当外置存储缺省、产物直接落在 /data/socrepack 时，
 # 若不排除会把正在生成的 *.tgz 打进 data 包（自包含递归）。rootfs 侧已有同样排除。
 PART_EXCLUDE_FLAGS["data"]=' --exclude=./socrepack '
+# /opt/applications 常为外置数据盘(NVMe/SATA/USB)挂载点，不属于母盘环境。
+# 不排除时 tar 递归进入挂载点，会把数据盘内容打进 opt 分区镜像导致 sparse 空间写满
+# （与 rootfs 排除 ./media/* 同理）。
+PART_EXCLUDE_FLAGS["opt"]=' --exclude=./applications/* '
 
 # These parameters define several generated files and
 # their default sizes for repackaging. Users can modify
