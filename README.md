@@ -29,6 +29,7 @@
 | [phytool](./source/psoph_phytool) | source/psoph_phytool | 网口 PHY 寄存器读写工具（纯脚本，无编译） |
 | [bmssm](./source/pbmssm) | source/pbmssm | 设备端后端（:9779）：鉴权/硬件指标/systemd/端口/网络/OTA/文件。见 [API.md](./API.md) / [USAGE.md](./USAGE.md) / [BUILD.md](./BUILD.md) |
 | [sophliteos](./source/psophliteos) | source/psophliteos | 算力设备管理 Web 平台（Go+Vue，:8080），反代 bmssm。见 [API.md](./API.md) / [USAGE.md](./USAGE.md) / [BUILD.md](./BUILD.md) |
+| [se-rag-core](./source/se-rag-core) | source/se-rag-core | SE 系列知识库 RAG 检索核心（Go，本地 FAISS/BM25 + 内置网关），供 SE7 skill 使用。见 [README](./source/se-rag-core/readme.md) |
 
 ## 编译方式
 
