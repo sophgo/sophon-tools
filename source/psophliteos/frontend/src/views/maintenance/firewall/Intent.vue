@@ -158,6 +158,11 @@
             h('p', { style: { 'font-weight': 550 } }, desc),
             h(
               'p',
+              { style: { color: '#ff4d4f', 'font-weight': 550, margin: '8px 0 4px', 'font-size': '13px' } },
+              t('maintenance.firewall.highRiskWarn'),
+            ),
+            h(
+              'p',
               { style: { color: '#fa8c16', margin: '8px 0 4px', 'font-size': '13px' } },
               t('maintenance.firewall.highRiskConfirmContent', {
                 code: ch.code,

@@ -508,6 +508,11 @@ func isValidPackageName(name string) bool {
 		}
 		return false
 	}
+	// 去掉扩展名后的包名不得为空或以 "." 开头（P2-2：如 "..tar.gz" 剥掉后缀得 ".."，
+	// filepath.Join 会落到父目录写文件）
+	if strings.HasPrefix(filepath.Base(packageName(base)), ".") {
+		return false
+	}
 	return true
 }
 

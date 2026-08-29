@@ -160,7 +160,10 @@ func TestForwardOK(t *testing.T) {
 
 // TestTokenGenerateFormat token 为 64 位 hex 且两次生成不同。
 func TestTokenGenerateFormat(t *testing.T) {
-	tok := database.NewForwardToken()
+	tok, err := database.NewForwardToken()
+	if err != nil {
+		t.Fatalf("generate token: %v", err)
+	}
 	if len(tok) != 64 {
 		t.Errorf("token len = %d, want 64", len(tok))
 	}
@@ -170,7 +173,11 @@ func TestTokenGenerateFormat(t *testing.T) {
 			break
 		}
 	}
-	if database.NewForwardToken() == tok {
+	tok2, err := database.NewForwardToken()
+	if err != nil {
+		t.Fatalf("generate second token: %v", err)
+	}
+	if tok2 == tok {
 		t.Error("two generated tokens must differ")
 	}
 }

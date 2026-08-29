@@ -217,6 +217,7 @@ export default {
     portDeny: '端口拒绝',
     highRiskConfirmTitle: '高危操作二次确认',
     highRiskConfirmContent: '二次确认码：{code}（{secs} 秒内有效）。高危操作将立即生效，请确认执行。',
+    highRiskWarn: '⚠️ 防火墙操作可能锁死设备管理通道（SSH/Web），此操作非常危险！若操作后设备失联，请通过 SSH 手动登录设备，由专业人士使用命令行操作恢复。',
     challengeFail: '获取二次确认码失败',
     actionFail: '操作失败',
   },

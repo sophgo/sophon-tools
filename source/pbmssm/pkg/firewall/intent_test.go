@@ -139,10 +139,10 @@ func TestCheckProtectDenyPortDenyEmptySrc(t *testing.T) {
 }
 
 func TestCheckProtectDenyPortDenySpecificSrc(t *testing.T) {
-	// 特定源 CIDR 允许拒绝
+	// 特定源 CIDR 拒绝保护端口也必须拦截（P1-2 收紧：窄段覆盖同样锁死管理通道）
 	it := Intent{ID: 10, Type: "port_deny", Params: mustParams(t, map[string]interface{}{"proto": "tcp", "port": 22, "src": "10.0.0.0/8"})}
-	if err := CheckProtectDeny(&it, []int{22}); err != nil {
-		t.Errorf("want allow for specific src, got %v", err)
+	if err := CheckProtectDeny(&it, []int{22}); err == nil {
+		t.Error("want block for specific src deny on protect port")
 	}
 }
 
@@ -219,10 +219,10 @@ func TestCheckProtectDenyPortDenySlash1Src(t *testing.T) {
 }
 
 func TestCheckProtectDenyPortDenySpecificSrcStillAllowed(t *testing.T) {
-	// 特定源 /8 deny 保护端口仍允许（合法运维场景）
+	// 任何来源拒绝保护端口一律拦截（P1-2 收紧：窄段覆盖同样锁死管理通道）
 	it := Intent{ID: 21, Type: "port_deny", Params: mustParams(t, map[string]interface{}{"proto": "tcp", "port": 22, "src": "10.0.0.0/8"})}
-	if err := CheckProtectDeny(&it, []int{22}); err != nil {
-		t.Errorf("want allow for specific /8 src, got %v", err)
+	if err := CheckProtectDeny(&it, []int{22}); err == nil {
+		t.Error("want block for specific /8 src deny on protect port")
 	}
 }
 

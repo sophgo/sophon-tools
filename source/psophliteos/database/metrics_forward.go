@@ -3,6 +3,7 @@ package database
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"time"
 )
 
@@ -42,23 +43,25 @@ func SaveMetricsForward(m MetricsForward) error {
 }
 
 // NewForwardToken 生成抓取 token：crypto/rand 32 字节 → 64 位 hex。
-func NewForwardToken() string {
+// rand 失败（系统级异常）返回错误（P2-8 fail-closed），不再回退时间熵——
+// 时间派生的 token 可预测，用于指标抓取鉴权等价于无鉴权。
+func NewForwardToken() (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
-		// crypto/rand 失败属系统级异常，fallback 到时间熵（极罕见路径）
-		now := time.Now().UnixNano()
-		for i := range b {
-			b[i] = byte(now >> (uint(i%8) * 8))
-		}
+		return "", fmt.Errorf("generate forward token: crypto/rand failed: %w", err)
 	}
-	return hex.EncodeToString(b)
+	return hex.EncodeToString(b), nil
 }
 
 // EnsureForwardToken 返回当前配置；若开启但无 token（如旧数据/首次开启）则自动生成并落库。
 func EnsureForwardToken() (MetricsForward, error) {
 	m := LoadMetricsForward()
 	if m.Enabled && m.Token == "" {
-		m.Token = NewForwardToken()
+		tok, err := NewForwardToken()
+		if err != nil {
+			return m, err
+		}
+		m.Token = tok
 		if err := SaveMetricsForward(m); err != nil {
 			return m, err
 		}

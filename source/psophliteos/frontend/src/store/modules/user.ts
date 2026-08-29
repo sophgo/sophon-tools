@@ -132,15 +132,25 @@ export const useUserStore = defineStore({
         try {
           await ssoRegister(loginParams.username, token);
         } catch (regError) {
+          // 临时 token（默认密码首登，change_pass_required=true）被 register 拒绝：
+          // 属于"必须改密"而非登录失败——保留 token（改密接口 /api/v1/password 可用
+          // 临时 token 调用），转入改密引导表单；改密成功后重新登录即用正式 token。
+          const regStatus = (regError as any)?.response?.status;
+          const regData = (regError as any)?.response?.data;
+          if (regStatus === 403 && regData?.change_pass_required) {
+            this.setFirstLogin(true);
+            setLoginState(LoginStateEnum.CHANGE_PASSWORD);
+            return null;
+          }
           this.setToken(undefined);
           // 401/403（token 无效、bmssm 密钥不一致等）对用户都属于"建立会话失败"，
           // 直接给友好文案；网络异常等才透出具体错误。
-          const status = (regError as any)?.response?.status;
+          const status = regStatus;
           const regErrMsg =
             status === 401 || status === 403
               ? t('sys.login.registerFailed')
-              : (regError as any)?.response?.data?.error ||
-                (regError as any)?.response?.data?.error_message ||
+              : regData?.error ||
+                regData?.error_message ||
                 (regError as unknown as Error)?.message ||
                 t('sys.login.registerFailed');
           return Promise.reject(new Error(regErrMsg));
