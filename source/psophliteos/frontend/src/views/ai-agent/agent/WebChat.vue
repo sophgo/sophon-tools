@@ -859,22 +859,18 @@
         open: false,
       });
     } else if (kind === 'thought') {
-      // 同一逻辑思考常被后端拆成多个 message.create（thought-1/thought-2）：
-      // 累积到当前打开的思考折叠块，避免同一段思考被拆成两个「思考过程」气泡。
+      // thought 分段独立成泡，不做跨 message_id 合并（MYS-774）：服务端
+      // RoundAssistants 落库时相邻 thought 不合并、按 message_id 各存一条；若前端
+      // 把 thought-2 续接到 thought-1 上，history 合并时本地合并版与落库的两条
+      // keyOf 均不匹配 → 该回合思考被重复渲染（合并泡 + 两泡落库版）。各自成泡后
+      // 本地与落库形态一致，mergeHistory 可正确去重（同一 message_id 的增量更新
+      // 走 handleUpdate 的 openThoughtKey 累积，不受影响）。
       const existing = messageId
         ? s.messages.find((m) => m.key === messageId && m.kind === 'thought')
         : null;
       if (existing) {
         existing.content = accumulate(existing.content, content);
         openThoughtKey = existing.key as string;
-      } else if (openThoughtKey) {
-        const target = s.messages.find((m) => m.key === openThoughtKey);
-        if (target && target.kind === 'thought') {
-          target.content += content;
-        } else {
-          openThoughtKey = null;
-          pushThought(messageId, content);
-        }
       } else {
         pushThought(messageId, content);
       }
@@ -1086,7 +1082,16 @@
   // 重复存在），仅追加本地尚未被服务端覆盖的消息（在途流式内容、权限审批记录——
   // 服务端不回放 permission）。这样既不丢失历史，也不会因去重把不同轮次的相同内容合并掉。
   function mergeHistory(local: ChatMsg[], server: ChatMsg[]): ChatMsg[] {
-    const keyOf = (m: ChatMsg) => m.role + '|' + (m.kind || '') + '|' + (m.content || '');
+    // keyOf 对 assistant 纯文本做 kind 归一化（MYS-774）：本地流式 text 消息不存 kind
+    // （handleCreate 只记录 role/content），服务端 session.history 落库的 text 消息带
+    // kind='text'。若直接拼 kind，同一回复在「流式接收 + 回合结束 pullHistory 合并」时
+    // 会因 kind 不一致各保留一份 → 页面渲染出两条重复回复。归一化把 kind 为空或 text
+    // 的 assistant 消息视为同一类，新旧数据（含 localStorage 旧缓存）均可正确去重。
+    const keyOf = (m: ChatMsg) => {
+      let k = m.kind || '';
+      if (m.role === 'assistant' && (k === '' || k === 'text')) k = 'text';
+      return m.role + '|' + k + '|' + (m.content || '');
+    };
     const serverKeys = new Set(server.map(keyOf));
     return server.concat(local.filter((m) => !serverKeys.has(keyOf(m))));
   }
