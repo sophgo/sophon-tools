@@ -134,6 +134,76 @@ func TestWSAuthEmptyKeyAllowsAll(t *testing.T) {
 	conn.Close()
 }
 
+// TestWSCheckOrigin 验证同源校验：跨源浏览器 Origin 拒绝（CSWSH 防护），
+// 同源 Origin 与无 Origin（内部客户端）放行——不改 MYS-379 "免 key"裁定。
+func TestWSCheckOrigin(t *testing.T) {
+	mod := NewModule(DefaultConfig(), nil, nil)
+	h := newHub(mod, "")
+	srv := httptest.NewServer(http.HandlerFunc(h.serveWS))
+	t.Cleanup(srv.Close)
+	u := wsURL(srv.URL) + wsPath
+
+	// 无 Origin（Go 客户端/设备内部脚本）→ 放行
+	conn, _, err := websocket.DefaultDialer.Dial(u, nil)
+	if err != nil {
+		t.Fatalf("no-origin dial failed: %v", err)
+	}
+	conn.Close()
+
+	// 同源 Origin（与请求 Host 一致）→ 放行
+	hdrs := map[string][]string{"Origin": {srv.URL}}
+	conn2, _, err := websocket.DefaultDialer.Dial(u, hdrs)
+	if err != nil {
+		t.Fatalf("same-origin dial failed: %v", err)
+	}
+	conn2.Close()
+
+	// 跨源 Origin → 拒绝握手（CSWSH）
+	evilHdrs := map[string][]string{"Origin": {"https://evil.example"}}
+	_, resp, err := websocket.DefaultDialer.Dial(u, evilHdrs)
+	if err == nil {
+		t.Fatalf("cross-origin dial must be rejected")
+	}
+	if resp != nil && resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("cross-origin rejected with status %d, want 403", resp.StatusCode)
+	}
+	if resp == nil {
+		t.Fatalf("cross-origin dial should get an http response")
+	}
+}
+
+// TestWSConnLimit 验证并发连接上限：到达 maxWSConns 后新连接被 503 拒绝。
+func TestWSConnLimit(t *testing.T) {
+	mod := NewModule(DefaultConfig(), nil, nil)
+	h := newHub(mod, "")
+	srv := httptest.NewServer(http.HandlerFunc(h.serveWS))
+	t.Cleanup(srv.Close)
+	u := wsURL(srv.URL) + wsPath
+
+	opened := make([]*websocket.Conn, 0, maxWSConns)
+	t.Cleanup(func() {
+		for _, c := range opened {
+			c.Close()
+		}
+	})
+	for i := 0; i < maxWSConns; i++ {
+		conn, _, err := websocket.DefaultDialer.Dial(u, nil)
+		if err != nil {
+			t.Fatalf("dial %d/%d failed: %v", i+1, maxWSConns, err)
+		}
+		opened = append(opened, conn)
+	}
+
+	// 第 maxWSConns+1 个连接应被拒绝
+	_, resp, err := websocket.DefaultDialer.Dial(u, nil)
+	if err == nil {
+		t.Fatalf("connection beyond limit must be rejected")
+	}
+	if resp == nil || resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("limit rejection status = %v, want 503", resp)
+	}
+}
+
 // TestHubKeyRotation 验证 MYS-387 轮换同步：SetKey 后旧子协议立即失效（403），
 // 新子协议放行——无需重启 bmssm。
 // TestHubKeyRotation MYS-379 裁定后 key 不再参与 WS 鉴权：

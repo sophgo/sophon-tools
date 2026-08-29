@@ -13,7 +13,7 @@
 #     ARCH:    arm64 | amd64 | all（默认按子项目）
 #     env OUTPUT_DIR: 覆盖产物目录（默认 <repo>/output/<子项目>/）
 #
-# 范围: 16 个子项目（pmulti_video_qt 已按 MYSWY 决定排除）
+# 范围: 17 个子项目（pmulti_video_qt 已按 MYSWY 决定排除）
 #
 # 用法:
 #   bash docker/build-all.sh                    # 构建全部子项目(默认平台)
@@ -71,6 +71,7 @@ DEFAULT_ARCH[pdfss_cpp]=all
 DEFAULT_ARCH[pqt_batch_deployment]=all
 DEFAULT_ARCH[pqt_memory_edit]=all
 DEFAULT_ARCH[pSophUI]=arm64
+DEFAULT_ARCH[se-rag-core]=all
 # pmulti_video_qt: 按 MYSWY 决定（2026-08-08）不需要做，从统一构建范围排除
 DEFAULT_ARCH[psoph_phytool]=all
 DEFAULT_ARCH[pspacc_efuse_demo]=amd64
@@ -91,6 +92,7 @@ PLATFORMS[pdfss_cpp]="amd64/arm64/armbi/loongarch64/riscv64/sw_64/win-amd64/win-
 PLATFORMS[pqt_batch_deployment]="amd64(linux AppImage) + windows"
 PLATFORMS[pqt_memory_edit]="amd64(linux AppImage) + windows"
 PLATFORMS[pSophUI]="arm64(交叉Qt)"
+PLATFORMS[se-rag-core]="arm64/amd64(Go静态)"
 PLATFORMS[psoph_phytool]="通用脚本"
 PLATFORMS[pspacc_efuse_demo]="amd64/arm64"
 
@@ -118,7 +120,7 @@ declare -A DEPENDS
 DEPENDS[pbmsec]=psocbak
 
 if [[ "${LIST_ONLY:-0}" = "1" ]]; then
-  echo "=== sophon-tools 16 子项目构建清单（pmulti_video_qt 已排除，单镜像 ${IMAGE}） ==="
+  echo "=== sophon-tools 17 子项目构建清单（pmulti_video_qt 已排除，单镜像 ${IMAGE}） ==="
   for p in $(echo "${!DEFAULT_ARCH[@]}" | tr ' ' '\n' | sort); do
     printf "  %-22s 平台: %-40s 镜像: %s\n" "$p" "${PLATFORMS[$p]}" "${IMAGE}"
   done

@@ -92,7 +92,7 @@ CPU_MODEL=$(awk -F': ' '/model name/{print $2; exit}' /proc/cpuinfo)
 case "${CPU_MODEL}" in
     ""|null|cv186ah)
         if [ -d /proc/device-tree ]; then
-            _cv_match=$(find /proc/device-tree -name compatible -type f \
+            _cv_match=$(find -L /proc/device-tree -name compatible -type f \
                 -exec grep -la "cv84x6" {} + 2>/dev/null)
             if [ -n "${_cv_match}" ]; then
                 CPU_MODEL="cv84x6"
@@ -205,7 +205,7 @@ LOGFILE="$(readlink -f "${BASH_SOURCE[0]}").log"
 rm -f "${LOGFILE}"*
 exec > >(tee -a "$LOGFILE") 2>&1
 
-echo "[INFO] ota update tool, version: v1.5.2"
+echo "[INFO] ota update tool, version: v1.5.3"
 
 WORK_DIR=""
 if [ ! -d "${RUN_WORK_DIR}/sdcard" ]; then
