@@ -47,7 +47,7 @@ CPU_MODEL=$(awk -F': ' '/model name/{print $2; exit}' /proc/cpuinfo)
 # cv84x6 与 bm1688/cv186ah 同属 CV 家族，HDMI 走原生 DRM(card0) 通路，与 fl2000/USB 方案区分。
 if [ "$CPU_MODEL" != "bm1688" ] && [ "$CPU_MODEL" != "cv186ah" ] && [ "$CPU_MODEL" != "cv84x6" ] \
    && [ -d /proc/device-tree ]; then
-    if find /proc/device-tree -name compatible -type f -exec grep -laE "cvitek,cv84x6-" {} + 2>/dev/null | grep -q .; then
+    if find -L /proc/device-tree -name compatible -type f -exec grep -laE "cvitek,cv84x6-" {} + 2>/dev/null | grep -q .; then
         CPU_MODEL="cv84x6"
     fi
 fi

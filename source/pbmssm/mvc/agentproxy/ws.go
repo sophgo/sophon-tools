@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -16,6 +17,9 @@ import (
 
 // wsPath WebSocket 端点路径（对齐设计文档 §6.3）。
 const wsPath = "/agent/ws"
+
+// maxWSConns 单个 Hub 允许的最大 WS 并发连接数（防资源耗尽）。
+const maxWSConns = 16
 
 // wsIdleTimeout 连接无任何消息(含客户端应用层 ping)即关闭。
 // MYS-632:原 30 分钟过长,半开连接最长假死 30 分钟;缩短到 3 分钟,
@@ -190,15 +194,38 @@ func (h *Hub) BroadcastSession(acpID string, frames ...WSFrame) {
 // Sec-WebSocket-Protocol，否则握手失败），前端 PicoWs 携带 token.<forward_key>
 // 的行为保持兼容。
 func (h *Hub) serveWS(w http.ResponseWriter, r *http.Request) {
+	// CSWSH 防护：拒绝跨源浏览器握手。非浏览器客户端（无 Origin 头）放行，
+	// 与 MYS-379 "免 key"裁定一致；同源页面（ws://<host>/agent/ws）不受影响。
 	upgrader := websocket.Upgrader{
 		ReadBufferSize:  4096,
 		WriteBufferSize: 4096,
-		CheckOrigin:     func(r *http.Request) bool { return true },
+		CheckOrigin: func(r *http.Request) bool {
+			origin := r.Header.Get("Origin")
+			if origin == "" {
+				return true
+			}
+			u, err := url.Parse(origin)
+			if err != nil {
+				return false
+			}
+			return strings.EqualFold(u.Host, r.Host)
+		},
 		// 回显客户端请求的子协议（token.<key>），浏览器强制要求服务端回显
 		// Sec-WebSocket-Protocol，否则握手失败。
 		// 子协议只用于回显，不再做 key 校验（见函数头注释）。
 		Subprotocols: websocket.Subprotocols(r),
 	}
+
+	// 并发连接数上限：未鉴权端点面对内部自用场景，防误配置/异常客户端打爆资源。
+	h.mu.Lock()
+	over := len(h.conns) >= maxWSConns
+	h.mu.Unlock()
+	if over {
+		logger.Warn("agentproxy: ws connection limit %d reached, reject %s", maxWSConns, r.RemoteAddr)
+		http.Error(w, "too many connections", http.StatusServiceUnavailable)
+		return
+	}
+
 	wsConn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
