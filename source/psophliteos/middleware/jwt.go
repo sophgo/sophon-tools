@@ -40,8 +40,10 @@ func SetJWTSecretFilePath(p string) { jwtSecretFile = p }
 //     server.authSecret 时需要一并配置；默认部署 bmssm 生成随机 secret 持久化，
 //     无需设置。
 //  2. bmssm 持久化随机 secret（/var/lib/bmssm/jwt_secret，默认部署）。
-//  3. 开发默认值 ssm-dev-secret（bmssm EnsureSecret 失败时的回退，与之一致）。
-func bmssmJWTSecret() string {
+//  3. 两者皆不可得 → 返回错误（P2-6 fail-closed）。不再回退开发默认
+//     ssm-dev-secret：该值公开，回退时任意持有者可伪造 sub=admin 的 JWT 绕过
+//     本地敏感路由。正常部署 bmssm 启动即生成并持久化 secret，不受影响。
+func bmssmJWTSecret() (string, error) {
 	configured := ""
 	config.Conf.RLock()
 	if v := config.Conf.GetViper(); v != nil { // 配置未加载（如单测）视为无配置
@@ -49,24 +51,28 @@ func bmssmJWTSecret() string {
 	}
 	config.Conf.RUnlock()
 	if configured != "" && !devSecrets[configured] {
-		return configured
+		return configured, nil
 	}
 	if data, err := os.ReadFile(jwtSecretFile); err == nil {
 		if s := strings.TrimSpace(string(data)); s != "" {
-			return s
+			return s, nil
 		}
 	}
-	return DefaultSecret
+	return "", errors.New("bmssm jwt secret unavailable (no bmssm.authSecret and no " + jwtSecretFile + "); refusing to validate")
 }
 
 // CheckBMSSMToken 校验 token 是否为 bmssm 签发的有效 JWT（签名 + 有效期），
 // 成功返回 token 中的用户名（sub）与临时标志（temp，首次登录待改密）。
 func CheckBMSSMToken(tokenString string) (username string, temp bool, err error) {
+	secret, err := bmssmJWTSecret()
+	if err != nil {
+		return "", false, err
+	}
 	token, err := jwt.Parse(tokenString, func(t *jwt.Token) (interface{}, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, errors.New("unexpected signing method")
 		}
-		return []byte(bmssmJWTSecret()), nil
+		return []byte(secret), nil
 	})
 	if err != nil {
 		return "", false, err

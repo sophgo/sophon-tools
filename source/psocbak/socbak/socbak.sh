@@ -11,7 +11,7 @@ LOGFILE="$(readlink -f "${BASH_SOURCE[0]}").log"
 rm -f $LOGFILE*
 exec > >(tee -a "$LOGFILE") 2>&1
 
-echo "VERSION: v1.3.0"
+echo "VERSION: v1.3.1"
 date '+%Y-%m-%d %H:%M:%S'
 
 export SOC_BAK_ALL_IN_ONE=${SOC_BAK_ALL_IN_ONE:-}
@@ -134,13 +134,15 @@ socbak_cleanup() {
 	echo -e "\nINFO: Received a kill signal. Cleaning up..."
 	systemctl disable resize-helper.service
 	umount ${TGZ_FILES_PATH}/sparse-path* &>/dev/null
-	exit 0
 }
 # 注意：不能挂 ERR。tar 打包运行中的根文件系统时，"File removed before we read it"
 # 等瞬态警告会使 tar 以 1 退出（属预期、可容忍，追加 pass 本就带 --ignore-failed-read），
 # ERR trap 会把这类警告当成致命错误：cleanup 提前退出且 exit 0，备份被静默截断还报成功
 # （CV84X2 真机实测踩坑）。关键步骤失败由各处的 "$?" 显式检查处理。
-trap socbak_cleanup EXIT SIGHUP SIGINT SIGQUIT SIGTERM
+# 退出码规范（P2-5）：cleanup 本身不 exit 0（原实现会吞掉脚本失败退出码）；
+# 信号 trap 单独显式 exit 130 结束，正常/失败路径退出码由 EXIT trap 原样保留。
+trap 'socbak_cleanup; exit 130' SIGHUP SIGINT SIGQUIT SIGTERM
+trap socbak_cleanup EXIT
 
 SOCBAK_GET_TAR_SIZE_KB=0
 socbak_get_tar_size() {

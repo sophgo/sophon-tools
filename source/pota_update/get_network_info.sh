@@ -24,6 +24,11 @@ declare -A CONFIG_NETMASK
 declare -A CONFIG_GATEWAY
 declare -A CONFIG_DNS
 
+# 单引号包裹安全转义：值内的 ' 转义为 '\''，拼入生成命令不破坏引号结构（P2-4）
+_q() {
+    printf "%s" "${1//\'/\'\\\'\'}"
+}
+
 # 函数：检测网络管理器类型
 detect_network_manager() {
     if systemctl is-active --quiet NetworkManager 2>/dev/null; then
@@ -373,18 +378,18 @@ generate_bm_set_ip_command() {
             return 1
         fi
 
-        cmd="$cmd '${CONFIG_IP[$iface]}' '${CONFIG_NETMASK[$iface]}'"
+        cmd="$cmd '$(_q "${CONFIG_IP[$iface]}")' '$(_q "${CONFIG_NETMASK[$iface]}")'"
 
         # 添加网关（如果存在）
         if [ -n "${CONFIG_GATEWAY[$iface]}" ]; then
-            cmd="$cmd '${CONFIG_GATEWAY[$iface]}'"
+            cmd="$cmd '$(_q "${CONFIG_GATEWAY[$iface]}")'"
         else
             cmd="$cmd ''"
         fi
 
         # 添加DNS（如果存在）
         if [ -n "${CONFIG_DNS[$iface]}" ]; then
-            cmd="$cmd '${CONFIG_DNS[$iface]}'"
+            cmd="$cmd '$(_q "${CONFIG_DNS[$iface]}")'"
         else
             cmd="$cmd ''"
         fi

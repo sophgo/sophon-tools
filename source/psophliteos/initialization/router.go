@@ -70,9 +70,17 @@ func Routers(webFS fs.FS) *gin.Engine {
 		// 鉴权：token 必须是 bmssm 签发的有效 JWT，且其 sub 与请求的 username 一致，
 		// 防止未认证请求用任意 username/token 自造活跃会话（伪造活跃会话可顶掉合法
 		// 用户 → 登录 DoS）。sub 取自 bmssm 登录签发，与前端登录输入一致。
-		sub, _, err := middleware.CheckBMSSMToken(req.Token)
+		sub, temp, err := middleware.CheckBMSSMToken(req.Token)
 		if err != nil || sub != req.Username {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+			return
+		}
+		// 临时 token（默认密码首登、待改密）不得建立活跃会话：临时 token 人人可取
+		// （默认凭据公开），放行会允许任意人顶掉已登录管理员（会话 DoS）。首登用户
+		// 必须先在 bmssm 完成改密、以正式 token 重新登录。前端收到 change_pass_required
+		// 后转入改密引导（temp token 可调 /api/v1/password 改密）。
+		if temp {
+			c.JSON(http.StatusForbidden, gin.H{"error": "temporary token, change password required", "change_pass_required": true})
 			return
 		}
 		middleware.SSORegister(req.Username, req.Token)
@@ -126,7 +134,14 @@ func Routers(webFS fs.FS) *gin.Engine {
 		}
 		Router.Any("/api/v1/*any",
 			middleware.SSO(),
-			middleware.DeadlineMiddleware(global.OtaTimeOut),
+			// P2-7：不再对全路由放大 deadline 到 OTA 超时（慢速连接可占连接 12 分钟），
+			// 仅长窗口路径（长文件下载、OTA 固件下载、LLM 配置/测试）命中前缀才延长；
+			// 其余保持服务器层 30s 读/写超时边界。LLM 流式走 /agent/ws（下挂
+			// DeadlineMiddleware），不依赖此处。
+			middleware.LongPathDeadline(
+				[]string{"/api/v1/files/download", "/api/v1/ota/download", "/api/v1/llm-proxy"},
+				global.OtaTimeOut,
+			),
 			func(c *gin.Context) {
 				proxy.ServeHTTP(c.Writer, c.Request)
 			})

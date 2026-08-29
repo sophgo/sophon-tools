@@ -789,6 +789,9 @@ func TestIsValidPackageName(t *testing.T) {
 		{"test$(whoami).deb", false}, // 命令注入
 		{"my_app_v1.0.tgz", true},
 		{"valid-name-v1.0.tar.gz", true},
+		{"..tar.gz", false},     // 剥掉后缀得 ".."，解包根逃逸父目录（P2-2）
+		{"..zip", false},        // 同上
+		{".hidden.deb", false},  // 隐藏点名前缀拒绝
 	}
 
 	for _, tt := range tests {

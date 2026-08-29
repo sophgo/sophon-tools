@@ -226,16 +226,16 @@ func isBroadCidr(cidr string) bool { return isBroadMatch(cidr) }
 
 // CheckProtectDeny 拒绝屏蔽保护端口/全网段保护主机的意图。返回 ErrInvalidInput。
 // 覆盖三种绕过路径：
-//  1. port_deny + 全网段 src（空/0.0.0.0/0/0.0.0.0）且端口命中 protect → 拒绝
+//  1. port_deny 端口命中 protect → 一律拒绝（无论 src 宽窄）。管理机 IP 动态变化、
+//     窄段覆盖场景多，任何对管理端口（SSH/Web）的拒绝都有锁死管理通道风险
+//     （原仅拦全网段 src，窄段如 10/8、192.168/16 可绕过守卫——P1-2 收紧）。
 //  2. ip_blacklist + 全网段 cidr → 拒绝（黑名单无端口维度，全内网封禁即锁死保护主机）
 //  3. rate_limit 作用于保护端口 → 拒绝（recent+DROP 超限丢弃，等效拒绝）
 //
 // 与 Translate 语义对齐：src 缺省即匹配所有源，绝非"仅匹配自己"。
-//
-// 已知边界（S1/S2，前端已有提示）：特定源网段（如 10/8、172.16/12、192.168/16）的拒绝
-// 仍会合法通过守卫——企业内网管理机常落这些网段，可能锁死管理通道；且 protect 端口依赖
-// 实时探测（ss/netstat），探测不到时（如 sshd 以非标准进程名运行、systemd socket 激活）
-// 危险规则会被放行。Rebuild 不再有旧 Apply 的"临时放行 + 回滚计时器"兜底，配置需谨慎。
+// protect 端口依赖实时探测（ss/netstat）+ config 额外端口，探测不到的极端场景仍可能
+// 漏守卫——前端已加针对管理通道的强风险提示（建议 SSH 登录后由专业人士命令行操作）。
+// Rebuild 不再有旧 Apply 的"临时放行 + 回滚计时器"兜底，配置需谨慎。
 func CheckProtectDeny(it *Intent, protect []int) error {
 	if len(protect) == 0 {
 		return nil
@@ -249,11 +249,9 @@ func CheckProtectDeny(it *Intent, protect []int) error {
 		if err := json.Unmarshal([]byte(it.Params), &p); err != nil {
 			return nil // params 格式不匹配，由 Validate 负责报错
 		}
-		if isBroadMatch(p.Src) {
-			for _, port := range protect {
-				if p.Port == port {
-					return fmt.Errorf("%w: 不能拒绝保护端口 %d 的全网段流量", ErrInvalidInput, port)
-				}
+		for _, port := range protect {
+			if p.Port == port {
+				return fmt.Errorf("%w: 不能拒绝保护端口 %d（管理通道 SSH/Web，任何来源的拒绝都可能锁死设备管理，请 SSH 登录后由专业人士通过命令行操作）", ErrInvalidInput, port)
 			}
 		}
 	case IntentIPBlacklist:

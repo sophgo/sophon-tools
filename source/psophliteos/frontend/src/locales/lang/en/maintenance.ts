@@ -212,6 +212,7 @@ export default {
     portDeny: 'Port Deny',
     highRiskConfirmTitle: 'High-risk operation confirmation',
     highRiskConfirmContent: 'Confirmation code: {code} (valid for {secs}s). This high-risk operation takes effect immediately. Please confirm.',
+    highRiskWarn: '⚠️ Firewall changes may lock out the device management channel (SSH/Web) and are extremely dangerous! If the device becomes unreachable after applying, SSH into the device and have a professional restore it via command line.',
     challengeFail: 'Failed to fetch confirmation code',
     actionFail: 'Operation failed',
   },

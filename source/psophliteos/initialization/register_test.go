@@ -3,6 +3,8 @@ package initialization
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -58,10 +60,25 @@ func setProdTimeouts(t *testing.T) {
 	})
 }
 
+// setTestJWTSecret 写入临时持久化 bmssm JWT secret 并让 middleware 读取它
+// （P2-6 fail-closed 后，无 secret 时 register/本地路由全部 401，测试需显式
+// secret）；返回该 secret 供测试签发同格式 JWT。结束后恢复默认文件路径。
+func setTestJWTSecret(t *testing.T) string {
+	t.Helper()
+	const secret = "register-test-secret-0123456789abcdef"
+	path := filepath.Join(t.TempDir(), "jwt_secret")
+	if err := os.WriteFile(path, []byte(secret), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	middleware.SetJWTSecretFilePath(path)
+	t.Cleanup(func() { middleware.SetJWTSecretFilePath("/var/lib/bmssm/jwt_secret") })
+	return secret
+}
+
 // TestSSORegisterRequiresValidJWT 验证 register 鉴权闭环：
 // 未携带有效 bmssm JWT 的请求不能自造活跃会话。
 func TestSSORegisterRequiresValidJWT(t *testing.T) {
-	middleware.SetJWTSecretFilePath("")
+	secret := setTestJWTSecret(t)
 	config.LoadConfig()
 	setProdTimeouts(t)
 	gin.SetMode(gin.TestMode)
@@ -77,7 +94,7 @@ func TestSSORegisterRequiresValidJWT(t *testing.T) {
 	}
 
 	// 2) 有效 JWT 但 username 不匹配 sub → 401，不建立会话
-	otherTok := issueBMSSMToken(t, "other", middleware.DefaultSecret, false)
+	otherTok := issueBMSSMToken(t, "other", secret, false)
 	w = registerJSON(t, router, `{"username":"admin","token":"`+otherTok+`"}`)
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("register with mismatched username: status=%d want 401 body=%s", w.Code, w.Body.String())
@@ -87,7 +104,7 @@ func TestSSORegisterRequiresValidJWT(t *testing.T) {
 	}
 
 	// 3) 有效 JWT + username 匹配 sub → 200，活跃会话建立
-	validTok := issueBMSSMToken(t, "admin", middleware.DefaultSecret, false)
+	validTok := issueBMSSMToken(t, "admin", secret, false)
 	w = registerJSON(t, router, `{"username":"admin","token":"`+validTok+`"}`)
 	if w.Code != http.StatusOK {
 		t.Fatalf("register with valid jwt: status=%d want 200 body=%s", w.Code, w.Body.String())
@@ -97,7 +114,18 @@ func TestSSORegisterRequiresValidJWT(t *testing.T) {
 	}
 	t.Cleanup(func() { middleware.SSOLogout(validTok) })
 
-	// 4) 畸形 body → 400
+	// 4) temp token（默认密码首登）→ 403 change_pass_required（P1-1）
+	tempTok := issueBMSSMToken(t, "admin", secret, true)
+	w = registerJSON(t, router, `{"username":"admin","token":"`+tempTok+`"}`)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("register with temp jwt: status=%d want 403 body=%s", w.Code, w.Body.String())
+	}
+	// 原活跃会话（validTok）保持不变：temp register 被拒即未顶号
+	if act, ok := middleware.SSOActiveToken(); !ok || act != validTok {
+		t.Fatalf("active session changed after rejected temp register: act=%q ok=%v", act, ok)
+	}
+
+	// 5) 畸形 body → 400
 	w = registerJSON(t, router, `{"username":"admin"}`)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("register with incomplete body: status=%d want 400", w.Code)
@@ -107,7 +135,7 @@ func TestSSORegisterRequiresValidJWT(t *testing.T) {
 // TestProtectedLocalRoutesUnifiedAuth 验证本地敏感路由统一鉴权口径：
 // 无活跃会话（或 token 无效）一律 401，登录注册后放行。
 func TestProtectedLocalRoutesUnifiedAuth(t *testing.T) {
-	middleware.SetJWTSecretFilePath("")
+	secret := setTestJWTSecret(t)
 	config.LoadConfig()
 	setProdTimeouts(t)
 	gin.SetMode(gin.TestMode)
@@ -135,7 +163,7 @@ func TestProtectedLocalRoutesUnifiedAuth(t *testing.T) {
 	}
 
 	// 已注册活跃会话 + 携带该 token → 放行
-	tok := issueBMSSMToken(t, "admin", middleware.DefaultSecret, false)
+	tok := issueBMSSMToken(t, "admin", secret, false)
 	w = registerJSON(t, router, `{"username":"admin","token":"`+tok+`"}`)
 	if w.Code != http.StatusOK {
 		t.Fatalf("register failed: %d %s", w.Code, w.Body.String())
@@ -155,7 +183,7 @@ func TestProtectedLocalRoutesUnifiedAuth(t *testing.T) {
 	// 有效 JWT 但非活跃 token → 401（SSO 单会话比对）
 	// 注：JWT 的 iat 为秒级精度，同秒签发的同 sub token 字节相同（SSO 按字符串比对
 	// 视为同一会话），换一个 sub 保证是不同的 token。
-	otherTok := issueBMSSMToken(t, "admin2", middleware.DefaultSecret, false)
+	otherTok := issueBMSSMToken(t, "admin2", secret, false)
 	w = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodGet, "/api/device/version", nil)
 	req.Header.Set("Authorization", "Bearer "+otherTok)
@@ -164,18 +192,18 @@ func TestProtectedLocalRoutesUnifiedAuth(t *testing.T) {
 		t.Fatalf("unregistered valid JWT: status=%d want 401 body=%s", w.Code, w.Body.String())
 	}
 
-	// 活跃 token 是临时 token（首次登录改密场景）→ 本地敏感路由 403，与 bmssm 口径一致
-	tempTok := issueBMSSMToken(t, "admin", middleware.DefaultSecret, true)
+	// 临时 token（默认密码首登）：register 一律 403、不建活跃会话（P1-1），
+	// 故携带临时 token 访问本地路由同样 401（无活跃会话）。
+	tempTok := issueBMSSMToken(t, "admin", secret, true)
 	w = registerJSON(t, router, `{"username":"admin","token":"`+tempTok+`"}`)
-	if w.Code != http.StatusOK {
-		t.Fatalf("register temp token failed: %d %s", w.Code, w.Body.String())
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("register temp token must be 403 (change pass required): %d %s", w.Code, w.Body.String())
 	}
-	defer middleware.SSOLogout(tempTok)
 	w = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodGet, "/api/device/version", nil)
 	req.Header.Set("Authorization", "Bearer "+tempTok)
 	router.ServeHTTP(w, req)
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("temp token on protected local route: status=%d want 403 body=%s", w.Code, w.Body.String())
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("temp token (no active session) on protected local route: status=%d want 401 body=%s", w.Code, w.Body.String())
 	}
 }

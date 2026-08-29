@@ -151,7 +151,12 @@ func (a *MetricsFwdApi) SetEnabled(c *gin.Context) {
 	cfg := database.LoadMetricsForward()
 	cfg.Enabled = *req.Enabled
 	if cfg.Enabled && cfg.Token == "" {
-		cfg.Token = database.NewForwardToken()
+		tok, err := database.NewForwardToken()
+		if err != nil {
+			c.JSON(http.StatusOK, mvc.Fail(-1, "token generation failed: "+err.Error()))
+			return
+		}
+		cfg.Token = tok
 	}
 	if err := database.SaveMetricsForward(cfg); err != nil {
 		c.JSON(http.StatusOK, mvc.Fail(-1, "db error: "+err.Error()))
@@ -163,7 +168,12 @@ func (a *MetricsFwdApi) SetEnabled(c *gin.Context) {
 // RotateToken POST /api/device/metrics-forward/token —— 轮换 token（旧 token 立即失效）。
 func (a *MetricsFwdApi) RotateToken(c *gin.Context) {
 	cfg := database.LoadMetricsForward()
-	cfg.Token = database.NewForwardToken()
+	tok, err := database.NewForwardToken()
+	if err != nil {
+		c.JSON(http.StatusOK, mvc.Fail(-1, "token generation failed: "+err.Error()))
+		return
+	}
+	cfg.Token = tok
 	if err := database.SaveMetricsForward(cfg); err != nil {
 		c.JSON(http.StatusOK, mvc.Fail(-1, "db error: "+err.Error()))
 		return

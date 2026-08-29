@@ -3,6 +3,7 @@ package middleware
 import (
 	"net/http"
 	"sophliteos/logger"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -23,6 +24,29 @@ func DeadlineMiddleware(d time.Duration) gin.HandlerFunc {
 		}
 		if err := rc.SetWriteDeadline(dl); err != nil {
 			logger.Debug("extend write deadline failed on %s: %v", c.Request.URL.Path, err)
+		}
+		c.Next()
+	}
+}
+
+// LongPathDeadline 仅对命中长窗口前缀的路径延长连接 deadline（P2-7）。
+// 常规 /api/v1/* 反代保持服务器层 30s 读/写超时边界，慢速连接占用时间有界，
+// 不会因全路由放大到 OTA 超时（12m）造成连接耗尽面；真正需要长窗口的路径
+// （长文件下载、OTA 固件下载、LLM 配置/测试等）单独命中前缀才延长。
+func LongPathDeadline(paths []string, d time.Duration) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		for _, prefix := range paths {
+			if strings.HasPrefix(c.Request.URL.Path, prefix) {
+				rc := http.NewResponseController(c.Writer)
+				dl := time.Now().Add(d)
+				if err := rc.SetReadDeadline(dl); err != nil {
+					logger.Debug("extend read deadline failed on %s: %v", c.Request.URL.Path, err)
+				}
+				if err := rc.SetWriteDeadline(dl); err != nil {
+					logger.Debug("extend write deadline failed on %s: %v", c.Request.URL.Path, err)
+				}
+				break
+			}
 		}
 		c.Next()
 	}

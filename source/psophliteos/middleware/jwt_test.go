@@ -40,24 +40,16 @@ func resetJWTSecretFile(t *testing.T, path string) {
 	t.Cleanup(func() { jwtSecretFile = orig })
 }
 
-func TestCheckBMSSMTokenDefaultSecret(t *testing.T) {
-	// 无配置、无持久化文件 → 回退开发默认 secret（与 bmssm 空配置口径一致）
+func TestCheckBMSSMTokenFailClosedNoSecret(t *testing.T) {
+	// 无配置、无持久化文件 → fail-closed（P2-6）：不得回退开发默认 secret 校验，
+	// 否则持有公开默认值的任意人可伪造 sub=admin JWT 绕过本地敏感路由。
 	resetJWTSecretFile(t, "")
 
-	u, temp, err := CheckBMSSMToken(issueToken(t, "admin", DefaultSecret, false))
-	if err != nil || u != "admin" || temp {
-		t.Fatalf("valid token rejected: u=%q temp=%v err=%v", u, temp, err)
+	if _, _, err := CheckBMSSMToken(issueToken(t, "admin", DefaultSecret, false)); err == nil {
+		t.Fatal("default-secret token accepted without persisted secret (fail-closed violated)")
 	}
-
 	if _, _, err := CheckBMSSMToken("garbage-token"); err == nil {
 		t.Fatal("garbage token accepted")
-	}
-	if _, _, err := CheckBMSSMToken(issueToken(t, "admin", "wrong-secret", false)); err == nil {
-		t.Fatal("token signed with wrong secret accepted")
-	}
-	// 临时 token 标志透出
-	if _, temp, err := CheckBMSSMToken(issueToken(t, "admin", DefaultSecret, true)); err != nil || !temp {
-		t.Fatalf("temp flag not reported: temp=%v err=%v", temp, err)
 	}
 	// 缺 sub 的 token 拒绝
 	claims := jwt.MapClaims{"exp": time.Now().Add(time.Hour).Unix()}
@@ -67,19 +59,6 @@ func TestCheckBMSSMTokenDefaultSecret(t *testing.T) {
 	}
 	if _, _, err := CheckBMSSMToken(tok); err == nil {
 		t.Fatal("token without subject accepted")
-	}
-	// 已过期 token 拒绝
-	expired := jwt.MapClaims{
-		"sub": "admin",
-		"iat": time.Now().Add(-2 * time.Hour).Unix(),
-		"exp": time.Now().Add(-1 * time.Hour).Unix(),
-	}
-	exTok, err := jwt.NewWithClaims(jwt.SigningMethodHS256, expired).SignedString([]byte(DefaultSecret))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := CheckBMSSMToken(exTok); err == nil {
-		t.Fatal("expired token accepted")
 	}
 }
 
@@ -98,10 +77,33 @@ func TestCheckBMSSMTokenPersistedSecret(t *testing.T) {
 	if _, _, err := CheckBMSSMToken(issueToken(t, "admin", DefaultSecret, false)); err == nil {
 		t.Fatal("default-secret token accepted while persisted secret active")
 	}
+	// 临时 token 标志透出（持久化 secret 路径）
+	if _, temp, err := CheckBMSSMToken(issueToken(t, "admin", secret, true)); err != nil || !temp {
+		t.Fatalf("temp flag not reported: temp=%v err=%v", temp, err)
+	}
+	// 已过期 token 拒绝
+	expired := jwt.MapClaims{
+		"sub": "admin",
+		"iat": time.Now().Add(-2 * time.Hour).Unix(),
+		"exp": time.Now().Add(-1 * time.Hour).Unix(),
+	}
+	exTok, err := jwt.NewWithClaims(jwt.SigningMethodHS256, expired).SignedString([]byte(secret))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := CheckBMSSMToken(exTok); err == nil {
+		t.Fatal("expired token accepted")
+	}
 }
 
 func TestRequireBMSSMTokenMiddleware(t *testing.T) {
-	resetJWTSecretFile(t, "")
+	// 设置有效持久化 secret（fail-closed 后无 secret 时全部 401，无法测到中间件语义）
+	secret := "middleware-test-secret"
+	path := filepath.Join(t.TempDir(), "jwt_secret")
+	if err := os.WriteFile(path, []byte(secret), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	resetJWTSecretFile(t, path)
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.GET("/protected", RequireBMSSMToken(), func(c *gin.Context) {
@@ -127,7 +129,7 @@ func TestRequireBMSSMTokenMiddleware(t *testing.T) {
 	// 临时 token → 403（与 bmssm 口径一致：改密前无可用的受保护能力）
 	w = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodGet, "/protected", nil)
-	req.Header.Set("Authorization", "Bearer "+issueToken(t, "admin", DefaultSecret, true))
+	req.Header.Set("Authorization", "Bearer "+issueToken(t, "admin", secret, true))
 	router.ServeHTTP(w, req)
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("temp token: status=%d want 403", w.Code)
@@ -135,7 +137,7 @@ func TestRequireBMSSMTokenMiddleware(t *testing.T) {
 
 	// 有效 token（Authorization 头）→ 200 + user
 	w = httptest.NewRecorder()
-	tok := issueToken(t, "admin", DefaultSecret, false)
+	tok := issueToken(t, "admin", secret, false)
 	req = httptest.NewRequest(http.MethodGet, "/protected", nil)
 	req.Header.Set("Authorization", "Bearer "+tok)
 	router.ServeHTTP(w, req)
