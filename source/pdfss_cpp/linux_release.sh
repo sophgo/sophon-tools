@@ -68,8 +68,8 @@ elif [[ "$1" == "darwin" ]]; then
 	fi
 	make clean
 	MAC_ARCH="$(uname -m)"
-	EXT_LIB_FLAG_STATIC=" -Wl,-force_load,${build_shell}/libs/darwin_build/lib/libssh2.a -Wl,-force_load,${build_shell}/libs/darwin_build/lib/libmbedtls.a -Wl,-force_load,${build_shell}/libs/darwin_build/lib/libmbedx509.a -Wl,-force_load,${build_shell}/libs/darwin_build/lib/libmbedcrypto.a -Wl,-force_load,${build_shell}/libs/darwin_build/lib/libz.a "
-	EXT_LIB_FLAG_DYNAMIC=" -lpthread "
+	export EXT_LIB_FLAG_STATIC=" -Wl,-force_load,${build_shell}/libs/darwin_build/lib/libssh2.a -Wl,-force_load,${build_shell}/libs/darwin_build/lib/libmbedtls.a -Wl,-force_load,${build_shell}/libs/darwin_build/lib/libmbedx509.a -Wl,-force_load,${build_shell}/libs/darwin_build/lib/libmbedcrypto.a -Wl,-force_load,${build_shell}/libs/darwin_build/lib/libz.a "
+	export EXT_LIB_FLAG_DYNAMIC=" -lpthread "
 	EXT_FLAG=" -mmacosx-version-min=10.15 " ARCH="${MAC_ARCH}" BUILD_PATH="${build_shell}" CROSS_COMPILE="" LIBS_TYPE="darwin_build" NEED_DEBUG="${NEED_DEBUG}" make VERBOSE=1
 	mv dfss-cpp ${build_shell}/output/dfss-cpp-darwin-${MAC_ARCH}
 fi
