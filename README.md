@@ -35,7 +35,8 @@
 
 ### 一键全量 release（推荐）
 
-本仓库已接入统一构建工程（M1~M4）：16 个子项目全部提供统一接口 `release.sh`，由
+本仓库已接入统一构建工程（M1~M4）：15 个子项目注册到统一构建清单（pmulti_video_qt /
+psoph_phytool / pspacc_efuse_demo 默认不发版，见 [RELEASE.md](./RELEASE.md)），由
 Docker 统一镜像 `sophon-tools-build` 在容器内完成编译。**一条命令全量出包**：
 
 ```bash
