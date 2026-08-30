@@ -6,6 +6,8 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
 else
 	build_shell="$(dirname "$(readlink -f "$0")")"
 fi
+# 脚本路径自包含：以下相对路径（libs/src/output）均以脚本所在目录为基准
+cd "$build_shell"
 
 if [[ "$2" == "lib" ]]; then
 	pushd libs
