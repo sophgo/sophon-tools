@@ -1,6 +1,11 @@
 #!/bin/bash
 
-build_shell="$(dirname "$(readlink -f "$0")")"
+if [[ "$(uname -s)" == "Darwin" ]]; then
+	# macOS 没有 readlink -f
+	build_shell="$(cd "$(dirname "$0")" && pwd -P)"
+else
+	build_shell="$(dirname "$(readlink -f "$0")")"
+fi
 
 if [[ "$2" == "lib" ]]; then
 	pushd libs
@@ -53,5 +58,17 @@ elif [[ "$1" == "sw_64" ]]; then
 	make clean
 	EXT_LIB_FLAG_STATIC=" -static -Wl,-Bstatic -lssh2 -lmbedcrypto -lpthread -lz " EXT_LIB_FLAG_DYNAMIC=" " EXT_FLAG=" " ARCH="sw_64" BUILD_PATH="${build_shell}" CROSS_COMPILE="sw_64-sunway-linux-gnu-" LIBS_TYPE="${build_target}" NEED_DEBUG="${NEED_DEBUG}" make VERBOSE=1
 	mv dfss-cpp ${build_shell}/output/dfss-cpp-linux-sw_64
+elif [[ "$1" == "darwin" ]]; then
+	# macOS 本机编译（x86_64 / arm64 取决于当前 Mac），交叉编译 darwin 需要 macOS SDK，仅本机构建
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		echo "ERROR: darwin 目标必须在 macOS 主机上构建（需要 macOS SDK/工具链）。非 macOS 主机请构建 linux/win 目标。" >&2
+		exit 1
+	fi
+	make clean
+	MAC_ARCH="$(uname -m)"
+	EXT_LIB_FLAG_STATIC=" -Wl,-force_load,${build_shell}/libs/darwin_build/lib/libssh2.a -Wl,-force_load,${build_shell}/libs/darwin_build/lib/libmbedtls.a -Wl,-force_load,${build_shell}/libs/darwin_build/lib/libmbedx509.a -Wl,-force_load,${build_shell}/libs/darwin_build/lib/libmbedcrypto.a -Wl,-force_load,${build_shell}/libs/darwin_build/lib/libz.a "
+	EXT_LIB_FLAG_DYNAMIC=" -lpthread "
+	EXT_FLAG=" " ARCH="${MAC_ARCH}" BUILD_PATH="${build_shell}" CROSS_COMPILE="" LIBS_TYPE="darwin_build" NEED_DEBUG="${NEED_DEBUG}" make VERBOSE=1
+	mv dfss-cpp ${build_shell}/output/dfss-cpp-darwin-${MAC_ARCH}
 fi
 popd

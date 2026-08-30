@@ -1,13 +1,18 @@
 #!/bin/bash
 # pdfss_cpp 统一构建接口 (M1 规范 v0.1)
 # 用法: bash release.sh [ARCH] [VERSION]
-#   ARCH:    host(amd64) | arm64 | all（默认 host；all=8 架构，含 win/loongarch64/riscv64/sw_64/armbi）
+#   ARCH:    host(amd64) | arm64 | darwin（macOS 本机） | all（默认 host；all=8 架构，含 win/loongarch64/riscv64/sw_64/armbi）
 #   VERSION: 显式版本号（默认读 git_version 文件）
 #   env OUTPUT_DIR: 产物目录（默认 <repo>/output/pdfss_cpp/）
 # 注意: 多架构交叉需要对应工具链，全部在 sophon-tools-build 镜像内预置。
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+if [[ "$(uname -s)" == "Darwin" ]]; then
+	# macOS 没有 readlink -f
+	SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
+else
+	SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+fi
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ARCH="${1:-host}"
 OUTPUT_DIR="${OUTPUT_DIR:-$REPO_ROOT/output/pdfss_cpp}"
@@ -19,10 +24,11 @@ echo "==> pdfss_cpp version=$VERSION"
 case "$ARCH" in
   host|amd64) TARGETS="host" ;;
   arm64)      TARGETS="aarch64" ;;
-  all)        TARGETS="host aarch64 armbi loongarch64 riscv64 sw_64 mingw64 mingw" ;;
+  all)        TARGETS="host aarch64 armbi loongarch64 riscv64 sw_64 mingw64 mingw" ;; # darwin 需在 macOS 主机单独构建
+  darwin)     TARGETS="darwin" ;;
   sw_64)      TARGETS="sw_64" ;;
   loongarch64) TARGETS="loongarch64" ;;
-  *) echo "ERROR: ARCH 必须是 host|amd64|arm64|all，得到: $ARCH" >&2; exit 1 ;;
+  *) echo "ERROR: ARCH 必须是 host|amd64|arm64|darwin|all，得到: $ARCH" >&2; exit 1 ;;
 esac
 
 mkdir -p "$OUTPUT_DIR"
