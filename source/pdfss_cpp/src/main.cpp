@@ -14,12 +14,10 @@
 #include <iostream>
 #include <mutex>
 #include <string>
-#if defined(__GNUC__) && !defined(__clang__)
-#if (__GNUC__ > 4) && (__GNUC__ < 8)
+#if defined(__GNUC__) && !defined(__clang__) && (__GNUC__ > 4) && (__GNUC__ < 8)
 #include <experimental/filesystem>
 #else
 #include <filesystem>
-#endif
 #endif
 
 #include "cxxopts.hpp"
@@ -40,6 +38,10 @@
 #include <unistd.h>
 #endif
 
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
+
 extern "C" {
 #include "log.h"
 }
@@ -54,7 +56,7 @@ extern "C" {
 
 using namespace std;
 using json = nlohmann::json;
-#if (__GNUC__ > 4) && (__GNUC__ < 8)
+#if defined(__GNUC__) && !defined(__clang__) && (__GNUC__ > 4) && (__GNUC__ < 8)
 namespace fs = std::experimental::filesystem;
 #else
 namespace fs = std::filesystem;
@@ -1240,6 +1242,17 @@ std::string getExecutablePath() {
   memset(buffer_in, 0, 1024);
 #ifdef _WIN32
   GetModuleFileNameA(NULL, buffer_in, sizeof(buffer_in));
+#elif defined(__APPLE__)
+  uint32_t path_size = sizeof(buffer_in);
+  if (_NSGetExecutablePath(buffer_in, &path_size) != 0) {
+    return std::string();
+  }
+  // 解析符号链接，与 Linux /proc/self/exe 行为一致
+  char resolved_path[PATH_MAX];
+  if (realpath(buffer_in, resolved_path) != nullptr) {
+    return std::string(resolved_path);
+  }
+  return std::string(buffer_in);
 #else
   ssize_t len = readlink("/proc/self/exe", buffer_in, sizeof(buffer_in) - 1);
   if (len != -1) {

@@ -24,7 +24,11 @@ ifeq ($(NEED_DEBUG),1)
 	STRIP_CMD := @echo "Skip stripping in debug mode"
 else
     BUILD_TYPE_FLAG := -O3
-	STRIP_CMD := $(STRIP) -v --strip-debug --strip-unneeded
+	ifeq ($(shell uname -s),Darwin)
+	    STRIP_CMD := $(STRIP) -x
+	else
+	    STRIP_CMD := $(STRIP) -v --strip-debug --strip-unneeded
+	endif
 endif
 
 CFLAGS = $(EXT_FLAG) -I. $(INCLUDE) $(LIBS) -std=gnu99 -Wall ${BUILD_TYPE_FLAG}

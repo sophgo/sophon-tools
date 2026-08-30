@@ -15,6 +15,8 @@ def get_architecture():
             return 'linux-amd64'
         elif system == 'windows':
             return 'win-amd64.exe'
+        elif system == 'darwin':
+            return 'darwin-x86_64'
     if arch == 'amd64':
         if system == 'linux':
             return 'linux-amd64'
@@ -23,6 +25,9 @@ def get_architecture():
     elif arch == 'i686' or arch == 'x86':
         if system == 'windows':
             return 'win-i686.exe'
+    elif arch == 'arm64':
+        if system == 'darwin':
+            return 'darwin-arm64'
     elif arch == 'aarch64':
         if system == 'linux':
             return 'linux-arm64'
