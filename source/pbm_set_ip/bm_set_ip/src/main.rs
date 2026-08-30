@@ -678,6 +678,11 @@ enum NetManager {
 }
 
 fn main() {
+    // 版本信息固定为执行首行（MYS-809 发版规范：可执行文件首行即版本号）。
+    // GIT_TAG_COMMIT 由 build.rs 注入（release.sh 传 BM_SET_IP_GIT_VERSION，回退
+    // .git_version 文件），见 build.rs。
+    println!("bm_set_ip version: {}", env!("GIT_TAG_COMMIT"));
+
     let cfg = match Config::parse() {
         Ok(c) => c,
         Err(e) => {
@@ -702,7 +707,6 @@ fn main() {
             .expect("failed to execute sudo");
         exit(status.code().unwrap_or(1));
     }
-    println!("bm_set_ip version: {}", concat!(env!("GIT_TAG_COMMIT")));
 
     let net_manager = detect_net_manager();
     match net_manager {

@@ -2,9 +2,12 @@
 # pbm_set_ip 统一构建接口 (M1 规范 v0.1)
 # 用法: bash release.sh [ARCH] [VERSION]
 #   ARCH:    arm64 | amd64 | all（默认 arm64，musl 全静态）
-#   VERSION: 显式版本号（默认从 git describe 生成 v<tag>-<sha>-<ts>）
+#   VERSION: 显式版本号（默认读 bm_set_ip/.git_version 单一权威文件，如 v26.08.30）
 #   env OUTPUT_DIR: 产物目录（默认 <repo>/output/pbm_set_ip/）
-#   env BM_SET_IP_GIT_VERSION: 注入编译时版本（默认取 git describe，避免改写仓库跟踪文件）
+#   env BM_SET_IP_GIT_VERSION: 注入编译时版本（默认取 .git_version，避免改写仓库跟踪文件）
+#
+# 版本管理规范：.git_version 为唯一权威版本来源（与 dfss git_version 一致）；
+# build.rs 通过 env GIT_TAG_COMMIT 注入，程序执行第一行打印版本信息。
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
@@ -22,7 +25,7 @@ case "$ARCH" in
   *) echo "ERROR: ARCH 必须是 arm64|amd64|all，得到: $ARCH" >&2; exit 1 ;;
 esac
 
-VERSION="${2:-$(git -C "$SCRIPT_DIR" describe --tags --abbrev=0 2>/dev/null || echo v0.0.0)-$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)-$(date -u '+%Y%m%d_%H%M%S')}"
+VERSION="${2:-$(cat "$CARGO_DIR/.git_version" 2>/dev/null || echo v0.0.0)}"
 
 mkdir -p "$OUTPUT_DIR"
 echo "==> pbm_set_ip version=$VERSION"
