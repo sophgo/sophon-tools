@@ -70,6 +70,7 @@ dfss的install功能可以方便地下载和安装软件包。
 * macOS 目标需在 Mac 本机上编译（交叉编译 darwin 需要 macOS SDK，Linux 环境下无法构建），`./linux_release.sh darwin lib` 会按当前 Mac 芯片生成对应架构产物
 * Intel Mac (x86_64) 生成 `dfss-cpp-darwin-x86_64`，Apple Silicon (arm64) 生成 `dfss-cpp-darwin-arm64`
 * 编译依赖 Xcode Command Line Tools（提供 clang/链接器等），依赖库 zlib/mbedtls/libssh2 会由 `libs/build_libs.sh` 自动构建静态版本
+* 最低支持 macOS 10.15（`std::filesystem` 与 `clock_gettime` 依赖，构建时已显式指定 `-mmacosx-version-min=10.15`）
 
 ### 默认编译器版本
 

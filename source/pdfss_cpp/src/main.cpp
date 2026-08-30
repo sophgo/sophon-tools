@@ -1247,6 +1247,12 @@ std::string getExecutablePath() {
   if (_NSGetExecutablePath(buffer_in, &path_size) != 0) {
     return std::string();
   }
+  // 解析符号链接，与 Linux /proc/self/exe 行为一致
+  char resolved_path[PATH_MAX];
+  if (realpath(buffer_in, resolved_path) != nullptr) {
+    return std::string(resolved_path);
+  }
+  return std::string(buffer_in);
 #else
   ssize_t len = readlink("/proc/self/exe", buffer_in, sizeof(buffer_in) - 1);
   if (len != -1) {

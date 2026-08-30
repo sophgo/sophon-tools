@@ -43,7 +43,11 @@ unset AR
 unset CROSS_COMPILE
 
 build_target="${build_shell}/${1}_build"
-sudo rm -rf "${build_target}"
+if [[ "$(uname -s)" == "Darwin" ]]; then
+	rm -rf "${build_target}"
+else
+	sudo rm -rf "${build_target}"
+fi
 
 if [[ "$1" == "host" ]]; then
 	# host gcc
