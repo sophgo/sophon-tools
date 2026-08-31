@@ -515,7 +515,9 @@
           name: fileName,
           product,
           fileName,
-          moduleName: 'ctrl',
+          // 单板设备无"控制板/核心板"模块概念，模块语义为 soc（系统固件）；
+          // 多板（SE6/8）才是 ctrl（控制板）。执行仍按 product 分派到 SOC 路径。
+          moduleName: deviceInfoStore.isSingleBoard ? 'soc' : 'ctrl',
           cmdFlag: '',
           version: '',
           flashData: flashVal,
@@ -524,7 +526,12 @@
           // 高危操作二次确认（MYS-389）：executeHazard 自动取确认码携带 confirm，
           // 否则 bmssm 返回 403（confirmation required）。
           await executeHazard(executeUpgradeApi, execBody);
-          createMessage.success(t('maintenance.systemUpdate.controlStartUpload'), 4);
+          createMessage.success(
+            deviceInfoStore.isSingleBoard
+              ? t('maintenance.systemUpdate.socStartUpload')
+              : t('maintenance.systemUpdate.controlStartUpload'),
+            4,
+          );
         } catch (e) {
           const errMsg = (e as any)?.response?.data?.error_message || (e as any)?.message || '升级触发失败';
           createMessage.error(errMsg, 4);
@@ -577,7 +584,8 @@
           name: fileName,
           product,
           fileName,
-          moduleName: 'ctrl',
+          // 单板设备模块语义为 soc（系统固件），多板（SE6/8）才是 ctrl
+          moduleName: deviceInfoStore.isSingleBoard ? 'soc' : 'ctrl',
           cmdFlag: '',
           version: '',
           flashData: flashVal,
@@ -585,7 +593,12 @@
         try {
           // 高危操作二次确认（MYS-389）：executeHazard 自动取确认码携带 confirm
           await executeHazard(executeUpgradeApi, execBody);
-          createMessage.success(t('maintenance.systemUpdate.controlStartUpload'), 4);
+          createMessage.success(
+            deviceInfoStore.isSingleBoard
+              ? t('maintenance.systemUpdate.socStartUpload')
+              : t('maintenance.systemUpdate.controlStartUpload'),
+            4,
+          );
         } catch (e) {
           const errMsg = (e as any)?.response?.data?.error_message || (e as any)?.message || '升级触发失败';
           createMessage.error(errMsg, 4);
