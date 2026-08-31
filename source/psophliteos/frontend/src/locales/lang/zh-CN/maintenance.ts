@@ -20,6 +20,7 @@ export default {
     selectUpgradeCoreBoard: '请选择核心板',
     updateStatus: '升级状态',
     controlStartUpload: '控制板开始升级，预计需要5分钟',
+    socStartUpload: '系统升级已开始，预计需要5分钟',
     softwareUpdateStatus: '软件正在升级，请您耐心等待！',
     selectNeedFile: '请选择需要上传的文件',
     fileFormat: '请选择需要上传的.tgz格式文件',

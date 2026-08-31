@@ -19,6 +19,7 @@ export default {
     selectUpgradeCoreBoard: 'Please Select Core Board',
     updateStatus: 'Upgrade Status',
     controlStartUpload: 'Start upgrding..., please wait five minites.',
+    socStartUpload: 'System upgrade started, about 5 minutes.',
     softwareUpdateStatus: 'Start upgrding..., please wait a minite！.',
     selectNeedFile: 'Please select file to upload',
     fileFormat: 'Only .tgz files are supported',
