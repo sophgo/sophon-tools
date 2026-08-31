@@ -98,10 +98,13 @@ cp "$SRC_DEBIAN/conffiles" "$STAGE/DEBIAN/conffiles"
 cp "$SRC_DEBIAN/postinst" "$STAGE/DEBIAN/postinst"
 cp "$SRC_DEBIAN/prerm"    "$STAGE/DEBIAN/prerm"
 cp "$SRC_DEBIAN/postrm"   "$STAGE/DEBIAN/postrm"
+# 空 preinst：新旧包都带同名维护脚本，避免 dpkg 升级时触发
+# "unable to remove obsolete info file '...preinst'" 报错中断解包
+cp "$SRC_DEBIAN/preinst"  "$STAGE/DEBIAN/preinst"
 # md5sums（仅数据文件，路径去前导 ./，对齐 deb policy）
 ( cd "$STAGE" && find . -type f ! -path './DEBIAN/*' -printf '%P\0' | sort -z | xargs -0 md5sum ) \
   > "$STAGE/DEBIAN/md5sums"
-chmod 0755 "$STAGE/DEBIAN/postinst" "$STAGE/DEBIAN/prerm" "$STAGE/DEBIAN/postrm"
+chmod 0755 "$STAGE/DEBIAN/postinst" "$STAGE/DEBIAN/prerm" "$STAGE/DEBIAN/postrm" "$STAGE/DEBIAN/preinst"
 chmod 0644 "$STAGE/DEBIAN/control" "$STAGE/DEBIAN/conffiles" "$STAGE/DEBIAN/md5sums"
 
 # 6. 打包（--root-owner-group 让数据树属主 root:root）

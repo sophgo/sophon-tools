@@ -2,7 +2,7 @@
 
 # DEFAULT_VERSION 是 sophliteos 版本号的唯一权威定义；release.sh / build-deb
 # 从此处提取默认值（规范：版本号在工具代码中更新，仓库根 release 禁止传版本号进来）。
-DEFAULT_VERSION="2.2.9"
+DEFAULT_VERSION="2.2.10"
 
 # 生成 release_version.txt：module/commit/buildname/buildtime。
 # commit/branch 全部来自 git 实时读取，不再写入硬编码残留。

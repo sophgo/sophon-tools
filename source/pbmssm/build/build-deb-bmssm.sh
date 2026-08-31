@@ -142,8 +142,11 @@ assemble_deb() {
   cp build/deb/postinst "$DEBROOT/DEBIAN/postinst"
   cp build/deb/prerm    "$DEBROOT/DEBIAN/prerm"
   cp build/deb/postrm   "$DEBROOT/DEBIAN/postrm"
+  # 空 preinst：新旧包都带同名维护脚本，避免 dpkg 升级时触发
+  # "unable to remove obsolete info file '...preinst'" 报错中断解包
+  cp build/deb/preinst  "$DEBROOT/DEBIAN/preinst"
   cp build/deb/conffiles "$DEBROOT/DEBIAN/conffiles"
-  chmod 0755 "$DEBROOT/DEBIAN/postinst" "$DEBROOT/DEBIAN/prerm" "$DEBROOT/DEBIAN/postrm"
+  chmod 0755 "$DEBROOT/DEBIAN/postinst" "$DEBROOT/DEBIAN/prerm" "$DEBROOT/DEBIAN/postrm" "$DEBROOT/DEBIAN/preinst"
   chmod 0644 "$DEBROOT/DEBIAN/control" "$DEBROOT/DEBIAN/conffiles"
 
   # md5sums

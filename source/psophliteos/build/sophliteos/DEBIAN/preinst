@@ -1,0 +1,5 @@
+#!/bin/bash
+# 空 preinst：新旧 deb 均携带同名维护脚本（exit 0），避免 dpkg 升级时在
+# "旧登记有 preinst 而磁盘无此文件"的环境（重装/中断/刷镜像）触发
+# "unable to remove obsolete info file '...preinst'" 报错中断解包（发版实测）。
+exit 0
