@@ -145,8 +145,16 @@ assemble_deb() {
   # 空 preinst：新旧包都带同名维护脚本，避免 dpkg 升级时触发
   # "unable to remove obsolete info file '...preinst'" 报错中断解包
   cp build/deb/preinst  "$DEBROOT/DEBIAN/preinst"
+  # 全量可选控制成员：同理由，保证新旧包 info 成员集合一致，dpkg 升级直接覆盖
+  # 而非走"删除 obsolete info"分支（overlayfs 重装环境下该分支会因 whiteout
+  # 条目报 ENOENT 中断解包，bmssm/sophliteos 发版实测）
+  cp build/deb/changelog "$DEBROOT/DEBIAN/changelog"
+  cp build/deb/triggers  "$DEBROOT/DEBIAN/triggers"
+  cp build/deb/templates "$DEBROOT/DEBIAN/templates"
+  cp build/deb/config    "$DEBROOT/DEBIAN/config"
   cp build/deb/conffiles "$DEBROOT/DEBIAN/conffiles"
-  chmod 0755 "$DEBROOT/DEBIAN/postinst" "$DEBROOT/DEBIAN/prerm" "$DEBROOT/DEBIAN/postrm" "$DEBROOT/DEBIAN/preinst"
+  chmod 0755 "$DEBROOT/DEBIAN/postinst" "$DEBROOT/DEBIAN/prerm" "$DEBROOT/DEBIAN/postrm" "$DEBROOT/DEBIAN/preinst" "$DEBROOT/DEBIAN/config"
+  chmod 0644 "$DEBROOT/DEBIAN/changelog" "$DEBROOT/DEBIAN/triggers" "$DEBROOT/DEBIAN/templates"
   chmod 0644 "$DEBROOT/DEBIAN/control" "$DEBROOT/DEBIAN/conffiles"
 
   # md5sums

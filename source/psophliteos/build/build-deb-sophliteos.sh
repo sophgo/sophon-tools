@@ -101,10 +101,18 @@ cp "$SRC_DEBIAN/postrm"   "$STAGE/DEBIAN/postrm"
 # 空 preinst：新旧包都带同名维护脚本，避免 dpkg 升级时触发
 # "unable to remove obsolete info file '...preinst'" 报错中断解包
 cp "$SRC_DEBIAN/preinst"  "$STAGE/DEBIAN/preinst"
+# 全量可选控制成员：同理由，保证新旧包 info 成员集合一致，dpkg 升级直接覆盖
+# 而非走"删除 obsolete info"分支（overlayfs 重装环境下该分支会因 whiteout
+# 条目报 ENOENT 中断解包，bmssm/sophliteos 发版实测）
+cp "$SRC_DEBIAN/changelog" "$STAGE/DEBIAN/changelog"
+cp "$SRC_DEBIAN/triggers"  "$STAGE/DEBIAN/triggers"
+cp "$SRC_DEBIAN/templates" "$STAGE/DEBIAN/templates"
+cp "$SRC_DEBIAN/config"    "$STAGE/DEBIAN/config"
 # md5sums（仅数据文件，路径去前导 ./，对齐 deb policy）
 ( cd "$STAGE" && find . -type f ! -path './DEBIAN/*' -printf '%P\0' | sort -z | xargs -0 md5sum ) \
   > "$STAGE/DEBIAN/md5sums"
-chmod 0755 "$STAGE/DEBIAN/postinst" "$STAGE/DEBIAN/prerm" "$STAGE/DEBIAN/postrm" "$STAGE/DEBIAN/preinst"
+chmod 0755 "$STAGE/DEBIAN/postinst" "$STAGE/DEBIAN/prerm" "$STAGE/DEBIAN/postrm" "$STAGE/DEBIAN/preinst" "$STAGE/DEBIAN/config"
+chmod 0644 "$STAGE/DEBIAN/changelog" "$STAGE/DEBIAN/triggers" "$STAGE/DEBIAN/templates"
 chmod 0644 "$STAGE/DEBIAN/control" "$STAGE/DEBIAN/conffiles" "$STAGE/DEBIAN/md5sums"
 
 # 6. 打包（--root-owner-group 让数据树属主 root:root）
