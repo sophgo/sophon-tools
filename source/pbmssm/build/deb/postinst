@@ -21,6 +21,27 @@ if ! dpkg -s iptables-persistent >/dev/null 2>&1; then
     DEBIAN_FRONTEND=noninteractive apt-get install -y -qq iptables-persistent || true
 fi
 
+# 清理 ≤1.2.x 升级残留（MYS-824 实测踩坑）：旧包把 unit 装在 /etc/systemd/system 下，
+# 且指向旧二进制 /bin/bmssm；systemd 中 /etc 优先级高于 /usr/lib，二者叠加会持续拉起
+# 旧版本。升级到本包时删除该残留（仅当指向旧路径，保留用户手动改过的 unit）。
+ETC_UNIT=/etc/systemd/system/bmssm.service
+if [ -f "$ETC_UNIT" ] && ! grep -q "^ExecStart=/opt/sophon/bmssm/bin/bmssm" "$ETC_UNIT"; then
+    echo "postinst: removing stale $ETC_UNIT (points to old path)" >&2
+    rm -f "$ETC_UNIT"
+fi
+
+# CV84X2 Ubuntu 22.04 rootfs（overlay）上 systemd 实测不识别 /usr/lib/systemd/system 下
+# 的新装 unit（unit-paths 含该路径但 cat/status 均报 not found，与 sophliteos 同现象），
+# 此处兜底：daemon-reload 后 unit 仍不可见则显式落到 /etc/systemd/system（优先级最高）。
+LIB_UNIT=/usr/lib/systemd/system/bmssm.service
+if [ -f "$LIB_UNIT" ]; then
+    systemctl daemon-reload
+    if ! systemctl cat bmssm >/dev/null 2>&1; then
+        echo "postinst: unit not visible from $LIB_UNIT, installing to $ETC_UNIT" >&2
+        cp "$LIB_UNIT" "$ETC_UNIT"
+    fi
+fi
+
 systemctl daemon-reload
 systemctl enable bmssm 2>/dev/null || true
 # 升级时重启新版本；首次安装时启动。失败不阻断 dpkg
