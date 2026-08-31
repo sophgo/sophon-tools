@@ -143,6 +143,10 @@
     downloading.value = true;
     try {
       const { url, name } = await getLogDownloadUrl();
+      // 原生 <a download>：浏览器流式落盘（低内存、自带进度条）。
+      // 已知限制：真实下载 hop 的失败（如会话被顶掉导致 401）由浏览器侧呈现为
+      // 保存了一个错误响应体（小文件），此前的 fetch+blob 方案同样不弹提示；
+      // 与 files/download 的 <a download> 行为一致，属可接受的权衡。
       const a = document.createElement('a');
       a.href = url;
       a.download = name;
