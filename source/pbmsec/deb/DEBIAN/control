@@ -5,4 +5,6 @@ Architecture: all
 Maintainer: sophon
 Priority: optional
 Depends: tftpd-hpa
-Description: This is a tool for se6/8.
+Description: Sophon SE6/SE8 security management tool
+ Provides sysbak secure backup, system update integrity checks and
+ tftpd-hpa based firmware delivery for SE6/SE8 platforms.

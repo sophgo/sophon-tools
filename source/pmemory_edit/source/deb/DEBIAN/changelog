@@ -1,0 +1,5 @@
+memory_edit
+
+2.12.1:
+  * support CV84X2 (dts auto-detect fallback)
+  * review fixes
