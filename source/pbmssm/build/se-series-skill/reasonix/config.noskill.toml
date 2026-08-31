@@ -1,5 +1,6 @@
-# Reasonix 默认配置（bmssm agentproxy 托管）— 无 SE7 skill/agent 设定的出厂默认
+# Reasonix 默认配置（bmssm agentproxy 托管）— 无 SE 系列 skill/agent 设定的出厂默认
 # HOME=/data/sophon/reasonix-home，与系统正常安装 reasonix 的 ~/.reasonix 隔离。
+# 不预载任何 skill；提示词为通用 SE 系列技术支持助手（不体现具体型号）。
 config_version = 6
 default_model = "sophnet"
 
@@ -23,6 +24,11 @@ mode  = "auto"   # 普通写/bash 自动放行（工作目录内少打扰）；�
 bash    = "off"   # 本机无 bubblewrap：须关 bash 系统沙箱才能 unconfined shell（平台要求）
 network = true
 # 不配 workspace_root/allow_write/forbid_read：不做路径圈地（用户选择）
+
+[agent]
+# 通用 SE 系列技术支持助手设定（"agent 设定"，见同 home 下 prompts/system.md）
+system_prompt_file = "/data/sophon/reasonix-home/prompts/system.md"
+temperature        = 0.0
 
 [environment]
 enabled = true

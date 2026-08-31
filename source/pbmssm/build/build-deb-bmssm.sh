@@ -10,10 +10,12 @@
 #               省略则只打 bmssm（Reasonix 需后续单独部署）。
 #
 # 产物（两个变体，均内嵌 bmssm；REASONIX_BIN 提供时均内嵌 reasonix）：
-#   release/bmssm_${VERSION}_${ARCH}_noskill.deb   出厂默认：Reasonix（默认配置，无 SE7 skill/agent 设定）
-#   release/bmssm_${VERSION}_${ARCH}_se7.deb        带 SE7：预载 se7 知识库 skill + SE7 agent 提示词
+#   release/bmssm_${VERSION}_${ARCH}_noskill.deb   出厂默认：Reasonix（默认配置，无 SE 系列 skill）
+#                                                    + 通用 SE 系列 agent 提示词（不体现具体型号）
+#   release/bmssm_${VERSION}_${ARCH}_seskill.deb   带 SE 系列 skill：预载 se-series-knowledge-base
+#                                                    多型号知识库（SE7/SE8/SE9）+ SE 系列 agent 提示词
 #                                                    + se-rag 检索二进制 + 对应 Reasonix 配置
-# SE7 资源来源：build/se7-skill/（SKILL.md + docs + Go 索引 + 提示词 + 两套 reasonix 配置）
+# SE 系列资源来源：build/se-series-skill/（SKILL.md + docs + Go 索引 + 提示词 + 两套 reasonix 配置）
 set -e
 
 cd "$(dirname "$0")/.."
@@ -30,7 +32,7 @@ else
   bash build/build-bmssm.sh "$VERSION"
 fi
 
-# 构建 se-rag 检索核心二进制（仅 se7 变体需要；x86/arm64 均静态）
+# 构建 se-rag 检索核心二进制（仅 seskill 变体需要；x86/arm64 均静态）
 SE_RAG_BIN=""
 if [ -d ../se-rag-core ]; then
   SE_RAG_DIR="$(cd ../se-rag-core && pwd)"
@@ -40,11 +42,11 @@ if [ -d ../se-rag-core ]; then
   echo "✓ 已构建 se-rag ($ARCH): $SE_RAG_BIN"
 fi
 
-SE7_SRC="$(cd build/se7-skill && pwd)"   # SE7 skill/提示词/索引等资源
+SE_SRC="$(cd build/se-series-skill && pwd)"   # SE 系列 skill/提示词/索引等资源
 
-# assemble_deb <suffix> <with_se7: 1|0>
+# assemble_deb <suffix> <with_seskill: 1|0>
 assemble_deb() {
-  local suffix="$1" with_se7="$2"
+  local suffix="$1" with_seskill="$2"
   local DEBROOT="build/deb/bmssm-root"
   local OUT="release/bmssm_${VERSION}_${ARCH}${suffix}.deb"
 
@@ -100,33 +102,38 @@ assemble_deb() {
   local RXM="$DEBROOT/data/sophon/reasonix-home"
   mkdir -p "$RXM/.reasonix"
 
-  if [ "$with_se7" = "1" ]; then
+  if [ "$with_seskill" = "1" ]; then
     if [ -z "$SE_RAG_BIN" ]; then
-      echo "ERROR: [_se7] 变体需要 se-rag 二进制（source/se-rag-core 缺失或构建失败），中止" >&2
+      echo "ERROR: [_seskill] 变体需要 se-rag 二进制（source/se-rag-core 缺失或构建失败），中止" >&2
       rm -rf "$DEBROOT"
       exit 1
     fi
-    # ===== SE7 变体：预载 skill + agent 提示词 + se-rag =====
+    # ===== seskill 变体：预载 SE 系列多型号 skill + agent 提示词 + se-rag =====
     # 1) se-rag 检索二进制
     mkdir -p "$RXM/bin"
     cp "$SE_RAG_BIN" "$RXM/bin/se-rag"
     chmod 0755 "$RXM/bin/se-rag"
-    # 2) se7 知识库 skill（SKILL.md + docs + Go 索引）
-    local SK="$RXM/skills/se7-knowledge-base"
-    mkdir -p "$SK/rag/data_se7_go"
-    cp "$SE7_SRC/SKILL.md" "$SK/SKILL.md"
-    cp -r "$SE7_SRC/docs/." "$SK/docs/"
-    cp -a "$SE7_SRC/rag-data/se7/." "$SK/rag/data_se7_go/"   # 含 .complete 完成标记（Open 依赖）
-    # 3) SE7 agent 提示词
+    # 2) se-series-knowledge-base skill（SKILL.md + docs/se7,se8,se9 + 三套 Go 索引）
+    local SK="$RXM/skills/se-series-knowledge-base"
+    mkdir -p "$SK/rag"
+    cp "$SE_SRC/SKILL.md" "$SK/SKILL.md"
+    cp -r "$SE_SRC/docs/." "$SK/docs/"
+    for p in se7 se8 se9; do
+      mkdir -p "$SK/rag/data_$p"
+      cp -a "$SE_SRC/rag/data_$p/." "$SK/rag/data_$p/"   # 含 .complete 完成标记（Open 依赖）
+    done
+    # 3) SE 系列 agent 提示词（多型号版）
     mkdir -p "$RXM/prompts"
-    cp "$SE7_SRC/prompts/system.md" "$RXM/prompts/system.md"
-    # 4) SE7 Reasonix 配置（引用 skill + system_prompt_file）
-    cp "$SE7_SRC/reasonix/config.toml" "$RXM/.reasonix/config.toml"
-    echo "  ✓ [$suffix] 已预载 SE7 skill + agent 提示词 + se-rag"
+    cp "$SE_SRC/prompts/system.seskill.md" "$RXM/prompts/system.md"
+    # 4) SE 系列 Reasonix 配置（引用 skill + system_prompt_file）
+    cp "$SE_SRC/reasonix/config.toml" "$RXM/.reasonix/config.toml"
+    echo "  ✓ [$suffix] 已预载 SE 系列 skill（SE7/SE8/SE9）+ agent 提示词 + se-rag"
   else
-    # ===== 默认（noskill）变体：Reasonix 默认配置，无 SE7 skill/提示词 =====
-    cp "$SE7_SRC/reasonix/config.noskill.toml" "$RXM/.reasonix/config.toml"
-    echo "  ✓ [$suffix] 默认配置（无 SE7 skill/提示词）"
+    # ===== 默认（noskill）变体：Reasonix 默认配置，无 SE 系列 skill；带通用提示词 =====
+    mkdir -p "$RXM/prompts"
+    cp "$SE_SRC/prompts/system.noskill.md" "$RXM/prompts/system.md"
+    cp "$SE_SRC/reasonix/config.noskill.toml" "$RXM/.reasonix/config.toml"
+    echo "  ✓ [$suffix] 默认配置（无 SE 系列 skill，通用提示词）"
   fi
 
   # DEBIAN 控制文件
@@ -150,7 +157,7 @@ assemble_deb() {
 
 mkdir -p release
 assemble_deb "_noskill" 0
-assemble_deb "_se7" 1
+assemble_deb "_seskill" 1
 
 echo
 echo "=== 产物 ==="
