@@ -1,2 +1,3 @@
-1.draft version
-
+sophon-tools sophliteos
+  * deb 携带全量 dpkg 控制成员（preinst/changelog/triggers/templates/config），
+    规避 overlayfs 重装环境下 dpkg obsolete-info 删除报错。

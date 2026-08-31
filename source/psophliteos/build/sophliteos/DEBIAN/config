@@ -1,0 +1,3 @@
+#!/bin/sh
+# placeholder（无 debconf 交互）
+exit 0
