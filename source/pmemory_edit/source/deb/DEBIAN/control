@@ -4,4 +4,6 @@ Version: MEMORY_EDIT_VERSION
 Architecture: arm64
 Maintainer: sophon
 Priority: optional
-Description: This is a memory layout modification tool for Sophon SoCs.
+Description: Memory layout configuration tool for Sophon SoCs
+ Adjust memory layout / partition parameters on Sophon BM168x and CV84X2
+ based devices, with dts auto-detection fallback.

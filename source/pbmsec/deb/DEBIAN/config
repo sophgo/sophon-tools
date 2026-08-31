@@ -1,0 +1,4 @@
+#!/bin/sh
+# bmsec uses no debconf. Placeholder config keeps control-member parity
+# between releases (avoids dpkg obsolete-info cleanup errors on overlayfs).
+exit 0

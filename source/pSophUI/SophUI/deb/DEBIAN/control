@@ -4,5 +4,7 @@ Version: 1.6.10
 Architecture: arm64
 Maintainer: sophgo
 Priority: optional
-Description: HDMI UI for Sophgo SoCs.
+Description: Sophon HDMI UI (SophUI) for SE7/SE9/CV84X2 boards
+ Drives HDMI output and system status display via the SophonHDMI service;
+ supports multiple SoC families with chip auto-detection.
 

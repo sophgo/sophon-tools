@@ -1,0 +1,7 @@
+Template: bmsec/internal
+Type: note
+Description: bmsec internal (no debconf)
+ This package does not use debconf interaction. The config/templates members
+ are shipped so that new and old deb releases carry the same dpkg control
+ member set, avoiding dpkg "unable to remove obsolete info file" failures
+ on overlayfs-based images.
