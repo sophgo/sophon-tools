@@ -110,7 +110,7 @@
   import { Checkbox, CheckboxGroup, Upload, Input, InputPassword } from 'ant-design-vue';
   import { UploadOutlined } from '@ant-design/icons-vue';
   import { useMessage } from '/@/hooks/web/useMessage';
-  import { upgradeApi, executeUpgradeApi } from '/@/api/maintenance/index';
+  import { upgradeApi, executeUpgradeApi, executeHazard } from '/@/api/maintenance/index';
   import { storeToRefs } from 'pinia';
   import { useDeviceInfo } from '/@/store/modules/overview';
   import { buildUUID } from '/@/utils/uuid';
@@ -279,10 +279,14 @@
         flashData: false,
       };
       try {
-        await executeUpgradeApi(execBody);
+        // OTA 执行属高危操作（MYS-389）：executeHazard 自动取二次确认码携带 confirm，
+        // 否则 bmssm 返回 403（confirmation required）。
+        await executeHazard(executeUpgradeApi, execBody);
         item.responseData = data;
       } catch (e) {
         item.status = 'error';
+        const errMsg = (e as any)?.response?.data?.error_message || (e as any)?.message || '升级触发失败';
+        createMessage.error(errMsg, 4);
         return { success: false, error: e };
       }
       item.status = 'success';

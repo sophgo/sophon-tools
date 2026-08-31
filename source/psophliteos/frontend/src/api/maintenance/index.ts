@@ -235,9 +235,53 @@ export function modComIP(params: any) {
   return defHttp.post({ url: Api.modComIP, params });
 }
 
-// 执行 OTA 升级（ssm POST /ota/upgrade）
+// 执行 OTA 升级（ssm POST /ota/upgrade）。MYS-389：需带二次确认码 confirm，
+// 缺失/过期 bmssm 返回 403 confirmation required。错误交给调用方（executeHazard）统一处理，
+// 不触发 defHttp 默认 403 弹窗（避免误导性"访问被禁止"提示）。
 export function executeUpgradeApi(params: any) {
-  return defHttp.post({ url: '/v1/ota/upgrade', params });
+  return defHttp.post({ url: '/v1/ota/upgrade', params }, { errorMessageMode: 'none' });
+}
+
+export interface HazardChallenge {
+  code: string;
+  expiresInSecs: number;
+}
+
+// 高危操作二次确认码（GET /v1/hazard/challenge，经反代到 bmssm）。
+export function getHazardChallenge() {
+  return defHttp.get<HazardChallenge>({ url: '/v1/hazard/challenge' }, { errorMessageMode: 'none' });
+}
+
+// executeHazard MYS-389 高危操作二次确认执行：取一次性确认码 → 带 confirm 调用 apiFn。
+// 确认码过期（bmssm 403 confirmation required）时自动重新取码重试一次，保证与已确认的
+// 操作语义一致（对齐防火墙 rebuild 流程）；取码失败/重试仍 403 时抛出，由调用方提示。
+export async function executeHazard(
+  apiFn: (params: any) => Promise<any>,
+  execBody: Record<string, any>,
+): Promise<any> {
+  let retried = false;
+  for (;;) {
+    let code = '';
+    try {
+      const ch = await getHazardChallenge();
+      code = ch?.code || '';
+    } catch (e) {
+      throw e;
+    }
+    if (!code) {
+      throw new Error('获取二次确认码失败');
+    }
+    try {
+      return await apiFn({ ...execBody, confirm: code });
+    } catch (e: any) {
+      const msg = e?.response?.data?.error_message || e?.message || '';
+      if (!retried && msg.includes('confirmation required')) {
+        retried = true;
+        continue;
+      }
+      throw e;
+    }
+  }
 }
 
 // 远程单条命令执行（ssm POST /hardware/exec）

@@ -156,6 +156,7 @@
     uploadPartFile,
     checkFileList,
     executeUpgradeApi,
+    executeHazard,
   } from '/@/api/maintenance/index';
   import { useDeviceInfo } from '/@/store/modules/overview';
   import { useMessage } from '/@/hooks/web/useMessage';
@@ -519,8 +520,17 @@
           version: '',
           flashData: flashVal,
         };
-        await executeUpgradeApi(execBody);
-        createMessage.success(t('maintenance.systemUpdate.controlStartUpload'), 4);
+        try {
+          // 高危操作二次确认（MYS-389）：executeHazard 自动取确认码携带 confirm，
+          // 否则 bmssm 返回 403（confirmation required）。
+          await executeHazard(executeUpgradeApi, execBody);
+          createMessage.success(t('maintenance.systemUpdate.controlStartUpload'), 4);
+        } catch (e) {
+          const errMsg = (e as any)?.response?.data?.error_message || (e as any)?.message || '升级触发失败';
+          createMessage.error(errMsg, 4);
+          item.status = 'error';
+          return { success: false, error: e };
+        }
         item.status = 'success';
         return { success: true, error: null };
       }
@@ -573,10 +583,12 @@
           flashData: flashVal,
         };
         try {
-          await executeUpgradeApi(execBody);
+          // 高危操作二次确认（MYS-389）：executeHazard 自动取确认码携带 confirm
+          await executeHazard(executeUpgradeApi, execBody);
           createMessage.success(t('maintenance.systemUpdate.controlStartUpload'), 4);
         } catch (e) {
-          // defHttp 已提示错误
+          const errMsg = (e as any)?.response?.data?.error_message || (e as any)?.message || '升级触发失败';
+          createMessage.error(errMsg, 4);
           item.status = 'error';
           return { success: false, error: e };
         }
