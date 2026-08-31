@@ -5,6 +5,20 @@ import sys
 import argparse
 import subprocess
 import shutil
+import stat
+
+def ensure_binary_executable(binary_path: str) -> None:
+    # Windows 的 PE 程序由 .exe 扩展名识别，无需执行位；其余平台权限缺失时补上 x 位
+    if os.name == "nt":
+        return
+    if os.access(binary_path, os.X_OK):
+        return
+    try:
+        os.chmod(binary_path, os.stat(binary_path).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+        if not os.access(binary_path, os.X_OK):
+            print("WARNING: unable to set exec permission on " + binary_path)
+    except Exception as e:
+        print("WARNING: failed to set exec permission on " + binary_path + " : " + str(e))
 
 def get_architecture():
     arch = platform.machine().lower()
@@ -77,6 +91,7 @@ def main():
     if binary_path is None:
         print("Binary file for architecture " + binary_arch + " not found at " + binary_path)
         return 1
+    ensure_binary_executable(binary_path)
     args = sys.argv[1:]
     try:
         ret = os.system(binary_path + " " + ' '.join(args))
@@ -111,6 +126,7 @@ def install_package(package_name: str, extra_args: list) -> int:
     if binary_path is None:
         print("The binary file for architecture " + binary_arch + " is not found")
         return 1
+    ensure_binary_executable(binary_path)
 
     dfss_home_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     dfss_cache_dir = os.path.join(dfss_home_dir, '.cache')
