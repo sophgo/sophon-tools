@@ -48,7 +48,8 @@ bmssm(:9779)为后端,sophliteos(:8080)反代 `/api/v1/*` 到 bmssm 并补充少
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/audit` | 审计日志 |
-| GET | `/logs/download` | 流式 tar.gz 打包整个 `/var/log` 目录 |
+| GET | `/logs/overview` | 日志下载清单：将抓取哪些日志（`/var/log` 顶层聚合：名称/类型/大小/条目数/修改时间） |
+| GET | `/logs/download` | 流式 tar.gz 打包整个 `/var/log` 目录（鉴权：`?token=` 或 Authorization 头；支持 `<a download>` 原生流式） |
 | GET | `/alarms` | 告警历史 |
 
 **性能指标历史存档**

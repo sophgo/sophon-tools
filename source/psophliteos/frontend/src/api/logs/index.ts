@@ -1,6 +1,6 @@
 import { defHttp } from '/@/utils/http/axios';
-import { getToken } from '/@/utils/auth';
 import { useGlobSetting } from '/@/hooks/setting';
+import { getSsoTicket } from '/@/api/sso';
 import { AlarmRecordParams } from './model/index';
 
 const { apiUrl } = useGlobSetting();
@@ -10,7 +10,9 @@ enum Api {
   OperRecord = '/v1/audit',
   // ssm 告警历史端点（经 sophliteos 反代）
   AlarmRecord = '/v1/alarms',
-  // ssm 系统日志下载（流式 tar.gz: /var/log/kern* + syslog*）
+  // 日志下载清单：将抓取哪些日志（/var/log 顶层聚合）
+  LogOverview = '/v1/logs/overview',
+  // ssm 系统日志下载（流式 tar.gz 整个 /var/log）
   LogDownload = '/v1/logs/download',
 }
 
@@ -32,18 +34,36 @@ export function getOperRecord(params: AlarmRecordParams) {
   }));
 }
 
-// 系统日志下载：GET /v1/logs/download，ssm 端流式打包 tar.gz（kern*+syslog*），
-// 浏览器收 blob 后触发下载。返回 {data:Blob, headers} 供视图取 content-disposition。
-export async function LogDownload(): Promise<{ data: Blob; headers: Record<string, string> }> {
-  const token = getToken();
-  const resp = await fetch(`${apiUrl}${Api.LogDownload}`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  });
-  if (!resp.ok) {
-    throw new Error(`log download failed: ${resp.status}`);
-  }
-  const data = await resp.blob();
-  const headers: Record<string, string> = {};
-  resp.headers.forEach((v, k) => (headers[k.toLowerCase()] = v));
-  return { data, headers };
+// 日志下载清单项（与 bmssm /logs/overview 契约对齐）。
+export interface LogOverviewEntry {
+  name: string;
+  path: string;
+  type: 'file' | 'dir' | 'symlink';
+  size: number; // 目录为递归合计；symlink 为 0
+  files: number; // 目录为子项数（不含顶层自身）；文件/软链为 1
+  mtime: number; // Unix 秒
+}
+
+export interface LogOverview {
+  root: string;
+  total_size: number;
+  total_entries: number;
+  entries: LogOverviewEntry[];
+}
+
+// 日志下载清单：下载前展示"将抓取哪些日志"。走 defHttp（带 Authorization 头）。
+export function getLogOverview() {
+  return defHttp.get<LogOverview>({ url: Api.LogOverview });
+}
+
+// 系统日志下载：原生 <a download>，浏览器流式落盘（低内存、自带下载进度条），
+// 后台在设备端流式 tar+gzip，不落盘整包、不占设备存储。
+// MYS-383：<a download> 无法带 Authorization 头，先以 Bearer 头换取一次性票据，
+// URL 只带 ?ticket=；sophliteos 校验后改写为 ?token= 转发 bmssm，JWT 不出 URL。
+export async function getLogDownloadUrl(): Promise<{ url: string; name: string }> {
+  const { ticket } = await getSsoTicket();
+  return {
+    url: `${apiUrl}${Api.LogDownload}?ticket=${encodeURIComponent(ticket)}`,
+    name: 'sys_log.tgz',
+  };
 }

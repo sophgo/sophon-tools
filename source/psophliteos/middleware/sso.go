@@ -124,9 +124,10 @@ var (
 )
 
 // queryTicketPaths 允许 ?ticket= 的一次性票据白名单路径。
-// 除这两个无法携带 Authorization 头的传输外，其余路径一律只认 Authorization 头。
+// 除这些无法携带 Authorization 头的传输外，其余路径一律只认 Authorization 头。
 var queryTicketPaths = map[string]bool{
 	"/api/v1/files/download":    true, // <a download> 流式下载
+	"/api/v1/logs/download":     true, // 系统日志 <a download> 流式下载（同 files/download）
 	"/api/v1/hardware/terminal": true, // 浏览器 WebSocket 终端
 }
 

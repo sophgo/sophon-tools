@@ -135,11 +135,16 @@ func Routers(webFS fs.FS) *gin.Engine {
 		Router.Any("/api/v1/*any",
 			middleware.SSO(),
 			// P2-7：不再对全路由放大 deadline 到 OTA 超时（慢速连接可占连接 12 分钟），
-			// 仅长窗口路径（长文件下载、OTA 固件下载、LLM 配置/测试）命中前缀才延长；
-			// 其余保持服务器层 30s 读/写超时边界。LLM 流式走 /agent/ws（下挂
-			// DeadlineMiddleware），不依赖此处。
+			// 仅长窗口路径（长文件下载、OTA 固件下载、LLM 配置/测试、日志打包下载）
+			// 命中前缀才延长；其余保持服务器层 30s 读/写超时边界。LLM 流式走
+			// /agent/ws（下挂 DeadlineMiddleware），不依赖此处。
 			middleware.LongPathDeadline(
-				[]string{"/api/v1/files/download", "/api/v1/ota/download", "/api/v1/llm-proxy"},
+				[]string{
+					"/api/v1/files/download",
+					"/api/v1/logs/download",
+					"/api/v1/ota/download",
+					"/api/v1/llm-proxy",
+				},
 				global.OtaTimeOut,
 			),
 			func(c *gin.Context) {
