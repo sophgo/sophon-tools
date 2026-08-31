@@ -1147,3 +1147,50 @@ func TestCompatEndpointsRequireAuth(t *testing.T) {
 		})
 	}
 }
+
+// TestCompatExecuteUpgradeNoSelfLock 回归：ExecuteUpgrade 入队后 worker 不应因
+// 自身 handler 仍持有 ota.upgrade 互斥锁而误判"hazard lock: already in progress"。
+// 此前 handler 全程持锁、worker 入队即抢 ota.flash 锁，二者冲突致首个 workflow
+// 必被误杀（MYS-451 引入，10.42.0.123 真机复现）。修复后 handler 入队前即释放锁，
+// flow 应正常到达终态 Success。
+func TestCompatExecuteUpgradeNoSelfLock(t *testing.T) {
+	r := setupCompatTest(t)
+	token := getNormalToken(t, r)
+
+	body, _ := json.Marshal(OtaVersion{
+		Product: "SE7", ModuleName: "soc", FileName: "soc_fw.tgz", Name: "race-test",
+		Version: "1.0.0", Confirm: hazard.NewConfirmCode(),
+	})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ota/upgrade", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	r.ServeHTTP(w, req)
+	assertSsmOK(t, w.Body.Bytes(), "upgrade enqueue")
+
+	// 等待 worker 消费到终态（dryRun flash → Success）
+	deadline := time.Now().Add(2 * time.Second)
+	var gotStatus int
+	var gotInfo string
+	for time.Now().Before(deadline) {
+		w2 := httptest.NewRecorder()
+		req2 := httptest.NewRequest(http.MethodGet, "/api/v1/ota/workflow", nil)
+		req2.Header.Set("Authorization", "Bearer "+token)
+		r.ServeHTTP(w2, req2)
+		resp := assertSsmOK(t, w2.Body.Bytes(), "list")
+		if arr, ok := resp.Result.([]interface{}); ok && len(arr) > 0 {
+			if m, ok := arr[0].(map[string]interface{}); ok {
+				gotStatus = int(m["status"].(float64))
+				gotInfo, _ = m["info"].(string)
+				if gotStatus == ota.StatusSuccess || gotStatus == ota.StatusFail {
+					break
+				}
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if gotStatus != ota.StatusSuccess {
+		t.Errorf("workflow 终态 status=%d info=%q, want Success(%d)；首个 OTA 不应因自身 handler 锁被误杀",
+			gotStatus, gotInfo, ota.StatusSuccess)
+	}
+}
