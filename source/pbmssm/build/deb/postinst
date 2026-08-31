@@ -11,14 +11,11 @@ mkdir -p /var/lib/bmssm /var/log/bmssm
 # DB 文件由 bmssm 启动时显式 chmod 0600（database.InitDB）
 chmod 0700 /var/lib/bmssm
 
-# 确保 iptables + iptables-persistent 已装（firewall 规则持久化依赖）
-if ! command -v iptables >/dev/null 2>&1; then
-    DEBIAN_FRONTEND=noninteractive apt-get update -qq
-    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq iptables || true
-fi
-if ! dpkg -s iptables-persistent >/dev/null 2>&1; then
-    DEBIAN_FRONTEND=noninteractive apt-get update -qq
-    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq iptables-persistent || true
+# iptables/iptables-persistent 由 control Recommends 声明，apt 安装本包时自动满足；
+# 不在 postinst 内 apt-get：维护脚本在 dpkg 持锁阶段执行，apt 会与之抢
+# /var/lib/dpkg/lock-frontend 报 "Could not get lock"（发版实测）。缺失仅提示。
+if ! command -v iptables >/dev/null 2>&1 || ! dpkg -s iptables-persistent >/dev/null 2>&1; then
+    echo "WARN: firewall 依赖 iptables/iptables-persistent 未就绪，请手动执行: sudo apt-get install -y iptables iptables-persistent" >&2
 fi
 
 # 清理 ≤1.2.x 升级残留（MYS-824 实测踩坑）：旧包把 unit 装在 /etc/systemd/system 下，
