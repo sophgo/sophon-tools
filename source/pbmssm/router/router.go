@@ -77,6 +77,11 @@ func Register(r *gin.Engine) {
 	// 流式落盘，避免 XHR blob 把大文件整块读入内存。
 	r.GET("/api/v1/files/download", fileCtrl.Download)
 
+	// 系统日志下载（流式 tar.gz: 整个 /var/log）：不走 Auth 中间件，handler 内
+	// 从 query ?token= 或 Authorization 头鉴权（与 files/download 同理，
+	// 支持浏览器原生 <a download> 流式落盘）。
+	r.GET("/api/v1/logs/download", logsCtrl.DownloadLogs)
+
 	// 受保护：其余都需要 Auth 中间件
 	// logout 也在此组，便于读 c.Get("user") 记审计
 	api := r.Group("/api/v1")
@@ -93,8 +98,8 @@ func Register(r *gin.Engine) {
 		// 高危操作二次确认码（MYS-389）：任何 reboot/shutdown/OTA/install 前先取码
 		api.GET("/hazard/challenge", hwCtrl.Challenge)
 
-		// 系统日志下载（流式 tar.gz: /var/log/kern* + syslog*）
-		api.GET("/logs/download", logsCtrl.DownloadLogs)
+		// 日志下载清单：将抓取哪些日志（/var/log 顶层聚合），供前端下载前展示
+		api.GET("/logs/overview", logsCtrl.LogOverview)
 
 		// 告警历史
 		api.GET("/alarms", alarmCtrl.ListAlarms)

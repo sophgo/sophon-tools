@@ -127,6 +127,31 @@ func TestTicketFlowOnWhitelistedPath(t *testing.T) {
 	}
 }
 
+// 系统日志下载同样支持 <a download> 一次性票据（queryTicketPaths 新增白名单路径）。
+func TestTicketOnLogsDownloadPath(t *testing.T) {
+	r := ssoTestRouter()
+	resetSSOState()
+	SSORegister("alice", "token-a")
+
+	ticket := SSOIssueTicket("token-a")
+	if ticket == "" {
+		t.Fatal("SSOIssueTicket returned empty")
+	}
+	w := ssoProbe(r, "GET", "/api/v1/logs/download", "", "ticket="+ticket)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ticket on logs/download: want 200, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "token=token-a") || strings.Contains(w.Body.String(), "ticket=") {
+		t.Fatalf("query rewrite failed, got body: %s", w.Body.String())
+	}
+
+	// 同一票据重放 → 401
+	w = ssoProbe(r, "GET", "/api/v1/logs/download", "", "ticket="+ticket)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("replayed logs ticket: want 401, got %d", w.Code)
+	}
+}
+
 func TestTicketBoundToActiveSession(t *testing.T) {
 	r := ssoTestRouter()
 	SSORegister("alice", "token-a")
