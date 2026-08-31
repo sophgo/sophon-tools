@@ -150,9 +150,31 @@ run_one() {
 
   local rc=0
   local extra_env="${EXTRA_ENV[$p]:-}"
+
+  # multica worktree 兼容（MYS-809/统一构建踩坑）：监控仓库以 git worktree 形式检出，
+  # 仓库根 .git 为 gitdir 引用文件（指向宿主绝对路径）。容器内 git 解析该引用失败
+  # （"not a git repository"），会打断 pnpm 安装 git 依赖（mpegts.js → webworkify-webpack）。
+  # 把 worktree 的主 git 目录按"同绝对路径"挂进容器，使 .git 引用在容器内可解析。
+  local git_mounts=()
+  if [ -f "${REPO_ROOT}/.git" ] && head -1 "${REPO_ROOT}/.git" 2>/dev/null | grep -q '^[[:space:]]*gitdir:'; then
+    local wt_gitdir main_common main_git_dir
+    wt_gitdir="$(sed -n 's/^[[:space:]]*gitdir:[[:space:]]*//p' "${REPO_ROOT}/.git" | sed 's/[[:space:]]*$//')"
+    if [ -n "$wt_gitdir" ] && [ -f "$wt_gitdir/commondir" ]; then
+      main_common="$(head -1 "$wt_gitdir/commondir" | sed 's/[[:space:]]*$//')"
+      case "$main_common" in
+        /*) main_git_dir="$main_common" ;;
+        *)  main_git_dir="$(cd "$wt_gitdir/$main_common" 2>/dev/null && pwd -P || true)" ;;
+      esac
+      if [ -n "$main_git_dir" ] && [ -d "$main_git_dir" ]; then
+        git_mounts=(-v "${main_git_dir}:${main_git_dir}:ro")
+      fi
+    fi
+  fi
+
   docker run --rm --privileged \
     -v /dev:/dev \
     -v "${REPO_ROOT}":/workspace/sophon-tools \
+    "${git_mounts[@]}" \
     -w "/workspace/sophon-tools/source/${p}" \
     -e OUTPUT_DIR="/workspace/sophon-tools/output/${p}" \
     "${IMAGE}" bash -c "
