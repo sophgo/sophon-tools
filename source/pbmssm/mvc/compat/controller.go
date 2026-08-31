@@ -510,6 +510,13 @@ func (ctrl *Controller) ExecuteUpgrade(c *gin.Context) {
 	if !ok {
 		return
 	}
+	// MYS-451 竞态（10.42.0.123 真机复现）：锁必须在 EnqueueFlow 前释放。worker 在
+	// flow 入队后立即获取刷机锁（ota.flash，覆盖整个刷机窗口）；若持锁到 handler
+	// 返回，worker 的第一把 acquire 会撞上本 handler 持有的 "ota.upgrade"，导致
+	// 首个提交的 workflow 被自身误标 Fail（"hazard lock: ota.upgrade is already
+	// in progress"）。并发防串由 worker 的 ota.flash 锁承担（刷机窗口内提交的
+	// 并发 upgrade 会在 worker 侧快速拒绝）。defer 保留作兜底（Release 幂等）。
+	guard.Release()
 	defer guard.Release()
 	// Product 为空时用设备实际型号兜底（global.DeviceTypeEx 形如 "SE7 V01"），
 	// 否则 productClass 识别不到会返回 "ota: path not implemented"。
@@ -550,6 +557,9 @@ func (ctrl *Controller) Rollback(c *gin.Context) {
 	if !ok {
 		return
 	}
+	// 同 ExecuteUpgrade（MYS-451 竞态）：入队前释放 handler 级锁，防 worker 抢
+	// ota.flash 时撞上本 handler 持有的 ota.rollback 锁。defer 兜底（幂等）。
+	guard.Release()
 	defer guard.Release()
 
 	product := req.Product
