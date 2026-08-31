@@ -125,8 +125,15 @@ func Routers(webFS fs.FS) *gin.Engine {
 		originalDirector := proxy.Director
 		proxy.Director = func(req *http.Request) {
 			originalDirector(req)
-			// 保留 Host 便于 bmssm 识别
-			req.Host = bmssmTarget.Host
+			// /api/v1/*：把 Host 指到 bmssm 上游，便于 bmssm 识别自身。
+			if req.URL.Path != "/agent/ws" {
+				req.Host = bmssmTarget.Host
+				return
+			}
+			// /agent/ws：必须保留浏览器原始 Host——bmssm serveWS 的 CSWSH CheckOrigin
+			// 用 Origin.Host == r.Host 做同源校验，反代一旦把 Host 改成 127.0.0.1:9779，
+			// 任何浏览器（含同源页面）都会被 403 拒于握手之前；保留原始 Host 后
+			// 同源页面通过、跨站 Origin 仍被拒（CSWSH 语义不变）。
 		}
 		proxy.Transport = &http.Transport{
 			// 长连接支持（含 WebSocket）
