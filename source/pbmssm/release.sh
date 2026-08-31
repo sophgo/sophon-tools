@@ -41,9 +41,9 @@ build_one() {
   local arch="$1"
   echo "==> pbmssm build arch=$arch version=$VERSION reasonix=${REASONIX_BIN:-<none>}"
   bash build/build-deb-bmssm.sh "$VERSION" "$arch" "$REASONIX_BIN"
-  # build-deb-bmssm.sh 固定产出两个后缀变体（_noskill 默认 / _se7 带 SE7 skill），
+  # build-deb-bmssm.sh 固定产出两个后缀变体（_noskill 默认 / _seskill 带 SE 系列 skill），
   # 逐个校验并拷贝到 OUTPUT_DIR；无匹配视为构建失败。
-  for suffix in _noskill _se7; do
+  for suffix in _noskill _seskill; do
     local deb="release/bmssm_${VERSION}_${arch}${suffix}.deb"
     if [ ! -f "$deb" ]; then
       echo "ERROR: 未找到产物 $deb" >&2

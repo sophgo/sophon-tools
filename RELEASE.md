@@ -74,7 +74,7 @@ gh release create v<YY.MM.DD> -R sophgo/sophon-tools \
 | 工具 | 发布方式 |
 | --- | --- |
 | dfss | **仅发布 pip 包**（`dfss-<ver>-py2.py3-none-any.whl`）；不发布各平台二进制与 sdist。同时上传 PyPI（见 5.4），两处同步最新 |
-| bmssm / sophliteos | arm64 deb（前者含 `_se7`/`_noskill` 双变体） |
+| bmssm / sophliteos | arm64 deb（前者含 `_seskill`/`_noskill` 双变体） |
 | pqt_batch_deployment / pqt_memory_edit | linux AppImage + windows exe |
 | pbmsec | deb（all 双架构） |
 | 其余工具 | 各自 release.sh 产物（zip/deb/脚本） |

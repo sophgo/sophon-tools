@@ -1,5 +1,6 @@
-# Reasonix 定制实例（bmssm agentproxy 托管）— SE7 技术支持 Agent 配置
+# Reasonix 定制实例（bmssm agentproxy 托管）— SE 系列技术支持 Agent 配置
 # HOME=/data/sophon/reasonix-home，与系统正常安装 reasonix 的 ~/.reasonix 隔离。
+# 预载 se-series-knowledge-base skill（SE7/SE8/SE9 多型号）+ se-series agent 提示词。
 config_version = 6
 default_model = "sophnet"
 
@@ -17,7 +18,7 @@ enabled = []   # empty = all built-in tools
 bash_timeout_seconds = 120
 
 [skills]
-# 预载 se7 知识库 skill（se7-knowledge-base/SKILL.md）
+# 预载 SE 系列多型号知识库 skill（se-series-knowledge-base/SKILL.md）
 paths = ["/data/sophon/reasonix-home/skills"]
 
 [permissions]
@@ -29,7 +30,7 @@ network = true
 # 不配 workspace_root/allow_write/forbid_read：不做路径圈地（用户选择）
 
 [agent]
-# SE7 技术支持助手设定（"agent 设定"，见同 home 下 prompts/system.md）
+# SE 系列技术支持助手设定（"agent 设定"，见同 home 下 prompts/system.md）
 system_prompt_file = "/data/sophon/reasonix-home/prompts/system.md"
 temperature        = 0.0
 
