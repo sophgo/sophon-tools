@@ -548,7 +548,9 @@ fi
 echo "Info: =======================================================================" | tee -a $log_file_path
 echo "Info: get max memory size ..." | tee -a $log_file_path
 if [[ $runtime_info_target == "bm1688" || $runtime_info_target == "cv84x6" ]]; then
-	echo "Info: max npu+vpp size: $(printf "0x%x" $(($ddr_size - $npu_size_add))) [$(printf "%d MiB" "$(($(($ddr_size - $npu_size_add)) / $SIZE1M))")]" | tee -a $log_file_path
+	# npu+vpp 总量受 npu_size_add(底部 CMA+200M) 与 vpp_size_add(顶部 FREERTOS 预留) 共同约束，
+	# 必须都减去，否则 -p 报的总量比真实可配多 vpp_size_add（bm1688 该值为 0 不受影响）
+	echo "Info: max npu+vpp size: $(printf "0x%x" $(($ddr_size - $npu_size_add - $vpp_size_add))) [$(printf "%d MiB" "$(($(($ddr_size - $npu_size_add - $vpp_size_add)) / $SIZE1M))")]" | tee -a $log_file_path
 	echo "Info: max npu size: $(printf "0x%x" $(($ddr_size - $npu_size_add))) [$(printf "%d MiB" "$(($(($ddr_size - $npu_size_add)) / $SIZE1M))")]" | tee -a $log_file_path
 elif [[ $runtime_info_target == "bm1684" ]]; then
 	echo "Info: max npu size: $(printf "0x%x" $(($ddr1_size - $npu_size_add))) [$(printf "%d MiB" "$(($(($ddr1_size - $npu_size_add)) / $SIZE1M))")]" | tee -a $log_file_path
@@ -565,8 +567,11 @@ elif [[ $runtime_info_target == "bm1688" ]]; then
 		echo "Info: max vpp size: $(printf "0x%x" $(($size_4g - $vpp_size_add))) [$(printf "%d MiB" "$(($(($size_4g - $vpp_size_add)) / $SIZE1M))")]"| tee -a $log_file_path
 	fi
 elif [[ $runtime_info_target == "cv84x6" ]]; then
-	# MYSWY 决策：cv84x6 的 vpp 校验上限为 8GB，打印与校验保持一致
-	vpp_max_size=$(($size_4g * 2))
+	# MYSWY 决策：cv84x6 的 vpp 校验上限为 8GB（size_4g*2），顶部需预留
+	# vpp_size_add（FREERTOS 2M）。若校验用 vpp+vpp_size_add <= 8G 判定，
+	# 则实际可配上限 = 8G - vpp_size_add，打印必须与之保持一致，否则
+	# -p 报出的上限比真实可配多 2M（用户按打印值配置会被 -c 拒绝）。
+	vpp_max_size=$(($size_4g * 2 - $vpp_size_add))
 	echo "Info: max vpp size: $(printf "0x%x" $vpp_max_size) [$(printf "%d MiB" "$(($vpp_max_size / $SIZE1M))")]" | tee -a $log_file_path
 fi
 # 解析设备树，获取vpp和npu的ion内存空间的全局唯一索引
