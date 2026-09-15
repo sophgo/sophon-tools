@@ -93,6 +93,7 @@ type Archive struct {
 
 	// Renames 归档原始条目名 → 卡上目标路径 (剥掉刷机包目录前缀时两者不同)。
 	// 写卡与校验都要走 TargetName(), 否则会拿着带前缀的原名去找文件。
+	// 目录源不填: 它的迭代器直接走 Files, 条目名已经是目标名 (见 applyBootRoot)。
 	Renames map[string]string
 
 	// Skipped 目录源专用: 因 FAT32 放不下而被跳过的条目数

@@ -13,7 +13,7 @@
 #     ARCH:    arm64 | amd64 | all（默认按子项目）
 #     env OUTPUT_DIR: 覆盖产物目录（默认 <repo>/output/<子项目>/）
 #
-# 范围: 15 个子项目（pmulti_video_qt 已按 MYSWY 决定排除；psoph_phytool /
+# 范围: 16 个子项目（pmulti_video_qt 已按 MYSWY 决定排除；psoph_phytool /
 # pspacc_efuse_demo 默认不发版，2026-08-30）
 #
 # 用法:

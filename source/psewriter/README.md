@@ -62,7 +62,7 @@ bash release.sh --project psewriter                 # 默认平台 windows
 ```bash
 bash release.sh                       # 默认 windows（32+64 位），不带内置镜像
 bash release.sh all                   # 再附带 Linux CLI（本机自测 / repack 用）
-bash release.sh windows 2.0.5         # 显式指定平台与版本（演练）
+bash release.sh windows 2.0.6         # 显式指定平台与版本（演练）
 IMAGE=/path/pkg.zip bash release.sh   # 额外产出自带内置镜像的 sewriter-embedded.exe
 ```
 

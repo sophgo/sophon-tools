@@ -282,6 +282,50 @@ func TestBuildCardFromNestedDirSource(t *testing.T) {
 	}
 }
 
+// 目录源 + 与前缀同名的嵌套层: 剥前缀算出的某个目标名可能正好等于另一个条目的
+// **原始名**, 此时不能拿已经改过名的条目再过一遍「原名 → 卡上目标名」映射 ——
+// 那会把这条映射到别人的位置上 (写入不报错, 卡上文件被顶掉、写后校验才发现)。
+func TestBuildCardFromNestedSameNameDir(t *testing.T) {
+	dir := writeTree(t, map[string][]byte{
+		"pkg/fip.bin":          bytes.Repeat([]byte{0x5A}, 200000),
+		"pkg/pkg/boot.scr":     append(append([]byte("mid\n"), marker...), '\n'),
+		"pkg/pkg/pkg/boot.scr": append(append([]byte("deep\n"), marker...), '\n'),
+	})
+	a, err := ProbeDir(dir, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !a.BootRoot.Stripped || a.BootRoot.Prefix != "pkg" {
+		t.Fatalf("应剥掉 pkg/ 这层, 得 %+v", a.BootRoot)
+	}
+	plan, err := PlanCardImage(a, 0, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dev := newFileDisk(t, plan.TotalSize+1<<20)
+	defer dev.Close()
+	if _, err := BuildCardOnDevice(dev, a, plan, nil); err != nil {
+		t.Fatalf("建卡失败: %v", err)
+	}
+	fv, err := VerifyCardFiles(dev, a, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fv.OK() {
+		t.Fatalf("卡上文件级校验应通过: %s / %s", fv.Summary(), fv.FirstError())
+	}
+	// 三个条目各自落到自己的目标路径, 一个都不能少、不能串位
+	got := map[string]bool{}
+	for _, f := range fv.Files {
+		got[f.Name] = true
+	}
+	for _, want := range []string{"fip.bin", "pkg/boot.scr", "pkg/pkg/boot.scr"} {
+		if !got[want] {
+			t.Errorf("卡上应存在 %s, 实得 %v", want, fv.Files)
+		}
+	}
+}
+
 // PrepareSource 认目录入口 (GUI/CLI 都走这里)
 func TestPrepareSourceAcceptsDir(t *testing.T) {
 	dir := writeTree(t, map[string][]byte{
