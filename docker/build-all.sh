@@ -73,7 +73,7 @@ DEFAULT_ARCH[pqt_batch_deployment]=all
 DEFAULT_ARCH[pqt_memory_edit]=all
 DEFAULT_ARCH[pSophUI]=arm64
 DEFAULT_ARCH[se-rag-core]=all
-DEFAULT_ARCH[sewriter]=windows      # SE写卡工具: 默认只出 Windows, 不带内置镜像
+DEFAULT_ARCH[psewriter]=windows      # SE写卡工具: 默认只出 Windows, 不带内置镜像
 # pmulti_video_qt: 按 MYSWY 决定（2026-08-08）不需要做，从统一构建范围排除
 # psoph_phytool / pspacc_efuse_demo: 按 MYSWY 决定（2026-08-30）默认不发版——不注册
 #   到 DEFAULT_ARCH（构建清单）即不随统一 release 构建/发布；如确需发布可在源码目录
@@ -96,7 +96,7 @@ PLATFORMS[pqt_batch_deployment]="amd64(linux AppImage) + windows"
 PLATFORMS[pqt_memory_edit]="amd64(linux AppImage) + windows"
 PLATFORMS[pSophUI]="arm64(交叉Qt)"
 PLATFORMS[se-rag-core]="arm64/amd64(Go静态)"
-PLATFORMS[sewriter]="windows(386/amd64; 默认不带内置镜像)"
+PLATFORMS[psewriter]="windows(386/amd64; 默认不带内置镜像)"
 PLATFORMS[psoph_phytool]="通用脚本"
 PLATFORMS[pspacc_efuse_demo]="amd64/arm64"
 
@@ -116,7 +116,7 @@ EXTRA_ENV[pbmssm]="export PATH=/opt/go/bin:\$PATH"
 EXTRA_ENV[pdfss_cpp]="export PATH=/env/loongson-gnu-toolchain-8.3-x86_64-loongarch64-linux-gnu-rc1.1/bin:/usr/sw/swgcc830_cross_tools/usr/bin:\$PATH"
 EXTRA_ENV[pqt_batch_deployment]="export PQT_INPLACE=1"
 EXTRA_ENV[pqt_memory_edit]="export PQT_INPLACE=1"
-EXTRA_ENV[sewriter]="export PATH=/opt/go/bin:\$PATH"
+EXTRA_ENV[psewriter]="export PATH=/opt/go/bin:\$PATH"
 
 # 子项目 -> 构建依赖（先构建依赖方，再构建本项目）
 # pbmsec 的 socbak.zip 取自 psocbak（release.sh 会优先复用其产物，缺失时现场打包），

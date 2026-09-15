@@ -181,7 +181,8 @@ func (d *dirIter) Open() (io.ReadCloser, error) {
 	if d.idx == 0 || d.idx > len(d.a.Files) {
 		return nil, fmt.Errorf("目录源: Open 必须在 Next 之后调用")
 	}
-	return d.a.openDirEntry(d.a.Files[d.idx-1].Name)
+	// 按磁盘原始路径打开 (剥过刷机包前缀的条目 Name 已是卡上目标名, 见 ArchiveEntry.SrcName)
+	return d.a.openDirEntry(d.a.Files[d.idx-1].srcName())
 }
 
 func (d *dirIter) Close() error { return nil }

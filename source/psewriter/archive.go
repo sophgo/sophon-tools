@@ -57,6 +57,20 @@ type ArchiveEntry struct {
 	Name  string // 归一化后的相对路径 (以 / 分隔, 无前导 /)
 	Size  int64
 	IsDir bool
+
+	// SrcName 目录源专用: **磁盘上的原始相对路径**。
+	// 剥掉刷机包外层目录后 Name 已变成卡上目标名, 拿它拼源目录会找不到文件
+	// (压缩包源不存在这个问题 —— 它们的迭代器读的是容器自己的目录表)。
+	// 空 = 与 Name 相同 (没剥过前缀的条目、以及所有压缩包条目)。
+	SrcName string
+}
+
+// srcName 取内容来源路径 (目录源剥过前缀时与 Name 不同)
+func (e ArchiveEntry) srcName() string {
+	if e.SrcName != "" {
+		return e.SrcName
+	}
+	return e.Name
 }
 
 // Archive 已识别的镜像来源

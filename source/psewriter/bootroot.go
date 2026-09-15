@@ -155,6 +155,7 @@ func applyBootRoot(a *Archive) error {
 	for _, f := range a.Files {
 		if n, ok := strip(f.Name); ok {
 			a.Renames[f.Name] = n
+			f.SrcName = f.Name // 目录源读内容仍按磁盘原始路径
 			f.Name = n
 			files = append(files, f)
 		} else {

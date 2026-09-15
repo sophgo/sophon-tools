@@ -231,6 +231,57 @@ func TestBuildCardFromDirSource(t *testing.T) {
 	}
 }
 
+// 目录源 + 多套一层刷机包目录: 剥掉前缀后仍必须按**磁盘上的原始路径**读内容。
+// 回归: 迭代器拿着剥过的卡上目标名去 <源目录>/ 下找文件 → ENOENT。
+func TestBuildCardFromNestedDirSource(t *testing.T) {
+	dir := writeTree(t, map[string][]byte{
+		"sdbootrecoveryfiles/boot.scr":              append(append([]byte("boot-script\n"), marker...), '\n'),
+		"sdbootrecoveryfiles/fip.bin":               bytes.Repeat([]byte{0x5A}, 200000),
+		"sdbootrecoveryfiles/recovery-ui/run-ui.sh": []byte("#!/bin/sh\n"),
+		"说明.txt": []byte("读我"),
+	})
+	a, err := ProbeDir(dir, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !a.BootRoot.Stripped || a.BootRoot.Prefix != "sdbootrecoveryfiles" {
+		t.Fatalf("应剥掉 sdbootrecoveryfiles/ 这层, 得 %+v", a.BootRoot)
+	}
+	plan, err := PlanCardImage(a, 0, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dev := newFileDisk(t, plan.TotalSize+1<<20)
+	defer dev.Close()
+	if _, err := BuildCardOnDevice(dev, a, plan, nil); err != nil {
+		t.Fatalf("用嵌套目录源建卡失败: %v", err)
+	}
+	fv, err := VerifyCardFiles(dev, a, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fv.OK() {
+		t.Fatalf("卡上文件级校验应通过: %s / %s", fv.Summary(), fv.FirstError())
+	}
+	for _, want := range []string{"fip.bin", "boot.scr", "recovery-ui/run-ui.sh", "说明.txt"} {
+		found := false
+		for _, f := range fv.Files {
+			if f.Name == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("卡上应能按根目录路径找到 %s, 实得 %v", want, func() []string {
+				var n []string
+				for _, f := range fv.Files {
+					n = append(n, f.Name)
+				}
+				return n
+			}())
+		}
+	}
+}
+
 // PrepareSource 认目录入口 (GUI/CLI 都走这里)
 func TestPrepareSourceAcceptsDir(t *testing.T) {
 	dir := writeTree(t, map[string][]byte{

@@ -1,4 +1,4 @@
-# 构建产物 (本地中间物; 发版产物统一汇到仓库 output/sewriter/)
+# 构建产物 (本地中间物; 发版产物统一汇到仓库 output/psewriter/)
 output/
 .build/
 
