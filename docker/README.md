@@ -9,9 +9,12 @@
 不再按子项目切换镜像。
 
 **镜像体积**：完整镜像（内置 dfss sw_64/loongarch64、Qt mingw 静态库、pSophUI aarch64 Qt 库）
-约 **8.9GB**（v1.1.0，`docker images` 显示 ~8.88GB）。体积增大是单镜像方案的预期取舍
+约 **9.1GB**（v1.2.0，`docker images` 显示 ~9.11GB；v1.1.0 为 ~8.88GB，v1.2.0 多出的是
+预热的 Win7 工具链 ~243MB）。体积增大是单镜像方案的预期取舍
 ——换取构建期零镜像切换、一键全量。v1.1.0 起去掉 Linaro GCC 6.3（改用系统 apt aarch64
 工具链），较 v1.0.0（~10.1GB）省约 1.2GB。
+
+导出的归档 `sophon-tools-build-unified-v1.2.0.tar.zst` 约 **2.9GB**（zstd，8.55GiB → 2.92GiB）。
 
 **镜像版本**：镜像 tag 由 `docker/versions.env` 的 `IMAGE_TAG` 控制（默认 `unified-v1.2.0`），
 `release.sh` / `build-all.sh` 默认使用 `sophon-tools-build:${IMAGE_TAG}`。发布到 dfss 服务器后，
