@@ -138,7 +138,12 @@ func applyBootRoot(a *Archive) error {
 	prefix := info.Prefix
 	// 写卡时是按**归档里的原始条目名**重新遍历的 (openFiles), 所以要把"原名 → 卡上目标名"
 	// 记下来, 否则 buildCardFS/VerifyCardFiles 会拿着带前缀的原名去找文件。
-	a.Renames = map[string]string{}
+	//
+	// 目录源例外: 它的迭代器直接走 a.Files, 拿到的 Name 已经是改过名的目标名, 再查一次
+	// 这张表就是**二次映射** —— 目录里出现与前缀同名的嵌套层时 (pkg/pkg/pkg/boot.scr),
+	// 那条目标名 pkg/pkg/boot.scr 正好是另一条的原始名, 会被顶到 pkg/boot.scr 上。
+	// 目录源不建表, TargetName 对它自然退化成恒等。
+	renames := map[string]string{}
 	strip := func(name string) (string, bool) {
 		switch {
 		case name == prefix:
@@ -154,7 +159,7 @@ func applyBootRoot(a *Archive) error {
 	outsiders := 0
 	for _, f := range a.Files {
 		if n, ok := strip(f.Name); ok {
-			a.Renames[f.Name] = n
+			renames[f.Name] = n
 			f.SrcName = f.Name // 目录源读内容仍按磁盘原始路径
 			f.Name = n
 			files = append(files, f)
@@ -181,6 +186,9 @@ func applyBootRoot(a *Archive) error {
 
 	if err := checkStripCollision(files, dirs); err != nil {
 		return err
+	}
+	if a.Format != dirFormat {
+		a.Renames = renames
 	}
 	a.Files, a.Dirs = files, dirs
 	a.BootRoot.Stripped = true
