@@ -30,12 +30,13 @@
 | [bmssm](./source/pbmssm) | source/pbmssm | 设备端后端（:9779）：鉴权/硬件指标/systemd/端口/网络/OTA/文件。见 [API.md](./API.md) / [USAGE.md](./USAGE.md) / [BUILD.md](./BUILD.md) |
 | [sophliteos](./source/psophliteos) | source/psophliteos | 算力设备管理 Web 平台（Go+Vue，:8080），反代 bmssm。见 [API.md](./API.md) / [USAGE.md](./USAGE.md) / [BUILD.md](./BUILD.md) |
 | [se-rag-core](./source/se-rag-core) | source/se-rag-core | SE 系列知识库 RAG 检索核心（Go，本地 FAISS/BM25 + 内置网关），供 SE 系列 skill 使用。见 [README](./source/se-rag-core/readme.md) |
+| [sewriter](./source/sewriter) | source/sewriter | SE写卡工具（Windows）：把发版文件包/目录/整卡镜像写成 SE 系列设备 TF 卡，写后回读校验。见 [README](./source/sewriter/README.md) / [现场说明](./source/sewriter/SE写卡工具说明.md) |
 
 ## 编译方式
 
 ### 一键全量 release（推荐）
 
-本仓库已接入统一构建工程（M1~M4）：15 个子项目注册到统一构建清单（pmulti_video_qt /
+本仓库已接入统一构建工程（M1~M4）：16 个子项目注册到统一构建清单（pmulti_video_qt /
 psoph_phytool / pspacc_efuse_demo 默认不发版，见 [RELEASE.md](./RELEASE.md)），由
 Docker 统一镜像 `sophon-tools-build` 在容器内完成编译。**一条命令全量出包**：
 

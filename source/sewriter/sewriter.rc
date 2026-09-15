@@ -1,0 +1,9 @@
+/* SE写卡工具 — Windows 资源脚本
+ *
+ * 嵌入应用程序 manifest (24 = RT_MANIFEST, 1 = CREATEPROCESS_MANIFEST_RESOURCE_ID)。
+ * 没有 manifest 时 Windows 只会加载 comctl32 v5, lxn/walk 依赖的 v6 行为缺失,
+ * 表现为启动即报 "TTM_ADDTOOL failed" (Unicode 版 tooltip 消息在 v5 下不被处理)。
+ *
+ * 生成: bash tools/winflash/build.sh   (内部调用 windres, 见 gen_manifest_syso)
+ */
+1 24 "sewriter.manifest"
