@@ -1,0 +1,11 @@
+# 构建产物 (本地中间物; 发版产物统一汇到仓库 output/psewriter/)
+output/
+.build/
+
+# 本机构建时可能残留的旧产物
+se7winflash
+se7winflash.exe
+sewriter.exe
+sewriter-x64.exe
+sewriter-linux
+sewriter-embedded.exe
