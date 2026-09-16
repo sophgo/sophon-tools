@@ -488,6 +488,7 @@ function socbak_f2fs_size_kb()
 		size_kb=${max_kb}
 	fi
 
+	# 向上：探测说这个尺寸装不下就按段倍增（起点估小的情况）
 	while true; do
 		fillable_kb=$(socbak_f2fs_fillable_kb "${size_kb}") || fillable_kb=""
 		if [ -n "${fillable_kb}" ] && [ "${fillable_kb}" -ge "${need_kb}" ]; then
@@ -501,6 +502,29 @@ function socbak_f2fs_size_kb()
 			size_kb=${max_kb}
 		fi
 	done
+
+	# 向下：上面那个起点偏保守（宁可大不可小），而 f2fs 又不能收缩，多出来的部分就是
+	# 实打实多写的 flash。探测给出的可写容量是准的，二分逼近仍然装得下的最小尺寸，
+	# 让它贴近 ext4 路径 resize2fs -M 的效果。下限按 f2fs 元数据开销留 2% 余量。
+	lo=$(( need_kb * 100 / 98 ))
+	lo=$(( (lo + F2FS_SEG_KB - 1) / F2FS_SEG_KB * F2FS_SEG_KB ))
+	if [ "${lo}" -lt "${F2FS_MKFS_MIN_KB}" ]; then
+		lo=${F2FS_MKFS_MIN_KB}
+	fi
+	while [ "${lo}" -lt "${size_kb}" ]; do
+		mid=$(( (lo + size_kb) / 2 ))
+		mid=$(( (mid + F2FS_SEG_KB - 1) / F2FS_SEG_KB * F2FS_SEG_KB ))
+		if [ "${mid}" -ge "${size_kb}" ]; then
+			break
+		fi
+		fillable_kb=$(socbak_f2fs_fillable_kb "${mid}") || fillable_kb=""
+		if [ -n "${fillable_kb}" ] && [ "${fillable_kb}" -ge "${need_kb}" ]; then
+			size_kb=${mid}
+		else
+			lo=$(( mid + F2FS_SEG_KB ))
+		fi
+	done
+
 	echo "INFO: f2fs content need ${need_kb} KB, image size ${size_kb} KB (max ${max_kb} KB)" >&2
 	echo "${size_kb}"
 }
