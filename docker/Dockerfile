@@ -28,6 +28,7 @@
 # ---- ARG 集合(由 build.sh 从 versions.env 注入) ----
 ARG UBUNTU_BASE_DIGEST
 ARG GO_VERSION GO_TARBALL_URL GO_TARBALL_SHA256
+ARG GOPROXY GOSUMDB WIN7_GO_VERSION
 ARG RUST_VERSION
 ARG NODE_TARBALL_URL NODE_TARBALL_SHA256
 ARG PNPM_VERSION YARN_VERSION
@@ -60,7 +61,7 @@ RUN curl -fsSL "${NODE_TARBALL_URL}" -o node.tar.xz \
 
 # ---- Stage 2: 最终运行镜像 ----
 FROM ${UBUNTU_BASE_DIGEST}
-ARG GO_VERSION RUST_VERSION PNPM_VERSION YARN_VERSION WITH_DFSS WITH_QT_MINGW WITH_SOPHUI
+ARG GO_VERSION GOPROXY GOSUMDB WIN7_GO_VERSION RUST_VERSION PNPM_VERSION YARN_VERSION WITH_DFSS WITH_QT_MINGW WITH_SOPHUI
 
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
@@ -105,6 +106,22 @@ RUN curl -fsSL "${UPX_TARBALL_URL}" -o /tmp/upx.tar.xz \
 # ---- Go(来自 Stage1, 已校验) ----
 COPY --from=downloader /opt/go /opt/go
 RUN /opt/go/bin/go version
+
+# ---- Go 模块代理 / 校验和库(国内镜像, 版本源见 versions.env) ----
+# proxy.golang.org 在 13.24 容器内拉模块不稳定(MYS-1081); 默认走 goproxy.cn。
+# 运行时仍可覆盖: docker run -e GOPROXY=... / -e GOSUMDB=off(内网私有模块场景)。
+ENV GOPROXY="${GOPROXY}" \
+    GOSUMDB="${GOSUMDB}"
+
+# ---- psewriter 的 Win7 工具链(构建期预热, 出包不再联网) ----
+# psewriter 必须用 <= go1.20 编译(go1.21 起最低要求 Windows 10), 脚本默认 go1.20.14。
+# 原先每次 build.sh 都靠 GOTOOLCHAIN 联网拉 ~100MB; 这里预热进 GOMODCACHE(/root/go/pkg/mod),
+# 容器内 GOTOOLCHAIN 保持 auto —— 不强制版本, 其它子项目仍用镜像自带的 Go。
+# 预热同样走 GOPROXY(即上面的 goproxy.cn)。
+ENV GOMODCACHE="/root/go/pkg/mod"
+RUN GOTOOLCHAIN="${WIN7_GO_VERSION}" go version \
+    && ls -d "${GOMODCACHE}"/golang.org/toolchain@* \
+    && GOTOOLCHAIN=auto go version
 
 # ---- Node.js + pnpm + yarn(来自 Stage1, 已校验) ----
 COPY --from=downloader /opt/nodejs /opt/nodejs

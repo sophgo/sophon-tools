@@ -66,7 +66,13 @@ echo "--- Go 工具链 (pbmssm / psophliteos) ---"
 VERSION "go"                    "go version"
 CHECK  "go 交叉编译 env"        "go env GOOS GOARCH | grep -q linux"
 CHECK  "CGO 可用"               "go env CGO_ENABLED"
+VERSION "GOPROXY"               "go env GOPROXY"
+VERSION "GOSUMDB"               "go env GOSUMDB"
+CHECK  "GOPROXY 已走国内镜像"    "go env GOPROXY | grep -q goproxy.cn"
 CHECK  "GOOS=linux GOARCH=arm64 编译" "cd /tmp && printf 'package main\nimport \"fmt\"\nfunc main(){fmt.Println(\"ok\")}\n' > m.go && GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o /dev/null m.go"
+# psewriter 的 Win7 工具链(go1.20.x)必须在镜像内离线可用, 否则每次出包都要联网拉 ~100MB。
+# 判据: GOPROXY=off(断网)下用纯标准库程序跑通 go1.20 的 windows/386 交叉编出 PE。
+CHECK  "Win7 工具链 go1.20.x 已预置" "cd /tmp && printf 'package main\nimport \"fmt\"\nfunc main(){fmt.Println(\"ok\")}\n' > w7.go && GOTOOLCHAIN=go1.20.14 GOPROXY=off GO111MODULE=off GOOS=windows GOARCH=386 CGO_ENABLED=0 go build -o /dev/null w7.go && GOTOOLCHAIN=go1.20.14 go version | grep -q go1.20"
 
 echo "--- Rust 工具链 (pbm_set_ip) ---"
 VERSION "rustc"                 "rustc --version"

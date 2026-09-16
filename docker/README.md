@@ -9,13 +9,26 @@
 不再按子项目切换镜像。
 
 **镜像体积**：完整镜像（内置 dfss sw_64/loongarch64、Qt mingw 静态库、pSophUI aarch64 Qt 库）
-约 **8.9GB**（v1.1.0，`docker images` 显示 ~8.88GB）。体积增大是单镜像方案的预期取舍
+约 **9.1GB**（v1.2.0，`docker images` 显示 ~9.11GB；v1.1.0 为 ~8.88GB，v1.2.0 多出的是
+预热的 Win7 工具链 ~243MB）。体积增大是单镜像方案的预期取舍
 ——换取构建期零镜像切换、一键全量。v1.1.0 起去掉 Linaro GCC 6.3（改用系统 apt aarch64
 工具链），较 v1.0.0（~10.1GB）省约 1.2GB。
 
-**镜像版本**：镜像 tag 由 `docker/versions.env` 的 `IMAGE_TAG` 控制（默认 `unified-v1.1.0`），
+导出的归档 `sophon-tools-build-unified-v1.2.0.tar.zst` 约 **2.9GB**（zstd，8.55GiB → 2.92GiB）。
+
+**镜像版本**：镜像 tag 由 `docker/versions.env` 的 `IMAGE_TAG` 控制（默认 `unified-v1.2.0`），
 `release.sh` / `build-all.sh` 默认使用 `sophon-tools-build:${IMAGE_TAG}`。发布到 dfss 服务器后，
 通过 `docker load` 加载的镜像即为该 tag。
+
+**v1.2.0 变更**（相对 v1.1.0）：
+
+| 变更 | 说明 |
+|------|------|
+| `GOPROXY` / `GOSUMDB` 默认走国内镜像 | `https://goproxy.cn,direct` / `sum.golang.google.cn`。`proxy.golang.org` 在容器内拉模块不稳定；运行时仍可用 `-e GOPROXY=...` 覆盖，内网私有模块可 `-e GOSUMDB=off` |
+| 预置 psewriter 的 Win7 工具链 | `go1.20.14` 构建期预热进 `GOMODCACHE`。psewriter 必须用 ≤ go1.20 编译（go1.21 起官方最低要求 Windows 10），原先每次出包都靠 `GOTOOLCHAIN` 联网拉 ~100MB。容器内 `GOTOOLCHAIN` 仍为 `auto`，不强制版本，其它子项目不受影响 |
+
+两条都由 `docker/verify.sh` 自检覆盖（`GOPROXY 已走国内镜像`、`Win7 工具链 go1.20.x 已预置`）——
+后者在 `GOPROXY=off` 断网条件下跑通 go1.20 的 `windows/386` 交叉编译，确保确实离线可用。
 
 ## 获取镜像（`build.sh` 默认自动三级回退）
 
@@ -49,9 +62,9 @@ dfss 下载细节：
 ### 手动拉取（等价命令）
 
 ```bash
-python3 -m dfss --url=open@sophgo.com:/toolchains/sophon-tools/sophon-tools-build-unified-v1.1.0.tar.zst
-docker load -i sophon-tools-build-unified-v1.1.0.tar.zst
-# 加载后镜像 tag: sophon-tools-build:unified-v1.1.0
+python3 -m dfss --url=open@sophgo.com:/toolchains/sophon-tools/sophon-tools-build-unified-v1.2.0.tar.zst
+docker load -i sophon-tools-build-unified-v1.2.0.tar.zst
+# 加载后镜像 tag: sophon-tools-build:unified-v1.2.0
 ```
 
 ### 本地构建（可选）

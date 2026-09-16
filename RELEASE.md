@@ -44,7 +44,7 @@
 bash release.sh          # 需要统一镜像 sophon-tools-build:<IMAGE_TAG>
 ```
 
-- 镜像：`docker/versions.env` 的 `IMAGE_TAG`（当前 `unified-v1.1.0`）；镜像缺失用 `bash docker/build.sh` 构建。
+- 镜像：`docker/versions.env` 的 `IMAGE_TAG`（当前 `unified-v1.2.0`）；镜像缺失用 `bash docker/build.sh` 构建。
 - 范围：**16 个子项目**（统一构建清单），`docker/build-all.sh --list` 查看。以下项目**默认不发版、不在统一构建范围**：
   - `pmulti_video_qt`（产品决定不需要）
   - `psoph_phytool`、`pspacc_efuse_demo`（产品决定默认不发版，2026-08-30；如确需发布在源码目录手动 `bash release.sh`）

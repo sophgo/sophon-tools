@@ -164,6 +164,9 @@ docker build \
   --build-arg GO_VERSION="${GO_VERSION}" \
   --build-arg GO_TARBALL_URL="${GO_TARBALL_URL}" \
   --build-arg GO_TARBALL_SHA256="${GO_TARBALL_SHA256}" \
+  --build-arg GOPROXY="${GOPROXY}" \
+  --build-arg GOSUMDB="${GOSUMDB}" \
+  --build-arg WIN7_GO_VERSION="${WIN7_GO_VERSION}" \
   --build-arg RUST_VERSION="${RUST_VERSION}" \
   --build-arg NODE_TARBALL_URL="${NODE_TARBALL_URL}" \
   --build-arg NODE_TARBALL_SHA256="${NODE_TARBALL_SHA256}" \
