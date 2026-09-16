@@ -177,7 +177,7 @@ LOGFILE="$(readlink -f "${BASH_SOURCE[0]}").log"
 rm -f $LOGFILE*
 exec > >(tee -a "$LOGFILE") 2>&1
 
-echo "[INFO] ota update tool, version: v1.4.0"
+echo "[INFO] ota update tool, version: v1.4.1"
 
 WORK_DIR=""
 if [ ! -d ${RUN_WORK_DIR}/sdcard ]; then
@@ -508,10 +508,51 @@ done
 if [[ "$(df | grep ${OTA_LAST_DEVICE} | wc -l)" != "0" ]]; then
     panic "umount ${OTA_LAST_DEVICE} error!!!"
 fi
-e2fsck -yf ${OTA_LAST_DEVICE}
-resize2fs -f ${OTA_LAST_DEVICE} ${OTA_LAST_DEVICE_NEW_SIZE_KB}K
-if [[ "$?" != "0" ]]; then
-    panic "resize2fs ${OTA_LAST_DEVICE} -> ${OTA_LAST_DEVICE_NEW_SIZE_KB}K, please check if your \
+# 把最后一个分区的文件系统腾出一段尾部空间，供刷机包写入。
+#
+# ext4 走 e2fsck + resize2fs 缩容；f2fs 不支持缩容（resize.f2fs 只能扩），所以：
+#   - 全量刷机（LAST_PART_NOT_FLASH=0）：最后一个分区本来就要被包内镜像整个覆盖，
+#     缩容没有意义，等价做法是按目标尺寸重建一个空 f2fs；
+#   - 保留数据（=1）：数据和"给包腾地方"不可兼得，直接拒绝并说明原因，
+#     而不是让 resize2fs 在 f2fs 上失败后 panic 一句误导性的 "eMMC partition is healthy"。
+OTA_LAST_DEVICE_FSTYPE=$(blkid -o value -s TYPE "${OTA_LAST_DEVICE}" 2>/dev/null)
+echo "[INFO] last device ${OTA_LAST_DEVICE} fstype: ${OTA_LAST_DEVICE_FSTYPE:-unknown}"
+OTA_LAST_RESIZE_RC=0
+case "${OTA_LAST_DEVICE_FSTYPE}" in
+    ext2|ext3|ext4)
+        e2fsck -yf "${OTA_LAST_DEVICE}"
+        resize2fs -f "${OTA_LAST_DEVICE}" ${OTA_LAST_DEVICE_NEW_SIZE_KB}K
+        OTA_LAST_RESIZE_RC=$?
+        ;;
+    f2fs)
+        if [[ "${LAST_PART_NOT_FLASH}" == "1" ]]; then
+            panic "last partition ${OTA_LAST_DEVICE} is f2fs, which cannot be shrunk to make room \
+for the update pack; use LAST_PART_NOT_FLASH=0 (full flash) or switch the last partition to ext4"
+        fi
+        # 重建会把该分区上的一切抹掉——包括刷机包自己。ext4 路径是缩容（数据还在），
+        # 所以包放在最后一个分区上没问题；f2fs 路径是重建，必须先确认包不在那儿。
+        OTA_WORK_DEV=$(df -P "${WORK_DIR}" 2>/dev/null | tail -1 | awk '{print $1}')
+        if [[ "${OTA_WORK_DEV}" == "${OTA_LAST_DEVICE}" ]]; then
+            panic "the update pack is on ${OTA_LAST_DEVICE} (${WORK_DIR}), but a full flash onto \
+an f2fs last partition has to recreate that partition, which would erase the pack itself; \
+extract the pack onto another partition (e.g. /var/tmp) and run again"
+        fi
+        OTA_MKFS_F2FS=$(command -v mkfs.f2fs 2>/dev/null || true)
+        [[ -n "${OTA_MKFS_F2FS}" ]] || panic "last partition ${OTA_LAST_DEVICE} is f2fs but \
+mkfs.f2fs not found"
+        echo "[INFO] full flash onto f2fs last partition (pack on ${OTA_WORK_DEV}), recreate it at \
+${OTA_LAST_DEVICE_NEW_SIZE_KB}K"
+        "${OTA_MKFS_F2FS}" -f "${OTA_LAST_DEVICE}" \
+            $(echo "${OTA_LAST_DEVICE_NEW_SIZE_KB} * 1024 / ${EMMC_SECTOR_B}" | bc)
+        OTA_LAST_RESIZE_RC=$?
+        ;;
+    *)
+        panic "cannot determine filesystem type of last partition ${OTA_LAST_DEVICE} (got \
+'${OTA_LAST_DEVICE_FSTYPE}')"
+        ;;
+esac
+if [[ "${OTA_LAST_RESIZE_RC}" != "0" ]]; then
+    panic "resize ${OTA_LAST_DEVICE} -> ${OTA_LAST_DEVICE_NEW_SIZE_KB}K failed, please check if your \
 eMMC partition is healthy"
 fi
 mount -a
