@@ -210,7 +210,7 @@ function parse_partition_xml()
 			panic "partition ${LABELS[$i]}: format=${PART_FORMAT[$i]} holds no filesystem, fstype is not allowed"
 		fi
 		if [ "${PART_FSTYPE[$i]}" = "f2fs" ]; then
-			for _tool in mkfs.f2fs sload.f2fs fsck.f2fs; do
+			for _tool in mkfs.f2fs fsck.f2fs resize.f2fs; do
 				command -v ${_tool} >/dev/null 2>&1 ||
 					panic "partition ${LABELS[$i]} needs f2fs but ${_tool} not found (expected in binTools)"
 			done
@@ -545,9 +545,9 @@ function do_gen_partition_subimg()
 	if [ $3 -eq 1 ]; then
 		mkfs.fat $RECOVERY_DIR/$1
 	elif [ $3 -eq 2 ]; then
-		# f2fs 不能"先 mkfs 再挂载灌内容"（下面那段 sudo mount/tar 只对 ext4/FAT 有效），
-		# 所以 f2fs 分区的镜像由 socbak.sh 预先按内容生成好，这里只处理没有预生成镜像的
-		# 空分区（如 ROOTFS_RW）：直接对整个分区 mkfs.f2fs。
+		# f2fs 分区的镜像由 socbak.sh 那边生成（与 ext4 同一条路：建镜像 → mkfs →
+		# 挂载灌内容 → 收缩），这里只处理没有预生成镜像的空分区（如 ROOTFS_RW）：
+		# 直接对整个分区 mkfs.f2fs。
 		if [ "${PART_FSTYPE[$2]}" = "f2fs" ]; then
 			mkfs.f2fs ${F2FS_MKFS_OPTS} -f $RECOVERY_DIR/$1
 		else
