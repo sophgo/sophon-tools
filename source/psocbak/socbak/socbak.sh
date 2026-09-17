@@ -3,7 +3,8 @@
 # env SOC_BAK_ALL_IN_ONE!="" for socbak allinone
 # env SOC_BAK_FIXED_SIZE!="" for socbak fixed size mode
 # env SOC_BAK_FIXED_DATA_START!="" for socbak fixed data partition start mode
-# env SOC_BAK_FSTYPE=ext4|f2fs for the filesystem of the generated images (default ext4)
+#
+# 分区文件系统在下面的 PART_FSTYPE_CONF 配置区按分区指定（没有全局开关）
 
 # 配置日志能力
 PWD="$(dirname "$(readlink -f "$0")")"
@@ -12,13 +13,12 @@ LOGFILE="$(readlink -f "${BASH_SOURCE[0]}").log"
 rm -f $LOGFILE*
 exec > >(tee -a "$LOGFILE") 2>&1
 
-echo "VERSION: v1.3.4"
+echo "VERSION: v1.3.5"
 date '+%Y-%m-%d %H:%M:%S'
 
 export SOC_BAK_ALL_IN_ONE=${SOC_BAK_ALL_IN_ONE:-}
 export SOC_BAK_FIXED_SIZE=${SOC_BAK_FIXED_SIZE:-}
 export SOC_BAK_FIXED_DATA_START=${SOC_BAK_FIXED_DATA_START:-}
-export SOC_BAK_FSTYPE=${SOC_BAK_FSTYPE:-ext4}
 
 for arg in "$@"; do
     case $arg in
@@ -34,20 +34,8 @@ for arg in "$@"; do
             export SOC_BAK_FIXED_DATA_START="${arg#*=}"
             shift
             ;;
-		SOC_BAK_FSTYPE=*)
-            export SOC_BAK_FSTYPE="${arg#*=}"
-            shift
-            ;;
     esac
 done
-
-case "${SOC_BAK_FSTYPE}" in
-	ext4|f2fs) ;;
-	*)
-		echo "ERROR: SOC_BAK_FSTYPE=${SOC_BAK_FSTYPE} is not supported (expect ext4 or f2fs)"
-		exit 1
-		;;
-esac
 
 if [[ "${SOC_BAK_FIXED_SIZE}" != "" ]] && [[ "${SOC_BAK_FIXED_DATA_START}" != "" ]]; then
 	echo "ERROR: SOC_BAK_FIXED_SIZE and SOC_BAK_FIXED_DATA_START cannot be enabled at the same time"
@@ -109,14 +97,43 @@ export GZIP=-1
 export PIGZ=-1
 PARTITIONS_SIZE_NO_DATA_KB=$((0))
 
-# SOC_BAK_FSTYPE=f2fs 时 format="2" 分区（RECOVERY/ROOTFS/ROOTFS_RW/OPT/SYSTEM/DATA）
-# 生成 f2fs 镜像；缺省 ext4，与历史版本行为一致。BOOT(FAT32) 与 MISC(raw) 不受影响。
+# format="2" 的分区（RECOVERY/ROOTFS/ROOTFS_RW/OPT/SYSTEM/DATA）生成 ext4 还是 f2fs
+# 镜像，由上面的 PART_FSTYPE_CONF 按分区指定；缺省全 ext4，与历史版本行为一致。
+# BOOT(FAT32) 与 MISC(raw) 不受影响。
 # f2fs mkfs 特性与 SDK 打包链（bm_make_package_sectors.sh）保持一致：面向异常断电 +
 # 可能跑 MySQL 等重型数据库的边缘场景，开 extra_attr(前置) / inode_checksum(撕裂 inode 可检测)
 # / sb_checksum(撕裂超级块可检测) / lost_found(孤立 inode 收进 lost+found 而非丢弃) /
 # inode_crtime(掉电取证)。内核未编译的特性（compression/encrypt/verity/casefold）不开。
 F2FS_MKFS_FEATURES="extra_attr,inode_checksum,sb_checksum,lost_found,inode_crtime"
 F2FS_MKFS_OPTS="-O ${F2FS_MKFS_FEATURES}"
+
+# ============================ 分区文件系统配置 ============================
+# 按分区指定生成的镜像用什么文件系统（只对 format="2" 的分区有意义）：
+#   ext4 —— 历史默认行为
+#   f2fs —— 该分区出 f2fs 镜像，生成的 partition32G.xml 里对应分区带 fstype="f2fs"
+# 没列出来的分区按 ext4。BOOT(format=1, FAT32) 与 MISC(format=0, raw) 不在此列。
+#
+# 例：只想让 data 和 rootfs 用 f2fs ——
+#     PART_FSTYPE_CONF[data]=f2fs
+#     PART_FSTYPE_CONF[rootfs]=f2fs
+#
+# 注意：任一分区配成 f2fs 时，运行内核必须支持 f2fs（/proc/filesystems 里有），
+# 否则 socbak 直接报错退出（见下面的预检）。
+declare -A -g PART_FSTYPE_CONF
+PART_FSTYPE_CONF=(
+	[recovery]=ext4
+	[rootfs]=ext4
+	[rootfs_rw]=ext4
+	[opt]=ext4
+	[system]=ext4
+	[data]=ext4
+)
+
+# 取某分区配置的文件系统（未配置按 ext4）
+function socbak_part_fstype()
+{
+	echo "${PART_FSTYPE_CONF[$1]:-ext4}"
+}
 # f2fs 镜像尺寸下限：mkfs.f2fs 实测 40 MB 建不起来、48 MB 起才行，取 64 MB 留余量。
 # 收缩搜索不能低于它——resize.f2fs 会把文件系统缩到更小，但内核会以 EUCLEAN 拒绝挂载。
 F2FS_MIN_SIZE_MB=64
@@ -234,19 +251,49 @@ else
 	echo "INFO: get chip id success!"
 fi
 
-if [[ "${SOC_BAK_FSTYPE}" == "f2fs" ]]; then
+# 配置区校验：分区名必须是已知的 format="2" 分区（写错了会静默退回 ext4，必须拦），
+# 取值只能是 ext4/f2fs
+for _conf_part in "${!PART_FSTYPE_CONF[@]}"; do
+	case "${_conf_part}" in
+		recovery|rootfs|rootfs_rw|opt|system|data) ;;
+		*)
+			echo "ERROR: PART_FSTYPE_CONF has unknown partition \"${_conf_part}\""
+			echo "ERROR: known partitions: recovery rootfs rootfs_rw opt system data"
+			exit 1
+			;;
+	esac
+	case "${PART_FSTYPE_CONF[${_conf_part}]}" in
+		ext4|f2fs) ;;
+		*)
+			echo "ERROR: PART_FSTYPE_CONF[${_conf_part}]=${PART_FSTYPE_CONF[${_conf_part}]} is not supported (expect ext4 or f2fs)"
+			exit 1
+			;;
+	esac
+done
+unset _conf_part
+
+SOCBAK_F2FS_PARTS=""
+for _part in recovery rootfs rootfs_rw opt system data; do
+	if [[ "$(socbak_part_fstype "${_part}")" == "f2fs" ]]; then
+		SOCBAK_F2FS_PARTS="${SOCBAK_F2FS_PARTS} ${_part}"
+	fi
+done
+unset _part
+echo "INFO: partition filesystems:$(for p in recovery rootfs rootfs_rw opt system data; do echo -n " ${p}=$(socbak_part_fstype $p)"; done)"
+
+if [[ "${SOCBAK_F2FS_PARTS}" != "" ]]; then
 	# f2fs 镜像要挂载后灌内容（与 ext4 同一条路），所以**运行内核必须支持 f2fs**。
 	# 不支持就直接报错退出——不能因为"这台机器挂不了 f2fs"而退化成另一种产物。
 	if ! grep -qw f2fs /proc/filesystems; then
-		echo "ERROR: SOC_BAK_FSTYPE=f2fs needs a kernel with f2fs support, but f2fs is not in /proc/filesystems."
-		echo "ERROR: boot a kernel with CONFIG_F2FS_FS=y (the CV84X2 BSP kernel has it) and retry."
+		echo "ERROR: f2fs partitions configured (${SOCBAK_F2FS_PARTS# }), but the running kernel has no f2fs support"
+		echo "ERROR: f2fs is not in /proc/filesystems; boot a kernel with CONFIG_F2FS_FS=y (the CV84X2 BSP kernel has it)."
 		exit 1
 	fi
 	# 工具来自 binTools（aarch64 全静态 f2fs-tools 1.16.0）。缺了就在这里报错，
 	# 否则会等到生成镜像阶段才以 "command not found" 的形式炸掉，前面几十分钟的备份白做。
 	for _f2fs_tool in mkfs.f2fs fsck.f2fs resize.f2fs dump.f2fs; do
 		if ! command -v "${_f2fs_tool}" >/dev/null 2>&1; then
-			echo "ERROR: SOC_BAK_FSTYPE=f2fs needs ${_f2fs_tool} (expected in ${TGZ_FILES_PATH}/binTools)"
+			echo "ERROR: f2fs partitions configured (${SOCBAK_F2FS_PARTS# }) but ${_f2fs_tool} not found (expected in ${TGZ_FILES_PATH}/binTools)"
 			exit 1
 		fi
 	done
@@ -567,8 +614,8 @@ if [[ "${ALL_IN_ONE_FLAG}" != "" ]] && [[ "${ALL_IN_ONE_SCRIPT}" != "" ]]; then
 	for TGZ_FILE in "${TGZ_FILES[@]}"
 	do
 		part_size_max=0
-		# BOOT 是 FAT32（下面的 "boot" 分支覆盖），其余分区按 SOC_BAK_FSTYPE 走 ext4/f2fs
-		partition_format="${SOC_BAK_FSTYPE}"
+		# BOOT 是 FAT32（下面的 "boot" 分支覆盖），其余分区按 PART_FSTYPE_CONF 逐分区取
+		partition_format="$(socbak_part_fstype "${TGZ_FILE}")"
 		ext_part=""
 		case $TGZ_FILE in
 			"rootfs")
@@ -714,31 +761,34 @@ if [[ "$SOC_NAME" == "bm1684x" ]] || [[ "$SOC_NAME" == "bm1684" ]]; then
 fi
 # f2fs 模式下给 format="2" 的分区带上 fstype 属性；ext4 时为空串，
 # 保证不传开关时生成的 xml 与历史版本逐字节一致。
-FSTYPE_ATTR=""
-if [[ "${SOC_BAK_FSTYPE}" == "f2fs" ]]; then
-	FSTYPE_ATTR=' fstype="f2fs"'
-fi
+# 每个 format="2" 分区按配置表决定要不要带 fstype 属性；全 ext4 时属性为空串，
+# 生成的 xml 与历史版本逐字节一致
+fstype_attr() {
+	if [[ "$(socbak_part_fstype "$1")" == "f2fs" ]]; then
+		echo -n ' fstype="f2fs"'
+	fi
+}
 echo "<physical_partition size_in_kb=\"$EMMC_ALL_SIZE\">" > $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
 # boot data opt system recovery rootfs
 if [[ " ${TGZ_FILES[@]} " =~ " boot " ]]; then
 	echo "  <partition label=\"BOOT\"       size_in_kb=\"${TGZ_FILES_SIZE[boot]}\"  readonly=\"false\"  format=\"1\" />" >> $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
 fi
 if [[ " ${TGZ_FILES[@]} " =~ " recovery " ]]; then
-	echo "  <partition label=\"RECOVERY\"   size_in_kb=\"${TGZ_FILES_SIZE[recovery]}\"  readonly=\"false\" format=\"2\"${FSTYPE_ATTR} />" >> $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
+	echo "  <partition label=\"RECOVERY\"   size_in_kb=\"${TGZ_FILES_SIZE[recovery]}\"  readonly=\"false\" format=\"2\"$(fstype_attr recovery) />" >> $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
 fi
 echo "  <partition label=\"MISC\"       size_in_kb=\"10240\"  readonly=\"false\"   format=\"0\" />" >> $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
 if [[ " ${TGZ_FILES[@]} " =~ " rootfs " ]]; then
-	echo "  <partition label=\"ROOTFS\"     size_in_kb=\"${TGZ_FILES_SIZE[rootfs]}\" readonly=\"true\"   format=\"2\"${FSTYPE_ATTR} />" >> $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
+	echo "  <partition label=\"ROOTFS\"     size_in_kb=\"${TGZ_FILES_SIZE[rootfs]}\" readonly=\"true\"   format=\"2\"$(fstype_attr rootfs) />" >> $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
 fi
-echo "  <partition label=\"ROOTFS_RW\"  size_in_kb=\"${ROOTFS_RW_SIZE}\" readonly=\"false\"  format=\"2\"${FSTYPE_ATTR} />" >> $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
+echo "  <partition label=\"ROOTFS_RW\"  size_in_kb=\"${ROOTFS_RW_SIZE}\" readonly=\"false\"  format=\"2\"$(fstype_attr rootfs_rw) />" >> $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
 if [[ " ${TGZ_FILES[@]} " =~ " opt " ]]; then
-	echo "  <partition label=\"OPT\"       size_in_kb=\"${TGZ_FILES_SIZE[opt]}\" readonly=\"false\"  format=\"2\"${FSTYPE_ATTR} />" >> $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
+	echo "  <partition label=\"OPT\"       size_in_kb=\"${TGZ_FILES_SIZE[opt]}\" readonly=\"false\"  format=\"2\"$(fstype_attr opt) />" >> $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
 fi
 if [[ " ${TGZ_FILES[@]} " =~ " system " ]]; then
-	echo "  <partition label=\"SYSTEM\"     size_in_kb=\"${TGZ_FILES_SIZE[system]}\" readonly=\"false\"  format=\"2\"${FSTYPE_ATTR} />" >> $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
+	echo "  <partition label=\"SYSTEM\"     size_in_kb=\"${TGZ_FILES_SIZE[system]}\" readonly=\"false\"  format=\"2\"$(fstype_attr system) />" >> $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
 fi
 if [[ " ${TGZ_FILES[@]} " =~ " data " ]]; then
-	echo "  <partition label=\"DATA\"       size_in_kb=\"${TGZ_FILES_SIZE[data]}\" readonly=\"false\"  format=\"2\"${FSTYPE_ATTR} />" >> $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
+	echo "  <partition label=\"DATA\"       size_in_kb=\"${TGZ_FILES_SIZE[data]}\" readonly=\"false\"  format=\"2\"$(fstype_attr data) />" >> $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
 fi
 echo "</physical_partition>" >> $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
 cat $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
