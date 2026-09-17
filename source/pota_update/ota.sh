@@ -205,7 +205,7 @@ LOGFILE="$(readlink -f "${BASH_SOURCE[0]}").log"
 rm -f "${LOGFILE}"*
 exec > >(tee -a "$LOGFILE") 2>&1
 
-echo "[INFO] ota update tool, version: v1.5.7"
+echo "[INFO] ota update tool, version: v1.5.8"
 
 WORK_DIR=""
 if [ ! -d "${RUN_WORK_DIR}/sdcard" ]; then
@@ -577,12 +577,13 @@ fi
 # 把最后一个分区的文件系统腾出一段尾部空间，供刷机包写入。
 #
 # ext4 走 e2fsck + resize2fs 缩容。
-# f2fs 只能离线缩容（resize.f2fs 启动会先做未挂载检查），此处已经 umount，加上 -s 即可：
-#   - 保留数据（LAST_PART_NOT_FLASH=1）：resize.f2fs -s -t <目标扇区数>，数据原地保留；
-#   - 全量刷机（=0）：最后一个分区本来就要被包内镜像整个覆盖，缩容没有意义，
-#     等价做法是按目标尺寸重建一个空 f2fs。
-# 坑：resize.f2fs 在"目标装不下数据"时**静默不动且退出码仍为 0**，所以保留数据这条分支
-# 必须回读超级块核对 block_count，核对不过直接 panic，不能带着没缩容的分区继续往下写包。
+# f2fs 只能离线缩容（resize.f2fs 启动会先做未挂载检查），此处已经 umount，加上 -s 即可。
+# 两种模式都**先试缩容**：缩容成功就已经腾出尾部空间，而且不像重建那样要求刷机包不在最后一个
+# 分区上；只有缩容做不到（旧数据装不下目标尺寸）才退回：保留数据（LAST_PART_NOT_FLASH=1）直接
+# panic，全量刷机（=0）按目标尺寸重建一个空 f2fs —— 重建会抹掉分区上的一切，走那条路之前必须
+# 先确认刷机包不在这块分区上。
+# 坑：resize.f2fs 在"目标装不下数据"时**静默不动且退出码仍为 0**，所以要回读超级块核对
+# block_count，核对不过一律按"没缩容"处理，不能带着没缩容的分区继续往下写包。
 #
 # 读 f2fs 超级块里的一个整数字段：f2fs_sb_field <绝对偏移> <字节数> <设备>。
 # 超级块起始偏移 1024，字段均为小端。
@@ -593,6 +594,10 @@ f2fs_sb_field() {
     [[ -n "${v}" ]] || return 1
     printf '%s' "${v}"
 }
+# 与打包链 bm_make_package_sectors.sh 的 F2FS_MKFS_FEATURES 保持一致：设备上重建出来的 f2fs
+# 必须和镜像里的一样带生产级特性（掉电能否检出撕裂的 inode/超级块、孤立即 inode 的去处），
+# 否则全量刷机后 /data 的特性就比打包出来的镜像退化了。
+OTA_F2FS_MKFS_FEATURES="extra_attr,inode_checksum,sb_checksum,lost_found,inode_crtime"
 OTA_LAST_DEVICE_FSTYPE=$(blkid -o value -s TYPE "${OTA_LAST_DEVICE}" 2>/dev/null)
 echo "[INFO] last device ${OTA_LAST_DEVICE} fstype: ${OTA_LAST_DEVICE_FSTYPE:-unknown}"
 OTA_LAST_RESIZE_RC=0
@@ -603,21 +608,20 @@ case "${OTA_LAST_DEVICE_FSTYPE}" in
         OTA_LAST_RESIZE_RC=$?
         ;;
     f2fs)
-        if [[ "${LAST_PART_NOT_FLASH}" == "1" ]]; then
-            # 优先 /usr/local/sbin：rootfs 里 1.16.0 的 resize.f2fs 装在那儿（-s 是 1.16 才有的），
-            # 而 /usr/sbin 下可能是不带 -s 的发行版自带版本。
-            OTA_RESIZE_F2FS=/usr/local/sbin/resize.f2fs
-            [[ -x "${OTA_RESIZE_F2FS}" ]] || OTA_RESIZE_F2FS=$(command -v resize.f2fs 2>/dev/null \
-|| true)
-            [[ -n "${OTA_RESIZE_F2FS}" && -x "${OTA_RESIZE_F2FS}" ]] || panic "last partition \
-${OTA_LAST_DEVICE} is f2fs but resize.f2fs not found"
-            OTA_LAST_DEVICE_NEW_SIZE_SECTORS=$(echo "${OTA_LAST_DEVICE_NEW_SIZE_KB} * 1024 / \
+        OTA_LAST_DEVICE_NEW_SIZE_SECTORS=$(echo "${OTA_LAST_DEVICE_NEW_SIZE_KB} * 1024 / \
 ${EMMC_SECTOR_B}" | bc)
+        # 优先 /usr/local/sbin：rootfs 里 1.16.0 的 f2fs 工具装在那儿（-s 是 1.16 才有的），
+        # 而 /usr/sbin 下可能是不带 -s 的发行版自带版本。
+        OTA_RESIZE_F2FS=/usr/local/sbin/resize.f2fs
+        [[ -x "${OTA_RESIZE_F2FS}" ]] || OTA_RESIZE_F2FS=$(command -v resize.f2fs 2>/dev/null \
+|| true)
+        OTA_F2FS_SHRUNK=0
+        OTA_F2FS_SHRINK_RC=-1
+        if [[ -n "${OTA_RESIZE_F2FS}" && -x "${OTA_RESIZE_F2FS}" ]]; then
             echo "[INFO] shrink f2fs last partition ${OTA_LAST_DEVICE} -> \
-${OTA_LAST_DEVICE_NEW_SIZE_KB}K (${OTA_LAST_DEVICE_NEW_SIZE_SECTORS} sectors, keep data) by \
-${OTA_RESIZE_F2FS}"
+${OTA_LAST_DEVICE_NEW_SIZE_KB}K (${OTA_LAST_DEVICE_NEW_SIZE_SECTORS} sectors) by ${OTA_RESIZE_F2FS}"
             "${OTA_RESIZE_F2FS}" -s -t "${OTA_LAST_DEVICE_NEW_SIZE_SECTORS}" "${OTA_LAST_DEVICE}"
-            OTA_LAST_RESIZE_RC=$?
+            OTA_F2FS_SHRINK_RC=$?
             # 超级块内：log_blocksize 在 0x10（偏移 1040）、block_count 在 0x24（偏移 1060），
             # block_count 的单位是块。
             OTA_F2FS_LOG_BLOCKSIZE=$(f2fs_sb_field 1040 4 "${OTA_LAST_DEVICE}") || \
@@ -627,33 +631,38 @@ panic "cannot read f2fs superblock from ${OTA_LAST_DEVICE}"
             OTA_F2FS_BLOCK_COUNT_MAX=$(echo "${OTA_LAST_DEVICE_NEW_SIZE_KB} * 1024 / \
 (2 ^ ${OTA_F2FS_LOG_BLOCKSIZE})" | bc)
             echo "[INFO] f2fs block_count after shrink: ${OTA_F2FS_BLOCK_COUNT} (must be <= \
-${OTA_F2FS_BLOCK_COUNT_MAX})"
-            if [[ "${OTA_LAST_RESIZE_RC}" != "0" ]]; then
-                panic "resize.f2fs -s -t ${OTA_LAST_DEVICE_NEW_SIZE_SECTORS} on ${OTA_LAST_DEVICE} \
-failed (rc=${OTA_LAST_RESIZE_RC})"
-            fi
-            if [[ "${OTA_F2FS_BLOCK_COUNT}" -gt "${OTA_F2FS_BLOCK_COUNT_MAX}" ]]; then
-                panic "f2fs ${OTA_LAST_DEVICE} was not shrunk: block_count is still \
-${OTA_F2FS_BLOCK_COUNT}, must be <= ${OTA_F2FS_BLOCK_COUNT_MAX} for ${OTA_LAST_DEVICE_NEW_SIZE_KB}K; \
-either the data does not fit the target size, or resize.f2fs does not support -s (needs f2fs-tools \
->= 1.16)"
+${OTA_F2FS_BLOCK_COUNT_MAX}, resize rc=${OTA_F2FS_SHRINK_RC})"
+            if [[ "${OTA_F2FS_SHRINK_RC}" == "0" && \
+                  "${OTA_F2FS_BLOCK_COUNT}" -le "${OTA_F2FS_BLOCK_COUNT_MAX}" ]]; then
+                OTA_F2FS_SHRUNK=1
             fi
         else
-            # 重建会把该分区上的一切抹掉——包括刷机包自己。缩容路径是保留数据，
-            # 所以包放在最后一个分区上没问题；重建路径必须先确认包不在那儿。
+            echo "[WARN] resize.f2fs not found, cannot shrink ${OTA_LAST_DEVICE} offline"
+        fi
+        if [[ "${OTA_F2FS_SHRUNK}" != "1" ]]; then
+            if [[ "${LAST_PART_NOT_FLASH}" == "1" ]]; then
+                panic "f2fs ${OTA_LAST_DEVICE} was not shrunk to ${OTA_LAST_DEVICE_NEW_SIZE_KB}K: \
+resize.f2fs -s -t ${OTA_LAST_DEVICE_NEW_SIZE_SECTORS} on ${OTA_LAST_DEVICE} failed \
+(rc=${OTA_F2FS_SHRINK_RC}, block_count=${OTA_F2FS_BLOCK_COUNT:-?} must be <= \
+${OTA_F2FS_BLOCK_COUNT_MAX:-?}); the data on it does not fit the target size, or resize.f2fs does \
+not support -s (needs f2fs-tools >= 1.16)"
+            fi
+            # 缩容做不到，只能重建 —— 重建会抹掉该分区上的一切，包括刷机包自己，所以先确认包不在
+            # 最后一个分区上。缩容路径（保留数据）没有这个限制。
             OTA_WORK_DEV=$(df -P "${WORK_DIR}" 2>/dev/null | tail -1 | awk '{print $1}')
             if [[ "${OTA_WORK_DEV}" == "${OTA_LAST_DEVICE}" ]]; then
-                panic "the update pack is on ${OTA_LAST_DEVICE} (${WORK_DIR}), but a full flash \
-onto an f2fs last partition has to recreate that partition, which would erase the pack itself; \
+                panic "the update pack is on ${OTA_LAST_DEVICE} (${WORK_DIR}), but its f2fs \
+filesystem could not be shrunk and has to be recreated, which would erase the pack itself; \
 extract the pack onto another partition (e.g. /var/tmp) and run again"
             fi
-            OTA_MKFS_F2FS=$(command -v mkfs.f2fs 2>/dev/null || true)
-            [[ -n "${OTA_MKFS_F2FS}" ]] || panic "last partition ${OTA_LAST_DEVICE} is f2fs but \
-mkfs.f2fs not found"
+            OTA_MKFS_F2FS=/usr/local/sbin/mkfs.f2fs
+            [[ -x "${OTA_MKFS_F2FS}" ]] || OTA_MKFS_F2FS=$(command -v mkfs.f2fs 2>/dev/null || true)
+            [[ -n "${OTA_MKFS_F2FS}" && -x "${OTA_MKFS_F2FS}" ]] || panic "last partition \
+${OTA_LAST_DEVICE} is f2fs but mkfs.f2fs not found"
             echo "[INFO] full flash onto f2fs last partition (pack on ${OTA_WORK_DEV}), recreate \
-it at ${OTA_LAST_DEVICE_NEW_SIZE_KB}K"
-            "${OTA_MKFS_F2FS}" -f "${OTA_LAST_DEVICE}" \
-                $(echo "${OTA_LAST_DEVICE_NEW_SIZE_KB} * 1024 / ${EMMC_SECTOR_B}" | bc)
+it at ${OTA_LAST_DEVICE_NEW_SIZE_KB}K by ${OTA_MKFS_F2FS}"
+            "${OTA_MKFS_F2FS}" -O "${OTA_F2FS_MKFS_FEATURES}" -f "${OTA_LAST_DEVICE}" \
+                "${OTA_LAST_DEVICE_NEW_SIZE_SECTORS}"
             OTA_LAST_RESIZE_RC=$?
         fi
         ;;

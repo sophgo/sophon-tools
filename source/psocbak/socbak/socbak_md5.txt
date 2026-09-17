@@ -45,4 +45,4 @@ f2a59885f1550f3b0909176521f42ca6  ./binTools/uuidgen
 608ca6d0a3e1b5c55d67b5396617b698  ./script/bm1684/bm_make_package.sh
 24dd21756fb680231e087305e006e2e5  ./script/bm1688/bm_make_package.sh
 7864745c1a0c7e0b72e2a6c68e7e78f9  ./script/bm1688/raw2cimg_edge.py
-ad83ed61a82dfcf334a5abd6c9b79b22  ./script/ota_update/ota_update.sh
+f6badd1335ad5432548ba99643cb381b  ./script/ota_update/ota_update.sh
