@@ -132,8 +132,19 @@ func Create(b backend.Storage, size, start, blocksize int64, volumeLabel string,
 	// Closed-form equivalent of the dosfstools mkfs.fat sectors-per-FAT search:
 	// smallest X such that (reserved + 2X + clusters*SPC) == totalSectors and
 	// X * (bytesPerSector/4) >= clusters + 2.
-	fatEntryDenom := uint32(blocksize)*uint32(sectorsPerCluster) + 8
-	sectorsPerFat := uint16((4*(totalSectors-uint32(reservedSectors)) + fatEntryDenom - 1) / fatEntryDenom)
+	//
+	// PATCH(setf) 7: 这里原来用 uint32 算、再窄化成 uint16, 而且少了一项。三处都会出错:
+	//   · 4*totalSectors 在卷容量超过约 512 GiB 时溢出 uint32 (静默回绕成一个小数);
+	//   · 结果窄化成 uint16 后, 卷容量超过约 256 GiB 时就被截断 (384 GB 的卡算出
+	//     32744, 实际需要 98280) —— FAT 表比卷所需的簇数还小, 建出来的 FAT32 是坏的:
+	//     256 GB 以下看不出来, 再大就会写出无法挂载/越界寻址的卷, 512 GiB 起直接 panic;
+	//   · 分子漏了 +8*SPC。把 "X*(B/4) >= clusters+2" 与 "clusters = (T-R-2X)/SPC"
+	//     合起来解, 需要的是 X*(B*SPC+8) >= 4*(T-R) + 8*SPC, 少这一项时 8 GB~2 TiB
+	//     里有 25 档容量 (如 14/15/30/60 GB) 会少算 1~2 个表项 —— 同样是 FAT 放不下卷。
+	// 用 uint64 计算、按 BPB 的字段宽度 (32 位) 落盘即可; 与 mkfs.fat 的取值同量级。
+	fatEntryDenom := uint64(blocksize)*uint64(sectorsPerCluster) + 8
+	sectorsPerFat := uint32((4*(uint64(totalSectors)-uint64(reservedSectors)) + 8*uint64(sectorsPerCluster) +
+		fatEntryDenom - 1) / fatEntryDenom)
 
 	// The layout must yield at least one cluster and leave at least 32 KiB
 	// of data area beyond the reserved sectors and FATs (matches mkfs.fat checks).

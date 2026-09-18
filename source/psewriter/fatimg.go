@@ -86,6 +86,32 @@ func PlanCardImageSized(pkg *Archive, totalTarget int64, requireFullDisk bool, o
 // fat32MaxSize FAT32 规范上限 (2 TiB 量级)
 const fat32MaxSize int64 = 2198754099200
 
+// PlanFormatOnly 只格式化模式的计划: 整卡一个 FAT32 分区, 不写任何文件。
+//
+// 与文件包模式的差别只在"有没有文件": 分区表、文件系统的建法完全一样
+// (同一个 buildCardFS), 所以格式化出来的卡与写卡时先建的那张卡是同一种格式 ——
+// BM1684X 的 BL1 走的 FatFs 认的就是 MBR + FAT32 (见 bl1check.go)。
+//
+// label 为空时用默认卷标 "SE"。卡比 FAT32 上限还大时按上限建分区 (剩下的空间不属于分区)。
+func PlanFormatOnly(totalTarget int64, label string) (*PackagePlan, error) {
+	if totalTarget <= 0 {
+		return nil, fmt.Errorf("无法确定目标设备容量")
+	}
+	total := totalTarget
+	if total > fat32MaxSize {
+		total = fat32MaxSize
+	}
+	if total < minFAT32Size {
+		return nil, fmt.Errorf("目标盘 %s 太小, 无法建立 FAT32 (至少需要 %s)",
+			HumanBytes(total), HumanBytes(minFAT32Size))
+	}
+	return &PackagePlan{
+		TotalSize: total,
+		PartSize:  total - partStartLBA*sectorSize,
+		Label:     sanitizeLabel(label),
+	}, nil
+}
+
 func roundUp(v, align int64) int64 {
 	if v%align == 0 {
 		return v

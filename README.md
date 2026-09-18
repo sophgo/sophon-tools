@@ -30,7 +30,7 @@
 | [bmssm](./source/pbmssm) | source/pbmssm | 设备端后端（:9779）：鉴权/硬件指标/systemd/端口/网络/OTA/文件。见 [API.md](./API.md) / [USAGE.md](./USAGE.md) / [BUILD.md](./BUILD.md) |
 | [sophliteos](./source/psophliteos) | source/psophliteos | 算力设备管理 Web 平台（Go+Vue，:8080），反代 bmssm。见 [API.md](./API.md) / [USAGE.md](./USAGE.md) / [BUILD.md](./BUILD.md) |
 | [se-rag-core](./source/se-rag-core) | source/se-rag-core | SE 系列知识库 RAG 检索核心（Go，本地 FAISS/BM25 + 内置网关），供 SE 系列 skill 使用。见 [README](./source/se-rag-core/readme.md) |
-| [sewriter](./source/psewriter) | source/psewriter | SE写卡工具（Windows 单文件）：把发版文件包/目录/整卡镜像写成 SE 系列设备 TF 卡，写后回读校验。见 [README](./source/psewriter/README.md) / [现场说明](./source/psewriter/SE写卡工具说明.md) |
+| [sewriter](./source/psewriter) | source/psewriter | SE写卡工具（Windows 单文件）：把发版文件包/目录/整卡镜像写成 SE 系列设备 TF 卡，也可只格式化 TF 卡；写后回读校验。见 [README](./source/psewriter/README.md) / [现场说明](./source/psewriter/SE写卡工具说明.md) |
 
 ## 编译方式
 

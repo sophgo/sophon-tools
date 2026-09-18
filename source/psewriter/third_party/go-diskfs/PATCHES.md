@@ -1,7 +1,7 @@
 # go-diskfs 本地补丁说明
 
 上游: `github.com/diskfs/go-diskfs` v1.9.4 (BSD-2-Clause, 见同目录 `LICENSE`)
-本目录是**打了补丁的本地副本**, 通过 `tools/winflash/go.mod` 的
+本目录是**打了补丁的本地副本**, 通过 `source/psewriter/go.mod` 的
 `replace github.com/diskfs/go-diskfs => ./third_party/go-diskfs` 生效。
 
 副本已裁掉 `testdata/`、`*_test.go`、`examples/` 与 CI 配置, 只保留编译所需源码。
@@ -13,6 +13,8 @@
 2. 上游 `allocateSpace()` 每分配一次簇都调 `WriteFat()`, 而 `WriteFat` 每次把**整张 FAT**
    (含两份副本) 重写一遍。TF 卡的 FAT 有几 MB, 一个 1 GiB 的文件包会因此写出十几 GB ——
    既慢又费卡。补丁 5 让它只回写变化的扇区。
+3. 上游算 FAT32 的 sectors-per-FAT 用 32 位整数、再窄化成 16 位、还漏了一项, **算出来的
+   FAT 表放不下卷里的簇** —— 卡看着格式化成功了, 插上却挂载失败或一写就坏。补丁 7 修掉它。
 
 ## 补丁清单 (搜索 `PATCH(setf)` 可定位全部改动)
 
@@ -47,15 +49,40 @@ Go <= 1.20。上游 go-diskfs v1.9.4 用了 Go 1.21 才进标准库的东西, �
 | `go.mod` | `go 1.25.0` + 若干高版本依赖 | 降到 `go 1.20`, 依赖锁到 1.20 可编译的版本 |
 
 去掉这两个依赖后, 整个依赖图 (sevenzip / rardecode / klauspost-compress / x-sys / x-text …)
-都能降到 Go 1.20 可编译的版本, 见 `tools/winflash/go.mod`。
+都能降到 Go 1.20 可编译的版本, 见 `source/psewriter/go.mod`。
 回归测试 `TestSevenZipContainersRoundTrip` 覆盖降级后的 7z 解压路径。
+
+### 补丁 7: 大卡/特定容量上 FAT 表算错 (卡会挂不上 / 写坏)
+
+| 文件 | 问题 | 修法 |
+|---|---|---|
+| `filesystem/fat32/fat32.go` `Create()` | 算 sectors-per-FAT 时三处出错: ① `4*(totalSectors-reserved)` 用 **uint32** —— 卷超过约 512 GiB 时溢出回绕; ② 结果窄化成 **uint16** —— 卷超过约 256 GiB 时被截断; ③ 分子漏了 `+8*SPC` —— 解 `X*(B*SPC+8) >= 4*(T-R) + 8*SPC` 才是 `X*(B/4) >= clusters+2` 的等价式, 少这一项时 8 GB~2 TiB 里有 25 档容量 (14/15/30/60 GB 等) 少算 1~2 个表项 | 用 uint64 计算、补上 `+8*SPC`、按 BPB 的字段宽度 (32 位) 落盘 |
+
+后果分三档, 都是"卡看着做出来了、实际不能用"这类最难查的故障:
+
+| 卡容量 | 症状 |
+|---|---|
+| 大部分容量 | 正常 |
+| 14 / 15 / 30 / 60 GB 等 25 档 | FAT 表比卷所需簇数少 1~2 项 (15 GB 少 2) → 卷尾那几个簇号超出 FAT 表范围 |
+| 384 GB ~ 512 GB | FAT 表比卷所需簇数还小得多 (384 GB 算出 32744, 实际需要 98280) → 挂载失败 / 一分配簇就越界写坏数据 |
+| ≥ 512 GB | `Create()` 里 `clusters[rootDirCluster]` 越界, 直接 panic |
+
+第一条在"只格式化 TF 卡"上尤其致命 —— 那个模式的**全部**产出就是这张 FAT32。
+回归测试 `TestFAT32GeometryOnLargeCards` 逐 GB 扫 8~48 GB、再补 256/384/512/1024 GB,
+每档都卡住不变量 `(total32 - reserved - 2*fatSz) / spc + 2 <= fatSz * bps / 4`,
+即 FAT 表放得下卷里每一个数据簇。**必须逐档扫**: 只挑"大卡"当代表的话, 漏掉 `+8*SPC`
+那一项时 256/384/512/1024 GB 全是好的, 出问题的 14/15/30/60 GB 一个都碰不到。
+去掉本补丁后该测试在 9~48 GB 与 384 GB 报"FAT 表太小"、512 GB panic。
 
 ## 验证
 
-- `tools/winflash/archive_test.go`:
+- `source/psewriter/archive_test.go`:
   - `TestBuildCardImageAcceptsCJKNames` —— 中/日文文件名与中文目录名建卡后按原名读回
   - `TestBuildCardImageShortNameCollision` —— 两个会被改写成相同短名的中文名互不串内容
   - `TestBuildCardImageRejectsUnrepresentableNames` —— BMP 之外(emoji)与 FAT 非法字符仍被拦下
+- `source/psewriter/formatonly_test.go`:
+  - `TestFAT32GeometryOnLargeCards` —— 逐 GB 扫 8~48 GB + 256/384/512/1024 GB, 每档 FAT 表都放得下全部数据簇
+  - `TestFormattedCardAcceptsFiles` —— 格式化出来的卡能继续建文件并读回 (FAT 建错时这一步会炸)
 - 端到端: 含中文名/中文目录的 zip 建卡后**用操作系统挂载**, `ls` 显示中文名、内容正确
 
 ## 上游
