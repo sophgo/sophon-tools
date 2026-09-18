@@ -276,15 +276,25 @@ func runGUI() int {
 				},
 			),
 			// ② 要做什么 (模式) + 该模式要用的设置
+			// 顺序 = 默认项在最前: 只格式化 → 制作刷机卡 → 写入整盘镜像
 			group("② 选择要做什么",
 				RadioButtonGroup{
 					Buttons: []RadioButton{
 						{
+							AssignTo: &u.modeFormat,
+							Text:     "只格式化 TF 卡 — 只建 MBR+FAT32，不写入任何文件",
+							ToolTipText: "整张卡格式化为 MBR + 1×FAT32（与写卡时先建的那种格式完全一样）。\n" +
+								"卡被格成 exFAT/NTFS/GPT、或 FAT32 被写坏时，用它快速恢复；\n" +
+								"格式化完成后可以直接用资源管理器把文件拷进去。",
+							// 单选框自己不定宽, 不写 Alignment 会被 VBox 居中
+							Alignment: AlignHNearVCenter,
+							OnClicked: func() { u.onModeChanged() },
+						},
+						{
 							AssignTo: &u.modeCard,
-							Text:     "制作刷机卡 — 把文件包 / 目录写进卡里（推荐）",
+							Text:     "制作刷机卡 — 把文件包 / 目录写进卡里",
 							ToolTipText: "卡会被格式化为 MBR+FAT32，再把文件包/目录里的文件写进去。\n" +
 								"SE5 / SE7 / SE9 的恢复卡用这个。",
-							// 单选框自己不定宽, 不写 Alignment 会被 VBox 居中
 							Alignment: AlignHNearVCenter,
 							OnClicked: func() { u.onModeChanged() },
 						},
@@ -293,15 +303,6 @@ func runGUI() int {
 							Text:     "写入整盘镜像 — 逐字节写入 .img 等整卡镜像",
 							ToolTipText: "把 .img/.raw/.iso（或其 gz/xz/bz2/zst 压缩体）逐字节写到卡上。\n" +
 								"卡上原有的分区表会被镜像里的分区表取代。",
-							Alignment: AlignHNearVCenter,
-							OnClicked: func() { u.onModeChanged() },
-						},
-						{
-							AssignTo: &u.modeFormat,
-							Text:     "只格式化 TF 卡 — 只建 MBR+FAT32，不写入任何文件",
-							ToolTipText: "整张卡格式化为 MBR + 1×FAT32（与写卡时先建的那种格式完全一样）。\n" +
-								"卡被格成 exFAT/NTFS/GPT、或 FAT32 被写坏时，用它快速恢复；\n" +
-								"格式化完成后可以直接用资源管理器把文件拷进去。",
 							Alignment: AlignHNearVCenter,
 							OnClicked: func() { u.onModeChanged() },
 						},
@@ -690,9 +691,9 @@ func (u *ui) about() {
 	walk.MsgBox(u.mw, "关于 SE写卡工具",
 		fmt.Sprintf("SE写卡工具 v%s\n\n"+
 			"制作 SE 系列设备（SE5/SE7/SE9）的 TF 卡，三种模式：\n"+
+			"· 只格式化 TF 卡：只建 MBR+FAT32，不写入任何文件\n"+
 			"· 制作刷机卡：文件包 / 目录 → 快速格式化为 MBR+FAT32 并写入\n"+
-			"· 写入整盘镜像：.img/.raw/.iso（或 gz/xz/bz2/zst/zip/7z/rar/tar 压缩体）逐字节写入\n"+
-			"· 只格式化 TF 卡：只建 MBR+FAT32，不写入任何文件\n\n"+
+			"· 写入整盘镜像：.img/.raw/.iso（或 gz/xz/bz2/zst/zip/7z/rar/tar 压缩体）逐字节写入\n\n"+
 			"写后回读校验：文件包模式回读比对 + 从卡上挂 FAT32 逐文件 sha256；\n"+
 			"只格式化模式回读核对分区表 / BPB / FAT 两份副本。\n\n"+
 			"安全: 系统盘永不出现在设备列表里；写盘前需勾选确认并二次确认。", toolVersion),
