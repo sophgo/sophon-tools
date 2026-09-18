@@ -7,6 +7,7 @@ require (
 	github.com/diskfs/go-diskfs v1.9.4
 	github.com/klauspost/compress v1.17.9
 	github.com/lxn/walk v0.0.0-20210112085537-c389da54e794
+	github.com/lxn/win v0.0.0-20210218163916-a377121e959e
 	github.com/nwaples/rardecode/v2 v2.0.1
 	github.com/ulikunitz/xz v0.5.12
 	golang.org/x/sys v0.30.0
@@ -22,7 +23,6 @@ require (
 	github.com/hashicorp/errwrap v1.0.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
-	github.com/lxn/win v0.0.0-20210218163916-a377121e959e // indirect
 	github.com/pierrec/lz4/v4 v4.1.21 // indirect
 	github.com/pkg/xattr v0.4.12 // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect

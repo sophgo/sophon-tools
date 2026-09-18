@@ -28,6 +28,7 @@ import (
 
 	"github.com/lxn/walk"
 	. "github.com/lxn/walk/declarative"
+	"github.com/lxn/win"
 )
 
 // taskMode 界面上"要做什么"
@@ -185,12 +186,15 @@ func runGUI() int {
 	}
 	kvTable := func(view **walk.TableView, model *kvModel, h int) TableView {
 		return TableView{
-			AssignTo:            view,
-			Model:               model,
-			AlternatingRowBG:    true,
-			ColumnsOrderable:    false,
-			LastColumnStretched: true,
-			MinSize:             Size{Height: h},
+			AssignTo:         view,
+			Model:            model,
+			AlternatingRowBG: true,
+			ColumnsOrderable: false,
+			// 这里**不设** LastColumnStretched: walk 在 Create 阶段就会调
+			// StretchLastColumn, 它一失败整个窗口都建不出来 (现场报
+			// "LVM_SETCOLUMNWIDTH failed" 直接启动失败)。改成窗口建好之后再设,
+			// 见 stretchLastColumns。
+			MinSize: Size{Height: h},
 			Columns: []TableViewColumn{
 				{Title: "项目", Width: 96},
 				{Title: "内容", Width: 260},
@@ -249,13 +253,13 @@ func runGUI() int {
 				),
 				kvTable(&u.propView, u.propModel, 76),
 				TableView{
-					AssignTo:            &u.partView,
-					Model:               u.partModel,
-					AlternatingRowBG:    true,
-					ColumnsOrderable:    false,
-					LastColumnStretched: true,
-					MinSize:             Size{Height: 56},
-					ToolTipText:         "目标设备上现有的分区。写入会覆盖这里的全部分区。",
+					AssignTo:         &u.partView,
+					Model:            u.partModel,
+					AlternatingRowBG: true,
+					ColumnsOrderable: false,
+					// 同 kvTable: LastColumnStretched 放到窗口建好之后再设
+					MinSize:     Size{Height: 56},
+					ToolTipText: "目标设备上现有的分区。写入会覆盖这里的全部分区。",
 					Columns: []TableViewColumn{
 						{Title: "分区", Width: 46},
 						{Title: "大小", Width: 84},
@@ -451,8 +455,8 @@ func runGUI() int {
 		},
 	}).Create(); err != nil {
 		walk.MsgBox(nil, "启动失败",
-			"图形界面初始化失败:\n\n"+err.Error()+
-				"\n\n命令行功能不受影响, 可在管理员 cmd / PowerShell 中直接使用:\n"+
+			"图形界面初始化失败:\n\n"+err.Error()+"\n\n"+envSummary()+
+				"\n命令行功能不受影响, 可在管理员 cmd / PowerShell 中直接使用:\n"+
 				"  sewriter.exe info                    查看内置数据源信息\n"+
 				"  sewriter.exe list                    列出磁盘\n"+
 				"  sewriter.exe write --disk 3 --yes    烧录到磁盘 3\n"+
@@ -460,6 +464,8 @@ func runGUI() int {
 				"请把本窗口内容反馈给开发者。", walk.MsgBoxIconError)
 		return 1
 	}
+
+	u.stretchLastColumns()
 
 	// 模式默认选第一项 —— 显式设一下, 不依赖 Win32 对单选框组的默认勾选行为
 	if u.modeCard != nil {
@@ -475,6 +481,45 @@ func runGUI() int {
 	u.updateHint()
 	u.mw.Run()
 	return 0
+}
+
+// stretchLastColumns 让两个表格的最后一列铺满剩余宽度。
+//
+// 为什么不在声明式里写 LastColumnStretched: walk 把它当成 Create 的一部分 ——
+// TableView.Create 里直接调 SetLastColumnStretched → StretchLastColumn, 一失败就
+// 整个 MainWindow.Create 返回错误, 程序弹「启动失败」直接退出。现场有机器就卡在
+// 这一步 (报 LVM_SETCOLUMNWIDTH failed, 见 MYS-1240)。但这只是"最后一列铺满"的
+// 观感设置, 铺不满最多是右边留白, 不该拦住启动 —— 所以挪到窗口建好之后再设,
+// 失败就退化成固定列宽, 只记一行日志。
+func (u *ui) stretchLastColumns() {
+	for _, tv := range []*walk.TableView{u.propView, u.partView} {
+		if tv == nil {
+			continue
+		}
+		if err := tv.SetLastColumnStretched(true); err != nil {
+			u.appendLog("提示: 表格末列自适应失败, 已退化为固定列宽 (" + err.Error() + ")")
+		}
+	}
+}
+
+// envSummary 启动失败时一并带上的环境信息 —— 现场只截一张图时也能看出系统/屏幕/缩放
+func envSummary() string {
+	cx := win.GetSystemMetrics(win.SM_CXSCREEN)
+	cy := win.GetSystemMetrics(win.SM_CYSCREEN)
+	hdc := win.GetDC(0)
+	dpi := win.GetDeviceCaps(hdc, win.LOGPIXELSX)
+	win.ReleaseDC(0, hdc)
+	if dpi <= 0 {
+		dpi = 96
+	}
+	return fmt.Sprintf("环境: Windows %s / 屏幕 %d×%d / 系统缩放 %d%%\n",
+		windowsVersionText(), cx, cy, dpi*100/96)
+}
+
+// windowsVersionText 把 win.GetVersion() 的返回值翻成 "10.0 (Build 19045)" 这种短文本
+func windowsVersionText() string {
+	v := win.GetVersion()
+	return fmt.Sprintf("%d.%d (Build %d)", byte(v), byte(v>>8), uint16(v>>16))
 }
 
 // ---------- 模式 ----------
