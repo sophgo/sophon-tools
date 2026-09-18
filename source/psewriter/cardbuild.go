@@ -184,6 +184,10 @@ func (b *devStore) Write(p []byte) (int, error) {
 
 // buildCardFS 在任意 backend 上建 MBR + FAT32 并把文件包写进去。
 // 目标可以是一个镜像文件 (BuildCardImage), 也可以是物理设备 (BuildCardOnDevice)。
+//
+// plan 里没有文件时 (= 只格式化模式, 见 PlanFormatOnly) 建完文件系统就结束 ——
+// 卡上留下的是一个空的、格式正确的 FAT32, 文件由用户自己往里拷。
+// pkg 只在这一步才用到, 所以只格式化时传 nil 是安全的。
 func buildCardFS(store backend.Storage, pkg *Archive, plan *PackagePlan, cb Progress) error {
 	if err := preflightNames(plan); err != nil {
 		return err
@@ -237,6 +241,10 @@ func buildCardFS(store backend.Storage, pkg *Archive, plan *PackagePlan, cb Prog
 	}
 
 	// 4) 文件 (逐个从归档流式解出, 不经内存整份缓存)
+	//    只格式化模式: 计划里没有文件, 到这儿就收工
+	if len(plan.Files) == 0 {
+		return nil
+	}
 	it, err := pkg.openFiles()
 	if err != nil {
 		return err
@@ -302,6 +310,7 @@ func BuildCardImage(pkg *Archive, plan *PackagePlan, tmpPath string, cb Progress
 }
 
 // BuildCardOnDevice 直接在目标设备上建卡, 并把"写了哪些区间"记进结果。
+// pkg 为 nil = 只格式化 (plan 里没有文件)。
 func BuildCardOnDevice(dev DiskDevice, pkg *Archive, plan *PackagePlan, cb Progress) (*CardWriteResult, error) {
 	if dev.Size() <= 0 {
 		return nil, fmt.Errorf("无法确定目标设备容量")

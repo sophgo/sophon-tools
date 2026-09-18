@@ -37,6 +37,8 @@ func run() int {
 		return cmdList(args[1:])
 	case "write", "flash":
 		return cmdWrite(args[1:])
+	case "format", "fmt":
+		return cmdFormat(args[1:])
 	case "verify":
 		return cmdVerify(args[1:])
 	case "hash":
@@ -65,6 +67,8 @@ func usage() {
                                         换镜像生成第二个自带镜像的程序
   sewriter.exe write --disk N [--image <镜像> | --dir <目录>] [--as raw|files]
                 [--fs-size max|auto|<MB>] [--label <卷标>] [--yes] [--no-verify] [--force]
+  sewriter.exe format --disk N [--label <卷标>] [--yes] [--no-verify] [--force]
+                                        只格式化: 在卡上建 MBR+FAT32, 不写入任何文件
   sewriter.exe verify --disk N [--image <镜像> | --dir <目录>] [--bytes N]
   sewriter.exe hash [--image <镜像>]
 
@@ -77,6 +81,12 @@ func usage() {
                目录里的软链按目标文件处理, FAT32 放不下的条目 (设备文件/断链) 跳过并计数
   * --as raw|files 可强制指定; 默认自动判定 (只有一个镜像文件 → 整盘; 否则 → 文件包)
   * --fs-size: 默认整卡格式化; auto = 只按内容大小建分区 (更快, 卡上剩余空间不参与)
+
+format 模式 (只格式化 TF 卡):
+  * 整张卡格式化为 MBR + 1×FAT32 (与写卡时先建的那种格式完全一样)
+  * 不写入任何文件 —— 用于卡被格成 exFAT/NTFS/GPT、或 FAT32 被写坏时快速恢复
+  * 卡比 FAT32 上限 (2 TiB) 还大时按上限建分区; 小于 64 MiB 时报错
+  * 写后同样回读核对分区表 / BPB / FAT 两份副本 (没有文件, 故无文件级校验)
 
 安全约定:
   * 系统盘永不出现在可选列表 (list --all 也只标注, 不允许写)
@@ -294,18 +304,55 @@ func cmdWrite(args []string) int {
 	}
 	fmt.Println()
 
-	return flashToDisk(target, prep, !*noVerify, func(phase string, done, total int64, rate float64) {
-		switch {
-		case phase == "check":
-			// 文件级校验的进度单位是"文件个数", 不是字节
-			fmt.Printf("\r  [校验文件] %d / %d 个   ", done, total)
-		case total > 0:
-			fmt.Printf("\r  [%s] %5.1f%%  %s / %s  %s   ", phaseName(phase), float64(done)*100/float64(total),
-				HumanBytes(done), HumanBytes(total), HumanRate(rate))
-		default:
-			fmt.Printf("\r  [%s] 已处理 %s  %s   ", phaseName(phase), HumanBytes(done), HumanRate(rate))
-		}
-	})
+	return flashToDisk(target, prep, !*noVerify, cliProgress)
+}
+
+// cmdFormat 只格式化: 在卡上建 MBR+FAT32, 不写入任何文件
+func cmdFormat(args []string) int {
+	fs := flag.NewFlagSet("format", flag.ExitOnError)
+	disk := fs.String("disk", "", "目标磁盘号 (如 3) 或设备路径")
+	label := fs.String("label", "", "卷标 (默认 SE)")
+	yes := fs.Bool("yes", false, "跳过交互确认 (自动化; 仍需通过安全判定)")
+	noVerify := fs.Bool("no-verify", false, "关闭写后回读校验")
+	force := fs.Bool("force", false, "允许写被判为'需人工确认'的固定盘 (系统盘仍禁止)")
+	_ = fs.Parse(args)
+	if *disk == "" {
+		fmt.Fprintln(os.Stderr, "缺少 --disk")
+		return 2
+	}
+	target, err := findDisk(*disk)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	if code := guardTarget(target, *force, *yes); code != 0 {
+		return code
+	}
+	prep, err := PrepareFormat(target.Size, *label)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 2
+	}
+	fmt.Printf("目标: %s\n%s\n操作: 只格式化 — 建 MBR + FAT32, 不写入任何文件\n",
+		target.Path, target.DetailText())
+	fmt.Printf("  %s: %s\n", padRight("卡容量", 12), HumanBytes(target.Size))
+	fmt.Printf("  %s: MBR / 1×FAT32 (卷标 %s)\n", padRight("分区", 12), prep.Plan.Label)
+	fmt.Println()
+
+	return flashToDisk(target, prep, !*noVerify, cliProgress)
+}
+
+// cliProgress 命令行下的写入/校验进度 (文件级校验的单位是"文件个数", 不是字节)
+func cliProgress(phase string, done, total int64, rate float64) {
+	switch {
+	case phase == "check":
+		fmt.Printf("\r  [校验文件] %d / %d 个   ", done, total)
+	case total > 0:
+		fmt.Printf("\r  [%s] %5.1f%%  %s / %s  %s   ", phaseName(phase), float64(done)*100/float64(total),
+			HumanBytes(done), HumanBytes(total), HumanRate(rate))
+	default:
+		fmt.Printf("\r  [%s] 已处理 %s  %s   ", phaseName(phase), HumanBytes(done), HumanRate(rate))
+	}
 }
 
 func cmdVerify(args []string) int {
@@ -486,10 +533,17 @@ func flashToDisk(d *DiskInfo, prep *PreparedSource, verify bool, cb Progress) in
 func reportOutcome(out *FlashOutcome) int {
 	if out.IsCard {
 		res := out.Card
-		fmt.Printf("写入完成: %s / 耗时 %s (%.1f MiB/s)\n", HumanBytes(res.WrittenBytes),
-			res.Elapsed.Round(time.Millisecond), mibPerSec(res.WrittenBytes, res.Elapsed))
-		fmt.Printf("快速格式化: 卡容量 %s, 实写 %s, 未触碰 %s (剩余空间不擦除)\n",
-			HumanBytes(res.TotalSize), HumanBytes(res.WrittenBytes), HumanBytes(res.SkippedBytes))
+		if out.FormatOnly {
+			fmt.Printf("格式化完成: 实写 %s / 耗时 %s (%.1f MiB/s)\n", HumanBytes(res.WrittenBytes),
+				res.Elapsed.Round(time.Millisecond), mibPerSec(res.WrittenBytes, res.Elapsed))
+			fmt.Printf("快速格式化: 卡容量 %s, 实写 %s, 未触碰 %s (剩余空间不擦除, 卡上没有写入任何文件)\n",
+				HumanBytes(res.TotalSize), HumanBytes(res.WrittenBytes), HumanBytes(res.SkippedBytes))
+		} else {
+			fmt.Printf("写入完成: %s / 耗时 %s (%.1f MiB/s)\n", HumanBytes(res.WrittenBytes),
+				res.Elapsed.Round(time.Millisecond), mibPerSec(res.WrittenBytes, res.Elapsed))
+			fmt.Printf("快速格式化: 卡容量 %s, 实写 %s, 未触碰 %s (剩余空间不擦除)\n",
+				HumanBytes(res.TotalSize), HumanBytes(res.WrittenBytes), HumanBytes(res.SkippedBytes))
+		}
 		if out.Layout == nil {
 			fmt.Println("（未执行回读校验）")
 			return 0

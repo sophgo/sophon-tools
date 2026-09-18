@@ -1,6 +1,6 @@
 // 统一写入流程 (MYS-1062 九轮 / 十三轮重构) — CLI 与 GUI 共用
 //
-// 两种来源, 两条写入路径:
+// 三种来源, 三条写入路径:
 //
 //	整盘镜像  ① 逐块写入 (源块全零且卡上已是零 → 整块跳过)
 //	         ② 落盘 (Windows FlushFileBuffers + 写通句柄 / Linux fsync), 关句柄重开
@@ -11,6 +11,10 @@
 //	         ② 落盘, 关写句柄换只读句柄
 //	         ③ 回读元数据区: 分区表 / BPB / FAT 两份副本
 //	         ④ 从卡上挂 FAT32, 逐个文件算 sha256 与源压缩包比对 (用户要的"二次校验文件完整性")
+//
+//	只格式化  ① 同文件包的第 ① 步, 但计划里没有文件 —— 只建 MBR+FAT32
+//	         ② 落盘, 关写句柄换只读句柄
+//	         ③ 回读元数据区 (没有文件, 所以没有第 ④ 步)
 //
 // ② 是用户要的"确保文件都真实写入到 TF 卡中": 句柄关掉再重新只读打开, 绕开系统写缓存。
 package main
@@ -23,6 +27,7 @@ import (
 // FlashOutcome 一次写入的完整结果
 type FlashOutcome struct {
 	IsCard      bool
+	FormatOnly  bool // 只格式化: 只建 MBR+FAT32, 没有文件级校验
 	Card        *CardWriteResult
 	Layout      *LayoutVerifyResult
 	Image       *FlashResult
@@ -42,6 +47,9 @@ func (o *FlashOutcome) OK() bool {
 		if o.Card == nil || o.Layout == nil || !o.Layout.OK() {
 			return false
 		}
+		if o.FormatOnly {
+			return true // 卡上本来就没有文件, 结构核对通过即算成功
+		}
 		return o.FileErr == nil && o.FileVerify != nil && o.FileVerify.OK()
 	}
 	return o.Image != nil && o.Image.VerifyOK
@@ -60,7 +68,7 @@ func RunFlash(d *DiskInfo, prep *PreparedSource, verify bool, cb Progress, logf 
 	}
 	defer unlock()
 
-	out := &FlashOutcome{IsCard: prep.IsCard()}
+	out := &FlashOutcome{IsCard: prep.IsCard(), FormatOnly: prep.IsFormatOnly()}
 
 	// ---- ① 写盘 ----
 	dev, err := openDiskDevice(d.Path)
@@ -78,8 +86,13 @@ func RunFlash(d *DiskInfo, prep *PreparedSource, verify bool, cb Progress, logf 
 			dev.Close()
 			return out, werr
 		}
-		log("卡上直接建 FAT32: 实写 %s, 未触碰 %s (剩余空间不擦除, 快速格式化语义)",
-			HumanBytes(res.WrittenBytes), HumanBytes(res.SkippedBytes))
+		if out.FormatOnly {
+			log("只格式化: 卡上建 MBR+FAT32, 实写 %s, 未触碰 %s (不写入任何文件)",
+				HumanBytes(res.WrittenBytes), HumanBytes(res.SkippedBytes))
+		} else {
+			log("卡上直接建 FAT32: 实写 %s, 未触碰 %s (剩余空间不擦除, 快速格式化语义)",
+				HumanBytes(res.WrittenBytes), HumanBytes(res.SkippedBytes))
+		}
 	} else {
 		res, werr := Flash(dev, prep.Src, false, cb)
 		out.Image = res
@@ -135,12 +148,14 @@ func RunFlash(d *DiskInfo, prep *PreparedSource, verify bool, cb Progress, logf 
 			return out, fmt.Errorf("卡上文件系统结构核对失败: %v", lay.Problems)
 		}
 		log("回读校验: %s", lay.Summary())
-		// ④ 文件级校验: 直接从卡上挂 FAT32 逐文件比对
-		log("文件级校验: 正在从卡上挂载 FAT32 并逐个文件比对…")
-		fv, ferr := VerifyCardFiles(dev2, prep.Archive, 1, cb)
-		out.FileVerify, out.FileErr = fv, ferr
-		if ferr != nil {
-			return out, ferr
+		// ④ 文件级校验: 直接从卡上挂 FAT32 逐文件比对 (只格式化模式没有文件, 跳过)
+		if prep.Archive != nil {
+			log("文件级校验: 正在从卡上挂载 FAT32 并逐个文件比对…")
+			fv, ferr := VerifyCardFiles(dev2, prep.Archive, 1, cb)
+			out.FileVerify, out.FileErr = fv, ferr
+			if ferr != nil {
+				return out, ferr
+			}
 		}
 	} else {
 		if err := VerifyOnly(dev2, prep.Src, cb, out.Image); err != nil {

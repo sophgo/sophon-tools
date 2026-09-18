@@ -27,6 +27,22 @@ type PreparedSource struct {
 // IsCard 文件包模式 (在卡上建 FAT32 + 快速格式化语义)
 func (p *PreparedSource) IsCard() bool { return p != nil && p.Plan != nil }
 
+// IsFormatOnly 只格式化模式: 只建 MBR+FAT32, 不写任何文件
+// (没有文件级校验可做, 写后只回读核对文件系统结构)
+func (p *PreparedSource) IsFormatOnly() bool { return p != nil && p.Plan != nil && p.Archive == nil }
+
+// PrepareFormat 只格式化模式: 把整张卡做成 MBR+FAT32, 不写入任何文件。
+//
+// 现场用途: 卡被别的工具格式化成了 exFAT/NTFS/GPT (SE7 的 BL1 走 FatFs, 认不了),
+// 或者 FAT32 被写坏 —— 不必重新下一份发版包, 直接格式化回可用状态。
+func PrepareFormat(targetSize int64, label string) (*PreparedSource, error) {
+	plan, err := PlanFormatOnly(targetSize, label)
+	if err != nil {
+		return nil, err
+	}
+	return &PreparedSource{Plan: plan}, nil
+}
+
 // TotalSize 本次写入会占用目标盘的字节数 (0 = 未知)
 func (p *PreparedSource) TotalSize() int64 {
 	if p == nil {
