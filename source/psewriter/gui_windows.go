@@ -101,15 +101,18 @@ type ui struct {
 	spinStop    chan struct{}
 }
 
-// mode 当前选中的模式 (没选中任何一项时按"制作刷机卡"处理, 那是默认项)
+// mode 当前选中的模式。
+//
+// 没选中任何一项时按「只格式化」处理 —— 正常情况下启动就会显式勾上它（见 runGUI），
+// 真走到这个兜底分支时，选破坏性最小的那个模式（只建文件系统，不往里写任何东西）。
 func (u *ui) mode() taskMode {
 	switch {
 	case u.modeImage != nil && u.modeImage.Checked():
 		return modeWriteImage
-	case u.modeFormat != nil && u.modeFormat.Checked():
-		return modeFormatOnly
+	case u.modeCard != nil && u.modeCard.Checked():
+		return modeMakeCard
 	}
-	return modeMakeCard
+	return modeFormatOnly
 }
 
 // ---------- 表格模型 ----------
@@ -208,6 +211,8 @@ func runGUI() int {
 		Size:     Size{Width: 700, Height: 760},
 		MinSize:  Size{Width: 660, Height: 700},
 		Layout:   VBox{Margins: Margins{Left: 8, Top: 6, Right: 8, Bottom: 8}, Spacing: 6},
+		// 内置中文字体 —— 现场有机器系统字体不全, 中文会画成豆腐块 (见 uifont_windows.go)
+		Font: uiFont(),
 		MenuItems: []MenuItem{
 			Menu{Text: "文件(&F)", Items: []MenuItem{
 				Action{Text: "刷新设备列表(&R)", OnTriggered: func() { u.refresh() }},
@@ -279,6 +284,8 @@ func runGUI() int {
 							Text:     "制作刷机卡 — 把文件包 / 目录写进卡里（推荐）",
 							ToolTipText: "卡会被格式化为 MBR+FAT32，再把文件包/目录里的文件写进去。\n" +
 								"SE5 / SE7 / SE9 的恢复卡用这个。",
+							// 单选框自己不定宽, 不写 Alignment 会被 VBox 居中
+							Alignment: AlignHNearVCenter,
 							OnClicked: func() { u.onModeChanged() },
 						},
 						{
@@ -286,6 +293,7 @@ func runGUI() int {
 							Text:     "写入整盘镜像 — 逐字节写入 .img 等整卡镜像",
 							ToolTipText: "把 .img/.raw/.iso（或其 gz/xz/bz2/zst 压缩体）逐字节写到卡上。\n" +
 								"卡上原有的分区表会被镜像里的分区表取代。",
+							Alignment: AlignHNearVCenter,
 							OnClicked: func() { u.onModeChanged() },
 						},
 						{
@@ -294,6 +302,7 @@ func runGUI() int {
 							ToolTipText: "整张卡格式化为 MBR + 1×FAT32（与写卡时先建的那种格式完全一样）。\n" +
 								"卡被格成 exFAT/NTFS/GPT、或 FAT32 被写坏时，用它快速恢复；\n" +
 								"格式化完成后可以直接用资源管理器把文件拷进去。",
+							Alignment: AlignHNearVCenter,
 							OnClicked: func() { u.onModeChanged() },
 						},
 					},
@@ -467,17 +476,22 @@ func runGUI() int {
 
 	u.stretchLastColumns()
 
-	// 模式默认选第一项 —— 显式设一下, 不依赖 Win32 对单选框组的默认勾选行为
-	if u.modeCard != nil {
-		u.modeCard.SetChecked(true)
+	// 默认模式是「只格式化 TF 卡」—— 显式设一下, 不依赖 Win32 对单选框组的默认勾选行为
+	if u.modeFormat != nil {
+		u.modeFormat.SetChecked(true)
 	}
 	// 「取消分析」只在分析期间出现
 	if u.btnCancel != nil {
 		u.btnCancel.SetVisible(false)
 	}
 	u.refresh()
-	u.applyMode()   // 按默认模式摆好各区块的显隐与说明
-	u.useEmbedded() // 默认使用内置数据源
+	u.applyMode() // 按默认模式摆好各区块的显隐与说明
+	if u.mode() == modeFormatOnly {
+		// 只格式化不用数据源, 别去初始化它 —— 否则日志里会多一行无关的「数据源」
+		u.prep, u.ready = nil, true
+	} else {
+		u.useEmbedded() // 默认使用内置数据源
+	}
 	u.updateHint()
 	u.mw.Run()
 	return 0
@@ -705,7 +719,7 @@ func (u *ui) refresh() {
 	disks, err := enumerateDisks()
 	if err != nil {
 		u.setStatus("枚举磁盘失败")
-		u.appendLog("✗ 枚举磁盘失败: " + err.Error())
+		u.appendLog("× 枚举磁盘失败: " + err.Error())
 		return
 	}
 	shown := SelectableDisks(disks, u.showAll.Checked())
@@ -903,7 +917,7 @@ func (u *ui) repreview() {
 					msg = "分析已取消"
 				}
 				u.setImageInfo("来源：" + dataSourceLabel(path) + "\r\n状态：" + msg)
-				u.appendLog("✗ 来源不可用: " + msg)
+				u.appendLog("× 来源不可用: " + msg)
 				u.updateHint()
 				return
 			}
@@ -985,8 +999,12 @@ func (u *ui) beginAnalyze() {
 	go u.spinLoop(stop)
 }
 
-// spinFrames 动态图标的帧 (盲文点阵, 等宽字体下都显示得出来)
-var spinFrames = []rune{'⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'}
+// spinFrames 动态图标的帧。
+//
+// 用「半黑半白的圆」而不是盲文点阵: 盲文 U+28xx 在 Noto Sans CJK 里没有, 而界面
+// 已经统一用内置字体画 (见 uifont_windows.go), 缺字会变成豆腐块。这几个几何图形
+// 内置字体里有, 也不依赖系统装了什么。
+var spinFrames = []rune{'◐', '◓', '◑', '◒'}
 
 // spinLoop 原位刷新动态图标
 func (u *ui) spinLoop(stop <-chan struct{}) {
@@ -1162,7 +1180,7 @@ func (u *ui) repackDialog() {
 			if err != nil {
 				u.progress.SetValue(0)
 				u.setStatus("生成失败 — 见日志")
-				u.appendLog("✗ 生成失败: " + err.Error())
+				u.appendLog("× 生成失败: " + err.Error())
 				walk.MsgBox(u.mw, "生成失败", err.Error(), walk.MsgBoxIconError)
 				return
 			}
@@ -1314,7 +1332,7 @@ func flashToDiskGUI(u *ui, d *DiskInfo, prep *PreparedSource) int {
 		u.mw.Synchronize(func() { u.appendLog(fmt.Sprintf(format, a...)) })
 	})
 	if err != nil {
-		u.mw.Synchronize(func() { u.appendLog("✗ " + err.Error()) })
+		u.mw.Synchronize(func() { u.appendLog("× " + err.Error()) })
 		return 1
 	}
 
@@ -1338,7 +1356,7 @@ func flashToDiskGUI(u *ui, d *DiskInfo, prep *PreparedSource) int {
 				if out.Layout.OK() {
 					u.appendLog("✓ 回读校验: " + out.Layout.Summary())
 				} else {
-					u.appendLog("✗ 文件系统结构核对失败: " + strings.Join(out.Layout.Problems, "; "))
+					u.appendLog("× 文件系统结构核对失败: " + strings.Join(out.Layout.Problems, "; "))
 				}
 			}
 		})
@@ -1361,7 +1379,7 @@ func flashToDiskGUI(u *ui, d *DiskInfo, prep *PreparedSource) int {
 				mark := "✓"
 				note := ""
 				if !f.OK {
-					mark = "✗"
+					mark = "×"
 					note = "  " + f.Err
 				}
 				u.appendLog(fmt.Sprintf("  %s %-40s %10s  sha256 %s%s", mark, f.Name, HumanBytes(f.Size), shortHash(f.GotSHA), note))
@@ -1376,7 +1394,7 @@ func flashToDiskGUI(u *ui, d *DiskInfo, prep *PreparedSource) int {
 					fmt.Sprintf("卡已写入并通过两级校验:\n\n① 回读校验: %s\n② 文件级校验: %s\n\n可以拔卡使用。",
 						layoutDesc, fv.Summary()), walk.MsgBoxIconInformation)
 			} else {
-				u.appendLog("✗ 文件级校验失败: " + fv.FirstError())
+				u.appendLog("× 文件级校验失败: " + fv.FirstError())
 				walk.MsgBox(u.mw, "文件级校验失败",
 					"卡上文件与源压缩包不一致, 请勿使用该卡:\n\n"+fv.FirstError(), walk.MsgBoxIconError)
 			}
@@ -1401,7 +1419,7 @@ func flashToDiskGUI(u *ui, d *DiskInfo, prep *PreparedSource) int {
 		if res.VerifyOK {
 			u.appendLog("✓ 回读校验通过: " + HumanBytes(res.VerifyBytes))
 		} else {
-			u.appendLog(fmt.Sprintf("✗ 回读校验失败: 首个不一致偏移 %d, 不一致字节 %d", res.MismatchOff, res.MismatchCnt))
+			u.appendLog(fmt.Sprintf("× 回读校验失败: 首个不一致偏移 %d, 不一致字节 %d", res.MismatchOff, res.MismatchCnt))
 		}
 	})
 	if res.VerifyOK {

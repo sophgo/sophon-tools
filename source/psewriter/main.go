@@ -204,7 +204,7 @@ func cmdRepack(args []string) int {
 
 	res, err := Repack(*img, *out, *skel, *force, func(phase string, done, total int64, rate float64) {})
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "✗ 生成失败:", err)
+		fmt.Fprintln(os.Stderr, "× 生成失败:", err)
 		return 1
 	}
 	fmt.Printf("✓ 已生成新程序: %s\n", res.OutPath)
@@ -294,7 +294,7 @@ func cmdWrite(args []string) int {
 		}
 	}
 	if n := prep.TotalSize(); n > 0 && target.Size < n {
-		fmt.Fprintf(os.Stderr, "✗ 目标容量 %s 小于镜像 %s\n", HumanBytes(target.Size), HumanBytes(n))
+		fmt.Fprintf(os.Stderr, "× 目标容量 %s 小于镜像 %s\n", HumanBytes(target.Size), HumanBytes(n))
 		return 1
 	}
 	fmt.Printf("目标: %s\n%s\n镜像: %s%s (%s)\n", target.Path, target.DetailText(),
@@ -405,7 +405,7 @@ func cmdVerify(args []string) int {
 			return 1
 		}
 		if !lay.OK() {
-			fmt.Fprintln(os.Stderr, "✗ 文件系统结构不符:", lay.Problems)
+			fmt.Fprintln(os.Stderr, "× 文件系统结构不符:", lay.Problems)
 			return 1
 		}
 		fmt.Println("✓", lay.Summary())
@@ -416,7 +416,7 @@ func cmdVerify(args []string) int {
 		}
 		fmt.Println("✓", fv.Summary())
 		if !fv.OK() {
-			fmt.Fprintln(os.Stderr, "✗", fv.FirstError())
+			fmt.Fprintln(os.Stderr, "×", fv.FirstError())
 			return 1
 		}
 		return 0
@@ -495,11 +495,11 @@ func guardTarget(d *DiskInfo, force, yes bool) int {
 	fmt.Println(d.DetailText())
 	switch d.Safety {
 	case SafetyDangerous:
-		fmt.Fprintf(os.Stderr, "✗ 拒绝: 磁盘 %d 是系统盘 (%s) — 禁止烧录\n", d.Index, d.Reason)
+		fmt.Fprintf(os.Stderr, "× 拒绝: 磁盘 %d 是系统盘 (%s) — 禁止烧录\n", d.Index, d.Reason)
 		return 1
 	case SafetyUnknown:
 		if !force {
-			fmt.Fprintf(os.Stderr, "✗ 拒绝: 磁盘 %d 判定为「%s」(%s)。确认无误请加 --force\n", d.Index, d.Safety, d.Reason)
+			fmt.Fprintf(os.Stderr, "× 拒绝: 磁盘 %d 判定为「%s」(%s)。确认无误请加 --force\n", d.Index, d.Safety, d.Reason)
 			return 1
 		}
 		fmt.Printf("⚠ 已用 --force 放开「%s」判定: %s\n", d.Safety, d.Reason)
@@ -523,7 +523,7 @@ func flashToDisk(d *DiskInfo, prep *PreparedSource, verify bool, cb Progress) in
 	})
 	fmt.Println()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "✗ 写入失败:", err)
+		fmt.Fprintln(os.Stderr, "× 写入失败:", err)
 		return 1
 	}
 	return reportOutcome(out)
@@ -549,7 +549,7 @@ func reportOutcome(out *FlashOutcome) int {
 			return 0
 		}
 		if !out.Layout.OK() {
-			fmt.Fprintf(os.Stderr, "✗ 文件系统结构核对失败: %v\n", out.Layout.Problems)
+			fmt.Fprintf(os.Stderr, "× 文件系统结构核对失败: %v\n", out.Layout.Problems)
 			return 1
 		}
 		fmt.Printf("✓ 回读校验: %s\n", out.Layout.Summary())
@@ -562,13 +562,13 @@ func reportOutcome(out *FlashOutcome) int {
 			mark := "✓"
 			note := ""
 			if !f.OK {
-				mark = "✗"
+				mark = "×"
 				note = "  " + f.Err
 			}
 			fmt.Printf("  %s %-40s %10s  sha256 %s%s\n", mark, f.Name, HumanBytes(f.Size), shortHash(f.GotSHA), note)
 		}
 		if !fv.OK() {
-			fmt.Fprintf(os.Stderr, "✗ 文件级校验失败: %s\n", fv.FirstError())
+			fmt.Fprintf(os.Stderr, "× 文件级校验失败: %s\n", fv.FirstError())
 			return 1
 		}
 		fmt.Printf("✓ 文件级校验通过: 卡上 %d 个文件与源压缩包完全一致\n", fv.OKCount)
@@ -595,7 +595,7 @@ func reportResult(res *FlashResult) int {
 		fmt.Printf("✓ 校验通过: %s 回读一致\n", HumanBytes(res.VerifyBytes))
 		return 0
 	}
-	fmt.Fprintf(os.Stderr, "✗ 校验失败: 首个不一致偏移 %d, 不一致字节 %d\n", res.MismatchOff, res.MismatchCnt)
+	fmt.Fprintf(os.Stderr, "× 校验失败: 首个不一致偏移 %d, 不一致字节 %d\n", res.MismatchOff, res.MismatchCnt)
 	return 1
 }
 
