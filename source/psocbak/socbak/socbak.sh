@@ -11,7 +11,7 @@ LOGFILE="$(readlink -f "${BASH_SOURCE[0]}").log"
 rm -f $LOGFILE*
 exec > >(tee -a "$LOGFILE") 2>&1
 
-echo "VERSION: v1.3.1"
+echo "VERSION: v1.3.2"
 date '+%Y-%m-%d %H:%M:%S'
 
 export SOC_BAK_ALL_IN_ONE=${SOC_BAK_ALL_IN_ONE:-}
@@ -207,6 +207,25 @@ if [[ "${SOC_NAME}" == "" ]]; then
 else
 	echo "INFO: get chip id success!"
 fi
+
+# 源机分区的文件系统：socbak 生成的镜像一律由 mkfs.ext4 建立（见 socbak_gen_partition_subimg
+# 与 socbak_allinone_pack 里的 do_gen_partition_subimg），所以**无论源机分区是 ext4 还是 f2fs，
+# 备份/回灌出来的分区都是 ext4**。f2fs 源机可以正常使用 socbak（tar/df/lsblk 与文件系统类型
+# 无关，读取内容不受影响），但回灌后文件系统类型会变回 ext4——数据保留、类型不保留。
+# 这里显式探测并打印，避免用户刷完才发现类型变了。
+SOCBAK_SRC_FSTYPES=""
+for _src_mnt in /media/root-ro /media/root-rw /recovery /data; do
+	[ -d "${_src_mnt}" ] || continue
+	_src_fs=$(df -T "${_src_mnt}" 2>/dev/null | tail -n 1 | awk '{print $2}')
+	[ -n "${_src_fs}" ] && SOCBAK_SRC_FSTYPES="${SOCBAK_SRC_FSTYPES} ${_src_mnt}=${_src_fs}"
+done
+echo "INFO: source filesystems:${SOCBAK_SRC_FSTYPES}"
+case "${SOCBAK_SRC_FSTYPES}" in
+	*f2fs*)
+		echo "WARNING: f2fs source partition detected, but socbak images are always created as ext4."
+		echo "WARNING: the backup/restore keeps the data but NOT the filesystem type (result is ext4)."
+		;;
+esac
 
 ROOTFS_EXCLUDE_FLAGS="${ROOTFS_EXCLUDE_FLAGS_RUN}"
 for TGZ_FILE in "${TGZ_FILES[@]}"

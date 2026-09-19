@@ -296,3 +296,51 @@ func TestMapNetCardsLoopbackSkipped(t *testing.T) {
 		t.Errorf("Name = %q, want eth0", got[0].Name)
 	}
 }
+
+// TestDisksF2FS 用 CV84X2 真机（p4/p5/p6 = f2fs，overlay upper 落 p5）原样抓下来的
+// `df -Tk` 与 /proc/mounts 校验：df 的类型列是 f2fs 时分区不能被丢掉。
+// 解析按列位置取数（fields[3]/[4]/[6]），不看类型列——这里把这条约定钉住，
+// 防止以后有人"顺手"按 ext4 过滤。
+func TestDisksF2FS(t *testing.T) {
+	dfOut := "Filesystem       Type    1K-blocks      Used Available Use% Mounted on\n" +
+		"overlay          overlay  8240832    666512   7574320   9% /\n" +
+		"/dev/mmcblk0p1   vfat       42746     26590     16156  63% /boot\n" +
+		"/dev/mmcblk0p4   f2fs     4192256   3230380    961876  78% /media/root-ro\n" +
+		"/dev/mmcblk0p5   f2fs     8240832    666512   7574320   9% /media/root-rw\n" +
+		"/dev/mmcblk0p2   ext4      110576     53728     47684  53% /recovery\n" +
+		"/dev/mmcblk0p6   f2fs    48363820    657808  47706012   2% /data\n"
+	mounts := "overlay / overlay rw,relatime,lowerdir=/media/root-ro," +
+		"upperdir=/media/root-rw/overlay,workdir=/media/root-rw/overlay-workdir 0 0\n" +
+		"/dev/mmcblk0p1 /boot vfat rw,relatime 0 0\n" +
+		"/dev/mmcblk0p4 /media/root-ro f2fs ro,lazytime,background_gc=on,discard 0 0\n" +
+		"/dev/mmcblk0p5 /media/root-rw f2fs rw,lazytime,background_gc=on,discard 0 0\n" +
+		"/dev/mmcblk0p2 /recovery ext4 rw,relatime 0 0\n" +
+		"/dev/mmcblk0p6 /data f2fs rw,lazytime,background_gc=on,discard 0 0\n"
+	fr := &fakeFileReader{files: map[string]string{"/proc/mounts": mounts}}
+	cmd := &fakeCmdRunner{responses: map[string]cmdResp{"df": {dfOut, nil}}}
+	c := NewCollector(fr, cmd)
+	disks := c.Disks()
+
+	if len(disks) != 1 {
+		t.Fatalf("Disks() len = %d, want 1 (all mmcblk0 partitions aggregated)", len(disks))
+	}
+	d := disks[0]
+	if d.DiskName != "/dev/mmcblk0" {
+		t.Errorf("DiskName = %q, want /dev/mmcblk0", d.DiskName)
+	}
+	if d.MountOn != "/" {
+		t.Errorf("MountOn = %q, want / (overlay upperdir on p5)", d.MountOn)
+	}
+	// 5 个分区（含 3 个 f2fs）全部计入：Σ(Used+Avail)=60941066 KB → 59512 MB
+	if want := float64(60941066 / 1024); d.Total != want {
+		t.Errorf("Total = %v, want %v MB (f2fs 分区被丢掉？)", d.Total, want)
+	}
+	// Free = Σ(Avail) = 56306116 KB → 54986 MB
+	if want := float64(56306116 / 1024); d.Free != want {
+		t.Errorf("Free = %v, want %v MB", d.Free, want)
+	}
+	// p4 只读、p5/p6 可写 → 整盘不判只读
+	if d.ReadOnly != 0 {
+		t.Errorf("ReadOnly = %d, want 0 (p5/p6 rw)", d.ReadOnly)
+	}
+}
