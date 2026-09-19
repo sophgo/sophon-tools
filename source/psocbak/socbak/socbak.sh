@@ -3,6 +3,8 @@
 # env SOC_BAK_ALL_IN_ONE!="" for socbak allinone
 # env SOC_BAK_FIXED_SIZE!="" for socbak fixed size mode
 # env SOC_BAK_FIXED_DATA_START!="" for socbak fixed data partition start mode
+#
+# 分区文件系统在下面的 PART_FSTYPE_CONF 配置区按分区指定（没有全局开关）
 
 # 配置日志能力
 PWD="$(dirname "$(readlink -f "$0")")"
@@ -11,7 +13,7 @@ LOGFILE="$(readlink -f "${BASH_SOURCE[0]}").log"
 rm -f $LOGFILE*
 exec > >(tee -a "$LOGFILE") 2>&1
 
-echo "VERSION: v1.3.1"
+echo "VERSION: v1.3.5"
 date '+%Y-%m-%d %H:%M:%S'
 
 export SOC_BAK_ALL_IN_ONE=${SOC_BAK_ALL_IN_ONE:-}
@@ -94,6 +96,47 @@ PIGZ_GZIP_COM=""
 export GZIP=-1
 export PIGZ=-1
 PARTITIONS_SIZE_NO_DATA_KB=$((0))
+
+# format="2" 的分区（RECOVERY/ROOTFS/ROOTFS_RW/OPT/SYSTEM/DATA）生成 ext4 还是 f2fs
+# 镜像，由上面的 PART_FSTYPE_CONF 按分区指定；缺省全 ext4，与历史版本行为一致。
+# BOOT(FAT32) 与 MISC(raw) 不受影响。
+# f2fs mkfs 特性与 SDK 打包链（bm_make_package_sectors.sh）保持一致：面向异常断电 +
+# 可能跑 MySQL 等重型数据库的边缘场景，开 extra_attr(前置) / inode_checksum(撕裂 inode 可检测)
+# / sb_checksum(撕裂超级块可检测) / lost_found(孤立 inode 收进 lost+found 而非丢弃) /
+# inode_crtime(掉电取证)。内核未编译的特性（compression/encrypt/verity/casefold）不开。
+F2FS_MKFS_FEATURES="extra_attr,inode_checksum,sb_checksum,lost_found,inode_crtime"
+F2FS_MKFS_OPTS="-O ${F2FS_MKFS_FEATURES}"
+
+# ============================ 分区文件系统配置 ============================
+# 按分区指定生成的镜像用什么文件系统（只对 format="2" 的分区有意义）：
+#   ext4 —— 历史默认行为
+#   f2fs —— 该分区出 f2fs 镜像，生成的 partition32G.xml 里对应分区带 fstype="f2fs"
+# 没列出来的分区按 ext4。BOOT(format=1, FAT32) 与 MISC(format=0, raw) 不在此列。
+#
+# 例：只想让 data 和 rootfs 用 f2fs ——
+#     PART_FSTYPE_CONF[data]=f2fs
+#     PART_FSTYPE_CONF[rootfs]=f2fs
+#
+# 注意：任一分区配成 f2fs 时，运行内核必须支持 f2fs（/proc/filesystems 里有），
+# 否则 socbak 直接报错退出（见下面的预检）。
+declare -A -g PART_FSTYPE_CONF
+PART_FSTYPE_CONF=(
+	[recovery]=ext4
+	[rootfs]=ext4
+	[rootfs_rw]=ext4
+	[opt]=ext4
+	[system]=ext4
+	[data]=ext4
+)
+
+# 取某分区配置的文件系统（未配置按 ext4）
+function socbak_part_fstype()
+{
+	echo "${PART_FSTYPE_CONF[$1]:-ext4}"
+}
+# f2fs 镜像尺寸下限：mkfs.f2fs 实测 40 MB 建不起来、48 MB 起才行，取 64 MB 留余量。
+# 收缩搜索不能低于它——resize.f2fs 会把文件系统缩到更小，但内核会以 EUCLEAN 拒绝挂载。
+F2FS_MIN_SIZE_MB=64
 
 if [[ "${SOC_BAK_FIXED_DATA_START}" != "" ]]; then
 	echo "INFO: SOC_BAK_FIXED_DATA_START open, some ROOTFS_RW space will be automatically allocated to ROOTFS_RO"
@@ -206,6 +249,54 @@ if [[ "${SOC_NAME}" == "" ]]; then
 	exit -1
 else
 	echo "INFO: get chip id success!"
+fi
+
+# 配置区校验：分区名必须是已知的 format="2" 分区（写错了会静默退回 ext4，必须拦），
+# 取值只能是 ext4/f2fs
+for _conf_part in "${!PART_FSTYPE_CONF[@]}"; do
+	case "${_conf_part}" in
+		recovery|rootfs|rootfs_rw|opt|system|data) ;;
+		*)
+			echo "ERROR: PART_FSTYPE_CONF has unknown partition \"${_conf_part}\""
+			echo "ERROR: known partitions: recovery rootfs rootfs_rw opt system data"
+			exit 1
+			;;
+	esac
+	case "${PART_FSTYPE_CONF[${_conf_part}]}" in
+		ext4|f2fs) ;;
+		*)
+			echo "ERROR: PART_FSTYPE_CONF[${_conf_part}]=${PART_FSTYPE_CONF[${_conf_part}]} is not supported (expect ext4 or f2fs)"
+			exit 1
+			;;
+	esac
+done
+unset _conf_part
+
+SOCBAK_F2FS_PARTS=""
+for _part in recovery rootfs rootfs_rw opt system data; do
+	if [[ "$(socbak_part_fstype "${_part}")" == "f2fs" ]]; then
+		SOCBAK_F2FS_PARTS="${SOCBAK_F2FS_PARTS} ${_part}"
+	fi
+done
+unset _part
+echo "INFO: partition filesystems:$(for p in recovery rootfs rootfs_rw opt system data; do echo -n " ${p}=$(socbak_part_fstype $p)"; done)"
+
+if [[ "${SOCBAK_F2FS_PARTS}" != "" ]]; then
+	# f2fs 镜像要挂载后灌内容（与 ext4 同一条路），所以**运行内核必须支持 f2fs**。
+	# 不支持就直接报错退出——不能因为"这台机器挂不了 f2fs"而退化成另一种产物。
+	if ! grep -qw f2fs /proc/filesystems; then
+		echo "ERROR: f2fs partitions configured (${SOCBAK_F2FS_PARTS# }), but the running kernel has no f2fs support"
+		echo "ERROR: f2fs is not in /proc/filesystems; boot a kernel with CONFIG_F2FS_FS=y (the CV84X2 BSP kernel has it)."
+		exit 1
+	fi
+	# 工具来自 binTools（aarch64 全静态 f2fs-tools 1.16.0）。缺了就在这里报错，
+	# 否则会等到生成镜像阶段才以 "command not found" 的形式炸掉，前面几十分钟的备份白做。
+	for _f2fs_tool in mkfs.f2fs fsck.f2fs resize.f2fs dump.f2fs; do
+		if ! command -v "${_f2fs_tool}" >/dev/null 2>&1; then
+			echo "ERROR: f2fs partitions configured (${SOCBAK_F2FS_PARTS# }) but ${_f2fs_tool} not found (expected in ${TGZ_FILES_PATH}/binTools)"
+			exit 1
+		fi
+	done
 fi
 
 ROOTFS_EXCLUDE_FLAGS="${ROOTFS_EXCLUDE_FLAGS_RUN}"
@@ -347,6 +438,82 @@ function resize_min_size()
 	echo "INFO: partition $1 size $socbak_resize_min_size_kb KB"
 }
 
+# 把分区 $1 的内容 tar 到目录 $2（就是镜像的挂载点，ext4/f2fs 共用同一段 tar）。
+function socbak_spool_partition_content()
+{
+	local part="$1"
+	local dest="$2"
+	case $part in
+		"rootfs")
+			pushd /
+			systemctl enable resize-helper.service
+			tar --checkpoint=500 --checkpoint-action=ttyout='[%d sec]: C%u, %T%*\r' --ignore-failed-read --numeric-owner -cpSf - ${ROOTFS_EXCLUDE_FLAGS} "./" | tar -xpSf - -C "$dest"
+			if [[ "$?" != "0" ]]; then echo "ERROR: cp files $part error, exit."; socbak_cleanup; fi
+			echo "INFO: add ext include files to rootfs..."
+			tar --ignore-failed-read --numeric-owner -cvpSf - ${ROOTFS_INCLUDE_PATHS} | tar -xpSf - -C "$dest"
+			systemctl disable resize-helper.service
+			popd
+		;;
+		*)
+			pushd /$part
+			set +u
+			EXT_FLAG="${PART_EXCLUDE_FLAGS["$part"]}"
+			set -u
+			tar --checkpoint=500 --checkpoint-action=ttyout='[%d sec]: C%u, %T%*\r' --ignore-failed-read --numeric-owner -cpSf - ${EXT_FLAG} "./" | tar -xpSf - -C "$dest"
+			if [[ "$?" != "0" ]]; then echo "ERROR: cp files $part error, exit."; socbak_cleanup; fi
+			popd
+		;;
+	esac
+}
+
+# f2fs 版的 resize_min_size：ext4 用 `resize2fs <img> <size>M` 试到装得下为止，
+# f2fs 对应的离线收缩是 `resize.f2fs -s -t <目标扇区数>`（-s = safe resize，会搬数据）。
+# 同样的坑：目标装不下数据时它**静默不动且返回 0**，所以每次都要回读超级块里的
+# block_count 确认收缩真的发生了（BSP-NOTES §57）。
+function resize_min_size_f2fs()
+{
+	declare -g socbak_resize_min_size_kb
+	local img="$1" size_M="$2" step_M="$3" max_count="$4" max_M="$5"
+	local target_blocks got_blocks count=0
+
+	if [ "${size_M}" -lt "${F2FS_MIN_SIZE_MB}" ]; then
+		echo "INFO: f2fs image lower bound is ${F2FS_MIN_SIZE_MB}M (mkfs.f2fs minimum), raise ${size_M}M to it"
+		size_M=${F2FS_MIN_SIZE_MB}
+	fi
+	echo "INFO: resize f2fs img($img) start at ${size_M}M, step is ${step_M}M, max count is ${max_count}"
+	while true; do
+		# 4K 块 = MB × 256；512B 扇区 = MB × 2048
+		target_blocks=$((size_M * 256))
+		echo "INFO: attempt partition($img) size ${size_M}M ..."
+		resize.f2fs -s -t $((size_M * 2048)) "$img" >/dev/null 2>&1
+		# 与 ext4 那份 resize_min_size 里"resize2fs 后跟一次 e2fsck"对齐：
+		# 收缩会把文件系统标脏，不修一遍后面挂不上
+		fsck.f2fs -f "$img" >/dev/null 2>&1
+		got_blocks=$(dump.f2fs -d 1 "$img" 2>/dev/null |
+			awk '$1 == "block_count" {print $NF}' | tr -d ']')
+		if [[ "${got_blocks}" == "${target_blocks}" ]]; then
+			break
+		fi
+		echo "INFO: ${size_M}M is too small for $(basename $img) (block_count=${got_blocks:-?}, want ${target_blocks})"
+		count=$((count + 1))
+		if [ $count -gt $max_count ] || [ $size_M -ge $max_M ]; then
+			# 一路试到上限都装不下：退回镜像原始尺寸（灌内容时已经证明装得下），
+			# 绝不留下一个尺寸与内容不匹配的镜像
+			echo "WARNING: cannot shrink $(basename $img), keep the original image size ${max_M}M"
+			size_M=${max_M}
+			break
+		fi
+		size_M=$((size_M + step_M))
+		if [ $size_M -gt $max_M ]; then
+			size_M=${max_M}
+		fi
+	done
+	# 收缩只改文件系统元数据，镜像文件本身要跟着截断到目标尺寸
+	truncate -s $((size_M * 1024 * 1024)) "$img"
+	socbak_resize_min_size_kb=$((size_M * 1024))
+	echo "INFO: partition $img size $socbak_resize_min_size_kb KB"
+}
+
 function socbak_gen_partition_subimg()
 {
 	declare -g partition_subimg_size_kb
@@ -355,77 +522,82 @@ function socbak_gen_partition_subimg()
 	rm ./sparse-file* &>/dev/null
 	rm ./sparse-path* -rf &>/dev/null
 	echo "INFO: creat partition($1) size: $((${2})) B ..."
-	dd if=/dev/zero of="sparse-file-$1" bs=$((1024 * 4)) count=$(($2 / 1024 / 4)) conv=notrunc status=progress
-	if [[ "$?" != "0" ]]; then echo "ERROR: dd $1 error, exit."; socbak_cleanup; fi
-	if [[ "$3" == "fat" ]]; then
-		mkfs.fat "sparse-file-$1"
-		if [[ "$?" != "0" ]]; then echo "ERROR: mkfs.fat $1 error, exit."; socbak_cleanup; fi
+	# f2fs 与 ext4 走同一条路：建镜像 → mkfs → 挂载 → tar 灌内容 → 卸载 → 收缩到最小。
+	# 只有三处不同：建镜像用稀疏文件（mkfs.f2fs 只写元数据，不必 dd 铺零）、
+	# mount 显式指定 -t f2fs、收缩用 resize.f2fs -s（对应 ext4 的 resize2fs -M）。
+	if [[ "$3" == "f2fs" ]]; then
+		truncate -s "$2" "sparse-file-$1"
+		if [[ "$?" != "0" ]]; then echo "ERROR: truncate $1 error, exit."; socbak_cleanup; exit 1; fi
+		mkfs.f2fs ${F2FS_MKFS_OPTS} -f "sparse-file-$1"
+		if [[ "$?" != "0" ]]; then echo "ERROR: mkfs.f2fs $1 error, exit."; socbak_cleanup; exit 1; fi
 	else
-		mkfs.ext4 -b 4096 -i 16384 "sparse-file-$1"
-		if [[ "$?" != "0" ]]; then echo "ERROR: mkfs.ext4 $1 error, exit."; socbak_cleanup; fi
+		dd if=/dev/zero of="sparse-file-$1" bs=$((1024 * 4)) count=$(($2 / 1024 / 4)) conv=notrunc status=progress
+		if [[ "$?" != "0" ]]; then echo "ERROR: dd $1 error, exit."; socbak_cleanup; fi
+		if [[ "$3" == "fat" ]]; then
+			mkfs.fat "sparse-file-$1"
+			if [[ "$?" != "0" ]]; then echo "ERROR: mkfs.fat $1 error, exit."; socbak_cleanup; fi
+		else
+			mkfs.ext4 -b 4096 -i 16384 "sparse-file-$1"
+			if [[ "$?" != "0" ]]; then echo "ERROR: mkfs.ext4 $1 error, exit."; socbak_cleanup; fi
+		fi
 	fi
 	mkdir "sparse-path-$1"
-	mount "sparse-file-$1" "sparse-path-$1"
-	if [[ "$?" != "0" ]]; then echo "ERROR: mount(1) $1 error, exit."; socbak_cleanup; fi
-	case $1 in
-		"rootfs")
-			pushd /
-			systemctl enable resize-helper.service
-			tar --checkpoint=500 --checkpoint-action=ttyout='[%d sec]: C%u, %T%*\r' --ignore-failed-read --numeric-owner -cpSf - ${ROOTFS_EXCLUDE_FLAGS} "./" | tar -xpSf - -C "$TGZ_FILES_PATH/sparse-path-$1"
-			if [[ "$?" != "0" ]]; then echo "ERROR: cp files $1 error, exit."; socbak_cleanup; fi
-			echo "INFO: add ext include files to rootfs..."
-			tar --ignore-failed-read --numeric-owner -cvpSf - ${ROOTFS_INCLUDE_PATHS} | tar -xpSf - -C "$TGZ_FILES_PATH/sparse-path-$1"
-			systemctl disable resize-helper.service
-			popd
-		;;
-		*)
-			pushd /$1
-			set +u
-			EXT_FLAG="${PART_EXCLUDE_FLAGS["$1"]}"
-			set -u
-			tar --checkpoint=500 --checkpoint-action=ttyout='[%d sec]: C%u, %T%*\r' --ignore-failed-read --numeric-owner -cpSf - ${EXT_FLAG} "./" | tar -xpSf - -C "$TGZ_FILES_PATH/sparse-path-$1"
-			if [[ "$?" != "0" ]]; then echo "ERROR: cp files $1 error, exit."; socbak_cleanup; fi
-			popd
-		;;
-	esac
+	MOUNT_TYPE_OPT=""
+	if [[ "$3" == "f2fs" ]]; then
+		MOUNT_TYPE_OPT="-t f2fs"
+	fi
+	mount ${MOUNT_TYPE_OPT} "sparse-file-$1" "sparse-path-$1"
+	if [[ "$?" != "0" ]]; then echo "ERROR: mount(1) $1 error, exit."; socbak_cleanup; exit 1; fi
+	socbak_spool_partition_content "$1" "$TGZ_FILES_PATH/sparse-path-$1"
 	#e4defrag "sparse-path-$1"
 	#if [[ "$?" != "0" ]]; then echo "ERROR: e4defrag $1 error, exit."; socbak_cleanup; fi
 	umount "sparse-path-$1"
 	if [[ "$?" != "0" ]]; then echo "ERROR: umount $1 error, exit."; socbak_cleanup; fi
 	size_kb="0"
+	# 收缩的搜索步长：ext4 的 resize_min_size 与 f2fs 的 resize_min_size_f2fs 用同一套
+	size_step=$(($2 / 1024 / 1024 / 20))
+	step_num=20
+	if [ $size_step -lt 10 ]; then
+		size_step=10
+	fi
+	if [ $size_step -gt 1000 ]; then
+		size_step=1000
+		step_num=$(($2 / 1024 / 1024 / $size_step))
+	fi
+	if [[ "$SOC_BAK_FIXED_SIZE" != "" ]]; then
+		echo "INFO: fixed size"
+		size_step=0
+		step_num=0
+	fi
 	if [[ "$3" == "ext4" ]]; then
 		e2fsck -fy "sparse-file-$1"
 		if [[ "$?" != "0" ]]; then echo "ERROR: e2fsck $1 error, exit."; socbak_cleanup; fi
 		resize2fs "sparse-file-$1"
 		if [[ "$?" != "0" ]]; then echo "ERROR: resize2fs $1 error, exit."; socbak_cleanup; fi
-		size_step=$(($2 / 1024 / 1024 / 20))
-		step_num=20
-		if [ $size_step -lt 10 ]; then
-			size_step=10
-		fi
-		if [ $size_step -gt 1000 ]; then
-			size_step=1000
-			step_num=$(($2 / 1024 / 1024 / $size_step))
-		fi
-		if [[ "$SOC_BAK_FIXED_SIZE" != "" ]]; then
-			echo "INFO: fixed size"
-			size_step=0
-			step_num=0
-		fi
 		resize_min_size "$TGZ_FILES_PATH/sparse-file-$1" $((${TGZ_FILES_SIZE["${1}"]} / 1024)) ${size_step} ${step_num}
+		TGZ_FILES_SIZE["${1}"]=$socbak_resize_min_size_kb
+	elif [[ "$3" == "f2fs" ]]; then
+		fsck.f2fs -f "sparse-file-$1"
+		if [[ "$?" != "0" ]]; then echo "ERROR: fsck.f2fs $1 error, exit."; socbak_cleanup; exit 1; fi
+		resize_min_size_f2fs "$TGZ_FILES_PATH/sparse-file-$1" $((${TGZ_FILES_SIZE["${1}"]} / 1024)) ${size_step} ${step_num} $(($2 / 1024 / 1024))
 		TGZ_FILES_SIZE["${1}"]=$socbak_resize_min_size_kb
 	elif [[ "$3" == "fat" ]]; then
 		TGZ_FILES_SIZE["${1}"]=$(( $2 / 1024 ))
 	fi
 	echo "INFO: partition $1 size is : ${TGZ_FILES_SIZE["${1}"]} KB"
-	tune2fs -l "sparse-file-$1"
-	mount "sparse-file-$1" "sparse-path-$1"
-	if [[ "$?" != "0" ]]; then echo "ERROR: mount(2) $1 error, exit."; socbak_cleanup; fi
+	if [[ "$3" == "ext4" ]]; then
+		tune2fs -l "sparse-file-$1"
+	fi
+	mount ${MOUNT_TYPE_OPT} "sparse-file-$1" "sparse-path-$1"
+	if [[ "$?" != "0" ]]; then echo "ERROR: mount(2) $1 error, exit."; socbak_cleanup; exit 1; fi
 	echo "INFO: print sparse-file-$1 files:"
 	ls "sparse-path-$1" -lah
 	umount "sparse-path-$1"
 	if [[ "$3" == "ext4" ]]; then
 		e2fsck -fy "sparse-file-$1"
+	elif [[ "$3" == "f2fs" ]]; then
+		fsck.f2fs -f "sparse-file-$1"
+		if [[ "$?" != "0" ]]; then echo "ERROR: fsck.f2fs $1 error, exit."; socbak_cleanup; exit 1; fi
 	fi
 	rm -rf "sparse-path-$1"
 }
@@ -442,7 +614,8 @@ if [[ "${ALL_IN_ONE_FLAG}" != "" ]] && [[ "${ALL_IN_ONE_SCRIPT}" != "" ]]; then
 	for TGZ_FILE in "${TGZ_FILES[@]}"
 	do
 		part_size_max=0
-		partition_format="ext4"
+		# BOOT 是 FAT32（下面的 "boot" 分支覆盖），其余分区按 PART_FSTYPE_CONF 逐分区取
+		partition_format="$(socbak_part_fstype "${TGZ_FILE}")"
 		ext_part=""
 		case $TGZ_FILE in
 			"rootfs")
@@ -586,27 +759,36 @@ fi
 if [[ "$SOC_NAME" == "bm1684x" ]] || [[ "$SOC_NAME" == "bm1684" ]]; then
 	echo "INFO: FORE BM1684/X The generated file partition32G.xml can replace file bootloader-arm64/scripts/partition32G.xml in VXX or replace some information for 3.0.0"
 fi
+# f2fs 模式下给 format="2" 的分区带上 fstype 属性；ext4 时为空串，
+# 保证不传开关时生成的 xml 与历史版本逐字节一致。
+# 每个 format="2" 分区按配置表决定要不要带 fstype 属性；全 ext4 时属性为空串，
+# 生成的 xml 与历史版本逐字节一致
+fstype_attr() {
+	if [[ "$(socbak_part_fstype "$1")" == "f2fs" ]]; then
+		echo -n ' fstype="f2fs"'
+	fi
+}
 echo "<physical_partition size_in_kb=\"$EMMC_ALL_SIZE\">" > $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
 # boot data opt system recovery rootfs
 if [[ " ${TGZ_FILES[@]} " =~ " boot " ]]; then
 	echo "  <partition label=\"BOOT\"       size_in_kb=\"${TGZ_FILES_SIZE[boot]}\"  readonly=\"false\"  format=\"1\" />" >> $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
 fi
 if [[ " ${TGZ_FILES[@]} " =~ " recovery " ]]; then
-	echo "  <partition label=\"RECOVERY\"   size_in_kb=\"${TGZ_FILES_SIZE[recovery]}\"  readonly=\"false\" format=\"2\" />" >> $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
+	echo "  <partition label=\"RECOVERY\"   size_in_kb=\"${TGZ_FILES_SIZE[recovery]}\"  readonly=\"false\" format=\"2\"$(fstype_attr recovery) />" >> $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
 fi
 echo "  <partition label=\"MISC\"       size_in_kb=\"10240\"  readonly=\"false\"   format=\"0\" />" >> $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
 if [[ " ${TGZ_FILES[@]} " =~ " rootfs " ]]; then
-	echo "  <partition label=\"ROOTFS\"     size_in_kb=\"${TGZ_FILES_SIZE[rootfs]}\" readonly=\"true\"   format=\"2\" />" >> $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
+	echo "  <partition label=\"ROOTFS\"     size_in_kb=\"${TGZ_FILES_SIZE[rootfs]}\" readonly=\"true\"   format=\"2\"$(fstype_attr rootfs) />" >> $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
 fi
-echo "  <partition label=\"ROOTFS_RW\"  size_in_kb=\"${ROOTFS_RW_SIZE}\" readonly=\"false\"  format=\"2\" />" >> $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
+echo "  <partition label=\"ROOTFS_RW\"  size_in_kb=\"${ROOTFS_RW_SIZE}\" readonly=\"false\"  format=\"2\"$(fstype_attr rootfs_rw) />" >> $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
 if [[ " ${TGZ_FILES[@]} " =~ " opt " ]]; then
-	echo "  <partition label=\"OPT\"       size_in_kb=\"${TGZ_FILES_SIZE[opt]}\" readonly=\"false\"  format=\"2\" />" >> $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
+	echo "  <partition label=\"OPT\"       size_in_kb=\"${TGZ_FILES_SIZE[opt]}\" readonly=\"false\"  format=\"2\"$(fstype_attr opt) />" >> $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
 fi
 if [[ " ${TGZ_FILES[@]} " =~ " system " ]]; then
-	echo "  <partition label=\"SYSTEM\"     size_in_kb=\"${TGZ_FILES_SIZE[system]}\" readonly=\"false\"  format=\"2\" />" >> $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
+	echo "  <partition label=\"SYSTEM\"     size_in_kb=\"${TGZ_FILES_SIZE[system]}\" readonly=\"false\"  format=\"2\"$(fstype_attr system) />" >> $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
 fi
 if [[ " ${TGZ_FILES[@]} " =~ " data " ]]; then
-	echo "  <partition label=\"DATA\"       size_in_kb=\"${TGZ_FILES_SIZE[data]}\" readonly=\"false\"  format=\"2\" />" >> $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
+	echo "  <partition label=\"DATA\"       size_in_kb=\"${TGZ_FILES_SIZE[data]}\" readonly=\"false\"  format=\"2\"$(fstype_attr data) />" >> $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
 fi
 echo "</physical_partition>" >> $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
 cat $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
@@ -651,15 +833,28 @@ function socbak_allinone_pack()
 				if [ $3 -eq 1 ]; then
 					mkfs.fat $RECOVERY_DIR/$1
 				elif [ $3 -eq 2 ]; then
-					mkfs.ext4 -b 4096 -i 16384 $RECOVERY_DIR/$1
+					# 没有预生成镜像的分区（如 ROOTFS_RW）在这里现造，只能按分区满尺寸建；
+					# 有内容的分区走 socbak_gen_partition_subimg（与 ext4 同一条路）。
+					if [ "${PART_FSTYPE[$2]}" = "f2fs" ]; then
+						mkfs.f2fs ${F2FS_MKFS_OPTS} -f $RECOVERY_DIR/$1
+					else
+						mkfs.ext4 -b 4096 -i 16384 $RECOVERY_DIR/$1
+					fi
 				fi
 				have_flag=0
 			else
 				advmv -g "sparse-file-$1" $RECOVERY_DIR/$1
 			fi
 			if [[ "$3" == "2" ]]; then
-				e2fsck -f -p $RECOVERY_DIR/$1
-				resize2fs -M $RECOVERY_DIR/$1
+				if [ "${PART_FSTYPE[$2]}" = "f2fs" ]; then
+					# f2fs 镜像在 socbak_gen_partition_subimg 里已经定稿（收缩到最小 + fsck 干净），
+					# 这里只确认一遍；resize2fs -M 对 f2fs 无意义且会直接报错。
+					fsck.f2fs -f $RECOVERY_DIR/$1 ||
+						{ echo "ERROR: fsck.f2fs $1 error, exit."; socbak_cleanup; }
+				else
+					e2fsck -f -p $RECOVERY_DIR/$1
+					resize2fs -M $RECOVERY_DIR/$1
+				fi
 			elif [[ "$3" == "1" ]]; then
 				fsck.fat -f $RECOVERY_DIR/$1
 			fi

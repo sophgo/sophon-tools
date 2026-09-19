@@ -14,6 +14,11 @@ LOAD_COMMAND=fatload
 SECTOR_BYTES=512
 CHUNK_SIZE=200704
 
+# f2fs 分区（xml 里 format="2" + fstype="f2fs"）的 mkfs 特性，与 bm1688/CV 系、
+# socbak.sh、SDK 打包链（bm_make_package_sectors.sh）保持一致。
+F2FS_MKFS_FEATURES="extra_attr,inode_checksum,sb_checksum,lost_found,inode_crtime"
+F2FS_MKFS_OPTS="-O ${F2FS_MKFS_FEATURES}"
+
 BOOT_PART_OFFSET=8192
 SCRIPT_ADDR="\${scriptaddr}"
 IN_ADDR="\${ramdisk_addr_r}"
@@ -170,6 +175,42 @@ function parse_partition_xml()
 
 	P_FLAG=($(grep -Po "readonly=\".+\"" ${PARTITION_FILE} | awk -F\" '{print $2}'))
 	PART_FORMAT=($(grep -Po "format=\".+\"" ${PARTITION_FILE} | awk -F\" '{print $2}'))
+
+	# 可选属性 fstype="ext4|f2fs"（缺省 ext4），只对 format="2" 的分区有意义：
+	# format 表示"分区类别"（0=raw/1=FAT32/2=带文件系统的分区），fstype 才是具体文件系统。
+	# 逐行解析而不是 grep -P 一把抓：属性可选，缺省时 grep 会少一行导致下标错位。
+	local _line _fstype _tool
+	PART_FSTYPE=()
+	while IFS= read -r _line; do
+		case "${_line}" in
+			*"<partition "*) ;;
+			*) continue ;;
+		esac
+		_fstype=""
+		if [[ "${_line}" =~ fstype=\"([A-Za-z0-9_]+)\" ]]; then
+			_fstype="${BASH_REMATCH[1]}"
+		fi
+		PART_FSTYPE+=("${_fstype:-ext4}")
+	done < "${PARTITION_FILE}"
+	if [ "${#PART_FSTYPE[@]}" != "${#LABELS[@]}" ]; then
+		panic "fstype parse mismatch: ${#PART_FSTYPE[@]} values for ${#LABELS[@]} partitions in ${PARTITION_FILE}"
+	fi
+
+	for i in $(seq 0 $[${#LABELS[@]}-1]); do
+		case "${PART_FSTYPE[$i]}" in
+			ext4|f2fs) ;;
+			*) panic "partition ${LABELS[$i]}: unsupported fstype \"${PART_FSTYPE[$i]}\" (expect ext4 or f2fs)" ;;
+		esac
+		if [ "${PART_FORMAT[$i]}" != "2" ] && [ "${PART_FSTYPE[$i]}" != "ext4" ]; then
+			panic "partition ${LABELS[$i]}: format=${PART_FORMAT[$i]} holds no filesystem, fstype is not allowed"
+		fi
+		if [ "${PART_FSTYPE[$i]}" = "f2fs" ]; then
+			for _tool in mkfs.f2fs fsck.f2fs resize.f2fs; do
+				command -v ${_tool} >/dev/null 2>&1 ||
+					panic "partition ${LABELS[$i]} needs f2fs but ${_tool} not found (expected in binTools)"
+			done
+		fi
+	done
 
 	for i in $(seq 0 $[${#LABELS[@]}-1]); do
 		PART_OFFSET[$i]=$offset
@@ -435,7 +476,13 @@ function do_gen_partition_subimg()
 	if [ $3 -eq 1 ]; then
 		mkfs.fat $RECOVERY_DIR/$1
 	elif [ $3 -eq 2 ]; then
-		mkfs.ext4 $RECOVERY_DIR/$1
+		# f2fs 不能"先 mkfs 再挂载灌内容"（下面那段 sudo mount/tar 只对 ext4/FAT 有效）：
+		# 有预生成镜像的分区走 socbak.sh 那边的镜像，这里只处理空分区（如 ROOTFS_RW）。
+		if [ "${PART_FSTYPE[$2]}" = "f2fs" ]; then
+			mkfs.f2fs ${F2FS_MKFS_OPTS} -f $RECOVERY_DIR/$1
+		else
+			mkfs.ext4 $RECOVERY_DIR/$1
+		fi
 	else
 		echo $1 partition has no filesystem
 		if [ -f ${PART_IMAGE_FILE_NAME[$2]} ]; then
@@ -481,7 +528,8 @@ function gen_partition_img()
 	local part_name=$2
 	local part_format=$3
 
-	if [ "$part_format" = "2"  ]; then
+	# resize_flag=1 会触发 ext4 专有的 e2fsck + resize2fs -M，f2fs 没有对应物，必须置 0
+	if [ "$part_format" = "2" ] && [ "${PART_FSTYPE[$part_number]}" != "f2fs" ]; then
 		local resize_flag="1"
 	else
 		local resize_flag="0"
