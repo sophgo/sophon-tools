@@ -186,6 +186,19 @@ function parse_partition_xml()
 			panic "partition RECOVERY: f2fs is not supported on RECOVERY (u-boot reads boot.scr from it and has no f2fs driver); keep it format=\"2\" (ext4)"
 		fi
 	done
+
+	# BOOT(p1) 必须是 FAT32：u-boot 用 fatload 从 p1 加载内核（boot.itb），
+	# fatload 只认 FAT，换成 ext4/f2fs 都会让机器起不来。AB 布局下是 boot_a/boot_b。
+	# 与 SDK 侧打包链同一条约束。
+	for i in $(seq 0 $[${#LABELS[@]}-1]); do
+		case "${LABELS[$i]}" in
+		boot|boot_a|boot_b)
+			if [ "${PART_FORMAT[$i]}" != "1" ]; then
+				panic "partition ${LABELS[$i]}: BOOT must be FAT32 (format=\"1\"), got format=\"${PART_FORMAT[$i]}\" (u-boot loads the kernel from it with fatload, which only reads FAT)"
+			fi
+			;;
+		esac
+	done
 	local _tool
 	PART_FSTYPE=()
 	for i in $(seq 0 $[${#LABELS[@]}-1]); do
