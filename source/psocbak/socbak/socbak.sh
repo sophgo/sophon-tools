@@ -13,7 +13,7 @@ LOGFILE="$(readlink -f "${BASH_SOURCE[0]}").log"
 rm -f $LOGFILE*
 exec > >(tee -a "$LOGFILE") 2>&1
 
-echo "VERSION: v1.4.0"
+echo "VERSION: v1.4.1"
 date '+%Y-%m-%d %H:%M:%S'
 
 export SOC_BAK_ALL_IN_ONE=${SOC_BAK_ALL_IN_ONE:-}
@@ -112,6 +112,10 @@ F2FS_MKFS_OPTS="-O ${F2FS_MKFS_FEATURES}"
 #   ext4 —— 历史默认行为，生成的 partition32G.xml 里该分区 format="2"
 #   f2fs —— 该分区出 f2fs 镜像，生成的 partition32G.xml 里该分区 format="3"
 # 没列出来的分区按 ext4。BOOT(format=1, FAT32) 与 MISC(format=0, raw) 不在此列。
+#
+# recovery 必须保持 ext4：u-boot 只带 FAT/ext4 驱动，而 recovery 通道要从 p2 里读
+# boot.scr（见 SDK 的 build/boot.cmd.emmc），配成 f2fs 后救援通道会静默失效。
+# 写成 f2fs 会在下面直接报错退出。
 #
 # 例：只想让 data 和 rootfs 用 f2fs ——
 #     PART_FSTYPE_CONF[data]=f2fs
@@ -271,6 +275,16 @@ for _conf_part in "${!PART_FSTYPE_CONF[@]}"; do
 	esac
 done
 unset _conf_part
+
+# recovery(p2) 不能是 f2fs：u-boot 只带 FAT/ext4 驱动，而 recovery 通道要从 p2 里读
+# boot.scr（见 SDK 的 build/boot.cmd.emmc），p2 改成 f2fs 后救援通道会静默失效 ——
+# 包能刷进去、平时也能起，直到真需要进 recovery 才发现。这里在动手之前拦下。
+if [[ "${PART_FSTYPE_CONF[recovery]:-ext4}" == "f2fs" ]]; then
+	echo "ERROR: PART_FSTYPE_CONF[recovery]=f2fs is not supported:"
+	echo "ERROR: u-boot reads boot.scr from the RECOVERY partition and has no f2fs driver,"
+	echo "ERROR: so the recovery/rescue path would silently stop working. Keep it ext4."
+	exit 1
+fi
 
 SOCBAK_F2FS_PARTS=""
 for _part in recovery rootfs rootfs_rw opt system data; do
