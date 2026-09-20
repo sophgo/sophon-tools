@@ -14,6 +14,11 @@ LOAD_COMMAND=fatload
 SECTOR_BYTES=512
 CHUNK_SIZE=200704
 
+# f2fs 分区（xml 里 format="3"）的 mkfs 特性，与 bm1688/CV 系、
+# socbak.sh、SDK 打包链（bm_make_package_sectors.sh）保持一致。
+F2FS_MKFS_FEATURES="extra_attr,inode_checksum,sb_checksum,lost_found,inode_crtime"
+F2FS_MKFS_OPTS="-O ${F2FS_MKFS_FEATURES}"
+
 BOOT_PART_OFFSET=8192
 SCRIPT_ADDR="\${scriptaddr}"
 IN_ADDR="\${ramdisk_addr_r}"
@@ -170,6 +175,27 @@ function parse_partition_xml()
 
 	P_FLAG=($(grep -Po "readonly=\".+\"" ${PARTITION_FILE} | awk -F\" '{print $2}'))
 	PART_FORMAT=($(grep -Po "format=\".+\"" ${PARTITION_FILE} | awk -F\" '{print $2}'))
+
+	# 具体文件系统直接由 format 表达：0=raw / 1=FAT32 / 2=ext4 / 3=f2fs。
+	local _tool
+	PART_FSTYPE=()
+	for i in $(seq 0 $[${#LABELS[@]}-1]); do
+		case "${PART_FORMAT[$i]}" in
+		0|1) PART_FSTYPE+=("none") ;;
+		2)   PART_FSTYPE+=("ext4") ;;
+		3)   PART_FSTYPE+=("f2fs") ;;
+		*)   panic "partition ${LABELS[$i]}: unsupported format \"${PART_FORMAT[$i]}\" (expect 0=raw 1=FAT32 2=ext4 3=f2fs)" ;;
+		esac
+	done
+
+	for i in $(seq 0 $[${#LABELS[@]}-1]); do
+		if [ "${PART_FSTYPE[$i]}" = "f2fs" ]; then
+			for _tool in mkfs.f2fs fsck.f2fs resize.f2fs; do
+				command -v ${_tool} >/dev/null 2>&1 ||
+					panic "partition ${LABELS[$i]} needs f2fs but ${_tool} not found (expected in binTools)"
+			done
+		fi
+	done
 
 	for i in $(seq 0 $[${#LABELS[@]}-1]); do
 		PART_OFFSET[$i]=$offset
@@ -434,8 +460,14 @@ function do_gen_partition_subimg()
 
 	if [ $3 -eq 1 ]; then
 		mkfs.fat $RECOVERY_DIR/$1
-	elif [ $3 -eq 2 ]; then
-		mkfs.ext4 $RECOVERY_DIR/$1
+	elif [ $3 -eq 2 -o $3 -eq 3 ]; then
+		# f2fs 不能"先 mkfs 再挂载灌内容"（下面那段 sudo mount/tar 只对 ext4/FAT 有效）：
+		# 有预生成镜像的分区走 socbak.sh 那边的镜像，这里只处理空分区（如 ROOTFS_RW）。
+		if [ "${PART_FSTYPE[$2]}" = "f2fs" ]; then
+			mkfs.f2fs ${F2FS_MKFS_OPTS} -f $RECOVERY_DIR/$1
+		else
+			mkfs.ext4 $RECOVERY_DIR/$1
+		fi
 	else
 		echo $1 partition has no filesystem
 		if [ -f ${PART_IMAGE_FILE_NAME[$2]} ]; then
@@ -443,7 +475,7 @@ function do_gen_partition_subimg()
 		fi
 	fi
 
-	if [ $3 -eq 1 -o $3 -eq 2 ]; then
+	if [ $3 -eq 1 -o $3 -eq 2 -o $3 -eq 3 ]; then
 		if [ -f ${PART_IMAGE_FILE_NAME[$2]} -a "${P_FLAG[$2]}" == "true" ]; then
 			if [ $(ls -l ${PART_IMAGE_FILE_NAME[$2]} | awk '{print $5}') == ${PART_SIZE_IN_BYTE[$2]} ]; then
 				echo "${PART_IMAGE_FILE_NAME[$2]} exists, replace $RECOVERY_DIR/$1"
@@ -481,7 +513,8 @@ function gen_partition_img()
 	local part_name=$2
 	local part_format=$3
 
-	if [ "$part_format" = "2"  ]; then
+	# resize_flag=1 会触发 ext4 专有的 e2fsck + resize2fs -M，f2fs 没有对应物，必须置 0
+	if [ "${PART_FSTYPE[$part_number]}" = "ext4" ]; then
 		local resize_flag="1"
 	else
 		local resize_flag="0"
