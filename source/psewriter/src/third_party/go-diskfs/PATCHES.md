@@ -1,7 +1,7 @@
 # go-diskfs 本地补丁说明
 
 上游: `github.com/diskfs/go-diskfs` v1.9.4 (BSD-2-Clause, 见同目录 `LICENSE`)
-本目录是**打了补丁的本地副本**, 通过 `source/psewriter/go.mod` 的
+本目录是**打了补丁的本地副本**, 通过 `source/psewriter/src/go.mod` 的
 `replace github.com/diskfs/go-diskfs => ./third_party/go-diskfs` 生效。
 
 副本已裁掉 `testdata/`、`*_test.go`、`examples/` 与 CI 配置, 只保留编译所需源码。
@@ -49,7 +49,7 @@ Go <= 1.20。上游 go-diskfs v1.9.4 用了 Go 1.21 才进标准库的东西, �
 | `go.mod` | `go 1.25.0` + 若干高版本依赖 | 降到 `go 1.20`, 依赖锁到 1.20 可编译的版本 |
 
 去掉这两个依赖后, 整个依赖图 (sevenzip / rardecode / klauspost-compress / x-sys / x-text …)
-都能降到 Go 1.20 可编译的版本, 见 `source/psewriter/go.mod`。
+都能降到 Go 1.20 可编译的版本, 见 `source/psewriter/src/go.mod`。
 回归测试 `TestSevenZipContainersRoundTrip` 覆盖降级后的 7z 解压路径。
 
 ### 补丁 7: 大卡/特定容量上 FAT 表算错 (卡会挂不上 / 写坏)
@@ -76,11 +76,11 @@ Go <= 1.20。上游 go-diskfs v1.9.4 用了 Go 1.21 才进标准库的东西, �
 
 ## 验证
 
-- `source/psewriter/archive_test.go`:
+- `source/psewriter/src/archive_test.go`:
   - `TestBuildCardImageAcceptsCJKNames` —— 中/日文文件名与中文目录名建卡后按原名读回
   - `TestBuildCardImageShortNameCollision` —— 两个会被改写成相同短名的中文名互不串内容
   - `TestBuildCardImageRejectsUnrepresentableNames` —— BMP 之外(emoji)与 FAT 非法字符仍被拦下
-- `source/psewriter/formatonly_test.go`:
+- `source/psewriter/src/formatonly_test.go`:
   - `TestFAT32GeometryOnLargeCards` —— 逐 GB 扫 8~48 GB + 256/384/512/1024 GB, 每档 FAT 表都放得下全部数据簇
   - `TestFormattedCardAcceptsFiles` —— 格式化出来的卡能继续建文件并读回 (FAT 建错时这一步会炸)
 - 端到端: 含中文名/中文目录的 zip 建卡后**用操作系统挂载**, `ls` 显示中文名、内容正确

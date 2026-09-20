@@ -11,6 +11,9 @@ output/*
 !source/psophliteos/frontend/src/**/data/**
 !source/psophliteos/frontend/src/assets/images/
 !source/psophliteos/frontend/src/assets/images/**
+# psewriter docs/images 是 README 的流程图资源，需入库
+!source/psewriter/docs/images/
+!source/psewriter/docs/images/**
 *.user
 *.zip
 *.tar
