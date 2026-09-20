@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 1090" width="820" height="1090" role="img" aria-label="SE写卡工具完整操作流程">
+  <title>SE写卡工具完整操作流程</title>
+  <desc>从准备到制作完成的完整流程图：准备 → 双击运行 → 选择目标设备 → 选择要做什么（三选一） → 核对确认 → 写后自动校验 → 完成或失败重做。</desc>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#5F6368"/>
+    </marker>
+    <style>
+      .box   { stroke-width: 1.5; rx: 10; }
+      .prep  { fill: #F1F3F4; stroke: #9AA0A6; }
+      .act   { fill: #E8F0FE; stroke: #1A73E8; }
+      .mode  { fill: #FEF7E0; stroke: #E8710A; }
+      .check { fill: #E6F4EA; stroke: #137333; }
+      .ok    { fill: #CEEAD6; stroke: #137333; }
+      .fail  { fill: #FCE8E6; stroke: #C5221F; }
+      .t     { font-family: "Noto Sans CJK SC","Source Han Sans SC","Microsoft YaHei","PingFang SC",sans-serif; fill: #202124; }
+      .h     { font-size: 16px; font-weight: 700; }
+      .b     { font-size: 14px; }
+      .s     { font-size: 13px; }
+      .chip  { font-size: 13px; font-weight: 700; }
+      .flow  { stroke: #5F6368; stroke-width: 2; fill: none; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect width="820" height="1090" fill="#FFFFFF"/>
+
+  <!-- 1. 准备 -->
+  <rect class="box prep" x="150" y="24" width="520" height="76"/>
+  <text class="t h" x="170" y="54">准备</text>
+  <text class="t b" x="170" y="82">Windows 电脑 + 读卡器 + TF 卡；拷入 sewriter.exe（单文件，免安装）</text>
+
+  <path class="flow" d="M 410 100 L 410 134"/>
+
+  <!-- 2. 运行 -->
+  <rect class="box act" x="150" y="136" width="520" height="76"/>
+  <text class="t h" x="170" y="166">双击 sewriter.exe</text>
+  <text class="t b" x="170" y="194">弹出 UAC 授权 → 选「是」（读写物理盘必须管理员权限）</text>
+
+  <path class="flow" d="M 410 212 L 410 246"/>
+
+  <!-- 3. 选设备 -->
+  <rect class="box act" x="150" y="248" width="520" height="96"/>
+  <text class="t h" x="170" y="278">① 选择目标设备</text>
+  <text class="t b" x="170" y="306">插上读卡器 → 点「刷新」→ 在下拉框里选中目标 TF 卡</text>
+  <text class="t s" x="170" y="330">系统盘永不出现在列表里；SATA/NVMe 等固定盘默认隐藏</text>
+
+  <path class="flow" d="M 410 344 L 410 378"/>
+
+  <!-- 4. 三选一 -->
+  <rect class="box mode" x="150" y="380" width="520" height="180"/>
+  <text class="t h" x="170" y="410">② 选择要做什么（三选一）</text>
+
+  <rect x="178" y="428" width="152" height="26" rx="13" fill="#FFFFFF" stroke="#E8710A" stroke-width="1.2"/>
+  <text class="t chip" x="254" y="446" text-anchor="middle">只格式化 TF 卡</text>
+  <text class="t b" x="348" y="446">把卡重做成 MBR+FAT32，不写入任何文件（默认）</text>
+
+  <rect x="178" y="466" width="152" height="26" rx="13" fill="#FFFFFF" stroke="#E8710A" stroke-width="1.2"/>
+  <text class="t chip" x="254" y="484" text-anchor="middle">制作刷机卡</text>
+  <text class="t b" x="348" y="484">再选数据源：内置 / 浏览文件… / 浏览目录…</text>
+
+  <rect x="178" y="504" width="152" height="26" rx="13" fill="#FFFFFF" stroke="#E8710A" stroke-width="1.2"/>
+  <text class="t chip" x="254" y="522" text-anchor="middle">写入整盘镜像</text>
+  <text class="t b" x="348" y="522">.img / .raw / .iso 逐字节写到卡上</text>
+
+  <path class="flow" d="M 410 560 L 410 594"/>
+
+  <!-- 5. 确认 -->
+  <rect class="box act" x="150" y="596" width="520" height="96"/>
+  <text class="t h" x="170" y="626">③ 核对并确认</text>
+  <text class="t b" x="170" y="654">勾选「我已核对目标设备，确认覆盖且不可恢复」</text>
+  <text class="t b" x="170" y="678">点「开始写入」（只格式化模式为「开始格式化」）</text>
+
+  <path class="flow" d="M 410 692 L 410 726"/>
+
+  <!-- 6. 写后校验 -->
+  <rect class="box check" x="150" y="728" width="520" height="172"/>
+  <text class="t h" x="170" y="758">写后自动校验（三项全绿才算完成）</text>
+  <text class="t b" x="170" y="790">① 回读比对　　分区表 / 引导扇区 / FAT 两份副本</text>
+  <text class="t b" x="170" y="820">② 文件比对　　从卡上挂 FAT32，逐文件比对 sha256</text>
+  <text class="t b" x="170" y="850">③ 短名核对　　卡根 8.3 短名（BL1 只认短名）</text>
+  <text class="t s" x="170" y="878">只格式化模式没有文件，只做第 ① 项</text>
+
+  <!-- 分流 -->
+  <path class="flow" d="M 410 900 L 410 922 L 275 922 L 275 942"/>
+  <path class="flow" d="M 410 900 L 410 922 L 545 922 L 545 942"/>
+
+  <!-- 7. 成功 -->
+  <rect class="box ok" x="150" y="944" width="250" height="118"/>
+  <text class="t h" x="275" y="976" text-anchor="middle">校验全绿 → 完成</text>
+  <text class="t b" x="275" y="1004" text-anchor="middle">拔卡，插到 SE 设备即可使用</text>
+  <text class="t s" x="275" y="1030" text-anchor="middle">卡可长期复用，重做即覆盖</text>
+
+  <!-- 8. 失败 -->
+  <rect class="box fail" x="420" y="944" width="250" height="118"/>
+  <text class="t h" x="545" y="976" text-anchor="middle">任一不过 → 失败</text>
+  <text class="t b" x="545" y="1004" text-anchor="middle">弹窗报错，这张卡不要拿去现场</text>
+  <text class="t s" x="545" y="1030" text-anchor="middle">按提示重做，见「常见问题」</text>
+</svg>
