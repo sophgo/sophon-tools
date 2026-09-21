@@ -80,10 +80,13 @@
     { immediate: true, deep: true },
   );
 
+  // 横坐标必须带日期：查询范围可达 7 天，只有 HH:mm:ss 无法区分是哪一天
   function fmtTime(ts: number): string {
     if (!ts) return '';
     const d = new Date(ts * 1000);
     const pad = (n: number) => String(n).padStart(2, '0');
-    return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(
+      d.getMinutes(),
+    )}:${pad(d.getSeconds())}`;
   }
 </script>

@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"syscall"
 	"testing"
 	"time"
@@ -296,5 +298,51 @@ func TestIsNoSpace(t *testing.T) {
 	// 普通错误返回 false
 	if isNoSpace(errors.New("some error")) {
 		t.Error("isNoSpace(plain error) = true, want false")
+	}
+}
+
+// 存档必须逐字段全量落盘：每个采样的所有 ArchFields 都要写进 record，
+// 没有"只记录 web 勾选项"这类裁剪（MYS-1382）。
+func TestArchiveWriterRecordsEveryField(t *testing.T) {
+	dir := t.TempDir()
+	w := NewArchiveWriter()
+	w.Start(dir, 100, 16)
+
+	// 每个字段填互不相同的值，逐位校验落盘内容
+	var rec ArchRecord
+	rv := reflect.ValueOf(&rec).Elem()
+	for i := 0; i < rv.NumField(); i++ {
+		rv.Field(i).SetFloat(float64(i + 1))
+	}
+	const ts uint32 = 1758448800
+	w.Submit(ts, &rec)
+
+	curPath := filepath.Join(dir, currentFileName)
+	recSize := ArchRecordSize()
+	deadline := time.Now().Add(3 * time.Second)
+	var buf []byte
+	for {
+		if b, err := os.ReadFile(curPath); err == nil && len(b) >= headerSize+recSize {
+			buf = b
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("等待 metrics.current 落盘超时")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if got := binary.LittleEndian.Uint32(buf[headerSize : headerSize+4]); got != ts {
+		t.Errorf("timestamp = %d, want %d", got, ts)
+	}
+	if n := binary.Size(ArchRecord{}) / 4; n != len(ArchFields())-1 {
+		t.Fatalf("ArchRecord float32 字段数 = %d, ArchFields = %d", n, len(ArchFields()))
+	}
+	for i := 0; i < binary.Size(ArchRecord{})/4; i++ {
+		off := headerSize + 4 + i*4
+		got := math.Float32frombits(binary.LittleEndian.Uint32(buf[off : off+4]))
+		if want := float32(i + 1); got != want {
+			t.Errorf("字段 %s（第 %d 位）= %v, want %v", ArchFields()[i+1], i, got, want)
+		}
 	}
 }
