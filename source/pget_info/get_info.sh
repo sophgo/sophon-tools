@@ -1,6 +1,6 @@
 #!/bin/bash
 
-GET_INFO_VERSION="1.5.1"
+GET_INFO_VERSION="1.6.0"
 
 shopt -s compat31
 
@@ -50,6 +50,27 @@ function od_read_dec_big() {
 
 function write_to_file() {
     echo "$2" | tee "$1" &>/dev/null
+}
+
+# VPSS 各部件使用率（%），按 vppinfo 中的 id 升序、空格分隔（形如 `0 0 0`）。
+# 路径随平台而异，两处依次尝试：CV 系（bm1688/cv186ah）为 /proc/soph/vppinfo，
+# CV84X2（cv84x6）与 bm1684x/bm1684 为 /proc/vppinfo。
+# usage 行每部件输出 instant|long（bm1684x 为 short|long）两个值，只取冒号后第一个，
+# 即 usage(instant|long) 中 `:` 之后、`|` 之前的那个数：
+#   {"id":0, "usage(instant|long)":   12%|   34%   （CV 系，冒号后有空格）
+#   [{"id":0, "usage(short|long)":0%|0%}, "intcnt":0]（bm1684x，冒号后无空格）
+function get_vpp_usage() {
+    local f usage
+    for f in /proc/soph/vppinfo /proc/vppinfo; do
+        [ -r "${f}" ] || continue
+        usage=$(grep -a 'usage(' "${f}" 2>/dev/null \
+            | grep -aoE ':[[:space:]]*[0-9]+%' \
+            | tr -d ': %' | tr '\n' ' ' | sed 's/ *$//')
+        if [ -n "${usage}" ]; then
+            echo "${usage}"
+            return
+        fi
+    done
 }
 
 # [i2c bus] [i2c addr(HEX)]
@@ -969,19 +990,15 @@ fi
 VPU_USAGE=""
 VPP_USAGE=""
 if [[ "${WORK_MODE}" == "SOC" ]]; then
-    if [[ "${CPU_MODEL}" == "cv84x6" ]]; then
-        # VPU 与其他 CV 系一致走 /proc/soph/vpuinfo（vc_drv_proc.h，PLATFORM_SOC）；
-        # VPP 则不同（osdrv vpss_proc.c，CV84X6 宏下无 soph/ 前缀）：/proc/vppinfo。
-        # vppinfo 的 usage 行格式为 {"id":N, "usage(instant|long)":  12%|  34%，
-        # 数值前有空格，且每核输出 instant|long 两个值——只取冒号后紧跟的 instant 值。
-        VPU_USAGE=$(cat /proc/soph/vpuinfo 2>/dev/null| tr -d '\n' | grep -ao ':[0-9]*%' | tr -d ':' | tr '\n' ',' | tr -d '%' | sed 's/ $//' | sed 's/,$//')
-        VPP_USAGE=$(cat /proc/vppinfo 2>/dev/null | tr -d '\n' | grep -aoE ':[[:space:]]*[0-9]+%' | tr -d ': ' | tr '\n' ',' | tr -d '%' | sed 's/,$//')
-    elif [[ "${SOC_FAMILY}" == "cv" ]]; then
+    if [[ "${CPU_MODEL}" == "cv84x6" ]] || [[ "${SOC_FAMILY}" == "cv" ]]; then
+        # CV 系（bm1688/cv186ah/cv84x6）VPU 走 /proc/soph/vpuinfo（vc_drv_proc.h，PLATFORM_SOC）。
         VPU_USAGE=$(cat /proc/soph/vpuinfo 2>/dev/null| tr -d '\n' | grep -ao ':[0-9]*%' | tr -d ':' | tr '\n' ',' | tr -d '%' | sed 's/ $//' | sed 's/,$//')
     else
         VPU_USAGE=$(cat /proc/vpuinfo 2>/dev/null| tr -d '\n' | grep -ao ':[0-9]*%' | tr -d ':' | tr '\n' ',' | tr -d '%' | sed 's/ $//' | sed 's/,$//')
-        VPP_USAGE=$(cat /proc/vppinfo 2>/dev/null| tr -d '\n' | grep -ao ':[0-9]*%' | tr -d ':' | tr '\n' ',' | tr -d '%' | sed 's/ $//' | sed 's/,$//')
     fi
+    # VPP 路径与 VPU 不同（osdrv vpss_proc.c）：CV 系在 /proc/soph/vppinfo，
+    # CV84X2/bm1684x 在 /proc/vppinfo，见 get_vpp_usage 注释。
+    VPP_USAGE=$(get_vpp_usage)
 fi
 
 # DEVICE_MEM_USAGE
