@@ -80,11 +80,12 @@ public:
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
     static QString executeLinuxCmd(QString strCmd);
-    /* 按 DTS 寄存器基址(如 290e0000)在 /sys/class/net 中查找对应接口名。
-       用于 bm1688/cv186ah 平台,兼容 ubuntu(eth0/eth1)与 debian(end0/end1)。 */
-    static QString ethernetNameByReg(const QString &reg, const QString &fallback);
-    /* 根据设备名解析 WAN/LAN 实际网口名,由 main() 探测设备名后调用。
-       bm1688/cv186ah 平台探测 sysfs;其余平台保持默认 eth0/eth1。 */
+    /* 收集物理以太网口及其 DTS 寄存器基址(<base>.ethernet),按基址数值升序返回。
+       虚拟接口(veth/bridge/can)无硬件 device 链接,不计入。 */
+    static QList<QPair<quint64, QString>> physicalEthernetsByReg();
+    /* 解析 WAN/LAN 实际网口名,由 main() 探测设备名后调用:按寄存器基址升序取前两个
+       物理以太网口(ubuntu: eth0/eth1,debian systemd>=v252: end0/end1),
+       探测不足两个时保持默认 eth0/eth1。 */
     void resolveNetworkIfnames(const QString &deviceName);
     void _get_ip_info(QNetworkInterface interface);
     bool getDemos(void);
