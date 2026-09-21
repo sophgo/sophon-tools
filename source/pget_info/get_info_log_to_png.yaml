@@ -112,6 +112,54 @@ info:
   y_name: VPP USAGE4(%)
   max: 100
   min: 0
+- name: VPP_USAGE5
+  info_name: VPP_USAGE
+  sampling_index: [0, 5]
+  y_name: VPP USAGE5(%)
+  max: 100
+  min: 0
+- name: VPP_USAGE6
+  info_name: VPP_USAGE
+  sampling_index: [0, 6]
+  y_name: VPP USAGE6(%)
+  max: 100
+  min: 0
+- name: VPP_USAGE7
+  info_name: VPP_USAGE
+  sampling_index: [0, 7]
+  y_name: VPP USAGE7(%)
+  max: 100
+  min: 0
+- name: VPP_USAGE8
+  info_name: VPP_USAGE
+  sampling_index: [0, 8]
+  y_name: VPP USAGE8(%)
+  max: 100
+  min: 0
+- name: VPP_USAGE9
+  info_name: VPP_USAGE
+  sampling_index: [0, 9]
+  y_name: VPP USAGE9(%)
+  max: 100
+  min: 0
+- name: VPP_USAGE10
+  info_name: VPP_USAGE
+  sampling_index: [0, 10]
+  y_name: VPP USAGE10(%)
+  max: 100
+  min: 0
+- name: VPP_USAGE11
+  info_name: VPP_USAGE
+  sampling_index: [0, 11]
+  y_name: VPP USAGE11(%)
+  max: 100
+  min: 0
+- name: VPP_USAGE12
+  info_name: VPP_USAGE
+  sampling_index: [0, 12]
+  y_name: VPP USAGE12(%)
+  max: 100
+  min: 0
 - name: CPU_ALL_USAGE
   info_name: CPU_ALL_USAGE
   sampling_index: [0, 0]
