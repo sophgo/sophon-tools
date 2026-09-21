@@ -190,7 +190,6 @@ function parse_partition_xml()
 		esac
 	done
 
-
 	# RECOVERY(p2) 必须是 u-boot 认得的文件系统（ext4/FAT），不能是 f2fs：
 	# u-boot 只带 FAT/ext4 驱动，而 recovery 通道要从 p2 里读 boot.scr（见 build/boot.cmd.emmc），
 	# p2 改成 f2fs 后救援通道会静默失效。与 SDK 侧打包链同一条约束。
