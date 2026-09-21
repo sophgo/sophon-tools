@@ -49,4 +49,4 @@ a8ce4ad006bcaa3e96e91771e4d24c25  ./binTools/resize.f2fs
 30f9402ee705d691111bd8c568417871  ./script/bm1684/bm_make_package.sh
 7864745c1a0c7e0b72e2a6c68e7e78f9  ./script/bm1688/raw2cimg_edge.py
 15c767a27c5e3d92d38f8f1efbf59e1e  ./script/bm1688/bm_make_package.sh
-f6badd1335ad5432548ba99643cb381b  ./script/ota_update/ota_update.sh
+43df176eacb8f9c7e52dde9a706cd478  ./script/ota_update/ota_update.sh
