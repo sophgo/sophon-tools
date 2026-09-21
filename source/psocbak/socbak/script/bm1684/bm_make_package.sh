@@ -177,6 +177,15 @@ function parse_partition_xml()
 	PART_FORMAT=($(grep -Po "format=\".+\"" ${PARTITION_FILE} | awk -F\" '{print $2}'))
 
 	# 具体文件系统直接由 format 表达：0=raw / 1=FAT32 / 2=ext4 / 3=f2fs。
+	PART_FSTYPE=()
+	for i in $(seq 0 $[${#LABELS[@]}-1]); do
+		case "${PART_FORMAT[$i]}" in
+		0|1) PART_FSTYPE+=("none") ;;
+		2)   PART_FSTYPE+=("ext4") ;;
+		3)   PART_FSTYPE+=("f2fs") ;;
+		*)   panic "partition ${LABELS[$i]}: unsupported format \"${PART_FORMAT[$i]}\" (expect 0=raw 1=FAT32 2=ext4 3=f2fs)" ;;
+		esac
+	done
 
 	# RECOVERY(p2) 必须是 u-boot 认得的文件系统（ext4/FAT），不能是 f2fs：
 	# u-boot 只带 FAT/ext4 驱动，而 recovery 通道要从 p2 里读 boot.scr（见 build/boot.cmd.emmc），
@@ -200,16 +209,6 @@ function parse_partition_xml()
 		esac
 	done
 	local _tool
-	PART_FSTYPE=()
-	for i in $(seq 0 $[${#LABELS[@]}-1]); do
-		case "${PART_FORMAT[$i]}" in
-		0|1) PART_FSTYPE+=("none") ;;
-		2)   PART_FSTYPE+=("ext4") ;;
-		3)   PART_FSTYPE+=("f2fs") ;;
-		*)   panic "partition ${LABELS[$i]}: unsupported format \"${PART_FORMAT[$i]}\" (expect 0=raw 1=FAT32 2=ext4 3=f2fs)" ;;
-		esac
-	done
-
 	for i in $(seq 0 $[${#LABELS[@]}-1]); do
 		if [ "${PART_FSTYPE[$i]}" = "f2fs" ]; then
 			for _tool in mkfs.f2fs fsck.f2fs resize.f2fs; do
@@ -483,8 +482,9 @@ function do_gen_partition_subimg()
 	if [ $3 -eq 1 ]; then
 		mkfs.fat $RECOVERY_DIR/$1
 	elif [ $3 -eq 2 -o $3 -eq 3 ]; then
-		# f2fs 不能"先 mkfs 再挂载灌内容"（下面那段 sudo mount/tar 只对 ext4/FAT 有效）：
-		# 有预生成镜像的分区走 socbak.sh 那边的镜像，这里只处理空分区（如 ROOTFS_RW）。
+		# f2fs 分区的镜像由 socbak.sh 那边生成（与 ext4 同一条路：建镜像 → mkfs →
+		# 挂载灌内容 → 收缩），这里只处理没有预生成镜像的空分区（如 ROOTFS_RW）：
+		# 直接对整个分区 mkfs.f2fs。
 		if [ "${PART_FSTYPE[$2]}" = "f2fs" ]; then
 			mkfs.f2fs ${F2FS_MKFS_OPTS} -f $RECOVERY_DIR/$1
 		else
@@ -535,7 +535,8 @@ function gen_partition_img()
 	local part_name=$2
 	local part_format=$3
 
-	# resize_flag=1 会触发 ext4 专有的 e2fsck + resize2fs -M，f2fs 没有对应物，必须置 0
+	# resize_flag=1 会触发 ext4 专有的 e2fsck + resize2fs -M，f2fs 没有离线收缩工具，
+	# 镜像尺寸在生成时就已定死，这里必须置 0。
 	if [ "${PART_FSTYPE[$part_number]}" = "ext4" ]; then
 		local resize_flag="1"
 	else
