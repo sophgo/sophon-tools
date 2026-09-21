@@ -2,6 +2,7 @@
 #include "ui_mainwindow.h"
 #include "qtermwidget.h"
 
+#include <algorithm>
 #include <cerrno>
 #include <csignal>
 #include <unistd.h>
@@ -35,10 +36,12 @@ QString MainWindow::executeLinuxCmd(QString strCmd)
     return strResult;
 }
 
-QString MainWindow::ethernetNameByReg(const QString &reg, const QString &fallback)
+QList<QPair<quint64, QString>> MainWindow::physicalEthernetsByReg()
 {
+    QList<QPair<quint64, QString>> phys;
     QDir netDir(QStringLiteral("/sys/class/net"));
-    /* 匹配 /sys/devices/platform/290e0000.ethernet(或 .../soc/290e0000.ethernet) 中的基址 */
+    /* /sys/class/net/<if>/device 指向 /sys/devices/platform/<base>.ethernet
+       (或 .../soc/<base>.ethernet),从中取出寄存器基址 */
     QRegularExpression rx(QStringLiteral("([0-9a-f]+)\\.ethernet\\s*$"),
                           QRegularExpression::CaseInsensitiveOption);
     for (const QString &iface : netDir.entryList(QDir::AllDirs | QDir::NoDotAndDotDot)) {
@@ -48,22 +51,35 @@ QString MainWindow::ethernetNameByReg(const QString &reg, const QString &fallbac
         if (!devLink.isSymLink())
             continue;   /* 虚拟接口(如 veth/bridge/can)无硬件 device 链接 */
         const auto m = rx.match(devLink.symLinkTarget());
-        if (m.hasMatch() && m.captured(1) == reg)
-            return iface;
+        if (!m.hasMatch())
+            continue;
+        bool ok = false;
+        const quint64 base = m.captured(1).toULongLong(&ok, 16);
+        if (ok)
+            phys.append(qMakePair(base, iface));
     }
-    return fallback;
+    std::sort(phys.begin(), phys.end(),
+              [](const QPair<quint64, QString> &a, const QPair<quint64, QString> &b) {
+                  return a.first < b.first;
+              });
+    return phys;
 }
 
 void MainWindow::resolveNetworkIfnames(const QString &deviceName)
 {
     m_wanIfName = "eth0";
     m_lanIfName = "eth1";
-    /* bm1688/cv186ah 平台在 ubuntu 下网口名为 eth0/eth1,debian(systemd>=v252)下
-       被重命名为 end0/end1;按 DTS 寄存器基址(290e0000/290f0000)统一探测,其余平台
-       保持默认 eth0/eth1。 */
-    if (deviceName == "bm1688" || deviceName == "cv186ah") {
-        m_wanIfName = ethernetNameByReg("290e0000", "eth0");
-        m_lanIfName = ethernetNameByReg("290f0000", "eth1");
+    /* 网口名不能按芯片名 + 写死寄存器基址来定:各 SoC 的以太网控制器地址不同
+       (bm1688/cv186ah 是 290e0000/290f0000,CV84X2/cv84x6 是 290d0000/290e0000),
+       且 CV84X2 的 /proc/cpuinfo model name 报的是 bm1688,靠芯片名区分不出来
+       —— 曾因此在 CV84X2 上把 WAN 判成 eth1、LAN 也回退成 eth1。
+       改为按 DTS 寄存器基址升序取前两个物理以太网口:第 1 个 WAN、第 2 个 LAN,
+       与 DTS aliases 的 ethernet0/ethernet1 顺序一致(ubuntu: eth0/eth1,
+       debian systemd>=v252: end0/end1)。探测不足两个时保持默认 eth0/eth1。 */
+    const auto phys = physicalEthernetsByReg();
+    if (phys.size() >= 2) {
+        m_wanIfName = phys.at(0).second;
+        m_lanIfName = phys.at(1).second;
     }
     qDebug() << "resolveNetworkIfnames" << deviceName
              << "wan:" << m_wanIfName << "lan:" << m_lanIfName;
