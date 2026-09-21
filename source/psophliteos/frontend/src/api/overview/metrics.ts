@@ -43,13 +43,18 @@ export function historyApi(params: HistoryParams) {
 // 导出 CSV：export 在 Auth 保护组，只认 Authorization 头。
 // 用 defHttp 取 text（带鉴权），再构造 Blob 触发浏览器下载。
 // 不能用 window.open（无法带 Authorization 头）。
-export async function exportCsv(from: number, to: number) {
+// fields 传 web 端勾选的指标 → 导出只含这些列；不传则导出全部字段。
+export async function exportCsv(from: number, to: number, fields?: string[]) {
+  const params: Record<string, string> = {
+    from: String(from),
+    to: String(to),
+    format: 'csv',
+  };
+  if (fields && fields.length) {
+    params.fields = fields.join(',');
+  }
   const text = await defHttp.get<string>(
-    {
-      url: Api.Export,
-      params: { from: String(from), to: String(to), format: 'csv' },
-      responseType: 'text',
-    },
+    { url: Api.Export, params, responseType: 'text' },
     { isTransformResponse: false }
   );
   const blob = new Blob([text], { type: 'text/csv;charset=utf-8' });

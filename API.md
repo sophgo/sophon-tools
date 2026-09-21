@@ -58,7 +58,7 @@ bmssm(:9779)为后端,sophliteos(:8080)反代 `/api/v1/*` 到 bmssm 并补充少
 |---|---|---|
 | GET | `/metrics/fields` | 字段目录 |
 | GET | `/metrics/history?from=&to=&fields=` | 历史查询(unix 秒,fields 逗号分隔,首列 timestamp) |
-| GET | `/metrics/export?from=&to=&format=csv` | CSV 导出(只认 Authorization 头) |
+| GET | `/metrics/export?from=&to=&fields=&format=csv` | CSV 导出(只认 Authorization 头;`fields` 逗号分隔,与 `history` 同口径,不传则导出全部字段) |
 
 **服务管理 / 端口状态**
 

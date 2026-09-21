@@ -66,13 +66,7 @@ func (ctrl *Controller) GetHistory(c *gin.Context) {
 		logger.Warn("metrics/history: scan: %v", scanErr)
 	}
 
-	var requested map[string]bool
-	if fieldsStr != "" {
-		requested = make(map[string]bool)
-		for _, f := range strings.Split(fieldsStr, ",") {
-			requested[strings.TrimSpace(f)] = true
-		}
-	}
+	requested := fieldSet(splitFields(fieldsStr))
 
 	var allFields []string
 	var points [][]float64
@@ -111,7 +105,8 @@ func (ctrl *Controller) GetHistory(c *gin.Context) {
 	}))
 }
 
-// GetExport GET /api/v1/metrics/export?from=&to=&format=csv
+// GetExport GET /api/v1/metrics/export?from=&to=&fields=&format=csv
+// fields 为 web 端勾选的指标（逗号分隔）；不传则导出全部字段。
 func (ctrl *Controller) GetExport(c *gin.Context) {
 	fromStr := c.Query("from")
 	toStr := c.Query("to")
@@ -127,33 +122,81 @@ func (ctrl *Controller) GetExport(c *gin.Context) {
 		return
 	}
 
-	dir := archDir()
-	segments, _ := scanSegments(dir, from, to)
-
 	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=metrics-%d-%d.csv", from, to))
 	c.Header("Content-Type", "text/csv; charset=utf-8")
 
-	first := true
+	writeExportCSV(c.Writer, archDir(), from, to, splitFields(c.Query("fields")))
+}
+
+// splitFields 解析逗号分隔的字段名，忽略空白项。
+func splitFields(s string) []string {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	var out []string
+	for _, f := range strings.Split(s, ",") {
+		if f = strings.TrimSpace(f); f != "" {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// writeExportCSV 把 dir 下 from..to 范围内的存档写成 CSV。
+// 列固定为 exportColumns(selected) 的顺序；分段缺该字段（旧 schema 写入的
+// 分段）时该格留空，保证同一份 CSV 里每行列数一致、不错位。
+func writeExportCSV(w io.Writer, dir string, from, to int64, selected []string) {
+	cols := exportColumns(selected)
+	segments, _ := scanSegments(dir, from, to)
+
+	io.WriteString(w, strings.Join(cols, ",")+"\n")
+
+	requested := fieldSet(selected)
 	for _, seg := range segments {
-		segFields, segPoints, err := readSeg(seg, from, to, nil)
+		segFields, segPoints, err := readSeg(seg, from, to, requested)
 		if err != nil {
 			continue
 		}
-		if first {
-			io.WriteString(c.Writer, strings.Join(segFields, ",")+"\n")
-			first = false
+		pos := make(map[string]int, len(segFields))
+		for i, f := range segFields {
+			pos[f] = i
 		}
+		parts := make([]string, len(cols))
 		for _, pt := range segPoints {
-			parts := make([]string, len(pt))
-			for i, v := range pt {
-				parts[i] = strconv.FormatFloat(v, 'f', 2, 64)
+			for i, c := range cols {
+				parts[i] = ""
+				if j, ok := pos[c]; ok && j < len(pt) {
+					parts[i] = strconv.FormatFloat(pt[j], 'f', 2, 64)
+				}
 			}
-			io.WriteString(c.Writer, strings.Join(parts, ",")+"\n")
+			io.WriteString(w, strings.Join(parts, ",")+"\n")
 		}
 	}
-	if first {
-		io.WriteString(c.Writer, "\n")
+}
+
+// exportColumns 返回导出列顺序：timestamp 在首位，其余按当前 schema 顺序，
+// 只保留 selected 中的字段（selected 为空 → 全部）。列顺序与请求顺序无关。
+func exportColumns(selected []string) []string {
+	keep := fieldSet(selected)
+	cols := make([]string, 0, len(arch.ArchFields()))
+	for _, f := range arch.ArchFields() {
+		if f == "timestamp" || keep == nil || keep[f] {
+			cols = append(cols, f)
+		}
 	}
+	return cols
+}
+
+// fieldSet 把字段名列表转成集合；空列表返回 nil（表示"不过滤"）。
+func fieldSet(fields []string) map[string]bool {
+	if len(fields) == 0 {
+		return nil
+	}
+	set := make(map[string]bool, len(fields))
+	for _, f := range fields {
+		set[f] = true
+	}
+	return set
 }
 
 // --- 内部函数 ---

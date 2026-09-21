@@ -143,7 +143,8 @@
     if (!fromTs.value || !toTs.value) return;
     exporting.value = true;
     try {
-      await exportCsv(fromTs.value, toTs.value);
+      // 只导出 web 端勾选的指标列，与图表展示保持一致
+      await exportCsv(fromTs.value, toTs.value, selectedFields.value);
       message.success('导出已开始');
     } catch {
       message.error('导出失败');
