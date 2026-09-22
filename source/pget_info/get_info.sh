@@ -52,23 +52,24 @@ function write_to_file() {
     echo "$2" | tee "$1" &>/dev/null
 }
 
-# VPSS 各部件使用率（%），按 vppinfo 中的 id 升序、逗号分隔（形如 `0,0,0`），
-# 与同段的 VPU_USAGE 一致。
+# VPSS 各部件实时使用率（%）：先给各部件均值，空格断开，再按 vppinfo 中的 id 升序
+# 给出各部件值、逗号分隔（形如 `4.20 0,12,0,0`），与 CPU_ALL_USAGE/CPUS_USAGE 同构。
 # 路径随平台而异，两处依次尝试：CV 系（bm1688/cv186ah）为 /proc/soph/vppinfo，
 # CV84X2（cv84x6）与 bm1684x/bm1684 为 /proc/vppinfo。
 # usage 行每部件输出 instant|long（bm1684x 为 short|long）两个值，只取冒号后第一个，
-# 即 usage(instant|long) 中 `:` 之后、`|` 之前的那个数：
+# 即 usage(instant|long) 中 `:` 之后、`|` 之前的那个数（实时值，long 值忽略）：
 #   {"id":0, "usage(instant|long)":   12%|   34%   （CV 系，冒号后有空格）
 #   [{"id":0, "usage(short|long)":0%|0%}, "intcnt":0]（bm1684x，冒号后无空格）
 function get_vpp_usage() {
-    local f usage
+    local f usage avg
     for f in /proc/soph/vppinfo /proc/vppinfo; do
         [ -r "${f}" ] || continue
         usage=$(grep -a 'usage(' "${f}" 2>/dev/null \
             | grep -aoE ':[[:space:]]*[0-9]+%' \
             | tr -d ': %' | tr '\n' ',' | sed 's/,$//')
         if [ -n "${usage}" ]; then
-            echo "${usage}"
+            avg=$(echo "${usage}" | tr ',' '\n' | awk '{s += $1; n++} END {if (n > 0) printf "%.2f", s / n}')
+            echo "${avg} ${usage}"
             return
         fi
     done
