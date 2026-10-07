@@ -64,16 +64,9 @@ func enumerateDisks() ([]*DiskInfo, error) {
 		if sysDisk[i] {
 			d.System = true
 		}
-		// 兜底: 分区起始偏移命中系统卷分区 → 也算系统盘
-		if !d.System && len(sysParts) > 0 {
-			for _, sp := range sysParts {
-				for _, p := range d.Partitions {
-					if p.Offset == sp.StartingOffset {
-						d.System = true
-					}
-				}
-			}
-		}
+		// 兜底: 分区起始偏移命中**本盘上**的系统卷分区 → 也算系统盘
+		// (盘号必须一起比, 否则每块盘 1 MiB 处的分区 1 会被误判, 见 markSystemDiskByOffset)
+		markSystemDiskByOffset(d, sysParts)
 		Classify(d)
 		windows.CloseHandle(h)
 		out = append(out, d)
@@ -524,10 +517,10 @@ func volumeDiskNumber(h windows.Handle) (uint32, error) {
 	return exts[0].DiskNumber, nil
 }
 
-// systemDiskNumbers 返回系统盘号 + 系统卷所在分区偏移 (双保险判定)
-func systemDiskNumbers() (map[int]bool, []diskExtent) {
+// systemDiskNumbers 返回系统盘号 + 系统卷所占的 (盘号, 起始偏移) 段 (双保险判定)
+func systemDiskNumbers() (map[int]bool, []VolumeExtent) {
 	nums := map[int]bool{}
-	var parts []diskExtent
+	var parts []VolumeExtent
 	dir, err := windows.GetWindowsDirectory()
 	if err != nil || len(dir) < 2 {
 		dir, err = windows.GetSystemDirectory()
@@ -549,7 +542,7 @@ func systemDiskNumbers() (map[int]bool, []diskExtent) {
 	}
 	for _, e := range exts {
 		nums[int(e.DiskNumber)] = true
-		parts = append(parts, e)
+		parts = append(parts, VolumeExtent{DiskNumber: e.DiskNumber, StartingOffset: e.StartingOffset})
 	}
 	return nums, parts
 }

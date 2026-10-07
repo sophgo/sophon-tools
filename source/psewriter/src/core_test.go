@@ -83,6 +83,59 @@ func TestSelectableDisksHidesSystemAndFixed(t *testing.T) {
 	}
 }
 
+// 系统盘"兜底"判定必须**同时比对盘号**: 分区起始偏移在各盘之间会重复 —— MBR 惯例
+// 从 LBA 2048 (1 MiB) 起分区, 本工具自己写出来的卡分区 1 也在 1 MiB。只比偏移,
+// 一张正常 TF 卡会被判成系统盘, 而 SafetyDangerous 没有出口 (SelectableDisks 无条件
+// 剔除、"显示全部"救不回、CLI 的 --force 只对 SafetyUnknown 生效) → 卡彻底消失。
+//
+// 回归: 曾经只要偏移相等就置 System=true, 与盘号无关。
+func TestSystemDiskFallbackRequiresSameDisk(t *testing.T) {
+	const sysVolOffset = int64(1) << 20 // 1 MiB: 系统卷分区与标准分区的常见落点
+	sysParts := []VolumeExtent{{DiskNumber: 0, StartingOffset: sysVolOffset}}
+
+	// 另一块盘 (USB 读卡器上的 TF 卡) 的分区 1 恰好在同一偏移
+	card := &DiskInfo{
+		Index:      1,
+		Path:       `\\.\PhysicalDrive1`,
+		BusType:    "USB",
+		Partitions: []Partition{{Index: 1, Offset: sysVolOffset, Size: 30 << 30, FSType: "FAT32"}},
+	}
+	markSystemDiskByOffset(card, sysParts)
+	Classify(card)
+	if card.System || card.Safety != SafetySafe {
+		t.Fatalf("异盘同偏移不应判为系统盘: System=%v Safety=%v", card.System, card.Safety)
+	}
+	if got := SelectableDisks([]*DiskInfo{card}, false); len(got) != 1 {
+		t.Fatalf("正常 TF 卡必须留在默认列表里, 实得 %d 项", len(got))
+	}
+
+	// 同一块盘上的系统卷分区 → 仍要认出来 (兜底本身不能失效)
+	sameDisk := &DiskInfo{
+		Index:      0,
+		Path:       `\\.\PhysicalDrive0`,
+		BusType:    "SATA",
+		Partitions: []Partition{{Index: 2, Offset: sysVolOffset, Size: 200 << 30, FSType: "NTFS"}},
+	}
+	markSystemDiskByOffset(sameDisk, sysParts)
+	Classify(sameDisk)
+	if !sameDisk.System || sameDisk.Safety != SafetyDangerous {
+		t.Fatalf("同盘同偏移的系统卷必须判为系统盘: System=%v Safety=%v", sameDisk.System, sameDisk.Safety)
+	}
+
+	// 盘号相同但偏移不同 → 不是系统盘 (不能放宽成"同盘即系统盘")
+	other := &DiskInfo{
+		Index:      0,
+		Path:       `\\.\PhysicalDrive0`,
+		BusType:    "SATA",
+		Partitions: []Partition{{Index: 1, Offset: 64 << 20, Size: 10 << 30, FSType: "NTFS"}},
+	}
+	markSystemDiskByOffset(other, sysParts)
+	Classify(other)
+	if other.System {
+		t.Fatal("同盘但偏移不匹配时不应判为系统盘")
+	}
+}
+
 func TestPadSector(t *testing.T) {
 	if got := padSector(make([]byte, 4096)); len(got) != 4096 {
 		t.Errorf("对齐数据不应扩容, 得 %d", len(got))
