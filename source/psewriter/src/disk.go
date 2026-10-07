@@ -151,6 +151,35 @@ func isRemovableBus(bus string) bool {
 	return false
 }
 
+// VolumeExtent 系统卷在物理盘上占用的一段 (Windows 侧由 IOCTL 填充)
+type VolumeExtent struct {
+	DiskNumber     uint32
+	StartingOffset int64
+}
+
+// markSystemDiskByOffset 兜底判定: 目标盘上若有分区的起始偏移与**同一块盘上**的
+// 系统卷分区重合, 也算系统盘。
+//
+// 盘号必须一起比: 分区起始偏移在**各盘之间是会重复的** —— MBR 惯例从 LBA 2048
+// 起分区, 每块盘的分区 1 都落在偏移 1 MiB (本工具自己写出来的卡就是这个偏移)。
+// 只比偏移, 任何"用本工具做过或被标准工具分过"的可移动盘都会被误判成系统盘; 而
+// SafetyDangerous 是**没有出口**的 (SelectableDisks 无条件剔除、"显示全部"救不回、
+// CLI 的 --force 只对 SafetyUnknown 生效), 卡会直接从设备列表里消失, 用户会以为
+// 工具坏了。跨盘比偏移在定义上也不成立 —— 系统卷只在它自己那块盘上。
+func markSystemDiskByOffset(d *DiskInfo, sysParts []VolumeExtent) {
+	for _, sp := range sysParts {
+		if int(sp.DiskNumber) != d.Index {
+			continue
+		}
+		for _, p := range d.Partitions {
+			if p.Offset == sp.StartingOffset {
+				d.System = true // Reason 由随后的 Classify 统一填
+				return
+			}
+		}
+	}
+}
+
 func truncate(s string, n int) string {
 	r := []rune(strings.TrimSpace(s))
 	if len(r) <= n {

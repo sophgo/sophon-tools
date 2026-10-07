@@ -1,4 +1,10 @@
+//go:build !windows
+
 // 目录数据源 单测 (MYS-1062 十八轮④, Linux 可跑)
+//
+// 加 !windows 约束: TestProbeDirSymlinkAndSkip 要用 syscall.Mkfifo 造命名管道,
+// 该 API 在 Windows 上不存在 —— 没有约束时整个测试包在 GOOS=windows 下**编译不过**
+// (go test / go vet 直接红), 尽管 build.sh 只 go build 而暂时掩盖了它。
 package main
 
 import (
@@ -6,7 +12,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"syscall"
 	"testing"
@@ -118,9 +123,6 @@ func TestProbeDirRootLevelUntouched(t *testing.T) {
 
 // 软链按目标文件处理; FAT32 放不下的 (断链/命名管道) 跳过并计数
 func TestProbeDirSymlinkAndSkip(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("软链/命名管道语义在 Windows 上不同")
-	}
 	dir := writeTree(t, map[string][]byte{
 		"real/big.bmodel": bytes.Repeat([]byte{1}, 1234),
 		"boot.scr":        []byte("b"),

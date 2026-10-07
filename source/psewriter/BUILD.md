@@ -73,3 +73,10 @@ IMAGE=/path/pkg.zip bash release.sh   # 额外产出自带内置镜像的 sewrit
   每档都卡住「FAT 表必须能寻址卷里每一个数据簇」这个不变量。
 - **2.1.1 启动失败**：部分机器一开就弹 `启动失败 / LVM_SETCOLUMNWIDTH failed`（末列自适应所致）。
 - **2.1.2 / 2.1.3 内置字体与默认模式**：内置中文字体；「只格式化 TF 卡」调到第一顺位并设为默认。
+- **2.1.4 系统盘「兜底」误伤可移动盘**：判定系统盘时，兜底那条规则只比对了分区**起始偏移**、
+  没比盘号，而偏移在各盘之间会重复 —— MBR 惯例从 LBA 2048（1 MiB）起分区，本工具自己写出来的
+  卡分区 1 也落在 1 MiB。于是插一张正常 TF 卡会被判成「系统盘(禁止)」，卡**直接从设备列表消失**：
+  `SafetyDangerous` 没有出口（`SelectableDisks` 无条件剔除、勾「全部」救不回、CLI 的 `--force`
+  只对 `SafetyUnknown` 生效），用户侧只表现为「工具坏了」。修复见 `disk.go` 的
+  `markSystemDiskByOffset`（盘号 + 偏移一起比），回归测试 `TestSystemDiskFallbackRequiresSameDisk`
+  同时钉住「异盘同偏移不算系统盘」与「同盘同偏移仍必须认出来」两个方向。
