@@ -49,13 +49,25 @@ for bm1688, please use "memory_edit.sh -c -npu 2048 -vpu 0 -vpp 2048"
 3. 将新生成的itb文件cp到/boot目录下替换同名文件，然后执行sync并重启
 4. 修改完成
 
+> `-c` 会把 `/boot` 下当前的 itb 备份为同目录的 `.memeditBak`。该备份与源文件在同一分区，
+> 而 `/boot` 通常很小（CV84X2 EVB 仅 42MB，boot.itb 约 24.8MB），剩余空间可能放不下第二份。
+> 脚本会先查剩余空间：**不足时打印警告并跳过备份，不影响内存修改本身**（备份只是兜底，
+> 且下面第 3 步建议自行另存一份到 `/data` 等大分区）。
+
 ### CV84X2（CV84X6）说明
 
 CV84X2 与 bm1688 同用 `/boot/boot.itb`，脚本按 multi.its 中的 dts 节点名自动识别
 cv84x6（板名含 cv84x6 前缀）。与 bm1688 的差异：
 
-- CV84X2 的 boot1 分区（/dev/mmcblk0boot1 offset160）**不存放板名**，multi.its 仅含
-  一个 fdt 节点时自动回退采用该节点（v2.12.1 起）；
+- CV84X2 的 boot1 分区（/dev/mmcblk0boot1 offset160）**不存放板名**，按板名查找失效，
+  脚本按以下顺序逐级回退确定当前使用的 dts（v2.12.2 起；每一级都要求能把配置名解析成
+  multi.its 里的 fdt 节点，解析不出就继续下一级）：
+    1. `/boot/u-boot.env` 的 `DTS_TYPE` —— u-boot 开机 `bootm` 实际使用的配置名
+       （出厂未烧 OEM 时由 u-boot 用编译期默认值填充）；
+    2. `multi.its` 的 `default` 配置；
+    3. `multi.its` 仅含一个 fdt 配置节点时直接采用该节点（v2.12.1 的行为）。
+  例如 CV84X2 EVB 的 multi.its 含 8 个 fdt 配置节点，boot1 为空，此时由第 1 级
+  `DTS_TYPE=config-cv84x6_wevb_emmc` 解析出 `cv84x6_wevb_emmc.dtb`；
 - vpu 不可配置，仅 npu/vpp（用法同 bm1688：`-c -npu 2048 -vpu 0 -vpp 2048`）；
 - 32GB 单条内存基址 0x10_00000000，ion 区域 ddr 索引固定 0x10；
 - vpp 顶部 2MB 为 FREERTOS 预留，vpp 校验上限 8GB。

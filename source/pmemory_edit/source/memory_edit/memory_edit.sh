@@ -313,7 +313,7 @@ ddr1_size=0
 ddr2_size=0
 ddr3_size=0
 ddr4_size=0
-echo "INFO: version: 2.12.1"
+echo "INFO: version: 2.12.2"
 if ( [ $# -eq 1 ] || [ $# -eq 2 ] ) && [ "$1" == "-p" ]; then
 	# 仅打印信息
 	print_info=1
@@ -384,9 +384,29 @@ else
 			get_dts_node_info ${memory_edit_PWD}/multi.its "${dts_file_name} " "fdt =" >> $log_file_path; fdt_node_name=$(echo "$get_dts_node_info_data" | awk -F'"' '{print $2}')
 		fi
 		if [[ "$fdt_node_name" == "" ]]; then
-			# CV84X2 的 boot1 分区 offset160 处不存放板名（bm1688 存放），按板名查找失效；
-			# 回退：multi.its 仅含一个 fdt 配置节点时直接采用该节点
-			if [[ "$(grep -c "fdt = " ${memory_edit_PWD}/multi.its)" == "1" ]]; then
+			# CV84X2 的 boot1 分区 offset160 处不存放板名（bm1688 存放），按板名查找失效。
+			# 逐级回退：每个候选都是 multi.its 里的配置名，解析成 fdt 节点名；
+			# 该级解析不出（含名字过时/写错）就继续下一级，而不是就此失败。
+			#   1) /boot/u-boot.env 的 DTS_TYPE —— u-boot 开机实际用于 bootm 的配置名，
+			#      出厂未烧 OEM 时由 u-boot 用编译期默认值填充（对齐 get_info.sh 做法）；
+			#   2) multi.its 的 default 配置 —— its 自身声明的默认配置；
+			#   3) multi.its 仅含一个 fdt 配置节点时直接采用该节点。
+			config_candidates=()
+			if [[ -r /boot/u-boot.env ]]; then
+				# -a：u-boot.env 前 4 字节是 CRC，含非文本字节，不加 -a 时 grep 可能按二进制处理而漏匹配
+				env_dts_type=$(tr '\0' '\n' < /boot/u-boot.env 2>/dev/null | grep -a -m1 '^DTS_TYPE=' | cut -d'=' -f2-)
+				[[ "$env_dts_type" != "" ]] && config_candidates+=("$env_dts_type")
+			fi
+			its_default=$(grep -m1 '^[[:space:]]*default[[:space:]]*=' ${memory_edit_PWD}/multi.its | awk -F'"' '{print $2}')
+			[[ "$its_default" != "" ]] && config_candidates+=("$its_default")
+			for config_name in "${config_candidates[@]}"; do
+				get_dts_node_info ${memory_edit_PWD}/multi.its "${config_name} " "fdt =" >> $log_file_path; fdt_node_name=$(echo "$get_dts_node_info_data" | awk -F'"' '{print $2}')
+				if [[ "$fdt_node_name" != "" ]]; then
+					echo "Info: no board name in boot1, use dts config $config_name -> $fdt_node_name" | tee -a $log_file_path
+					break
+				fi
+			done
+			if [[ "$fdt_node_name" == "" ]] && [[ "$(grep -c "fdt = " ${memory_edit_PWD}/multi.its)" == "1" ]]; then
 				fdt_node_name=$(grep "fdt = " ${memory_edit_PWD}/multi.its | awk -F'"' '{print $2}')
 				echo "Info: no board name in boot1, use the only fdt node: $fdt_node_name" | tee -a $log_file_path
 			fi
@@ -909,6 +929,34 @@ en_emmcfile >> $log_file_path 2>&1
 if [ "$?" != "0" ]; then echo "Error: en_emmcfile" | tee -a $log_file_path; exit -1; fi
 echo -e "Info: en_emmcfile ok\nPlease reboot the device after running this command for the changes to take effect:\nsudo cp ${memory_edit_PWD}/$runtime_info_boot_file /boot/$runtime_info_boot_file && sync" | tee -a $log_file_path
 cp ${memory_edit_PWD}/output/$runtime_info_boot_file ${memory_edit_PWD}/
-sudo cp /boot/$runtime_info_boot_file /boot/$runtime_info_boot_file.memeditBak 2> /dev/null
+# 备份 /boot/$runtime_info_boot_file 到同分区 .memeditBak。
+# /boot 分区很小（CV84X2 EVB 仅 42MB，而 boot.itb 24.8MB），空间不足时 cp 会静默
+# 截断备份、甚至把 /boot 撑满（曾实测把 /boot 撑到 100%）。故先查剩余空间，
+# 不足则跳过备份并告警，不阻塞内存修改（备份只是兜底，不影响已生成的 itb）。
+backup_src="/boot/$runtime_info_boot_file"
+backup_dst="${backup_src}.memeditBak"
+if [[ -e "$backup_src" ]]; then
+	backup_src_size=$(stat -c %s "$backup_src" 2> /dev/null)
+	backup_dst_size=$(stat -c %s "$backup_dst" 2> /dev/null)
+	backup_avail_kb=$(df -P -k /boot 2> /dev/null | awk 'NR==2 {print $4}')
+	if [[ "$backup_src_size" =~ ^[0-9]+$ ]] && [[ "$backup_avail_kb" =~ ^[0-9]+$ ]]; then
+		# cp 会先截断同名目标再写入，旧备份占的空间随之释放，
+		# 故所需空间 = 源大小 - 已存在的同名备份大小（无旧备份时即源大小）
+		backup_need=$(( backup_src_size - ${backup_dst_size:-0} ))
+		[[ $backup_need -lt 0 ]] && backup_need=0
+		backup_avail=$(( backup_avail_kb * 1024 ))
+		if [[ $backup_avail -ge $backup_need ]]; then
+			if sudo cp "$backup_src" "$backup_dst" 2>> $log_file_path; then
+				echo "Info: backup $runtime_info_boot_file to $backup_dst ok" | tee -a $log_file_path
+			else
+				echo "Warning: backup $runtime_info_boot_file failed (see $log_file_path), continue" | tee -a $log_file_path
+			fi
+		else
+			echo "Warning: not enough space on /boot to backup $runtime_info_boot_file (need $backup_need bytes, available $backup_avail bytes), skip backup" | tee -a $log_file_path
+		fi
+	else
+		echo "Warning: cannot get /boot free space or $runtime_info_boot_file size, skip backup" | tee -a $log_file_path
+	fi
+fi
 sync
 
