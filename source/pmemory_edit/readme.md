@@ -66,7 +66,7 @@ cv84x6（板名含 cv84x6 前缀）。与 bm1688 的差异：
        （出厂未烧 OEM 时由 u-boot 用编译期默认值填充）；
     2. `multi.its` 的 `default` 配置；
     3. `multi.its` 仅含一个 fdt 配置节点时直接采用该节点（v2.12.1 的行为）。
-  例如 CV84X2 EVB 的 multi.its 含 9 个 fdt 配置节点，boot1 为空，此时由第 1 级
+  例如 CV84X2 EVB 的 multi.its 含 8 个 fdt 配置节点，boot1 为空，此时由第 1 级
   `DTS_TYPE=config-cv84x6_wevb_emmc` 解析出 `cv84x6_wevb_emmc.dtb`；
 - vpu 不可配置，仅 npu/vpp（用法同 bm1688：`-c -npu 2048 -vpu 0 -vpp 2048`）；
 - 32GB 单条内存基址 0x10_00000000，ion 区域 ddr 索引固定 0x10；

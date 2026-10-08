@@ -2,7 +2,7 @@
 # memory_edit -p 的 dts 自动检测回退回归测试（CV84X6）
 #
 # 背景：CV84X2/CV84X6 的 boot1 分区 offset160 不存放板名（bm1688 存放），按板名查找
-# 恒失败；EVB 的 multi.its 含多个 fdt 配置节点（本机 9 个），v2.12.1 的「仅一个 fdt
+# 恒失败；EVB 的 multi.its 含多个 fdt 配置节点（本机 8 个），v2.12.1 的「仅一个 fdt
 # 节点才回退」分支不命中，-p 直接报 `Error: cannot find used dts file on bm1688`。
 # 修复后改为逐级回退（u-boot.env 的 DTS_TYPE → multi.its 的 default → 单 fdt 节点），
 # 每级都要求把配置名解析成真实的 fdt 节点，解析不出继续降级。
