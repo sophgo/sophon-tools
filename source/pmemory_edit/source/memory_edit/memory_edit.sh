@@ -929,6 +929,34 @@ en_emmcfile >> $log_file_path 2>&1
 if [ "$?" != "0" ]; then echo "Error: en_emmcfile" | tee -a $log_file_path; exit -1; fi
 echo -e "Info: en_emmcfile ok\nPlease reboot the device after running this command for the changes to take effect:\nsudo cp ${memory_edit_PWD}/$runtime_info_boot_file /boot/$runtime_info_boot_file && sync" | tee -a $log_file_path
 cp ${memory_edit_PWD}/output/$runtime_info_boot_file ${memory_edit_PWD}/
-sudo cp /boot/$runtime_info_boot_file /boot/$runtime_info_boot_file.memeditBak 2> /dev/null
+# 备份 /boot/$runtime_info_boot_file 到同分区 .memeditBak。
+# /boot 分区很小（CV84X2 EVB 仅 42MB，而 boot.itb 24.8MB），空间不足时 cp 会静默
+# 截断备份、甚至把 /boot 撑满（曾实测把 /boot 撑到 100%）。故先查剩余空间，
+# 不足则跳过备份并告警，不阻塞内存修改（备份只是兜底，不影响已生成的 itb）。
+backup_src="/boot/$runtime_info_boot_file"
+backup_dst="${backup_src}.memeditBak"
+if [[ -e "$backup_src" ]]; then
+	backup_src_size=$(stat -c %s "$backup_src" 2> /dev/null)
+	backup_dst_size=$(stat -c %s "$backup_dst" 2> /dev/null)
+	backup_avail_kb=$(df -P -k /boot 2> /dev/null | awk 'NR==2 {print $4}')
+	if [[ "$backup_src_size" =~ ^[0-9]+$ ]] && [[ "$backup_avail_kb" =~ ^[0-9]+$ ]]; then
+		# cp 会先截断同名目标再写入，旧备份占的空间随之释放，
+		# 故所需空间 = 源大小 - 已存在的同名备份大小（无旧备份时即源大小）
+		backup_need=$(( backup_src_size - ${backup_dst_size:-0} ))
+		[[ $backup_need -lt 0 ]] && backup_need=0
+		backup_avail=$(( backup_avail_kb * 1024 ))
+		if [[ $backup_avail -ge $backup_need ]]; then
+			if sudo cp "$backup_src" "$backup_dst" 2>> $log_file_path; then
+				echo "Info: backup $runtime_info_boot_file to $backup_dst ok" | tee -a $log_file_path
+			else
+				echo "Warning: backup $runtime_info_boot_file failed (see $log_file_path), continue" | tee -a $log_file_path
+			fi
+		else
+			echo "Warning: not enough space on /boot to backup $runtime_info_boot_file (need $backup_need bytes, available $backup_avail bytes), skip backup" | tee -a $log_file_path
+		fi
+	else
+		echo "Warning: cannot get /boot free space or $runtime_info_boot_file size, skip backup" | tee -a $log_file_path
+	fi
+fi
 sync
 

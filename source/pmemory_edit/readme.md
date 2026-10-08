@@ -49,6 +49,11 @@ for bm1688, please use "memory_edit.sh -c -npu 2048 -vpu 0 -vpp 2048"
 3. 将新生成的itb文件cp到/boot目录下替换同名文件，然后执行sync并重启
 4. 修改完成
 
+> `-c` 会把 `/boot` 下当前的 itb 备份为同目录的 `.memeditBak`。该备份与源文件在同一分区，
+> 而 `/boot` 通常很小（CV84X2 EVB 仅 42MB，boot.itb 约 24.8MB），剩余空间可能放不下第二份。
+> 脚本会先查剩余空间：**不足时打印警告并跳过备份，不影响内存修改本身**（备份只是兜底，
+> 且下面第 3 步建议自行另存一份到 `/data` 等大分区）。
+
 ### CV84X2（CV84X6）说明
 
 CV84X2 与 bm1688 同用 `/boot/boot.itb`，脚本按 multi.its 中的 dts 节点名自动识别
