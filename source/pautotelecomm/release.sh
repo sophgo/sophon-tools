@@ -3,7 +3,7 @@
 # 用法: bash release.sh [ARCH] [VERSION]
 #   ARCH:    仅 arm64（默认，设备 SE5/7/9）。rootfs 内 quectel-CM/dhclient 为
 #            aarch64 预编译二进制，本子项目不支持 amd64，传入其他值将报错退出。
-#   VERSION: 显式版本号（默认 1.2.8）
+#   VERSION: 显式版本号（默认 1.2.9）
 #   env OUTPUT_DIR: 产物目录（默认 <repo>/output/pautotelecomm/）
 set -euo pipefail
 
@@ -11,7 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 cd "$SCRIPT_DIR" || exit 1   # 打包源/产物路径全部以本脚本目录为基准，消除对调用方 cwd 的依赖
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ARCH="${1:-arm64}"
-VERSION="${2:-1.2.8}"
+VERSION="${2:-1.2.9}"
 OUTPUT_DIR="${OUTPUT_DIR:-$REPO_ROOT/output/pautotelecomm}"
 
 # 本子项目仅支持 arm64（rootfs 内为 aarch64 预编译二进制），明确拒绝其他架构
@@ -22,7 +22,7 @@ esac
 
 # 版本号校验：必须为纯数字版本，防止含 / 或空值污染文件名
 if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
-    echo "ERROR: VERSION 非法（应为数字版本号，如 1.2.8），得到: '$VERSION'" >&2
+    echo "ERROR: VERSION 非法（应为数字版本号，如 1.2.9），得到: '$VERSION'" >&2
     exit 1
 fi
 
@@ -56,6 +56,8 @@ tar -xavf "\$TMP_DIR/packages.tgz" -C "\$TMP_DIR" || exit
 systemctl daemon-reload
 systemctl stop autotelecomm
 systemctl stop ec20
+systemctl stop ec20-selfcheck.timer
+systemctl stop ec20-selfcheck.service
 
 echo "[install rootfs] start ..."
 pushd "\${TMP_DIR}/rootfs" || exit
@@ -76,6 +78,9 @@ if [[ "\$(python3 -m pip list | grep pyserial | wc -l)" == "0" ]]; then
 fi
 
 systemctl daemon-reload
+# 旧版本（含客户现场手工 enable 的）自愈服务改为由 timer 触发，清掉遗留的 enable 软链
+rm -f /etc/systemd/system/multi-user.target.wants/ec20-selfcheck.service
+systemctl enable ec20-selfcheck.timer
 systemctl stop lteModemManager
 systemctl disable lteModemManager
 sync

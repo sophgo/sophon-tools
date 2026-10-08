@@ -1,0 +1,9 @@
+[Unit]
+Description=EC20 dial self-heal check (restart ec20 if usb0 has no IPv4)
+# 本单元由 ec20-selfcheck.timer 周期触发，不要单独 enable。
+# 这里刻意不加 Wants=ec20.service：那会隐式把 udev 触发的 ec20.service
+# 拖进常规启动依赖，反而加重开机时序竞态。
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/autotelecomm_scripts/ec20-selfcheck.sh

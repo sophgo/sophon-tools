@@ -1,0 +1,12 @@
+[Unit]
+Description=EC20 dial self-heal periodic timer
+
+[Timer]
+# 开机后先等模组首次枚举 + quectel-CM 首轮拨号（约 45s）再开始检查，
+# 之后每分钟检查一次，兼顾「开机竞态多轮重试」与「运行中掉线自动恢复」。
+OnBootSec=45s
+OnUnitActiveSec=60s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target
