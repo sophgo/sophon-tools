@@ -313,7 +313,7 @@ ddr1_size=0
 ddr2_size=0
 ddr3_size=0
 ddr4_size=0
-echo "INFO: version: 2.12.1"
+echo "INFO: version: 2.12.2"
 if ( [ $# -eq 1 ] || [ $# -eq 2 ] ) && [ "$1" == "-p" ]; then
 	# 仅打印信息
 	print_info=1
@@ -384,9 +384,29 @@ else
 			get_dts_node_info ${memory_edit_PWD}/multi.its "${dts_file_name} " "fdt =" >> $log_file_path; fdt_node_name=$(echo "$get_dts_node_info_data" | awk -F'"' '{print $2}')
 		fi
 		if [[ "$fdt_node_name" == "" ]]; then
-			# CV84X2 的 boot1 分区 offset160 处不存放板名（bm1688 存放），按板名查找失效；
-			# 回退：multi.its 仅含一个 fdt 配置节点时直接采用该节点
-			if [[ "$(grep -c "fdt = " ${memory_edit_PWD}/multi.its)" == "1" ]]; then
+			# CV84X2 的 boot1 分区 offset160 处不存放板名（bm1688 存放），按板名查找失效。
+			# 逐级回退：每个候选都是 multi.its 里的配置名，解析成 fdt 节点名；
+			# 该级解析不出（含名字过时/写错）就继续下一级，而不是就此失败。
+			#   1) /boot/u-boot.env 的 DTS_TYPE —— u-boot 开机实际用于 bootm 的配置名，
+			#      出厂未烧 OEM 时由 u-boot 用编译期默认值填充（对齐 get_info.sh 做法）；
+			#   2) multi.its 的 default 配置 —— its 自身声明的默认配置；
+			#   3) multi.its 仅含一个 fdt 配置节点时直接采用该节点。
+			config_candidates=()
+			if [[ -r /boot/u-boot.env ]]; then
+				# -a：u-boot.env 前 4 字节是 CRC，含非文本字节，不加 -a 时 grep 可能按二进制处理而漏匹配
+				env_dts_type=$(tr '\0' '\n' < /boot/u-boot.env 2>/dev/null | grep -a -m1 '^DTS_TYPE=' | cut -d'=' -f2-)
+				[[ "$env_dts_type" != "" ]] && config_candidates+=("$env_dts_type")
+			fi
+			its_default=$(grep -m1 '^[[:space:]]*default[[:space:]]*=' ${memory_edit_PWD}/multi.its | awk -F'"' '{print $2}')
+			[[ "$its_default" != "" ]] && config_candidates+=("$its_default")
+			for config_name in "${config_candidates[@]}"; do
+				get_dts_node_info ${memory_edit_PWD}/multi.its "${config_name} " "fdt =" >> $log_file_path; fdt_node_name=$(echo "$get_dts_node_info_data" | awk -F'"' '{print $2}')
+				if [[ "$fdt_node_name" != "" ]]; then
+					echo "Info: no board name in boot1, use dts config $config_name -> $fdt_node_name" | tee -a $log_file_path
+					break
+				fi
+			done
+			if [[ "$fdt_node_name" == "" ]] && [[ "$(grep -c "fdt = " ${memory_edit_PWD}/multi.its)" == "1" ]]; then
 				fdt_node_name=$(grep "fdt = " ${memory_edit_PWD}/multi.its | awk -F'"' '{print $2}')
 				echo "Info: no board name in boot1, use the only fdt node: $fdt_node_name" | tee -a $log_file_path
 			fi
