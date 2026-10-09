@@ -1,0 +1,14 @@
+[Unit]
+Description=EC20 dial self-heal periodic timer
+# 本 timer 刻意不挂 timers.target、也不由安装脚本 enable：
+# 它由 77-ec20dongle.rules 在检测到 Quectel EC20 模组时随 ec20.service 一起拉起
+# （ENV{SYSTEMD_WANTS}）。没有 EC20 的设备上该规则不命中，timer 根本不会启动。
+
+[Timer]
+# 时间基准是「timer 被拉起」这一刻（即模组被检出），而非系统开机：
+# 先等 45s 让 quectel-CM 完成首轮拨号，之后每 90s 检查一次。
+# 用 OnActiveSec 而非 OnBootSec：热插拔时模组可能在上电很久之后才出现，
+# OnBootSec 到那时早已过期、会立刻触发，失去「先让首轮拨号跑完」的意义。
+OnActiveSec=45s
+OnUnitActiveSec=90s
+AccuracySec=5s

@@ -30,7 +30,7 @@
 ```bash
 bash release.sh [ARCH] [VERSION]
 #   ARCH:    仅 arm64（默认），传入其他值将报错退出
-#   VERSION: 显式版本号（默认 1.2.8），产物为 autotelecomm_install_<VERSION>.sh
+#   VERSION: 显式版本号（默认 1.2.9），产物为 autotelecomm_install_<VERSION>.sh
 #   env OUTPUT_DIR: 产物目录（默认 <repo>/output/pautotelecomm/）
 ```
 
@@ -52,6 +52,10 @@ bash release.sh [ARCH] [VERSION]
     1. SIM卡是否识别，可以通过模组的AT指令手册查询
     2. 天线是否插牢，是否有信号，通常信号大于21以上才能正常使用，可以通过模组的AT指令手册查询信号强度
     3. 使用的SIM卡是否是特殊的APN，如果是请参考第一项
+4. EC20 模组开机或运行中 `usb0` 无 IP / 消失（`ec20.service` 显示 active 但拨号失败）：根因是开机时序竞态——`77-ec20dongle.rules` 在 ttyUSB 枚举瞬间即拉起 `ec20.service`，此时模组数据面尚未就绪，quectel-CM 抢跑拨号 + DHCP 失败后只进入轮询、进程不退出，导致 `Restart=on-failure` 无法自愈；运行中掉线（quectel-CM 卡死/模组软复位）同样不会自动恢复，常表现为需要多次手工 `systemctl restart ec20`（先出 usb0、再出 IP）。
+    已随包内置 `ec20-selfcheck.timer` 自愈：**由 `77-ec20dongle.rules` 在检出 EC20 模组时随 `ec20.service` 一起拉起**（没有 EC20 的设备上不会启动，安装时不全局 enable），从拉起时刻起 45s 后开始、之后每 90s 检查一次拨号网卡（usb0/usb1/wwan0/enx*）有无 IPv4，无则 `systemctl restart ec20`（同一网卡上两次重启的实际最小间隔即 timer 周期 90s），覆盖开机竞态与运行中掉线两种情形，无需手工配置。
+    排查时可查看日志：`journalctl -u ec20-selfcheck`、`/tmp/ec20-selfcheck.log`、`/tmp/quectel-CM_log`。
+    注意：本自愈只负责软件层拉起；若模组硬件掉线（`dmesg` 出现 USB reset/-110/-71 枚举风暴、`lsusb` 看不到 Quectel 模组），重启服务无效，需先排查硬件/供电/M.2 接触。
 
 ## 常见的信息查询AT指令：
 
