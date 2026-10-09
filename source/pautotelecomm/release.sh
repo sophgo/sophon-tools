@@ -78,9 +78,12 @@ if [[ "\$(python3 -m pip list | grep pyserial | wc -l)" == "0" ]]; then
 fi
 
 systemctl daemon-reload
-# 旧版本（含客户现场手工 enable 的）自愈服务改为由 timer 触发，清掉遗留的 enable 软链
+# 自愈 timer 改为由 udev 在检出 EC20 模组时拉起（77-ec20dongle.rules 的
+# ENV{SYSTEMD_WANTS}），不再全局 enable：没有 EC20 的设备上不该存在这个 timer。
+# 这里清理历史版本留下的 enable 软链（1.2.9 曾 enable 到 timers.target.wants，
+# 更早还有手工 enable 到 multi-user.target.wants 的 service）。
 rm -f /etc/systemd/system/multi-user.target.wants/ec20-selfcheck.service
-systemctl enable ec20-selfcheck.timer
+rm -f /etc/systemd/system/timers.target.wants/ec20-selfcheck.timer
 systemctl stop lteModemManager
 systemctl disable lteModemManager
 sync

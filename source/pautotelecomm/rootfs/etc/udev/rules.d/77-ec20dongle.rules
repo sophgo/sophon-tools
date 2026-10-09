@@ -13,7 +13,9 @@ ENV{ID_VENDOR_ID}=="05c6", ENV{ID_MODEL_ID}=="9003", GOTO="quectel_dialing_start
 GOTO="quectel_dongle_rules_end"
 
 LABEL="quectel_dialing_start"
-TAG+="systemd", ENV{SYSTEMD_WANTS}="ec20.service", SYMLINK+="Quectel_modem"
+# 自愈 timer 也由这里拉起：只有检测到 EC20 模组（上面的 VID/PID 列表）才启动，
+# 没有 EC20 的设备上根本不会出现该 timer，无需在安装时全局 enable。
+TAG+="systemd", ENV{SYSTEMD_WANTS}="ec20.service ec20-selfcheck.timer", SYMLINK+="Quectel_modem"
 GOTO="quectel_dongle_rules_end"
 
 LABEL="quectel_dongle_rules_end"

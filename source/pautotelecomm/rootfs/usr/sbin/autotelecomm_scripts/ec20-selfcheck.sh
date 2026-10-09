@@ -10,7 +10,7 @@
 #   2) 运行中掉线：设备长期运行后 usb0 消失（quectel-CM 卡死 / 模组软复位等），
 #      无人值守时不会自动恢复。
 #
-# 本脚本为幂等的单次检查（由 timer 每分钟触发），只做一件事：
+# 本脚本为幂等的单次检查（由 timer 每 90s 触发一次），只做一件事：
 #   检查拨号网卡是否已有 IPv4，没有就 systemctl restart ec20 重新拨号。
 # 通过「定时周期触发 + 冷却时间限流」兼顾两个场景：
 #   - 开机时多轮重试，直到拿到 IP（对应场景 1 的"先出 usb0、再出 IP"）；
@@ -23,7 +23,10 @@
 #     重启多少次都无效，需先排查硬件/供电/接触。
 
 IFACE="${EC20_IFACE:-}"
-# 两次 restart ec20 之间的最小间隔（秒），防止模组故障时无限高频重启
+# 两次 restart ec20 之间的最小间隔（秒）。
+# 注意：本值小于 timer 周期（ec20-selfcheck.timer: OnUnitActiveSec=90s），故在
+# timer 驱动的常规路径上，实际的重启间隔由 timer 周期决定（约 90s），本限流不会
+# 额外收紧；它真正起作用的是「脚本被手工/临时调用」的场景，防止那时被高频重启。
 COOLDOWN="${EC20_SELFCHECK_COOLDOWN:-30}"
 STAMP_DIR="${EC20_SELFCHECK_STAMP_DIR:-/run/ec20-selfcheck}"
 LOG="${EC20_SELFCHECK_LOG:-/tmp/ec20-selfcheck.log}"
