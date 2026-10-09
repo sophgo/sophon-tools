@@ -19,7 +19,7 @@ import (
 
 func TestPlanFormatOnly(t *testing.T) {
 	t.Run("整卡一个 FAT32 分区", func(t *testing.T) {
-		const size = 8 << 30
+		const size int64 = 8 << 30
 		plan, err := PlanFormatOnly(size, "")
 		if err != nil {
 			t.Fatal(err)
@@ -282,7 +282,7 @@ func TestFAT32GeometryOnLargeCards(t *testing.T) {
 
 // 只格式化的卡与"写文件包"建出来的卡必须是同一种格式 —— 现场两边的卡可以互换
 func TestFormatOnlyMatchesPackageCardLayout(t *testing.T) {
-	const size = 8 << 30
+	const size int64 = 8 << 30
 	dev, plan := formatFakeDevice(t, size, "")
 
 	a, pkgPlan := buildTestPkg(t)
