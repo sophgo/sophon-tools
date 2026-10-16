@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"se-rag-core/internal/chunker"
 	"se-rag-core/internal/config"
 	"se-rag-core/internal/docstore"
 	"se-rag-core/internal/embed"
@@ -177,9 +178,10 @@ func TestDoctorFingerprintProviderMismatch(t *testing.T) {
 		t.Fatalf("build failed: %v", err)
 	}
 
+	strategy := chunker.StrategyVersion
 	writeMeta := func(fp string, dim int) {
 		t.Helper()
-		m := docstore.Meta{Product: "se7", EmbedderFingerprint: fp, Dim: dim, BuildVersion: "1.0"}
+		m := docstore.Meta{Product: "se7", EmbedderFingerprint: fp, Dim: dim, BuildVersion: "1.0", ChunkStrategy: strategy}
 		b, err := json.MarshalIndent(m, "", "  ")
 		if err != nil {
 			t.Fatal(err)
@@ -208,6 +210,18 @@ func TestDoctorFingerprintProviderMismatch(t *testing.T) {
 	if needRebuild {
 		t.Error("doctor: matching fingerprint+dim -> want no rebuild")
 	}
+
+	// 场景 2b：指纹匹配但分块策略落后（旧索引没有 chunk_strategy）→ 需要重建
+	strategy = ""
+	writeMeta("siliconflow.BAAI/bge-m3", 1024)
+	needRebuild, err = runDoctor(rc)
+	if err != nil {
+		t.Fatalf("doctor err: %v", err)
+	}
+	if !needRebuild {
+		t.Error("doctor: stale chunk strategy -> want rebuild-needed")
+	}
+	strategy = chunker.StrategyVersion
 
 	// 场景 3：历史索引无 embedder_fingerprint 字段（legacy meta.json）→ 无法验证向量空间 → 提示重建
 	legacy := `{"product":"se7","dim":1024,"chunk_count":1,"build_version":"1.0"}`

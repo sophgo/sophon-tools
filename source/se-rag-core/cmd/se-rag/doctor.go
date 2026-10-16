@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 
+	"se-rag-core/internal/chunker"
 	"se-rag-core/internal/config"
 	"se-rag-core/internal/docstore"
 	"se-rag-core/internal/retriever"
@@ -30,6 +31,12 @@ func runDoctor(rc runCtx) (needRebuild bool, err error) {
 
 	if err := retriever.CheckFingerprint(meta.Fingerprint(), wantFp); err != nil {
 		fmt.Printf("WARNING: %v\n", err)
+		fmt.Printf("  -> 重新建索引: se-rag build --docs-dir <docs> -index-dir %s\n", rc.indexDir)
+		return true, nil
+	}
+	if meta.StrategyStale() {
+		fmt.Printf("WARNING: index chunk strategy %q is older than current %q (FAQ docs are now split per Q&A)\n",
+			meta.ChunkStrategy, chunker.StrategyVersion)
 		fmt.Printf("  -> 重新建索引: se-rag build --docs-dir <docs> -index-dir %s\n", rc.indexDir)
 		return true, nil
 	}

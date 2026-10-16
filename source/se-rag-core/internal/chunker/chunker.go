@@ -43,6 +43,13 @@ func NewDefaultChunker() *MarkdownChunker {
 var separators = []string{"\n## ", "\n### ", "\n#### ", "\n\n", "\n", "。", ". ", " "}
 
 func (c *MarkdownChunker) ChunkFile(text, sourceFile string) []Chunk {
+	if IsFAQFile(sourceFile) {
+		return c.chunkFAQ(text, sourceFile)
+	}
+	return c.chunkPlain(text, sourceFile)
+}
+
+func (c *MarkdownChunker) chunkPlain(text, sourceFile string) []Chunk {
 	clean, regions := extractProtected(text)
 	linePos := buildLinePositions(text)
 	pieces := c.splitText(clean, 0)

@@ -181,6 +181,7 @@ func runBuild(rc runCtx) error {
 		Model:               p.Embedder.Model,
 		ChunkCount:          len(allChunks),
 		BuildVersion:        "1.0",
+		ChunkStrategy:       chunker.StrategyVersion,
 	}
 	store := &docstore.Store{IndexDir: rc.indexDir}
 	if err := store.SaveIndex(rc.product, meta, vecs, vecIDs, bmi, allChunks); err != nil {
