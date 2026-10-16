@@ -25,7 +25,7 @@ SE 系列知识库的 **Go RAG 检索核心**，替代现行 Python 栈（numpy 
 source/se-rag-core/
 ├── cmd/se-rag/          CLI（build / query / doctor）
 ├── internal/
-│   ├── chunker/         Markdown 分块（800 token / 80 overlap，保护代码块/表格）
+│   ├── chunker/         Markdown 分块（800 token / 80 overlap，保护代码块/表格；`*-faq.md` 按标题切问答块）
 │   ├── vector/          暴力内积向量索引 + L2 归一化 + gob 持久化
 │   ├── bm25/            BM25Okapi + 中英分词（中文 2-gram）+ 倒排 + gob 持久化
 │   ├── embed/           Embedding / Reranker provider 抽象 + siliconflow/sophnet + 限流 + 重试
@@ -179,6 +179,13 @@ cd source/se-rag-core
 go test ./...        # 单测（无网络）
 go vet ./...
 ```
+
+## 分块策略
+
+- 普通文档：800 token / 80 overlap 递归切分，保护代码块与表格。
+- **FAQ 文档**（文件名以 `-faq.md` 结尾，如 `10-media-faq.md`）：按 `##` / `###` / `####` 标题切块，**每个问答独立成块**（围栏代码块内的 `#` 不算标题；只有标题没有正文的段落并入下一段；超过 2400 字符的问答退回递归切分）。
+  小问答不再被合并进同一个块，向量检索不会被相邻问题稀释（在 SE9 FAQ 上向量单路 hit@8 从 12/21 升到 19/21，完整管线 MRR 约 0.79 → 0.87）。
+- 分块策略版本 `chunker.StrategyVersion`（当前 `faq-heading-v1`）写入索引 `meta.json` 的 `chunk_strategy`。旧索引没有该字段：`doctor` 报告需要重建，`query` 向 stderr 提示 `rebuild recommended`；重建即可，`docs` 无需改动。
 
 ## 对外接口（供 skill 调用）
 

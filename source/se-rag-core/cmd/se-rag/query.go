@@ -3,14 +3,26 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"time"
 
+	"se-rag-core/internal/chunker"
 	"se-rag-core/internal/config"
 	"se-rag-core/internal/docstore"
 	"se-rag-core/internal/embed"
 	"se-rag-core/internal/retriever"
 )
+
+// warnStaleIndex 索引的分块策略落后于当前版本时向 stderr 提示重建（不影响查询结果输出）。
+func warnStaleIndex(indexDir, product string) {
+	meta, err := (&docstore.Store{IndexDir: indexDir}).ReadMeta(product)
+	if err != nil || !meta.StrategyStale() {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "warning: index chunk strategy %q is older than current %q; rebuild recommended: se-rag build --docs-dir <docs> -index-dir %s\n",
+		meta.ChunkStrategy, chunker.StrategyVersion, indexDir)
+}
 
 func runQuery(rc runCtx) error {
 	rc.ensureFactories()
@@ -18,6 +30,7 @@ func runQuery(rc runCtx) error {
 	if rc.product == "" {
 		rc.product = metaProductLabel
 	}
+	warnStaleIndex(rc.indexDir, rc.product)
 	if rc.offline {
 		return runQueryOffline(rc)
 	}
@@ -54,6 +67,7 @@ func runQuery(rc runCtx) error {
 
 // runQueryOffline 纯 BM25 检索：不构造 embedder / reranker，不发起任何网络请求，
 // 因此也不校验 key。输出末行 mode=bm25，fallback 原因标明是主动离线。
+// 索引过期提示由调用方 runQuery 统一发出，此处不再重复。
 func runQueryOffline(rc runCtx) error {
 	if rc.query == "" {
 		return fmt.Errorf("empty query")

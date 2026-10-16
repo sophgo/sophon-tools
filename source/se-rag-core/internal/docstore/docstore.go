@@ -79,6 +79,7 @@ func (s *Store) BuildMeta(product, providerName, model string, dim int, chunks [
 		Model:               model,
 		ChunkCount:          len(chunks),
 		BuildVersion:        "1.0",
+		ChunkStrategy:       chunker.StrategyVersion,
 	}
 }
 

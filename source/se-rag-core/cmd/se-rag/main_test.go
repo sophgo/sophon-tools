@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"se-rag-core/internal/chunker"
 	"se-rag-core/internal/config"
 	"se-rag-core/internal/docstore"
 	"se-rag-core/internal/embed"
@@ -177,9 +179,10 @@ func TestDoctorFingerprintProviderMismatch(t *testing.T) {
 		t.Fatalf("build failed: %v", err)
 	}
 
+	strategy := chunker.StrategyVersion
 	writeMeta := func(fp string, dim int) {
 		t.Helper()
-		m := docstore.Meta{Product: "se7", EmbedderFingerprint: fp, Dim: dim, BuildVersion: "1.0"}
+		m := docstore.Meta{Product: "se7", EmbedderFingerprint: fp, Dim: dim, BuildVersion: "1.0", ChunkStrategy: strategy}
 		b, err := json.MarshalIndent(m, "", "  ")
 		if err != nil {
 			t.Fatal(err)
@@ -208,6 +211,18 @@ func TestDoctorFingerprintProviderMismatch(t *testing.T) {
 	if needRebuild {
 		t.Error("doctor: matching fingerprint+dim -> want no rebuild")
 	}
+
+	// 场景 2b：指纹匹配但分块策略落后（旧索引没有 chunk_strategy）→ 需要重建
+	strategy = ""
+	writeMeta("siliconflow.BAAI/bge-m3", 1024)
+	needRebuild, err = runDoctor(rc)
+	if err != nil {
+		t.Fatalf("doctor err: %v", err)
+	}
+	if !needRebuild {
+		t.Error("doctor: stale chunk strategy -> want rebuild-needed")
+	}
+	strategy = chunker.StrategyVersion
 
 	// 场景 3：历史索引无 embedder_fingerprint 字段（legacy meta.json）→ 无法验证向量空间 → 提示重建
 	legacy := `{"product":"se7","dim":1024,"chunk_count":1,"build_version":"1.0"}`
@@ -341,5 +356,71 @@ func TestBuildDimMismatchErrors(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "dim mismatch") {
 		t.Errorf("error should mention dim mismatch, got: %v", err)
+	}
+}
+
+// ---- 索引过期提示：-offline 只提示一次（runQuery 与 runQueryOffline 曾各发一条）----
+
+func TestStaleIndexWarningPrintedOnce(t *testing.T) {
+	rc := keyTestCtx(t)
+	rc.useBuiltin = true
+	if err := runBuild(rc); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	// 抹掉 chunk_strategy，模拟旧索引
+	b, err := os.ReadFile(filepath.Join(rc.indexDir, "meta.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m docstore.Meta
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	m.ChunkStrategy = ""
+	out, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rc.indexDir, "meta.json"), out, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	captureStderr := func(f func()) string {
+		old := os.Stderr
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		os.Stderr = w
+		done := make(chan string, 1)
+		go func() {
+			buf, _ := io.ReadAll(r)
+			done <- string(buf)
+		}()
+		f()
+		w.Close()
+		os.Stderr = old
+		return <-done
+	}
+
+	// 在线与离线两条路径都应恰好提示一次
+	rc.query = "网络配置"
+	got := captureStderr(func() {
+		if err := runQuery(rc); err != nil {
+			t.Fatalf("query: %v", err)
+		}
+	})
+	if n := strings.Count(got, "rebuild recommended"); n != 1 {
+		t.Errorf("query: rebuild warning printed %d times, want 1\nstderr=%q", n, got)
+	}
+
+	rc.offline = true
+	got = captureStderr(func() {
+		if err := runQuery(rc); err != nil {
+			t.Fatalf("offline query: %v", err)
+		}
+	})
+	if n := strings.Count(got, "rebuild recommended"); n != 1 {
+		t.Errorf("offline: rebuild warning printed %d times, want 1\nstderr=%q", n, got)
 	}
 }

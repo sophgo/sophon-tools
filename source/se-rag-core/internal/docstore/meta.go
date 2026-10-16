@@ -2,6 +2,8 @@ package docstore
 
 import (
 	"strconv"
+
+	"se-rag-core/internal/chunker"
 )
 
 // Meta 索引元信息，meta.json 落盘。
@@ -13,7 +15,11 @@ type Meta struct {
 	ChunkCount          int    `json:"chunk_count"`
 	CreatedAt           string `json:"created_at"`
 	BuildVersion        string `json:"build_version"`
+	ChunkStrategy       string `json:"chunk_strategy,omitempty"` // chunker.StrategyVersion；旧索引为空
 }
+
+// StrategyStale 索引的分块策略是否落后于当前代码（旧索引没有该字段，也算落后）。
+func (m Meta) StrategyStale() bool { return m.ChunkStrategy != chunker.StrategyVersion }
 
 // Fingerprint 产品索引的完整指纹 "<provider>.<model>@<dim>"，用于供应商/模型/维度变更检测。
 func (m Meta) Fingerprint() string {
