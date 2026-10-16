@@ -170,7 +170,9 @@ func splitSections(lines []string) []hsection {
 		stack = append(stack, h)
 	}
 
-	// 只有标题没有正文的小节直接丢弃：它的标题已经出现在后代小节的祖先路径里
+	// 只有标题没有正文、且下一个标题更深（即本标题会出现在后代的祖先路径里）的小节才丢弃；
+	// 下一个标题是同级或更浅时（如 "### 6.3 硬盘挂载" 紧跟 "## 说明"、FAQ 里同级的下一个问题），
+	// 标题不会被任何祖先路径带走，必须保留成块，否则该章节名会从索引里彻底消失。
 	var secs []hsection
 	for k, sec := range raw {
 		if sec.headLine == "" && frontmatterOnly(lines[sec.from:sec.to]) {
@@ -179,7 +181,7 @@ func splitSections(lines []string) []hsection {
 		if isTOCTitle(sec.title) {
 			continue // 自动生成的目录会列出全部标题，几乎命中任何查询
 		}
-		if headingOnly(lines[sec.from:sec.to]) && k+1 < len(raw) {
+		if headingOnly(lines[sec.from:sec.to]) && k+1 < len(raw) && raw[k+1].level > sec.level {
 			continue
 		}
 		secs = append(secs, sec)

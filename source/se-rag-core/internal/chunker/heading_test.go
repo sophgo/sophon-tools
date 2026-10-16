@@ -78,6 +78,32 @@ func TestHeadingOnlySectionsFoldIntoBreadcrumb(t *testing.T) {
 	}
 }
 
+// 仅标题的小节只有在下一个标题更深（标题会出现在后代的祖先路径里）时才能丢弃。
+// 下一个标题同级或更浅时，标题不会被任何祖先路径带走，丢弃会让章节名从索引里消失。
+func TestHeadingOnlySectionKeptWhenNextHeadingIsNotDeeper(t *testing.T) {
+	// 下一个标题更浅：h3 后面是 h2，标题进不了任何面包屑
+	manual := "### 6.3 硬盘挂载\n\n## 说明\n\n- 先格式化硬盘。\n"
+	joined := ""
+	for _, c := range chunkM(manual) {
+		joined += c.Text + "\n"
+	}
+	if !strings.Contains(joined, "6.3 硬盘挂载") {
+		t.Errorf("h3 section followed by h2 must keep its title: %q", joined)
+	}
+
+	// 下一个标题同级：FAQ 里相邻的同级问答，标题同样进不了面包屑
+	faq := "#### 无法识别 SIM 卡\n\n#### 4G/5G 模组不支持 SIM 卡热拔插\n\n#### 专网拨号\n\n修改 lteModem.py\n"
+	joined = ""
+	for _, c := range chunkH(faq) {
+		joined += c.Text + "\n"
+	}
+	for _, want := range []string{"无法识别 SIM 卡", "4G/5G 模组不支持 SIM 卡热拔插", "专网拨号"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("sibling FAQ question %q must survive: %q", want, joined)
+		}
+	}
+}
+
 func TestHeadingNoHeadingsStillChunked(t *testing.T) {
 	var sb strings.Builder
 	for i := 0; i < 200; i++ {
