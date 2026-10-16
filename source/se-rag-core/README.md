@@ -110,7 +110,8 @@ SE_RAG_FAKE_EMBED=1 ./bin/se-rag build --docs-dir example/se7/docs -index-dir ./
 ## 供应商配置
 
 默认（`config.DefaultConfig`）使用 siliconflow + 内置混淆 key，模型 `BAAI/bge-m3` + `BAAI/bge-reranker-v2-m3`。
-用户自备 key 时（**flag 必须写在问题文本之前**——Go `flag` 遇到第一个非 flag 参数即停止解析，写在后面会被静默忽略）：
+用户自备 key 时（flag 写在问题文本之前或之后均可；位置参数之后的 flag 自 1.1.0 起生效，
+1.0.0 及更早写在后面会被静默忽略）：
 
 ```bash
 export SE_RAG_EMBED_KEY="sk-user-embedding-key"
