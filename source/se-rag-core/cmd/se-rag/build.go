@@ -14,9 +14,10 @@ import (
 	"se-rag-core/internal/vector"
 )
 
-// buildTimeout build 全量 embedding 的整体 deadline（query 单次为 120s；build 覆盖全部批次，取 5min）。
+// buildTimeout build 全量 embedding 的整体 deadline（query 单次为 120s；build 覆盖全部批次，取 15min：
+// 单产品约 1400–1900 块，内置 key 限流下约 2–4 分钟，留足网络波动余量）。
 // 网关吞连接（Worker 失联）时保证 build 有限时退出，不无限挂起。
-const buildTimeout = 5 * time.Minute
+const buildTimeout = 15 * time.Minute
 
 // runCtx 供 build/query/doctor 共享的参数 + 可注入的 provider 工厂（测试/离线 fake）。
 // build 始终依据 docs 全量重建索引（docs 是唯一真源），无需 force 开关。
@@ -52,6 +53,33 @@ func applyUserKeys(p *config.Product, useBuiltin, requireRerank bool) error {
 		return fmt.Errorf("-builtin-key=false requires SE_RAG_RERANK_KEY (missing); set env or drop the flag")
 	}
 	return nil
+}
+
+// embedWithRetry 单个批次 embedding 失败时最多重试 embedRetries 次（退避 1s、3s）。
+// 网关偶发返回 400 {"code":20015,"message":"The parameter is invalid"}（同一批文本重试即成功，
+// 实测在多个 build 并发时出现），httpclient 对 4xx 快速失败，不加这一层会让数分钟的 build 在中途整体失败。
+// 真正的参数错误会在重试后原样报出，只多花几秒。
+const embedRetries = 2
+
+var embedBackoff = func(attempt int) time.Duration { return time.Duration(1+2*attempt) * time.Second }
+
+func embedWithRetry(ctx context.Context, emb embed.Embedder, texts []string) ([][]float32, error) {
+	var lastErr error
+	for attempt := 0; attempt <= embedRetries; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(embedBackoff(attempt - 1)):
+			}
+		}
+		ev, err := emb.Embed(ctx, texts)
+		if err == nil {
+			return ev, nil
+		}
+		lastErr = err
+	}
+	return nil, lastErr
 }
 
 // realEmbed 真实 embedding 工厂（测试可注入 fake）。
@@ -135,7 +163,7 @@ func runBuild(rc runCtx) error {
 		if end > len(docsText) {
 			end = len(docsText)
 		}
-		ev, err := emb.Embed(ctx, docsText[i:end])
+		ev, err := embedWithRetry(ctx, emb, docsText[i:end])
 		if err != nil {
 			return fmt.Errorf("embed batch [%d:%d]: %w", i, end, err)
 		}

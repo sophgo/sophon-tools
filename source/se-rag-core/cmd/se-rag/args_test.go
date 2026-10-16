@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"flag"
 	"io"
 	"reflect"
+	"strings"
 	"testing"
+	"time"
 
 	"se-rag-core/internal/config"
 	"se-rag-core/internal/embed"
@@ -105,5 +109,47 @@ func TestDispatchQueryOfflineFlagAnywhere(t *testing.T) {
 		if rc := dispatch(args); rc != 0 {
 			t.Errorf("dispatch %v rc=%d, want 0", args, rc)
 		}
+	}
+}
+
+type flakyEmbedder struct {
+	failFirst int
+	calls     int
+}
+
+func (f *flakyEmbedder) Name() string { return "flaky" }
+func (f *flakyEmbedder) Dim() int     { return 2 }
+func (f *flakyEmbedder) Embed(_ context.Context, texts []string) ([][]float32, error) {
+	f.calls++
+	if f.calls <= f.failFirst {
+		return nil, errors.New(`http 400: {"code":20015,"message":"The parameter is invalid. Please check again."}`)
+	}
+	out := make([][]float32, len(texts))
+	for i := range out {
+		out[i] = []float32{1, 1}
+	}
+	return out, nil
+}
+
+func TestEmbedWithRetryRecoversFromTransientError(t *testing.T) {
+	embedBackoff = func(int) time.Duration { return time.Millisecond }
+	f := &flakyEmbedder{failFirst: 2}
+	if _, err := embedWithRetry(context.Background(), f, []string{"a"}); err != nil {
+		t.Fatalf("2 transient failures should be retried away, got %v", err)
+	}
+	if f.calls != 3 {
+		t.Errorf("calls=%d, want 3", f.calls)
+	}
+}
+
+func TestEmbedWithRetryGivesUpOnPersistentError(t *testing.T) {
+	embedBackoff = func(int) time.Duration { return time.Millisecond }
+	f := &flakyEmbedder{failFirst: 99}
+	_, err := embedWithRetry(context.Background(), f, []string{"a"})
+	if err == nil || !strings.Contains(err.Error(), "20015") {
+		t.Fatalf("persistent error must surface unchanged, got %v", err)
+	}
+	if f.calls != embedRetries+1 {
+		t.Errorf("calls=%d, want %d", f.calls, embedRetries+1)
 	}
 }

@@ -25,7 +25,7 @@ SE 系列知识库的 **Go RAG 检索核心**，替代现行 Python 栈（numpy 
 source/se-rag-core/
 ├── cmd/se-rag/          CLI（build / query / doctor）
 ├── internal/
-│   ├── chunker/         Markdown 分块（800 token / 80 overlap，保护代码块/表格；`*-faq.md` 按标题切问答块）
+│   ├── chunker/         Markdown 分块（按标题切块；`*-faq.md` 一问一块，手册类相邻小节打包；见「分块策略」）
 │   ├── vector/          暴力内积向量索引 + L2 归一化 + gob 持久化
 │   ├── bm25/            BM25Okapi + 中英分词（中文 2-gram）+ 倒排 + gob 持久化
 │   ├── embed/           Embedding / Reranker provider 抽象 + siliconflow/sophnet + 限流 + 重试
@@ -182,10 +182,27 @@ go vet ./...
 
 ## 分块策略
 
-- 普通文档：800 token / 80 overlap 递归切分，保护代码块与表格。
-- **FAQ 文档**（文件名以 `-faq.md` 结尾，如 `10-media-faq.md`）：按 `##` / `###` / `####` 标题切块，**每个问答独立成块**（围栏代码块内的 `#` 不算标题；只有标题没有正文的段落并入下一段；超过 2400 字符的问答退回递归切分）。
-  小问答不再被合并进同一个块，向量检索不会被相邻问题稀释（在 SE9 FAQ 上向量单路 hit@8 从 12/21 升到 19/21，完整管线 MRR 约 0.79 → 0.87）。
-- 分块策略版本 `chunker.StrategyVersion`（当前 `faq-heading-v1`）写入索引 `meta.json` 的 `chunk_strategy`。旧索引没有该字段：`doctor` 报告需要重建，`query` 向 stderr 提示 `rebuild recommended`；重建即可，`docs` 无需改动。
+所有 Markdown 按标题（`#` ~ `####`，围栏代码块内的 `#` 不算）切块，策略版本 `heading-v2`：
+
+- **问答文档**（文件名以 `-faq.md` 结尾，如 `10-media-faq.md`）：每个小节（一个问答）独立成块，无论多短。
+- **手册 / README 等其他文档**：相邻的小节打包到约 1800 字符一块（不越过 `#` 一级标题；当前块很小时可以越过）。
+  API 手册每个接口下有"接口形式 / 参数说明 / 返回值…"一串很短的小节，单独成块只有几十个字，既没有检索价值又会让索引膨胀数倍。
+- 块文本以 `【祖先标题1 › 祖先标题2】` 开头，让只含"参数说明"这类通用标题的块也带着所属主题；`LineStart/LineEnd` 仍是原文行号，不含该前缀。
+- 超过 2400 字符的小节在行边界处二切：优先空行，其次强制；续块重复小节标题，表格被切开时续块重复表头；不再有 6000 字符的"硬切"块。
+- 不单独成块的内容：只有标题没有正文、**且下一个标题更深**的小节（标题已在后代的祖先路径里；下一个标题同级或更浅时标题无处可去，仍会成块）、只有 frontmatter 的前言、`目录` / `Contents` 小节（自动生成的目录会命中几乎任何查询）。
+
+效果（真实 bge-m3 + reranker，top8，MRR）：
+
+| 评测集 | 旧分块 | 本策略 |
+| --- | --- | --- |
+| SE9 FAQ，29 题·口语 | 0.800 | 0.935 |
+| SE9 FAQ，29 题·关键词 | 0.758 | 0.901 |
+| SE7 手册 / README，25 题·口语 | 0.613 | 0.730 |
+| SE7 手册 / README，25 题·关键词 | 0.727 | 0.786 |
+
+FAQ 提升最大：旧分块把几个短问答合并进同一块，向量检索几乎失效（向量单路 MRR 0.32 → 0.80）。局限：查询由人工撰写，样本小。
+
+索引 `meta.json` 的 `chunk_strategy` 记录策略版本。旧索引没有该字段：`doctor` 报告需要重建，`query` 向 stderr 提示 `rebuild recommended`；重建即可，`docs` 无需改动。块数比 `faq-heading-v1` 多约 60%（hub 现有 docs 实测 SE7/SE8/SE9 = 1681/1709/2185，旧策略 1037/1062/1340），单产品 build 约 3 分钟，`buildTimeout` 为 15 分钟。
 
 ## 对外接口（供 skill 调用）
 

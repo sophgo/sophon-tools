@@ -282,7 +282,7 @@ func TestBuildSkipsNilVectors(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 两个文件 → 两个 chunk：a.md 正常，b.md 含 DROPVEC 模拟上游缺向量
-	if err := os.WriteFile(filepath.Join(docsDir, "a.md"), []byte("# SE7\n\n## 网络\n\n配置 netplan 使能 dhcp4。\n\n## SDK\n\nSE7 使用 BM1684X 芯片。"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(docsDir, "a.md"), []byte("# SE7\n\n配置 netplan 使能 dhcp4。\n\nSE7 使用 BM1684X 芯片。"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(docsDir, "b.md"), []byte("# FAQ\n\n## 异常\n\n本段 DROPVEC 缺失向量 内容。"), 0o644); err != nil {

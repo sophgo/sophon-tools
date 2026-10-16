@@ -8,11 +8,17 @@ import (
 	"testing"
 )
 
+func legacyChunker() *MarkdownChunker {
+	c := NewDefaultChunker()
+	c.HeadingAware = false
+	return c
+}
+
 func contains(s, sub string) bool { return strings.Contains(s, sub) }
 
 func TestChunkRespectsCodeBlock(t *testing.T) {
 	text := "# 标题\n\n## 段落\n\n```go\nfunc main() {\n    println(\"hello\")\n}\n```\n\n## 结尾\n\n这是结尾一段。"
-	chunks := NewDefaultChunker().ChunkFile(text, "test.md")
+	chunks := legacyChunker().ChunkFile(text, "test.md")
 	if len(chunks) == 0 {
 		t.Fatal("expected chunks")
 	}
@@ -30,7 +36,7 @@ func TestChunkRespectsCodeBlock(t *testing.T) {
 
 func TestChunkLineNumbers(t *testing.T) {
 	text := "line1\nline2\nline3\nline4\nline5"
-	chunks := NewDefaultChunker().ChunkFile(text, "test.md")
+	chunks := legacyChunker().ChunkFile(text, "test.md")
 	if len(chunks) != 1 {
 		t.Fatalf("expected 1 chunk, got %d", len(chunks))
 	}
@@ -41,7 +47,7 @@ func TestChunkLineNumbers(t *testing.T) {
 
 func TestChunksSizedBelowMax(t *testing.T) {
 	long := strings.Repeat("这是包含很多中文内容的一个段落，用于测试分块是否会把文本切得过大。", 200)
-	chunks := NewDefaultChunker().ChunkFile("# 标题\n\n"+long, "t.md")
+	chunks := legacyChunker().ChunkFile("# 标题\n\n"+long, "t.md")
 	if len(chunks) == 0 {
 		t.Fatal("expected chunks")
 	}
@@ -73,7 +79,7 @@ func TestChunkOverlapInMainPath(t *testing.T) {
 	// 主路径（分隔符切分）相邻块应共享约 Overlap 字符的重叠文本（README: 800/80）。
 	filler := "这是包含很多中文内容的一个段落，用于测试分块逻辑。"
 	text := "# 标题\n\n" + strings.Repeat(filler+"\n\n", 60)
-	c := NewDefaultChunker()
+	c := legacyChunker()
 	chunks := c.ChunkFile(text, "t.md")
 	if len(chunks) < 2 {
 		t.Fatalf("expected >=2 chunks, got %d", len(chunks))
@@ -102,7 +108,7 @@ func TestChunkOverlapAcrossCodeBlock(t *testing.T) {
 	filler := "长段中文文本用于撑大块长度，确保溢出切分多次。"
 	code := "```go\nfunc main() {\n    fmt.Println(\"hi\")\n}\n```"
 	text := strings.Repeat(filler+"\n\n", 30) + code + "\n\n" + strings.Repeat(filler+"\n\n", 30)
-	chunks := NewDefaultChunker().ChunkFile(text, "t.md")
+	chunks := legacyChunker().ChunkFile(text, "t.md")
 	if len(chunks) < 2 {
 		t.Fatalf("expected >=2 chunks, got %d", len(chunks))
 	}
@@ -121,7 +127,7 @@ func TestChunkOverlapAcrossCodeBlock(t *testing.T) {
 func TestSplitPieceCoresConcatenateToSource(t *testing.T) {
 	// 不变量：各片段 core 按序拼接必须还原 clean 原文（依赖它做精确行号定位），
 	// 且重叠文本只作为前缀追加、不得修改核心内容。
-	c := NewDefaultChunker()
+	c := legacyChunker()
 	texts := []string{
 		"# 标题\n\n" + strings.Repeat("这是包含很多中文内容的一个段落，用于测试分块逻辑。\n\n", 60),
 		"前文\n\n```go\nfunc main() { println(\"hi\") }\n```\n\n" + strings.Repeat("无分隔长段中文文本，用于触发字符级兜底切分。"+"\n\n", 50),
@@ -153,7 +159,7 @@ func truncated(s string, n int) string {
 // 检索时 ChunkByID 后写覆盖导致来源文件错乱）。
 func TestChunkIDUniqueAcrossFiles(t *testing.T) {
 	text := "# 标题\n\n" + strings.Repeat("这是完全相同的共享段落内容，两个文档都会出现。", 60)
-	c := NewDefaultChunker()
+	c := legacyChunker()
 	a := c.ChunkFile(text, "a.md")
 	b := c.ChunkFile(text, "b.md")
 	if len(a) == 0 || len(b) == 0 {
@@ -172,7 +178,7 @@ func TestChunkIDUniqueAcrossFiles(t *testing.T) {
 // MYS-392：同一文件内不同位置的 chunk（即使文本相同）ChunkID 也必须唯一。
 func TestChunkIDUniqueWithinFile(t *testing.T) {
 	text := "# 标题\n\n" + strings.Repeat("重复出现的段落内容。", 90) + "\n\n## 第二节\n\n" + strings.Repeat("重复出现的段落内容。", 90)
-	chunks := NewDefaultChunker().ChunkFile(text, "t.md")
+	chunks := legacyChunker().ChunkFile(text, "t.md")
 	ids := map[string]int{}
 	for _, ch := range chunks {
 		ids[ch.ChunkID]++
@@ -190,7 +196,7 @@ func TestLineNumbersAfterCodeBlock(t *testing.T) {
 	pre := "# 标题\n" + strings.Repeat("这是代码块之前的文本。", 30)
 	code := "\n\n```go\nfunc main() {\n    println(\"hello\")\n}\n```"
 	post := "\n\n## 段落二\n\n" + strings.Repeat("这是代码块之后的文本。", 30)
-	chunks := NewDefaultChunker().ChunkFile(pre+code+post, "t.md")
+	chunks := legacyChunker().ChunkFile(pre+code+post, "t.md")
 	if len(chunks) < 2 {
 		t.Fatalf("expected >= 2 chunks, got %d", len(chunks))
 	}
@@ -209,7 +215,7 @@ func TestLineNumbersAfterTable(t *testing.T) {
 	pre := "# 标题\n" + strings.Repeat("这是表格之前的文本。", 30)
 	table := "\n\n| a | b |\n| c | d |\n"
 	post := "\n\n## 表格之后\n\n" + strings.Repeat("这是表格之后的文本。", 30)
-	chunks := NewDefaultChunker().ChunkFile(pre+table+post, "t.md")
+	chunks := legacyChunker().ChunkFile(pre+table+post, "t.md")
 	if len(chunks) < 2 {
 		t.Fatalf("expected >= 2 chunks, got %d", len(chunks))
 	}
@@ -230,7 +236,7 @@ func TestLineNumbersDuplicateParagraph(t *testing.T) {
 	line := "段落内容重复。"
 	block := strings.Repeat(line+"\n", 400) // > 800 token，递归切分成多 chunk
 	text := block + "\n## 分隔\n" + block     // 两个相同大块，中间夹分隔行
-	chunks := NewDefaultChunker().ChunkFile(text, "t.md")
+	chunks := legacyChunker().ChunkFile(text, "t.md")
 
 	firstLine := map[string]int{}
 	dupes := 0
@@ -264,7 +270,7 @@ func TestChunkIDScoped(t *testing.T) {
 
 // MYS-392：超长 chunk（charSplitChunks 路径）子块 ChunkID 掺文件路径+序号，行号随字节偏移递增。
 func TestCharSplitChunksIDsAndLines(t *testing.T) {
-	c := NewDefaultChunker()
+	c := legacyChunker()
 	seq := 0
 	text := strings.Repeat("abc\n", 1700) // 1700 行 * 4 = 6800 字节 > MaxChunkChars 6000
 	chs := c.charSplitChunks(text, "big.md", 10, &seq)
@@ -297,7 +303,7 @@ func TestChunkDirectoryIDsUnique(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	got, err := NewDefaultChunker().ChunkDirectory(dir)
+	got, err := legacyChunker().ChunkDirectory(dir)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -27,6 +27,8 @@ type MarkdownChunker struct {
 	MaxChars      int
 	OverlapChars  int
 	MaxChunkChars int
+	// HeadingAware=true（默认）按标题切块（见 heading.go）；false 为旧版统一递归切分（仅测试 / 对照用）。
+	HeadingAware bool
 }
 
 func NewDefaultChunker() *MarkdownChunker {
@@ -36,6 +38,7 @@ func NewDefaultChunker() *MarkdownChunker {
 		MaxChars:      1200, // 800 token * 1.5 chars-per-token
 		OverlapChars:  120,  // 80 token * 1.5
 		MaxChunkChars: 6000,
+		HeadingAware:  true,
 	}
 }
 
@@ -43,8 +46,8 @@ func NewDefaultChunker() *MarkdownChunker {
 var separators = []string{"\n## ", "\n### ", "\n#### ", "\n\n", "\n", "。", ". ", " "}
 
 func (c *MarkdownChunker) ChunkFile(text, sourceFile string) []Chunk {
-	if IsFAQFile(sourceFile) {
-		return c.chunkFAQ(text, sourceFile)
+	if c.HeadingAware {
+		return c.chunkByHeadings(text, sourceFile)
 	}
 	return c.chunkPlain(text, sourceFile)
 }
