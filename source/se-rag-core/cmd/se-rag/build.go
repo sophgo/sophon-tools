@@ -14,9 +14,10 @@ import (
 	"se-rag-core/internal/vector"
 )
 
-// buildTimeout build 全量 embedding 的整体 deadline（query 单次为 120s；build 覆盖全部批次，取 5min）。
+// buildTimeout build 全量 embedding 的整体 deadline（query 单次为 120s；build 覆盖全部批次，取 15min：
+// 单产品约 1400–1900 块，内置 key 限流下约 2–4 分钟，留足网络波动余量）。
 // 网关吞连接（Worker 失联）时保证 build 有限时退出，不无限挂起。
-const buildTimeout = 5 * time.Minute
+const buildTimeout = 15 * time.Minute
 
 // runCtx 供 build/query/doctor 共享的参数 + 可注入的 provider 工厂（测试/离线 fake）。
 // build 始终依据 docs 全量重建索引（docs 是唯一真源），无需 force 开关。
