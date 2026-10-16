@@ -67,8 +67,8 @@ func runQuery(rc runCtx) error {
 
 // runQueryOffline 纯 BM25 检索：不构造 embedder / reranker，不发起任何网络请求，
 // 因此也不校验 key。输出末行 mode=bm25，fallback 原因标明是主动离线。
+// 索引过期提示由调用方 runQuery 统一发出，此处不再重复。
 func runQueryOffline(rc runCtx) error {
-	warnStaleIndex(rc.indexDir, rc.product)
 	if rc.query == "" {
 		return fmt.Errorf("empty query")
 	}
