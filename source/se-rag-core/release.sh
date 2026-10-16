@@ -2,7 +2,7 @@
 # se-rag-core 统一构建接口 (对齐 sophon-tools M1 规范)
 # 用法: bash release.sh [ARCH] [VERSION]
 #   ARCH:    arm64 | amd64 | all（默认 all）
-#   VERSION: 显式版本号（默认 1.3.0）
+#   VERSION: 显式版本号（默认 1.3.1）
 #   env OUTPUT_DIR: 产物目录（默认 <repo>/output/se-rag-core/）
 # 产物: se-rag-linux-<arch>-<ver> （静态二进制，CGO_ENABLED=0）
 set -euo pipefail
@@ -10,7 +10,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ARCH="${1:-all}"
-VERSION="${2:-1.3.0}"
+VERSION="${2:-1.3.1}"
 OUTPUT_DIR="${OUTPUT_DIR:-$REPO_ROOT/output/se-rag-core}"
 
 mkdir -p "$OUTPUT_DIR"

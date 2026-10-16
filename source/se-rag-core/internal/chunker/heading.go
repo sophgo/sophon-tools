@@ -12,7 +12,9 @@ import (
 //	v0（meta 中为空）：所有文件统一按 800 token 递归切分
 //	heading-v2       ：所有 Markdown 按 #~#### 标题切块（每个问答 / 每个小节独立成块），
 //	                   块首带祖先标题路径，超长小节在行边界处二切
-const StrategyVersion = "heading-v2"
+//	heading-v3       ：同 heading-v2，但"目录"小节只在整节确实都是目录条目时才丢弃
+//	                   （heading-v2 会把标题叫"目录"、内容是章节导语的小节一并丢掉）
+const StrategyVersion = "heading-v3"
 
 const (
 	// sectionMaxChars 单个小节的字符上限；超过则在行边界处切成多块。
@@ -20,12 +22,23 @@ const (
 	// pieceSoftChars 二切时优先在空行处断开的最小累计长度；pieceHardChars 超过则强制在行边界断开。
 	pieceSoftChars = 1200
 	pieceHardChars = 2400
+	// tocEntryMaxChars 无列表 / 编号 / 点线特征的目录条目行字符上限；
+	// tocItemMaxChars 带列表项 / 编号特征的行也必须在限度内（正文里的编号步骤可以很长）。
+	// tocSentenceMarks 句读符号：目录条目没有，正文句子通常有；tocEndMarks 只用于行尾。
+	tocEntryMaxChars = 40
+	tocItemMaxChars  = 60
+	tocSentenceMarks = "。！？；：，、,;.!?"
+	tocEndMarks      = "。！？；;"
 )
 
 var (
 	headingRe = regexp.MustCompile(`^(#{1,4})\s+(\S.*?)\s*$`)
 	fenceRe   = regexp.MustCompile("^\\s*(```|~~~)")
 	sepRowRe  = regexp.MustCompile(`^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$`)
+	// 目录条目的三类特征：锚点链接、点线引导页码、列表项或编号短标题。
+	tocLinkRe    = regexp.MustCompile(`\]\(#`)
+	tocDotLeadRe = regexp.MustCompile(`(\.{3,}|…+)\s*[IVXivx0-9]+\s*$`)
+	tocItemRe    = regexp.MustCompile(`^([-*+]|\d+(\.\d+)*[.、)]?)\s+\S`)
 )
 
 type hsection struct {
@@ -178,7 +191,7 @@ func splitSections(lines []string) []hsection {
 		if sec.headLine == "" && frontmatterOnly(lines[sec.from:sec.to]) {
 			continue // 只有 frontmatter 的前言不单独成块
 		}
-		if isTOCTitle(sec.title) {
+		if isTOCTitle(sec.title) && tocOnly(lines[sec.from:sec.to]) {
 			continue // 自动生成的目录会列出全部标题，几乎命中任何查询
 		}
 		if headingOnly(lines[sec.from:sec.to]) && k+1 < len(raw) && raw[k+1].level > sec.level {
@@ -306,4 +319,50 @@ func frontmatterOnly(sec []string) bool {
 func isTOCTitle(title string) bool {
 	t := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(title), " ", ""))
 	return t == "目录" || t == "contents" || t == "tableofcontents"
+}
+
+// tocOnly 判断一个标题叫"目录"的小节是否整节都是目录条目——只有这样的才整节丢弃。
+// 真实语料里有小节标题叫"目录"、内容却是本章导语（"本章主要介绍…"）的情况，
+// 无条件丢弃会让这些导语离开索引（无法检索），因此丢弃前必须看内容。
+//
+// 逐行判定，空行与标题行不算内容；有任意一行不是目录条目就整节保留：
+//   - 引用 / 表格行：目录不会用这两种形式，视为正文；
+//   - 锚点链接（[标题](#锚点)）：GitHub 风格目录；
+//   - 点线引导页码（"1 安全 ..... 1"）：PDF 转换出的目录；
+//   - 列表项或编号短标题（"- 前言"、"3.7.8 小数据包吞吐量不足导致丢包"）；
+//   - 其余行只有在很短且不带句读符号时才算目录条目（"前言"、"目录"、"TPU 常见问题"）。
+//
+// 围栏代码块内的行一律视为正文。
+func tocOnly(sec []string) bool {
+	for _, l := range sec {
+		if fenceRe.MatchString(l) {
+			return false // 目录小节里有代码围栏，不是纯目录
+		}
+		t := strings.TrimSpace(l)
+		if t == "" || headingRe.MatchString(l) {
+			continue
+		}
+		if !isTOCEntry(t) {
+			return false
+		}
+	}
+	return true
+}
+
+// isTOCEntry 单行是否是目录条目。
+func isTOCEntry(t string) bool {
+	if strings.HasPrefix(t, ">") || strings.HasPrefix(t, "|") {
+		return false
+	}
+	if tocLinkRe.MatchString(t) || tocDotLeadRe.MatchString(t) {
+		return true
+	}
+	if strings.ContainsAny(t, tocEndMarks) {
+		return false // 以句读收尾是句子，不是条目
+	}
+	n := len([]rune(t))
+	if tocItemRe.MatchString(t) {
+		return n <= tocItemMaxChars
+	}
+	return n <= tocEntryMaxChars && !strings.ContainsAny(t, tocSentenceMarks)
 }

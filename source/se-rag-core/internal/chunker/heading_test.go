@@ -281,3 +281,95 @@ func TestTOCSectionIsDropped(t *testing.T) {
 		t.Error("only exact TOC titles are dropped")
 	}
 }
+
+// 标题叫"目录"、内容却是章节导语的小节必须保留：整节丢弃会让导语离开索引。
+// 真实语料：se7/se8 `sophon-testhub_clear.md` 的 `# 模型推理` → `## 目录` → 4 段导语。
+func TestTOCSectionWithProseIsNotDropped(t *testing.T) {
+	prose := "本章主要介绍C和Python常用接口，主要内容如下："
+	text := "# 模型推理\n\n## 目录\n\n" +
+		"C接口详细介绍请阅读《BMRuntime开发参考手册》。\n\n" +
+		"BMRuntime用于读取BMCompiler的编译输出(.bmodel)，驱动其在SOPHON智能视觉深度学习处理器中执行。\n\n" +
+		prose + "\n\n" +
+		"- BMLib接口：负责设备Handle的管理\n- BMRuntime的C语言接口\n\n## 下一节\n\n正文\n"
+	cs := chunkM(text)
+	joined := ""
+	for _, c := range cs {
+		joined += c.Text + "\n"
+	}
+	for _, want := range []string{"C接口详细介绍请阅读", "BMRuntime用于读取", prose} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("章节导语 %q 必须留在索引里: %q", want, joined)
+		}
+	}
+}
+
+// 目录小节里出现引用块 / 代码块时同样不能整节丢弃（真实语料：se9 `sophon-testhub_clear.md` 的
+// `# SoC模式内存修改工具` → `## 目录` → 引用块告警 + df 命令代码块）。
+func TestTOCSectionWithQuoteAndCodeIsNotDropped(t *testing.T) {
+	text := "# SoC模式内存修改工具\n\n## 目录\n\n" +
+		"- [工具1:在SoC上使用脚本进行修改](#工具1)\n\n" +
+		"> 需要目标SoC服务器上rootfs-rw分区（即根目录），有200M以上空间。\n" +
+		"> 使用如下命令查看目录的空间大小：\n\n" +
+		"```bash\n# 查看根目录\nsudo df -h /\n```\n\n" +
+		"## 工具1:在SoC上使用脚本进行修改\n\n说明\n"
+	cs := chunkM(text)
+	joined := ""
+	for _, c := range cs {
+		joined += c.Text + "\n"
+	}
+	for _, want := range []string{"rootfs-rw", "sudo df -h /"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("%q 必须留在索引里: %q", want, joined)
+		}
+	}
+}
+
+// 纯目录小节仍然整节丢弃，不会因为放宽判定而把目录带进索引。
+func TestPureTOCVariantsAreStillDropped(t *testing.T) {
+	cases := map[string]string{
+		"锚点链接":  "- [工具1:在SoC上使用脚本进行修改](#工具1)\n- [获取BM1688](#获取)\n",
+		"点线页码":  "前言 ..... I\n目录 ..... III\n1 安全 ..... 1\n",
+		"编号短标题": "1 声明\n2 前言\n2.1 文档概述\n3 外设常见问题\n3.1 iic-常见问题\n",
+		"嵌套列表":  "- 1 安全\n  - 1.1 通用安全\n  - 1.2 电气安全\n",
+		"无标记短语": "前言\n目录\nTPU 常见问题\n",
+	}
+	for name, body := range cases {
+		cs := chunkM("# 手册\n\n## 目录\n\n" + body + "\n## 正文节\n\n正文\n")
+		for _, c := range cs {
+			if strings.Contains(c.Text, "目录\n") && !strings.Contains(c.Text, "正文") {
+				t.Errorf("%s：目录小节不应单独成块: %q", name, c.Text)
+			}
+			for _, entry := range strings.Split(strings.TrimSpace(body), "\n") {
+				if e := strings.TrimSpace(entry); e != "" && strings.Contains(c.Text, e) {
+					t.Errorf("%s：目录条目 %q 不应进索引: %q", name, e, c.Text)
+				}
+			}
+		}
+	}
+}
+
+func TestIsTOCEntry(t *testing.T) {
+	entries := []string{
+		"- 前言", "* 目录", "1 安全", "2.4 声明", "3.7.8 小数据包吞吐量不足导致丢包",
+		"3.8.2 usb device 配置为指定功能", "前言 ..... I", "1 安全 ..... 1",
+		"- [工具1:在SoC上使用脚本进行修改](#工具1)", "前言", "TPU 常见问题",
+	}
+	for _, e := range entries {
+		if !isTOCEntry(e) {
+			t.Errorf("%q 应判为目录条目", e)
+		}
+	}
+	prose := []string{
+		"C接口详细介绍请阅读《BMRuntime开发参考手册》。",
+		"BMRuntime用于读取BMCompiler的编译输出(.bmodel)，驱动其在SOPHON智能视觉深度学习处理器中执行。",
+		"本章主要介绍C和Python常用接口，主要内容如下：",
+		"- BMLib接口：负责设备Handle的管理、内存管理、数据搬运、API的发送和同步、A53使能、设置智能视觉深度学习处理器工作频率等",
+		"> 需要目标SoC服务器上rootfs-rw分区（即根目录），有200M以上空间。",
+		"| TPU | Tensor Processing Unit | 张量处理单元 |",
+	}
+	for _, p := range prose {
+		if isTOCEntry(p) {
+			t.Errorf("%q 是正文，不应判为目录条目", p)
+		}
+	}
+}
