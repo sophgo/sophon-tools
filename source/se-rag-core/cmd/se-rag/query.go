@@ -18,6 +18,9 @@ func runQuery(rc runCtx) error {
 	if rc.product == "" {
 		rc.product = metaProductLabel
 	}
+	if rc.offline {
+		return runQueryOffline(rc)
+	}
 	// 先校验 key 配置（-builtin-key=false 缺 env key 属配置错误，优先报出）
 	cfg := config.DefaultConfig()
 	p := cfg.Products[0]
@@ -45,6 +48,24 @@ func runQuery(rc runCtx) error {
 	if err != nil {
 		return err
 	}
+	fmt.Print(retriever.FormatMarkdown(out))
+	return nil
+}
+
+// runQueryOffline 纯 BM25 检索：不构造 embedder / reranker，不发起任何网络请求，
+// 因此也不校验 key。输出末行 mode=bm25，fallback 原因标明是主动离线。
+func runQueryOffline(rc runCtx) error {
+	if rc.query == "" {
+		return fmt.Errorf("empty query")
+	}
+	r := &retriever.Retriever{Store: &docstore.Store{IndexDir: rc.indexDir}}
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	out, err := r.Search(ctx, rc.query, rc.product, rc.topN)
+	if err != nil {
+		return err
+	}
+	out.FallbackReason = "offline mode (-offline)"
 	fmt.Print(retriever.FormatMarkdown(out))
 	return nil
 }

@@ -27,6 +27,7 @@ type runCtx struct {
 	topN       int
 	query      string
 	useBuiltin bool
+	offline    bool // query 专用：不联网，纯 BM25
 	embedF     func(config.Provider) (embed.Embedder, error)
 	rerankF    func(config.Provider) (embed.Reranker, error)
 }

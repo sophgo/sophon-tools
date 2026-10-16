@@ -5,7 +5,7 @@ SE 系列知识库的 **Go RAG 检索核心**，替代现行 Python 栈（numpy 
 
 ## 特性
 
-- **混合检索**：向量语义检索（FAISS 暴力内积，L2 归一化）+ BM25 关键词检索 → RRF 融合（k=60）→ Reranker 精排
+- **混合检索**：向量语义检索（内存暴力内积，L2 归一化）+ BM25 关键词检索 → RRF 融合（k=60）→ Reranker 精排
 - **A/B 双路径**：
   - 路径 A（在线，主路径）：embedding 供应商向量化 → 向量 + BM25 → RRF → rerank
   - 路径 B（BM25 兜底）：无 key / 断网 / embedding 失败时自动降级为纯 BM25，保证开箱即用、离线可用
@@ -81,6 +81,9 @@ SE_RAG_FAKE_EMBED=1 ./bin/se-rag build --docs-dir example/se7/docs -index-dir ./
 # 在线路径 A（真实 embedding），返回每条含源文件相对路径:行号区间
 ./bin/se-rag query -index-dir ./rag-data -top-n 8 "SE7 如何配置网络"
 
+# 离线检索：不联网、不要求 key，纯 BM25（不外发查询内容；mode=bm25）
+./bin/se-rag query -offline -index-dir ./rag-data "SE7 如何配置网络"
+
 # 路径 B 兜底会自动触发：无 key / 断网 / embedding 失败时降级为 BM25
 ```
 
@@ -107,13 +110,13 @@ SE_RAG_FAKE_EMBED=1 ./bin/se-rag build --docs-dir example/se7/docs -index-dir ./
 ## 供应商配置
 
 默认（`config.DefaultConfig`）使用 siliconflow + 内置混淆 key，模型 `BAAI/bge-m3` + `BAAI/bge-reranker-v2-m3`。
-用户自备 key 时：
+用户自备 key 时（**flag 必须写在问题文本之前**——Go `flag` 遇到第一个非 flag 参数即停止解析，写在后面会被静默忽略）：
 
 ```bash
 export SE_RAG_EMBED_KEY="sk-user-embedding-key"
 export SE_RAG_RERANK_KEY="sk-user-rerank-key"
 ./bin/se-rag build --docs-dir example/se7/docs -index-dir ./rag-data -builtin-key=false
-./bin/se-rag query -index-dir ./rag-data "问题" -builtin-key=false
+./bin/se-rag query -builtin-key=false -index-dir ./rag-data "问题"
 ```
 
 - 内置 key 启用的限流：并发 ≤ 1、单次 ≤ 2 段落（**进程内信号量**——单进程内有效；
@@ -158,7 +161,7 @@ export SE_RAG_RERANK_KEY="sk-user-rerank-key"
 mkdir -p docs/se8
 # 放入 se8 产品手册 / SDK 文档
 ./bin/se-rag build --docs-dir docs/se8 -index-dir ./rag-se8
-./bin/se-rag query -index-dir ./rag-se8 "se8 问题" -top-n 8
+./bin/se-rag query -index-dir ./rag-se8 -top-n 8 "se8 问题"
 ./bin/se-rag doctor -index-dir ./rag-se8
 ```
 
@@ -178,5 +181,5 @@ go vet ./...
 
 ## 对外接口（供 skill 调用）
 
-`se-rag query "<问题>" -index-dir <dir> -top-n N` 输出紧凑 Markdown，
+`se-rag query -index-dir <dir> -top-n N "<问题>"` 输出紧凑 Markdown，
 每条结果头部标注 `源文件相对路径:行号区间`，格式与 Python 版 `query.py` 一致（来源文件:行号、相关性分数、文本摘要、耗时）。skill 层可直接用 subprocess 调用。

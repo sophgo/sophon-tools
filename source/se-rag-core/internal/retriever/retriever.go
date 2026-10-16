@@ -1,4 +1,4 @@
-// Package retriever 混合检索器：向量(FAISS 暴力内积) + BM25 → RRF 融合 → Rerank。
+// Package retriever 混合检索器：向量(内存暴力内积) + BM25 → RRF 融合 → Rerank。
 // 在线路径 A 失败（无 key / 断网 / embedding 异常）时降级为纯 BM25 路径 B。
 package retriever
 
