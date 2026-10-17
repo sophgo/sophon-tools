@@ -11148,7 +11148,7 @@ std::vector<std::map<std::string, Tensor*>> process(std::vector<std::map<std::st
 
 int main() {  
     std::vector<int> dev_id = {0, 1};  
-    std::string bmodel_path = "/home/jingyu/SAM-ViT-B_embedding_fp16_1b.bmodel";  
+    std::string bmodel_path = "/home/<user>/SAM-ViT-B_embedding_fp16_1b.bmodel";  
     sail::MultiEngine engine(bmodel_path, dev_id);  
 
     std::vector<std::string> graph_names = engine.get_graph_names();  

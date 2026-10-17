@@ -50,7 +50,7 @@ config info:
     - 输出示例:
 
         ``` bash
-        linaro@AE0026-host:/data/zztTemp/bmsec$ bmsec help
+        linaro@AE0026-host:/data/<path>/bmsec$ bmsec help
         bmsec version: 1.1.8
         help:
         The tool has two usage modes. The first usage mode is the command-line mode, which uses command-line arguments as parameters for each subfunction.
@@ -82,7 +82,7 @@ config info:
     - 输出示例:
     
         ``` bash
-        linaro@AE0026-host:/data/zztTemp/bmsec$ bmsec pconf
+        linaro@AE0026-host:/data/<path>/bmsec$ bmsec pconf
         config info: 
         7. linaro:linaro@(172.16.150.11):22 -> 20021
         8. linaro:linaro@(172.16.150.12):22 -> 20022
@@ -102,7 +102,7 @@ config info:
     - 输出示例:
     
         ``` bash
-        linaro@AE0026-host:/data/zztTemp/bmsec$ bmsec run 12 ls
+        linaro@AE0026-host:/data/<path>/bmsec$ bmsec run 12 ls
         Core Id: 12, Cmd: ls
         bsp-debs
         script
@@ -128,7 +128,7 @@ config info:
     - 输出示例:
     
         ``` bash
-        linaro@AE0026-host:/data/zztTemp/bmsec$ bmsec getbi
+        linaro@AE0026-host:/data/<path>/bmsec$ bmsec getbi
         ID CHIPID  SDK       CPU    TPU    SYSMEM TPUMEM VPUMEM VPPMEM TEMP(C/B)          
         7  BM1684  V23.03.01 1.08%  0%     35.37% 0%     0%     0%     48°C/41°C          
         8  BM1684  V22.12.01 0.88%  0%     18.44% 0%     0%     0%     56°C/51°C          
@@ -149,7 +149,7 @@ config info:
     - 输出示例:
     
         ``` bash
-        linaro@AE0026-host:/data/zztTemp/bmsec$ bmsec pf all /factory/OEMconfig.ini /data
+        linaro@AE0026-host:/data/<path>/bmsec$ bmsec pf all /factory/OEMconfig.ini /data
         Core Id: all, Local:/factory/OEMconfig.ini -> Remote:/data
         =============core7 to /data===============
         sending incremental file list
@@ -193,7 +193,7 @@ config info:
 
         sent 408 bytes  received 35 bytes  295.33 bytes/sec
         total size is 309  speedup is 0.70
-        linaro@AE0026-host:/data/zztTemp/bmsec$ bmsec run all "ls /data/OEM*"
+        linaro@AE0026-host:/data/<path>/bmsec$ bmsec run all "ls /data/OEM*"
         Core Id: all, Cmd: ls /data/OEM*
         ********core 7 run log************
         /data/OEMconfig.ini
@@ -220,7 +220,7 @@ config info:
     - 输出示例:
     
         ``` bash
-        linaro@AE0026-host:/data/zztTemp/bmsec$ bmsec df all /factory/OEMconfig.ini /data/SubOEMconfig.ini
+        linaro@AE0026-host:/data/<path>/bmsec$ bmsec df all /factory/OEMconfig.ini /data/SubOEMconfig.ini
         Core Id: all, Remote:/factory/OEMconfig.ini -> Local:/data/SubOEMconfig.ini
         =============core7 to /data/6_SubOEMconfig.ini===============
         receiving incremental file list
@@ -264,7 +264,7 @@ config info:
 
         sent 43 bytes  received 407 bytes  300.00 bytes/sec
         total size is 309  speedup is 0.69
-        linaro@AE0026-host:/data/zztTemp/bmsec$ ls /data
+        linaro@AE0026-host:/data/<path>/bmsec$ ls /data
         10_SubOEMconfig.ini  11_SubOEMconfig.ini  6_SubOEMconfig.ini  7_SubOEMconfig.ini  8_SubOEMconfig.ini  9_SubOEMconfig.ini
         ```
 
@@ -277,7 +277,7 @@ config info:
     - 输出示例:
     
         ``` bash
-        linaro@AE0026-host:/data/zztTemp/bmsec$ bmsec ssh 12
+        linaro@AE0026-host:/data/<path>/bmsec$ bmsec ssh 12
         Ssh To Core Id: 12
         Welcome to Ubuntu 20.04 LTS (GNU/Linux 5.4.217-bm1684-g1d0bad24641c aarch64)
 
@@ -306,7 +306,7 @@ config info:
     - 输出示例(由于SE6/8底层实现不同，所以这个命令执行的输出并不一致，需要使用puart功能查看算力核心的调试串口打印来确定算力核心是否成果重启电源):
     
         ``` bash
-        linaro@AE0026-host:/data/zztTemp/bmsec$ bmsec reset 12
+        linaro@AE0026-host:/data/<path>/bmsec$ bmsec reset 12
         Reset Core Id: 12
         SE6_INF: se6ctr_switch_cpld CPLD1
         SE6_DBG: se6ctr_i2c_switch_mux in ch2
@@ -323,7 +323,7 @@ config info:
     - 输出示例
     
         ``` bash
-        linaro@AE0026-host:/data/zztTemp/bmsec$ bmsec uart 12
+        linaro@AE0026-host:/data/<path>/bmsec$ bmsec uart 12
         Uart To Core Id: 12
         SE6_INF: se6ctr_switch_cpld CPLD1
         SE6_DBG: se6ctr_i2c_switch_mux in ch2
@@ -370,7 +370,7 @@ config info:
     - 输出示例(由于该功能只有打印，所以可以在算力核心重启时查看调试信息，正常运行时该命令没有输出调试信息):
     
         ``` bash
-        linaro@AE0026-host:/data/zztTemp/bmsec$ bmsec puart 12
+        linaro@AE0026-host:/data/<path>/bmsec$ bmsec puart 12
         Uart To Core Id: 12
         SE6_INF: se6ctr_switch_cpld CPLD1
         SE6_DBG: se6ctr_i2c_switch_mux in ch2
@@ -414,7 +414,7 @@ config info:
     - 输出示例:
     
         ``` bash
-        linaro@AE0026-host:/data/zztTemp/bmsec$ bmsec update 12
+        linaro@AE0026-host:/data/<path>/bmsec$ bmsec update 12
         update Id: 12
         Core Id: 12, Local:/recovery/tftp/spi_flash.bin -> Remote:/data/spi_flash.bin
         sending incremental file list
@@ -480,7 +480,7 @@ config info:
     - 输出示例:
     
         ``` bash
-        linaro@AE0026-host:/data/zztTemp/bmsec$ bmsec tftpc
+        linaro@AE0026-host:/data/<path>/bmsec$ bmsec tftpc
         ID      IP                      INFO
         7       172.16.150.11
         8       172.16.150.12
@@ -501,7 +501,7 @@ config info:
     - 输出示例:
     
         ``` bash
-        linaro@AE0026-host:/data/zztTemp/bmsec$ bmsec nfs /data/ /data/nfs
+        linaro@AE0026-host:/data/<path>/bmsec$ bmsec nfs /data/ /data/nfs
         Core Id: all, Cmd: sudo umount /data/nfs
         umount: /data/nfs: not mounted.
         umount: /data/nfs: not mounted.
@@ -563,7 +563,7 @@ config info:
 
         ********core 12 run log************
 
-        linaro@AE0026-host:/data/zztTemp/bmsec$ bmsec getbi
+        linaro@AE0026-host:/data/<path>/bmsec$ bmsec getbi
         ID CHIPID  SDK       CPU    TPU    SYSMEM TPUMEM VPUMEM VPPMEM TEMP(C/B)          
         7  BM1684  V23.03.01 1.08%  0%     7.42%  0%     0%     0%     49°C/42°C          
         8  BM1684  V22.12.01 1.02%  0%     8.44%  0%     0%     0%     57°C/52°C          
@@ -588,7 +588,7 @@ config info:
     
         ``` bash
 
-        linaro@AE0026-host:/data/zztTemp/bmsec$ bmsec cmem 7 p
+        linaro@AE0026-host:/data/<path>/bmsec$ bmsec cmem 7 p
         Core Id: 7, option:p -> npuSize: vpuSize: vppSize: dtsFile:
         Core Id: 7, Local:/opt/sophon/bmsec/binTools/memory_edit*.tar.xz -> Remote:/data/.memEdit/memory_edit.tar.xz
         sending incremental file list
@@ -618,7 +618,7 @@ config info:
         Info: now vpu size: 0x40000000 [1024 MiB]
         Info: now vpp size: 0x40000000 [1024 MiB]
         ~
-        linaro@AE0026-host:/data/zztTemp/bmsec$ bmsec cmem 7 c 1024 512 512
+        linaro@AE0026-host:/data/<path>/bmsec$ bmsec cmem 7 c 1024 512 512
         Core Id: 7, option:c -> npuSize:1024 vpuSize:512 vppSize:512 dtsFile:
         Core Id: 7, Local:/opt/sophon/bmsec/binTools/memory_edit*.tar.xz -> Remote:/data/.memEdit/memory_edit.tar.xz
         sending incremental file list
@@ -657,7 +657,7 @@ config info:
         Info: en_emmcfile ok, please run cmd and reboot system:
         sudo cp /data/.memEdit/memory_edit/emmcboot.itb /boot/emmcboot.itb && sync
         ~
-        linaro@AE0026-host:/data/zztTemp/bmsec$ bmsec cmem 7 p
+        linaro@AE0026-host:/data/<path>/bmsec$ bmsec cmem 7 p
         Core Id: 7, option:p -> npuSize: vpuSize: vppSize: dtsFile:
         Core Id: 7, Local:/opt/sophon/bmsec/binTools/memory_edit*.tar.xz -> Remote:/data/.memEdit/memory_edit.tar.xz
         sending incremental file list
@@ -698,7 +698,7 @@ config info:
     - 输出示例:
     
         ``` bash
-        linaro@AE0026-host:/data/zztTemp/bmsec$ bmsec rconf
+        linaro@AE0026-host:/data/<path>/bmsec$ bmsec rconf
         init info not, make it...
         core 1 is not power good
         core 2 is not power good
@@ -735,7 +735,7 @@ config info:
     - 输出示例:
     
         ``` bash
-        linaro@AE0026-host:/data/zztTemp/bmsec$ bmsec sysbak 7 /data/nfsBak/
+        linaro@AE0026-host:/data/<path>/bmsec$ bmsec sysbak 7 /data/nfsBak/
         Core Id: 7, Cmd: [ -e /system/data/buildinfo.txt ] && exit 1 || exit 0
         Core Id: 7, Cmd: for mount_point in $(mount | grep nfs | awk '{print $3}'); do sudo umount "$mount_point"; done
         Core Id: 7, Cmd: sudo mkdir -p /socrepack
@@ -817,7 +817,7 @@ config info:
                 <partition label="OPT"        size_in_kb="2097152" readonly="false"  format="2" />
                 <partition label="DATA"       size_in_kb="4194304" readonly="false"  format="2" />
         </physical_partition>
-        /data/nfsBak /data/zztTemp/bmsec
+        /data/nfsBak /data/<path>/bmsec
         start building ...
 
         To continue, superuser credentials are required.
@@ -1073,9 +1073,9 @@ config info:
     - 输出示例:
     
         ``` bash
-        linaro@AE0026-host:/data/zztTemp/bmsec$ bmsec pt add 172.26.166.66 8 10000 22 tcp
+        linaro@AE0026-host:/data/<path>/bmsec$ bmsec pt add 172.26.166.66 8 10000 22 tcp
         Opt : add, Core Id: 8, Remote:22 -> Local:10000
-        linaro@AE0026-host:/data/zztTemp/bmsec$ bmsec pt ls
+        linaro@AE0026-host:/data/<path>/bmsec$ bmsec pt ls
         TYPE HOST-IP          HOST-PORT    (CORE-IP ID)          CORE-PORT    
         tcp  172.26.166.66    20021        (172.16.150.11 7)  22           
         udp  172.26.166.66    21081:21082  (172.16.150.11 7)  21081-21082  
@@ -1096,9 +1096,9 @@ config info:
         tcp  172.26.166.66    9022         (172.16.150.12 8)  22           
         tcp  172.26.166.66    10000        (172.16.150.12 8)  22           
 
-        linaro@AE0026-host:/data/zztTemp/bmsec$ bmsec pt del 172.26.166.66 8 9022 22 tcp
+        linaro@AE0026-host:/data/<path>/bmsec$ bmsec pt del 172.26.166.66 8 9022 22 tcp
         Opt : del, Core Id: 8, Remote:22 -> Local:9022
-        linaro@AE0026-host:/data/zztTemp/bmsec$ bmsec pt ls
+        linaro@AE0026-host:/data/<path>/bmsec$ bmsec pt ls
         TYPE HOST-IP          HOST-PORT    (CORE-IP ID)          CORE-PORT    
         tcp  172.26.166.66    20021        (172.16.150.11 7)  22           
         udp  172.26.166.66    21081:21082  (172.16.150.11 7)  21081-21082  

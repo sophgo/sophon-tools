@@ -11613,7 +11613,7 @@ INT8模型mAP为： 34.70%
 
 
 ========================================
-文件: /home/zzt/workspace/sex_support_web/docs/get_docs/se9/a2_ws/tpu-mlir/docs/quick_start/source_zh/08_fuse_preprocess.rst
+文件: /home/<user>/workspace/sex_support_web/docs/get_docs/se9/a2_ws/tpu-mlir/docs/quick_start/source_zh/08_fuse_preprocess.rst
 ========================================
 
 .. _fuse preprocess:
@@ -11771,7 +11771,7 @@ VPSS作为输入
 
 
 ========================================
-文件: /home/zzt/workspace/sex_support_web/docs/get_docs/se9/a2_ws/tpu-mlir/docs/quick_start/source_zh/09_add_postprocess.rst
+文件: /home/<user>/workspace/sex_support_web/docs/get_docs/se9/a2_ws/tpu-mlir/docs/quick_start/source_zh/09_add_postprocess.rst
 ========================================
 
 .. _add_postprocess:

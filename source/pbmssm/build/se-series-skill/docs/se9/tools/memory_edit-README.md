@@ -23,16 +23,16 @@ source
 
 ``` bash
 
-root@bm1684:/data/zzt/new_nfs/memory_edit# ./memory_edit.sh
+root@bm1684:/data/new_nfs/memory_edit# ./memory_edit.sh
 INFO: version: 2.10
 Error: Invalid parameters. Please refer to the following example
-/data/zzt/new_nfs/memory_edit/memory_edit.sh -p [dts name] # for print infomation
-/data/zzt/new_nfs/memory_edit/memory_edit.sh -c -npu 0x80000000 -vpu 0x80000000 -vpp 0x80000000 [dts name] # for config mem, The memory size unit is Byte
-/data/zzt/new_nfs/memory_edit/memory_edit.sh -c -npu 2048 -vpu 2048 -vpp 2048 [dts name] # for config mem, The memory size unit is MiB
+/data/new_nfs/memory_edit/memory_edit.sh -p [dts name] # for print infomation
+/data/new_nfs/memory_edit/memory_edit.sh -c -npu 0x80000000 -vpu 0x80000000 -vpp 0x80000000 [dts name] # for config mem, The memory size unit is Byte
+/data/new_nfs/memory_edit/memory_edit.sh -c -npu 2048 -vpu 2048 -vpp 2048 [dts name] # for config mem, The memory size unit is MiB
 for bm1688, please use "memory_edit.sh -c -npu 2048 -vpu 0 -vpp 2048"
-/data/zzt/new_nfs/memory_edit/memory_edit.sh -d dtbfile # for de_emmcboot.itb
-/data/zzt/new_nfs/memory_edit/memory_edit.sh -e dtbfile # for en_emmcboot.itb
-/data/zzt/new_nfs/memory_edit/memory_edit.sh --clean # clean this dir
+/data/new_nfs/memory_edit/memory_edit.sh -d dtbfile # for de_emmcboot.itb
+/data/new_nfs/memory_edit/memory_edit.sh -e dtbfile # for en_emmcboot.itb
+/data/new_nfs/memory_edit/memory_edit.sh --clean # clean this dir
 
 ```
 

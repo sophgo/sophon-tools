@@ -1,6 +1,6 @@
 ---
 name: se-series-knowledge-base
-version: 4.1.0
+version: 4.3.0
 description: >-
   Technical knowledge base for Sophgo SE7, SE8, SE9 series micro-servers.
   SE7: BM1684X single SoC. SE8: BM1684X distributed cluster.
@@ -29,6 +29,7 @@ description: >-
 - SE7/SE8 用 libsophon v23.09-LTS，SE9 用 bm1688 分支
 - SAIL 包跨产品不通用，与 SoC 和 SDK 版本一一对应
 - SE8 先区分主控/算力节点：SDK、驱动、推理问题在算力节点排查
+- SE9 现有型号：16-BP1-11 / 16-BP1-18 / 8-BP1-11 / 8-BP1-17 / 8-EPC-A0 / 8-EPC-B0 / 16-EPC-20 / 16-EPC-21 / 16-EPC-A0（规格书在 `docs/se9/se9_sdk/`，型号对比表在 `docs/se9/00-introduce.md`）
 - SE8 集群规模见 `docs/se8/00-introduce.md`；各产品具体机型差异优先查对应规格书
 - 所有产品均为 SoC 模式，不回答 PCIE 模式问题
 
@@ -66,7 +67,7 @@ description: >-
 ```
 
 - 输出每条含 `源文件相对路径:行号区间` + 分数 + 文本摘要 + 耗时 + 模式（hybrid/bm25）。
-- 流水线：Embedding → FAISS 暴力内积 top-20 + BM25 top-20 → RRF 融合(k=60) → Rerank top-8。
+- 流水线：Embedding → 内存暴力内积 top-20 + BM25 top-20 → RRF 融合(k=60) → Rerank top-8。
 - **路径 B 兜底**：无 key / 断网 / embedding 失败时自动降级为纯 BM25，仍要回答问题。
 - 内置 key 走 CF→FC 网关故障转移链（CF Worker → 阿里云 FC），CF 不可达自动切 FC，零改动。
 - 重建索引（改了 docs / 换 embedding 供应商）：
@@ -78,7 +79,7 @@ description: >-
     -index-dir /data/sophon/reasonix-home/skills/se-series-knowledge-base/rag/data_se7
   ```
   （se8/se9 同理，换 `--docs-dir`/`-index-dir` 即可）
-- 换 embedding 供应商后先用 `doctor` 校验向量库指纹是否需重建。
+- 换 embedding 供应商或升级 se-rag 后先用 `doctor` 校验：向量库指纹或分块策略版本（`chunk_strategy`）落后都会提示重建。
 
 ## 源码检索（涉及 API/驱动/代码时）
 
@@ -103,7 +104,7 @@ description: >-
 
 ### 阶段二：评估与补漏
 
-**核心原则：摘要优先。** RAG 返回的 800-token 分块摘要已含关键信息，能直接用就不读原文。
+**核心原则：摘要优先。** RAG 返回的分块摘要（FAQ 一问一块，手册按小节切块、块首带标题路径）已含关键信息，能直接用就不读原文。
 
 - 摘要完整（命令/参数/步骤齐全）→ 直接用，不读原文。
 - 摘要模糊（有省略、缺参数、缺版本号）→ 标记需精读：`read` 对应源文件（`源文件相对路径:行号` 定位，缺多少读多少）。
