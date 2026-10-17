@@ -10530,9 +10530,9 @@ int main() {
     int step = 2;
     float threshold_surf = 0.01f;
     float threshold_match = 0.75f;
-    const char *input_path1 = "/home/zyz/TPU1686/tpu-kernel-1684x/samples/host/test_picture/output.rgb";
-    const char *input_path2 = "/home/zyz/TPU1686/tpu-kernel-1684x/samples/host/test_picture/output2.rgb";
-    const char *output_path_tpu = "/home/zyz/middleware-soc/bmvid/bmcv/test/image/output_tpu.bin";
+    const char *input_path1 = "/home/<user>/TPU1686/tpu-kernel-1684x/samples/host/test_picture/output.rgb";
+    const char *input_path2 = "/home/<user>/TPU1686/tpu-kernel-1684x/samples/host/test_picture/output2.rgb";
+    const char *output_path_tpu = "/home/<user>/middleware-soc/bmvid/bmcv/test/image/output_tpu.bin";
     bm_handle_t handle;
     int ret = bm_dev_request(&handle, 0);
     if (ret != BM_SUCCESS) {

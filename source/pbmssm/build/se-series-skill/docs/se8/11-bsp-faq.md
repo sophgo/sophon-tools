@@ -1,10 +1,6 @@
 ---
 title: BSP FAQ
 description: BSP常见问题
-tableOfContents:
-  maxHeadingLevel: 3
-sidebar:
-  hidden: true
 ---
 
 ## 网络问题
@@ -123,7 +119,6 @@ TFTP_ADDRESS=":69"
 TFTP_OPTIONS="-v --secure"
 ```
 2. 重启tftpd-hpa服务：`sudo systemctl restart tftpd-hpa`
-
 
 ## 其他问题
 ### 常见问题

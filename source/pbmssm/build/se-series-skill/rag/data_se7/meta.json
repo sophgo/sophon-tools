@@ -3,7 +3,8 @@
   "embedder_fingerprint": "siliconflow.BAAI/bge-m3",
   "dim": 1024,
   "model": "BAAI/bge-m3",
-  "chunk_count": 951,
+  "chunk_count": 1682,
   "created_at": "",
-  "build_version": "1.0"
+  "build_version": "1.0",
+  "chunk_strategy": "heading-v3"
 }

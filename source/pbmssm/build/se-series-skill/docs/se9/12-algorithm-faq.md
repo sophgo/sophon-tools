@@ -1,13 +1,9 @@
 ---
 title: 算法移植FAQ
 description: 算法移植常见问题
-tableOfContents:
-  maxHeadingLevel: 3
-sidebar:
-  hidden: true
 ---
 
-### 一、SE9如何加装存储？
+## SE9如何加装存储？
 
 答：
 
@@ -23,17 +19,17 @@ M.2 SSD 支持容量2TB(已验证)，为非标配配件，需要用户根据所�
 
 具体请参考[《SE9用户指导手册》](https://sophon-file.sophon.cn/sophon-prod-s3/drive/25/05/16/09/%E7%AE%97%E8%83%BD%E6%99%BA%E8%83%BD%E5%BE%AE%E6%9C%8D%E5%8A%A1%E5%99%A8SE9%E7%94%A8%E6%88%B7%E6%8C%87%E5%AF%BC%E6%89%8B%E5%86%8C_20250512-v2.6.pdf)选件安装章节和硬盘挂载章节：
 
-### 二、SE9如何加装4G/5G和LTE天线？
+## SE9如何加装4G/5G和LTE天线？
 
 答：参考[《SE9用户指导手册》](https://sophon-file.sophon.cn/sophon-prod-s3/drive/25/05/16/09/%E7%AE%97%E8%83%BD%E6%99%BA%E8%83%BD%E5%BE%AE%E6%9C%8D%E5%8A%A1%E5%99%A8SE9%E7%94%A8%E6%88%B7%E6%8C%87%E5%AF%BC%E6%89%8B%E5%86%8C_20250512-v2.6.pdf)LTE天线章节
 
-### 三、在哪里添加SE9的4G/5G、WIFI、BT、SATA模块，如何使用？
+## 在哪里添加SE9的4G/5G、WIFI、BT、SATA模块，如何使用？
 
 答：使用方法参考[《SE9用户指导手册》](https://sophon-file.sophon.cn/sophon-prod-s3/drive/25/05/16/09/%E7%AE%97%E8%83%BD%E6%99%BA%E8%83%BD%E5%BE%AE%E6%9C%8D%E5%8A%A1%E5%99%A8SE9%E7%94%A8%E6%88%B7%E6%8C%87%E5%AF%BC%E6%89%8B%E5%86%8C_20250512-v2.6.pdf)4G/5G模组使用、WIFI/BT模组使用、M.2 SSD的安装章节
 
 ![img](../../../assets/se9-algorithm-faq/SE9_4g5g_wifi_sata.png)
 
-### 四、SE9如何刷新固件？
+## SE9如何刷新固件？
 
 答：
 
@@ -51,11 +47,11 @@ M.2 SSD 支持容量2TB(已验证)，为非标配配件，需要用户根据所�
 
 注意：OTA方式适合在小版本之间升级。如果版本跨度较大，建议使用sdcard卡刷方式升级。
 
-### 五、SE9如何使用串口调试？
+## SE9如何使用串口调试？
 
 答：准备一条USB Type-c 接口的数据线，在笔记本电脑或台式电脑上安装串口驱动[CP210X](https://www.silabs.com/developers/usb-to-uart-bridge-vcp-drivers?tab=downloads)，使用USB Type-c线连接SE9的TYPE-C口与电脑，设置波特率115200。再给SE9上电，进入串口通讯界面，即可开始对SE9进行操作。原始账号和密码默认均为linaro。
 
-### 六、SE9常用命令参考
+## SE9常用命令参考
 
 答：
 
@@ -84,7 +80,7 @@ M.2 SSD 支持容量2TB(已验证)，为非标配配件，需要用户根据所�
 
 答：参考[《BMRuntime开发参考手册》tpu_model使用](https://doc.sophgo.com/bm1688_sdk-docs/v2.0/docs_latest_release/docs/tpu-runtime/reference/bmodel/bmodel.html#tpu-model)
 
-### 七、如何连接SE9？
+## 如何连接SE9？
 
 答：有三种方式查看SE9 IP。
 
@@ -101,12 +97,11 @@ SE9连上网线，插上HDMI线，HDMI连接显示器，在显示器上查看IP�
 
 - 用串口type-c连进去查看。(安装[CP210X](https://www.silabs.com/developers/usb-to-uart-bridge-vcp-drivers?tab=downloads)驱动，用串口工具连接，波特率115200)
 
-### 八、SE9如何修改IP？
+## SE9如何修改IP？
 
 答：SE9搭载的是ubuntu系统，配置文件在/etc/netplan/01-netcfg.yaml文件中。WAN IP地址修改有多种方式。
 
 - 使用netplan工具来配置网络接口的静态IP地址
-
 
 修改/etc/netplan/01-netcfg.yaml：
 
@@ -124,7 +119,7 @@ sudo netplan apply
 
 - 参考[《SE9用户指导手册》](https://sophon-file.sophon.cn/sophon-prod-s3/drive/25/05/16/09/%E7%AE%97%E8%83%BD%E6%99%BA%E8%83%BD%E5%BE%AE%E6%9C%8D%E5%8A%A1%E5%99%A8SE9%E7%94%A8%E6%88%B7%E6%8C%87%E5%AF%BC%E6%89%8B%E5%86%8C_20250512-v2.6.pdf)网络设置章节
 
-### 九、如何修改内存布局？
+## 如何修改内存布局？
 
 答：请参考《SE9内存布局修改套件指导文档.pdf》或[内存布局修改工具说明文档](https://github.com/sophgo/sophon-tools/tree/main/source/pmemory_edit)，SoC模式内存修改工具(memory_edit_x.xx.tar.xz)下载链接：https://github.com/sophgo/sophon-tools/releases
 
@@ -134,14 +129,14 @@ sudo netplan apply
 ./memory_edit.sh -c -npu 2048 -vpu 0 -vpp 4096
 ```
 
-### 十、如何制作刷机包？
+## 如何制作刷机包？
 
 答：有两种方式，一种是通过github代码构建安装包，另一种是基于sdcard.tgz基础软件包定制化。
 
 - 参考《算能边缘产品BSP开发参考手册》构建安装包
 - 使用socbak工具制作(参考：[socbak工具说明文档](https://github.com/sophgo/sophon-tools/tree/main/source/psocbak)，(socbak.zip)下载链接：https://github.com/sophgo/sophon-tools/releases)
 
-### 十一、SE9盒子上自带的几个服务是做什么的？
+## SE9盒子上自带的几个服务是做什么的？
 
 答：
 
@@ -170,7 +165,7 @@ sudo systemctl disable bmssm
 disable服务后，再删掉/etc/systemd/system下的服务，重启后服务就不会自动起来了
 ```
 
-### 十二、SE9设备是否有看门狗？在cpu、内存爆满后，盒子就处于假死状态了
+## SE9设备是否有看门狗？在cpu、内存爆满后，盒子就处于假死状态了
 
 答：watchdog默认是在内核开启的。使用这命令开watchdog：
 
@@ -186,7 +181,7 @@ sudo busybox watchdog -t 3 -T 5 /dev/watchdog0
 
 请参考[《算能边缘产品BSP开发参考手册》Watchdog操作指南](https://doc.sophgo.com/bm1688_sdk-docs/v2.1/docs_latest_release/docs/athena2-img/4_system_software_composition.html#watchdog)
 
-### 十三、如何查看SN/MAC？
+## 如何查看SN/MAC？
 
 答：用命令查看。其中device_sn为设备整机sn。
 
@@ -194,7 +189,7 @@ sudo busybox watchdog -t 3 -T 5 /dev/watchdog0
 cat /factory/OEMconfig.ini
 ```
 
-### 十四、查看内存情况
+## 查看内存情况
 
 答：
 
@@ -207,15 +202,15 @@ sudo cat /sys/kernel/debug/ion/cvi_vpp_heap_dump/summary | head -3
 sudo cat /sys/kernel/debug/ion/cvi_npu_heap_dump/summary | head -3
 ```
 
-### 十五、SE9上QT编译
+## SE9上QT编译
 
 答：参考《SE9 QT编译.pdf》
 
-### 十六、程序编译，如何快速从1684/1684X转到CV186AH/BM1688？
+## 程序编译，如何快速从1684/1684X转到CV186AH/BM1688？
 
 答：参考[《BM1688_CV186AH SOPHONSDK开发指南》附录BM1684(X)_to_BM1688(CV186AH)兼容性文档](https://doc.sophgo.com/bm1688_sdk-docs/v2.0/docs_latest_release/docs/BM1688_CV186AH_SophonSDK_doc/Appendix/8_compatibility_doc.html)
 
-### 十七、如何在命令行使用ffmpeg取USB摄像头视频流？
+## 如何在命令行使用ffmpeg取USB摄像头视频流？
 
 答：使用sophon-ffmpeg读取USB摄像头视频流，具有硬件加速功能
 
@@ -223,7 +218,7 @@ sudo cat /sys/kernel/debug/ion/cvi_npu_heap_dump/summary | head -3
 ffmpeg -f v4l2 -pix_fmt mjpeg -s:v 1920x1080 -r 30 -zero_copy 0 -c:v jpeg_bm -i /dev/video6 -is_dma_buffer 1 -vf scale_bm=format=yuv420p:zero_copy=1 -r 25 -c:v h264_bm -b:v 3M -f flv rtmp://localhost/webcam/screen
 ```
 
-### 十八、如何在命令行使用ffmpeg读取alsa音频？
+## 如何在命令行使用ffmpeg读取alsa音频？
 
 答：alsa为软件功能，无硬件加速。
 
@@ -231,7 +226,7 @@ ffmpeg -f v4l2 -pix_fmt mjpeg -s:v 1920x1080 -r 30 -zero_copy 0 -c:v jpeg_bm -i 
 ffmpeg -f alsa -i hw:0 -t 30 out.wav
 ```
 
-### 十九、如何使用python版sophon-opencv？
+## 如何使用python版sophon-opencv？
 
 答：
 
@@ -239,26 +234,26 @@ ffmpeg -f alsa -i hw:0 -t 30 out.wav
 export PYTHONPATH=$PYTHONPATH:/opt/sophon/sophon-opencv-latest/opencv-python 
 ```
 
-### 二十、如何将bm_image转为cv.Mat?
+## 如何将bm_image转为cv.Mat?
 
 答：
 
 - Python中cv.Mat就是一个**numpy**.array，请参考[《SAIL使用手册》](https://doc.sophgo.com/bm1688_sdk-docs/v2.1/docs_latest_release/docs/sophon-sail/docs/)接口：asmat、asnumpy、mat_to_bm_image、bm_image_to_tensor、tensor_to_bm_image接口
 - C++中使用cv::bmcv::toMat()接口。
 
-### 二十一、sophon-opencv的版本？
+## sophon-opencv的版本？
 
 答：基于开源opencv 4.8.0版本改造。1684/1684x上是基于4.1.0
 
-### 二十二、sophon-ffmpeg的版本？
+## sophon-ffmpeg的版本？
 
 答：基于开源ffmpeg 6.0.0版本改造。1684/1684x上是基于5.0.0
 
-### 二十三、GPIO使用，如何输出开关量信号？
+## GPIO使用，如何输出开关量信号？
 
 答：参考[《BSP开发参考手册》GPIO操作指南](https://doc.sophgo.com/bm1688_sdk-docs/v2.1/docs_latest_release/docs/athena2-img/4_system_software_composition.html#gpio)和[《SE9用户指导手册》](https://sophon-file.sophon.cn/sophon-prod-s3/drive/25/05/16/09/%E7%AE%97%E8%83%BD%E6%99%BA%E8%83%BD%E5%BE%AE%E6%9C%8D%E5%8A%A1%E5%99%A8SE9%E7%94%A8%E6%88%B7%E6%8C%87%E5%AF%BC%E6%89%8B%E5%86%8C_20250512-v2.6.pdf)GPIO使用方法章节
 
-### 二十四、继电器使用方法
+## 继电器使用方法
 
 答：参考[《SE9用户指导手册》](https://sophon-file.sophon.cn/sophon-prod-s3/drive/25/05/16/09/%E7%AE%97%E8%83%BD%E6%99%BA%E8%83%BD%E5%BE%AE%E6%9C%8D%E5%8A%A1%E5%99%A8SE9%E7%94%A8%E6%88%B7%E6%8C%87%E5%AF%BC%E6%89%8B%E5%86%8C_20250512-v2.6.pdf)继电器使用章节
 
@@ -266,19 +261,19 @@ export PYTHONPATH=$PYTHONPATH:/opt/sophon/sophon-opencv-latest/opencv-python
 
 继电器：GPIO198。GPIOOUT1：GPIO0。GPIOOUT2：GPIO1。
 
-### 二十五、CAN使用方法
+## CAN使用方法
 
 答：参考[《BSP开发参考手册》CAN操作指南](https://doc.sophgo.com/bm1688_sdk-docs/v2.1/docs_latest_release/docs/athena2-img/4_system_software_composition.html#can)和[《SE9用户指导手册》](https://sophon-file.sophon.cn/sophon-prod-s3/drive/25/05/16/09/%E7%AE%97%E8%83%BD%E6%99%BA%E8%83%BD%E5%BE%AE%E6%9C%8D%E5%8A%A1%E5%99%A8SE9%E7%94%A8%E6%88%B7%E6%8C%87%E5%AF%BC%E6%89%8B%E5%86%8C_20250512-v2.6.pdf)CAN使用方法章节
 
-### 二十六、485/232使用方法?
+## 485/232使用方法?
 
 答：参考[《SE9用户指导手册》](https://sophon-file.sophon.cn/sophon-prod-s3/drive/25/05/16/09/%E7%AE%97%E8%83%BD%E6%99%BA%E8%83%BD%E5%BE%AE%E6%9C%8D%E5%8A%A1%E5%99%A8SE9%E7%94%A8%E6%88%B7%E6%8C%87%E5%AF%BC%E6%89%8B%E5%86%8C_20250512-v2.6.pdf)485/232使用方法章节
 
-### 二十七、使用TPU-MLIR，设置混精度的层名后，混精度未生效？
+## 使用TPU-MLIR，设置混精度的层名后，混精度未生效？
 
 答：设置不需要量化的层名时需要使用**mlir2onnx工具把.mlir转成.onnx**后，查看并设置对应层名。**注：若使用原始.onnx文件的层名，有可能设置无效。mlir2onnx工具使用如下：**`mlir2onnx.py -m xxx.mlir -o revert.onnx`
 
-### 二十八、使用TPU-MLIR，FP32/FP16模型推理可以得到正确结果，INT8模型无法得到正确结果？
+## 使用TPU-MLIR，FP32/FP16模型推理可以得到正确结果，INT8模型无法得到正确结果？
 
 答：如果使用全网络层INT8量化时bmodel精度损失较大，就需要使用混合精度的方式，把用INT8精度损失较大的网络层转成FP32/16的方式来提升精度。使用混合精度量化的推荐方法：
 
@@ -288,11 +283,11 @@ export PYTHONPATH=$PYTHONPATH:/opt/sophon/sophon-opencv-latest/opencv-python
 
 若仍然不满足，则需要用多次手动尝试局部不量化，将部分层之前、之后、之间添加到混精度表中，参考[fp_forward工具](https://doc.sophgo.com/bm1688_sdk-docs/v2.1/docs_latest_release/docs/tpu-mlir/quick_start_en/07_quantization.html#fp-forward)的使用
 
-### 二十九、使用TPU-MLIR，如何混精度？
+## 使用TPU-MLIR，如何混精度？
 
 答：参考[《TPU-MLIR快速入门指南.pdf》](https://doc.sophgo.com/bm1688_sdk-docs/v2.1/docs_latest_release/docs/tpu-mlir/quick_start_en/07_quantization.html#tpu-mlir)。推荐使用fp_forward工具生成混精度表以提升精度。其中，fpfwd_inputs参数表示设置当前层及之前的网络层不量化，fpfwd_outputs参数表示设置当前层及之后的网络层不量化，fpfwd_blocks参数表示设置当前层不量化。其中，设置不需要量化的层名时需要使用**mlir2onnx工具把.mlir转成.onnx**后，查看并设置对应层名。**注：若使用原始.onnx文件的层名，有可能设置无效。**请参考https://github.com/sophgo/sophon-demo/blob/release/docs/Calibration_Guide.md。
 
-### 三十、工厂发出的SE9-8 8G版本和SE9-16 16G版本，查询SE9-8的内存是4G，SE9-16的内存是8G。这是为什么？
+## 工厂发出的SE9-8 8G版本和SE9-16 16G版本，查询SE9-8的内存是4G，SE9-16的内存是8G。这是为什么？
 
 答：
 
@@ -303,13 +298,13 @@ export PYTHONPATH=$PYTHONPATH:/opt/sophon/sophon-opencv-latest/opencv-python
 3. 输入对应数字(SE9-8选28，SE9-16选25)
 4. 重启
 
-### 三十一、客户拿到盒子后，使用bmrt_test --bmodel xxx.bmodel报错
+## 客户拿到盒子后，使用bmrt_test --bmodel xxx.bmodel报错
 
 答：盒子出厂的版本有些问题，重新刷机后解决。
 
 ![img](../../../assets/se9-algorithm-faq/bmrt_test.png)
 
-### 三十二、SE9接上HDMI后，为什么没有出现ubuntu的桌面？
+## SE9接上HDMI后，为什么没有出现ubuntu的桌面？
 
 答：SE9默认不安装ubuntu界面，如果需要ubuntu桌面系统，可以手动安装。
 
@@ -337,7 +332,6 @@ sudo systemctl disable SophonHDMI
 sudo systemctl disable SophonHDMIStatus
 sudo reboot
 
-
 # 如果遇到hdmi花屏则执行
 sudo su
 echo off > /sys/class/drm/card0/card0-DSI-1/status
@@ -346,33 +340,31 @@ exit
 
 注意：ubuntu 界面会占用比较大的存储/内存空间。
 
-### 三十四、SE9的SDK下载链接
+## SE9的SDK下载链接
 
 答：SE9的SDK下载链接可以在官网找到，官网链接为https://developer.sophon.cn/site/index/material/101/all.html
 
 其中，BM1688&CV186AH下的SDK为SE9能够使用的SDK，它与BM1684&BM1684X不是同一套。
 
-### 三十五、如何查看模型属于单核模型还是双核模型？
+## 如何查看模型属于单核模型还是双核模型？
 
 答：有两种方式
 
 - 使用tpu_model --info xxx.bmodel
 
-
 ![img](../../../assets/se9-algorithm-faq/tpu_model_info.png)
 
 - 使用bmrt_test --bmodel xxx.bmodel
 
-
 ![img](../../../assets/se9-algorithm-faq/bmrt_test_corenum.png)
 
-### 三十六、双核模型在SE9-8(CV186AH)上运行会如何？
+## 双核模型在SE9-8(CV186AH)上运行会如何？
 
 答：双核模型没法运行在SE9-8(CV186AH)上。如果使用bmrt_test --bmodel xxx.bmodel，会报FATAL:(14)the bmodel is not compatible with the current target.
 
 ![img](../../../assets/se9-algorithm-faq/bmrt_test_2core_se9_8.png)
 
-### 三十七、sophon-opencv和sophon-ffmpeg具体做了哪些硬件加速？
+## sophon-opencv和sophon-ffmpeg具体做了哪些硬件加速？
 
 答:
 
@@ -386,17 +378,17 @@ sophon-ffmpeg API包含了所有硬件加速的视频/图像编解码接口，�
 
 参考《算能边缘产品MULTIMEDIA开发参考手册》[SOPHGO OpenCV使用指南](https://doc.sophgo.com/bm1688_sdk-docs/v2.0/docs_latest_release/docs/multimedia/guide/guide/Multimedia_Guide_zh.html#sophgo-opencv)和[SOPHGO FFMPEG使用指南](https://doc.sophgo.com/bm1688_sdk-docs/v2.0/docs_latest_release/docs/multimedia/guide/guide/Multimedia_Guide_zh.html#sophgo-ffmpeg)
 
-### 三十八、使用docker搭建测试环境
+## 使用docker搭建测试环境
 
 答：参考[《LIBSOPHON使用手册》使用Docker搭建测试环境](https://doc.sophgo.com/bm1688_sdk-docs/v2.1/docs_latest_release/docs/libsophon/guide/4_docker_usage.html)
 
-### **三十九、盒子上运行sophon-demo python例程或cpp例程报decode failure问题**
+## 盒子上运行sophon-demo python例程或cpp例程报decode failure问题
 
 答：用户权限问题，用linaro用户登录并运行即可
 
 ![img](../../../assets/se9-algorithm-faq/linaro.png)
 
-### 四十、如何修改liteos的web界面logo？
+## 如何修改liteos的web界面logo？
 
 答：
 
@@ -405,7 +397,7 @@ sophon-ffmpeg API包含了所有硬件加速的视频/图像编解码接口，�
 
 换完后重启服务即可：systemctl restart sophliteos
 
-### 四十一、如何修改HDMI配网工具界面LOGO？
+## 如何修改HDMI配网工具界面LOGO？
 
 答：
 
@@ -413,7 +405,7 @@ sophon-ffmpeg API包含了所有硬件加速的视频/图像编解码接口，�
 2. 取消注释export SOPHON_QT_BG_PATH=sample.png，并设置为想要替换的LOGO
 3. 重启服务：sudo systemctl restart SophonHDMI
 
-### 四十二、SE9盒子安装桌面后，出现死机/休眠状态，怎么解决？
+## SE9盒子安装桌面后，出现死机/休眠状态，怎么解决？
 
 答：
 
@@ -423,7 +415,7 @@ sophon-ffmpeg API包含了所有硬件加速的视频/图像编解码接口，�
 sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
 ```
 
-### 四十三、如何得到模型的算力占用情况
+## 如何得到模型的算力占用情况
 
 答：
 
@@ -438,7 +430,7 @@ eg.
 flops: 28883247200, runtime: 6.544257ms, ComputationAbility: 4.413526T
 ```
 
-### 四十四、设备长时间运行，出现卡死、重启或报错问题
+## 设备长时间运行，出现卡死、重启或报错问题
 
 答：
 
@@ -455,7 +447,7 @@ sudo cat /sys/kernel/debug/ion/cvi_npu_heap_dump/summary | head -3
 
 进一步排查可以使用[get_info工具](https://github.com/sophgo/sophon-tools/tree/main/source/pget_info)监控设备运行信息
 
-### 四十五、运行yolov8/11系列模型报Only support OPT model
+## 运行yolov8/11系列模型报Only support OPT model
 
 ![img](../../../assets/se9-algorithm-faq/error_opt_model.png)
 
@@ -463,7 +455,7 @@ sudo cat /sys/kernel/debug/ion/cvi_npu_heap_dump/summary | head -3
 
 请参考重新导出onnx后转bmodel：https://github.com/sophgo/sophon-demo/blob/release/sample/YOLOv8_plus_det/docs/YOLOv8_Export_Guide.md
 
-### 四十六、编译程序时，报GLIBC问题
+## 编译程序时，报GLIBC问题
 
 ![img](../../../assets/se9-algorithm-faq/glibc.png)
 
@@ -471,7 +463,7 @@ sudo cat /sys/kernel/debug/ion/cvi_npu_heap_dump/summary | head -3
 
 我们也提供了[docker镜像](https://github.com/sophgo/sophon-demo/blob/release/docs/Environment_Install_Guide.md#41-%E4%BA%A4%E5%8F%89%E7%BC%96%E8%AF%91%E7%8E%AF%E5%A2%83%E6%90%AD%E5%BB%BA)作为交叉编译环境
 
-### 四十七、运行python例子报No module named 'sophon'问题
+## 运行python例子报No module named 'sophon'问题
 
 ![img](../../../assets/se9-algorithm-faq/nosail.png)
 
@@ -486,15 +478,15 @@ python3 -m dfss --install sail
 
 - 如果设备固件版本小于2.0.0，则需要自行下载github源码[sophon-sail](https://github.com/sophgo/sophon-sail)并编译whl后安装即可.
 
-### 四十八、sophon-demo常见问题：
+## sophon-demo常见问题：
 
 答：https://github.com/sophgo/sophon-demo/blob/release/docs/FAQ.md
 
-### 四十九、sophon-stream常见问题：
+## sophon-stream常见问题：
 
 答：https://github.com/sophgo/sophon-stream/blob/master/docs/FAQ.md
 
-### 五十、运行算法出现load library send api error，load model failed或net_indx < (int)m_network_names.size() failed问题
+## 运行算法出现load library send api error，load model failed或net_indx < (int)m_network_names.size() failed问题
 
 答：在设备上输入bm-smi命令查看chipT Status是active还是fault。如果是tpu fault，首先检查SDK固件版本是否为官网最新的版本，不是的话先升级到最新版本再测试问题是否还存在。如果问题还存在，联系技术人员，并提供：
 

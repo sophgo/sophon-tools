@@ -17085,7 +17085,7 @@ Mat::create(int height, int width, int total, int _type, const size_t* _steps, v
 
 ---
 
-文件: /home/zzt/workspace/sex_support_web/docs/get_docs/se9/a2_ws/sophgo-develop-docs/multimedia/source_zh/guide/Multimedia_Guide_zh.rst
+文件: /home/<user>/workspace/sex_support_web/docs/get_docs/se9/a2_ws/sophgo-develop-docs/multimedia/source_zh/guide/Multimedia_Guide_zh.rst
 
 # SOPHGO多媒体框架介绍
 

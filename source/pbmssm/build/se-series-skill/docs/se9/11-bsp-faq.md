@@ -1,128 +1,9 @@
 ---
 title: BSP FAQ
 description: BSP常见问题
-tableOfContents:
-  maxHeadingLevel: 3
-sidebar:
-  hidden: true
 ---
 
-## 目录
-
-1 声明
-
-2 前言
-2.1 文档概述
-2.2 读者对象
-2.3 约定的符号、标志、专用语解释
-2.4 声明
-
-3 外设常见问题
-3.1 iic-常见问题
-3.1.1 客户量不到波形，客户读不到数据
-3.1.2 i2ctool 工具使用方法
-3.1.3 波形示例
-3.1.4 I2C 子节点实现
-3.1.5 模拟 I2C 实现
-3.2 pwm-常见问题
-3.2.1 PWM 引脚无波形输出
-3.3 uart-常见问题
-3.3.1 SM9&SE9 设备串口无打印
-3.3.2 收发不到数据常见调试方式
-3.4 spi-常见问题
-3.4.1 SPI CS 管脚控制问题
-3.5 can-常见问题
-3.5.1 CAN_ID 混乱
-3.5.2 高速传输时出现帧混乱
-3.5.3 sata-常见问题
-3.5.4 sata-phy 硬件检查
-3.6 spacc-常见问题
-3.6.1 spacc 驱动的使用
-3.6.2 对称加解密算法运算结果有问题
-3.7 eth-网络常见问题
-3.7.1 ethtool 使用
-3.7.2 phytool 使用
-3.7.3 iperf3 使用
-3.7.4 bm_set_ip 使用
-3.7.5 ping 域名不通
-3.7.6 修改 mtu 大小报错
-3.7.7 客户验证网桥功能时遇到问题
-3.7.8 小数据包吞吐量不足导致丢包
-3.7.9 SE9 不支持并行检测
-3.8 usb-常见问题
-3.8.1 切换 usb 的角色
-3.8.2 usb device 配置为指定功能
-3.8.3 device 作为存储设备的操作指南
-3.8.4 Device 作为 RNDIS 设备的操作指南
-3.8.5 Device 作为 UVC 设备的操作指南
-3.8.6 报错原因分析
-3.9 pcie-常见问题
-3.9.1 rc 问题
-3.9.2 EP 问题
-3.10 nvme-常见问题
-3.11 sd-常见问题
-3.11.1 sd-uhs 模式切换问题
-3.12 内置 mcu-常见问题
-3.12.1 mcu-启动流程
-3.12.2 mcu 的代码设计
-3.13 gpio 和 pinmux-常见问题
-3.13.1 选择 GPIO 方法
-3.13.2 write error: Device or resource busy
-3.13.3 uboot 下怎么使用 gpio
-3.14 代码操作 GPIO
-3.14.1 pinmux 怎么查看表格，查看寄存器
-3.15 RS485-常见问题
-3.15.1 RS485 通信异常问题
-3.16 wifi&bt-常见问题
-3.17 4/5G-常见问题
-3.17.1 故障排查常用 AT 命令
-3.17.2 无法识别 SIM 卡
-3.17.3 4G/5G 模组不支持 SIM 卡热拔插
-3.17.4 专网拨号
-3.17.5 双模组支持
-3.18 watchdog-常见问题
-3.18.1 看门狗驱动编译开启
-3.19 Athena2 watchdog 开启时间
-3.19.1 如何喂狗
-3.19.2 如何关闭看门狗
-3.20 固件升级常见问题
-3.20.1 通过 SD 卡升级失败：
-3.20.2 通过 OTA 升级失败：
-3.20.3 USB 升级常见问题
-TPU 常见问题
-4.1 常用命令介绍
-4.2 tpu hang 常见问题
-4.3 bm-smi 常见问题
-5 内存常见问题
-5.1 内存大小
-5.2 内存调整
-5.3 ION 查看
-6 休眠唤醒常见问题
-7 recovery 常见问题
-7.1 进入 recovery
-7.2 recovery 模式问题排查
-8 OEM 常见问题
-9 OS 常见问题汇总
-9.1 目前 1688&CV186AH 支持的 OS 如下所示
-9.2 算能麒麟二次开发定制指南
-9.3 麒麟版本
-9.4 定制 ftp.bin
-9.5 定制内核 kernel
-9.6 导出二次开发麒麟包
-
-## 声明
-
-# SOPHON
-
-### 法律声明
-
-版权所有 © 算能 2022. 保留一切权利。
-
-非经本公司书面许可，任何单位和个人不得擅自摘抄、复制本文档内容的部分或全部，并不得以任何形式传播。
-
-### 注意
-
-您购买的产品、服务或特性等应受算能商业合同和条款的约束，本文档中描述的全部或部分产品、服务或特性可能不在您的购买或使用范围之内。除非合同另有约定，算能对本文档内容不做任何明示或默示的声明或保证。由于产品版本升级或其他原因，本文档内容会不定期进行更新。除非另有约定，本文档仅作为使用指导，本文档中的所有陈述、信息和建议不构成任何明示或暗示的担保。
+> 来源：《算能边缘产品BSP开发参考手册FAQ》，发行日期 2025年07月10日。
 
 ## 技术支持
 
@@ -146,67 +27,9 @@ sales@sophgo.com
 
 +86-10-57590723 +86-10-57590724
 
-## 前言
+## iic-常见问题
 
-### 2.1 文档概述
-
-本文档详细介绍了 BM1688 系列 AI 计算模组（含开发板）的外观特点、应用场景、设备参数、电气特性、配套软件、使用环境等，使得该设备的用户及开发者对 BM1688 系列 AI 计算模组（含开发板）有比较全面深入的了解。设备用户及开发者可依据此手册，开展对该设备的安装、调试、部署、维护等一系列工作。
-
-### 2.2 读者对象
-
-本文档主要适用于如下人员：
-
-算丰 FAE 工程师、售前工程师
-
-生态合作伙伴的开发人员
-
-- 用户企业研发工程师、售前工程师
-
-### 2.3 约定的符号、标志、专用语解释
-
-在本文中可能出现如下符号、标志，它们所代表的含义如下：
-
-表 2.1: 符号、标志、专用语解释
-
-| | | |
-| --- | --- | --- |
-| 危险 | 表示有高度危险，如果不能避免，可能导致人员伤亡或严重伤害 |
-| 警告 | 表示有中度或低度潜在危险，如果不能避免，可能导致人员轻微或中等伤害 |
-| 注意 | 表示有潜在风险，如果忽视这部分文本，可能导致设备损坏、数据丢失、设备性能降低或不可预知的结果 |
-| A | 防静电 | 防静电标识，表示静电敏感的设备或操作 |
-| A | 当心触电 | 电击防护标识，标识高压危险，需做好防护 |
-| A | 窍门 | 表示能帮助您解决某个问题或节省您的时间 |
-| A | 说明 | 表示是正文的附加信息，是对正文的强调和补充 |
-
-表 2.2: 缩略语表
-
-| 缩写 | 英文全称 | 中文释义 |
-| --- | --- | --- |
-| TPU | Tensor Processing Unit | 张量处理单元 |
-| OEM | Original Equipment Manufacturer | 原始设备制造商 |
-| ION | Input/Output Navigator | 输入输出导航器 |
-
-表 2.3: 修改记录
-
-| 文档版本 | 发布日期 | 修订说明 | 对应硬件版本 | 对应软件版本 |
-| --- | --- | --- | --- | --- |
-| V0.1 | 2025-6-25 | 首次正式发布 | BM1688 EVB:V1.5 | v2.0 |
-
-### 2.4 声明
-
-Copyright © 2022 北京算能科技有限公司。
-
-我们对本产品手册及其中的内容具有全部的知识产权。除非特别授权，禁止复制或向第三方分发。凡侵犯本公司版权等知识产权权益的行为，本公司保留依法追究其法律责任的权利。
-
-本产品系列将有不断地更新迭代，我们将定期检查本产品手册中的内容，在后续的版本中将出现不可避免的修正、删减、补充。
-
-我们保留在不事先通知的情况下进行技术改进、文档变更、产品改进升级、增加或减少产品型号和功能的权利。
-
-## 外设常见问题
-
-### 3.1 iic-常见问题
-
-#### 3.1.1 客户量不到波形，客户读不到数据
+### 客户量不到波形，客户读不到数据
 
 a. 未 pinmux，会在 i2c detect 或者通信时出现 i2c_designware 4000000.i2c: controller timed out。
 
@@ -220,7 +43,7 @@ e. iic 能 detect 到设备地址，但是读写寄存器信息都失败（读�
 
 f. iic 控制器没问题，大概率是从设备时序不匹配，检查硬件
 
-#### 3.1.2 i2ctool 工具使用方法
+### i2ctool 工具使用方法
 
 以下是在 Linux 终端中使用 i2c-tools 工具进行总线检测和设备读写的常用命令：
 
@@ -234,13 +57,13 @@ d. 单寄存器读取 i2cget -f -y 0 0x3c 0x00 # 读取 i2c-0 总线 0x3c 设备
 
 e. 寄存器写入 i2cset -f -y 0 0x3c 0x40 0x12 # 向 i2c-0 总线 0x3c 设备的 0x40 寄存器写入 0x12
 
-#### 3.1.3 波形示例
+### 波形示例
 
 0x3d 是设备 addr，读取 0x00 地址 0x01 个字节大小数据，读出 10
 
 写到 0x3d 地址，data：0x03
 
-#### 3.1.4 I2C 子节点实现
+### I2C 子节点实现
 
 如果要增加子节点，需要获取如下信息：
 
@@ -250,7 +73,7 @@ b. 设备的地址（如 0x48）。
 
 c. 应该加载哪个驱动（如 national, lm75）。
 
-#### 3.1.5 模拟 I2C 实现
+### 模拟 I2C 实现
 
 a. 在对应 dts 添加节点，以 i2c11 为例;
 
@@ -394,9 +217,9 @@ CAN_CTRLMODE_STD;
 | R1200 | AG6 | 200R 1% | [22] |
 | PCIE0_RESREF | | | |
 
-### 3.6 spacc-常见问题
+## spacc-常见问题
 
-#### 3.6.1 spacc 驱动的使用
+### spacc 驱动的使用
 
 a. 查看驱动是否成功加载：
 
@@ -404,7 +227,7 @@ ls /dev/spacc 是否存在。
 
 b. 仿照驱动测试用例进行驱动的使用，可以参考源码目录：osdrv/osdrv_test/spacc
 
-#### 3.6.2 对称加解密算法运算结果有问题
+### 对称加解密算法运算结果有问题
 
 a. 先确定加解密数据源的地址和数据大小是否为 16B 对齐。使用 spacc 对称加解密的数据源大小必须按照 16B 对齐。如果不是使用驱动管理的内存池时，传入的物理地址需要 16B 对齐。
 
@@ -414,22 +237,22 @@ c. 使用 cat /proc/buddyinfo 命令可以看看可用的内存块。
 
 d. 将数据源拆成多块进行加解密时，需要自行计算每个分组的 IV 值，详情可参考驱动测试用例进行修改。
 
-### 3.7 eth-网络常见问题
+## eth-网络常见问题
 
-#### 3.7.1 ethtool 使用
+### ethtool 使用
 
 a. sudo ethtool eth1 # 查询 eth1 网络接口的设置和状态，设置网络接口 eth1 开启自动协商、100M 速率、全双工模式
 
 b. sudo ethtool -s eth1 autoneg on speed 100 duplex half
 
-#### 3.7.2 phytool 使用
+### phytool 使用
 
 sudo phytool write eth0/0/0x1f 0xd08 #需要先切换页，这里是切换到0xd08页
 sudo phytool read eth0/0/0x15 #读页0xd08的0x15寄存器的值
 sudo phytool write eth0/0/0x15 xxx #往页0xd08的0x15寄存器写入xxx值
 sudo phytool write eth0/0/0x1f 0 #读写操作结束，最后需要切换回去页0
 
-#### 3.7.3 iperf3 使用
+### iperf3 使用
 
 a. Test TCP performance
 
@@ -450,7 +273,7 @@ iperf3 -c 192.168.150.10 -t 100 -u -b 1000M -l 1460
 -b <bandwidth>：在使用 UDP 时，指定目标带宽。例如，-b 1000M 表示目标带宽为 1000 Mbps。
 -l <length>：指定每个发送数据包的大小，上面指定数据包大小为 1460 byte。
 
-#### 3.7.4 bm_set_ip 使用
+### bm_set_ip 使用
 
 问题：客户对 bm_set_ip 命令使用不熟悉；需要增加路由规则。
 
@@ -479,13 +302,13 @@ d. 手动修改 netplan 配置
 
 修改/etc/netplan/01-netcfg.yaml 文件，然后执行命令：sudo netplan apply
 
-#### 3.7.5 ping 域名不通
+### ping 域名不通
 
 问题描述：ping www.baidu.com不通，但是可以 ping 通外网 ip。
 
 方法：修改 /etc/resolv.conf 文件，添加 DNS，添加 nameserver 8.8.8.8 后可以 ping 通域名了。
 
-#### 3.7.6 修改 mtu 大小报错
+### 修改 mtu 大小报错
 
 问题描述：通过命令行修改 MTU size 报错
 
@@ -497,7 +320,7 @@ d. 手动修改 netplan 配置
 2. ip link set eth1 mtu 2000 //再修改mtu大小，这里是修改mtu大小为2000
 3. ip link set eth1 up //最后up网口
 
-#### 3.7.7 客户验证网桥功能时遇到问题
+### 客户验证网桥功能时遇到问题
 
 问题：客户自己验证桥接的部分发现，经过验证这样的配置能让两个网口共享一个 IP，但是也只能是动态获取的 IP，静态 IP 不支持，也不支持多 IP。
 
@@ -533,7 +356,7 @@ network:
       dhcp4: no
 ```
 
-#### 3.7.8 小数据包吞吐量不足导致丢包
+### 小数据包吞吐量不足导致丢包
 
 问题描述：当设置数据包长度接近 MTU size 时候吞吐量不足 900M 导致丢包，MTU size 大小为 1500，指定数据包大小为 1460。
 
@@ -576,7 +399,7 @@ PC: iperf3 -s
 
 iperf3 -c 192.168.1.11 -b 250M -u -t 100 -l 1460 -P4
 
-#### 3.7.9 SE9 不支持并行检测
+### SE9 不支持并行检测
 
 问题描述：客户交换机设置网络端口为关闭自协商，FIX 速率为 100M 全双工时候，与我们 SE9 的原型机相连，SE9 打开自协商，无法 linkup。
 
@@ -588,9 +411,9 @@ iperf3 -c 192.168.1.11 -b 250M -u -t 100 -l 1460 -P4
 
 sudo ethtool -s eth1 autoneg off speed 100 duplex full
 
-### 3.8 usb-常见问题
+## usb-常见问题
 
-#### 3.8.1 切换 usb 的角色
+### 切换 usb 的角色
 
 ```bash
 # usb0 切为 host
@@ -606,9 +429,9 @@ echo host > /sys/kernel/debug/usb/39110000.usb/mode
 echo device > /sys/kernel/debug/usb/39110000.usb/mode
 ```
 
-#### 3.8.2 usb device 配置为指定功能
+### usb device 配置为指定功能
 
-#### 3.8.3 device 作为存储设备的操作指南
+### device 作为存储设备的操作指南
 
 a. 切换为 device mode
 
@@ -623,7 +446,7 @@ b. 运行脚本 run_usb.sh（bm1688 的路径为 /usr/sbin/run_usb.sh）
 
 其中 mmcblkXY 为第 X 个磁盘的 eMMC 或 SD 中第 Y 个分区，请用户根据具体情况选择。
 
-#### 3.8.4 Device 作为 RNDIS 设备的操作指南
+### Device 作为 RNDIS 设备的操作指南
 
 a. 切换为 device mode
 
@@ -648,7 +471,7 @@ c. 配置 windows 驱动
 5. 选择"网络适配器"类型
 6. 安装"Remote NDIS Compatible Device"驱动
 
-#### 3.8.5 Device 作为 UVC 设备的操作指南
+### Device 作为 UVC 设备的操作指南
 
 a. 切换为 device mode
 
@@ -674,7 +497,7 @@ d. 使用 potplayer 拉流
 1. alt + d 快捷键打开 PotPlayer 的设备设置
 2. 选中摄像头，配置设备为 UVC Camera，配置格式为 1080P，最后打开设备
 
-#### 3.8.6 报错原因分析
+### 报错原因分析
 
 a. 报错 probe of xhci-hcd.0.auto: can't setup: -110
 
@@ -684,9 +507,9 @@ b. 报错 log 为 device descriptor read/64, error -61
 
 基本上都是硬件问题，需要检查 soc usb 的外围电路，包括 usb ip 引脚和 hub 相关的电路
 
-### 3.9 pcie-常见问题
+## pcie-常见问题
 
-#### 3.9.1 rc 问题
+### rc 问题
 
 a. controller 初始化失败
 
@@ -721,11 +544,9 @@ PCIE1_LO_RESET_X function:
 [] UART2_TX
 ```
 
-## 外设常见问题
+## PCIe 问题
 
-### PCIe 问题
-
-#### RC 问题
+### RC 问题
 
 **枚举设备失败，lspci 无设备**
 
@@ -748,7 +569,7 @@ pcie0:pcie@20800000 {
 };
 ```
 
-#### EP 问题
+### EP 问题
 
 **a. 枚举失败**
 
@@ -814,13 +635,13 @@ mw 0x20700204 0x80000000
 
 3) EP 端 a53 即可通过 0x80000000~0xbfffffff 访问 RC 端 0x100000000 开始的地址空间
 
-### NVMe 常见问题
+## NVMe 常见问题
 
 NVMe 无法识别问题主要是 PCIE RC RESET 是否配置正确
 
-### SD 常见问题
+## SD 常见问题
 
-#### SD UHS 模式切换问题
+### SD UHS 模式切换问题
 
 SD 的 IO 电压本身是支持 1.8/3.3V 切换的，当需要切换到 UHS 模式时，驱动会控制电压切换电路（前提是硬件有设计）切换至 1.8V，后续才能正常识别
 
@@ -833,15 +654,15 @@ sd:cv-sd@29310000 {
 }
 ```
 
-### 内置 MCU 常见问题
+## 内置 MCU 常见问题
 
-#### MCU 启动流程
+### MCU 启动流程
 
 MCU 位于芯片内部的 RTC_SYS 中，是一个 8051 处理器。理论上内置 MCU 可以通过特殊的总线设计访问芯片上所有的寄存器。可以通过配置 RTC_DOMAIN 的 MCU boot 寄存器来更改 MCU 的 boot 地址。
 
 目前在边侧产品中，MCU 的固件会提前编译好，放置在 FSBL 仓库的这个位置：fsbl/plat/cvitek/cv186x/common/prebuilt/cv186x_MCU_FW.bin。在 BL2 阶段，MCU 固件将从 emmc 加载到 RTC_AHB_SRAM 中。在解开 MCU 复位后，MCU 从 RTC_AHB_SRAM 启动。
 
-#### MCU 的代码设计
+### MCU 的代码设计
 
 **a. DDR retrain**
 
@@ -851,9 +672,9 @@ MCU 代码包含了 DDR2 retrain 的内容。当系统需要 MCU 执行 DDR2 ret
 
 MCU 代码为 SE9、SM9 等产品实现了按键上下电与按键复位、回复出厂设置等设计。一般除了客户定制的 MCU 需求外，MCU 在不同产品上运行的是同一个固件。MCU 通过 OEM 来判断当前产品需要执行什么逻辑。BL2 阶段会将 OEM 从 EMMC 读到 SRAM，方便 MCU 从 SRAM 读取 OEM 中的 product 信息。
 
-### GPIO 和 Pinmux 常见问题
+## GPIO 和 Pinmux 常见问题
 
-#### 选择 GPIO 方法
+### 选择 GPIO 方法
 
 `echo N > /sys/class/gpio/export`，N 为待操作的 GPIO 编号
 
@@ -875,11 +696,11 @@ GPIO 编号 = GPIO 组号值 + 偏移值
 
 `echo N > /sys/class/gpio/export` 之后，生成 `/sys/class/gpio/gpioN` 目录
 
-#### Write error: Device or resource busy
+### Write error: Device or resource busy
 
 通过 `cat /sys/kernel/debug/gpio` 检查 gpio 占用。检查一下 DTS。
 
-#### UBoot 下怎么使用 GPIO
+### UBoot 下怎么使用 GPIO
 
 在使用 gpio 命令之前，需要确保 U-Boot 已启用了 GPIO 命令支持
 
@@ -910,7 +731,7 @@ U-Boot 的配置文件中检查以下选项是否启用：
 4. 输出低电平
    输入命令：`gpio clear 29`，万用表测量引脚电平为 0V 左右
 
-#### 代码操作 GPIO
+### 代码操作 GPIO
 
 **Pinmux 怎么查看表格，查看寄存器**
 
@@ -959,13 +780,13 @@ cvi_pinmux -d PWR_WAKEUP0,15
 
 另外，可以通过 `cvi_pinmux -l` 列出 soc 上所有 pin 和其 functions，或通过 `cvi_pinmux -r pin name`，读取对应 pin 所包含的功能
 
-### RS485 常见问题
+## RS485 常见问题
 
-#### RS485 通信异常问题
+### RS485 通信异常问题
 
 RS485 设计是 UART 经过一个 485 芯片，半双工工作，只能发或者收，无法做到同时发和送，如果有异常，先确认 UART 是否可以正常收发，另外 485 芯片可能不支持自动方向切换，需要控制一个 gpio 切换收发模式
 
-### WiFi & BT 常见问题
+## WiFi & BT 常见问题
 
 蓝牙目前只支持 5.2 版本以下的协议
 
@@ -977,9 +798,9 @@ pulseaudio --start --log-target=journal
 sudo systemctl restart bluetooth
 ```
 
-### 4/5G 常见问题
+## 4/5G 常见问题
 
-#### 故障排查常用 AT 命令
+### 故障排查常用 AT 命令
 
 - `AT+CPIN?`：检查模组是否识别到 SIM 卡
 - `AT+COPS?`：显示运行商接入点 APN，要保证信号良好，否则返回 0
@@ -988,11 +809,11 @@ sudo systemctl restart bluetooth
 - `ATI`：查看固件版本
 - `AT+GTIPPASS=1`：默认为 0，模组会启用 DHCP 服务；设置为 1 时，可从模组直接获取运营商分配的 IP
 
-#### 无法识别 SIM 卡
+### 无法识别 SIM 卡
 
-#### 4G/5G 模组不支持 SIM 卡热拔插
+### 4G/5G 模组不支持 SIM 卡热拔插
 
-#### 专网拨号
+### 专网拨号
 
 修改 `/usr/sbin/lteModem.py`，添加专网拨号命令：
 
@@ -1001,13 +822,13 @@ AT+CGDCONT=1,"IP","xxx.vpdn"
 AT+MGAUTH=1,"username","password"
 ```
 
-#### 双模组支持
+### 双模组支持
 
 启用两个 lteModemManager 服务，只需修改 `/usr/sbin/lteModem.py` 中使用的串口和端口，确保两个服务使用的串口和端口不同
 
-### Watchdog 常见问题
+## Watchdog 常见问题
 
-#### 看门狗驱动编译开启
+### 看门狗驱动编译开启
 
 在 linux 配置中打开这 3 个宏开关：
 
@@ -1015,11 +836,11 @@ AT+MGAUTH=1,"username","password"
 - `CONFIG_WATCHDOG_CORE=y`
 - `CONFIG_DW_WATCHDOG=y`
 
-#### Athena2 watchdog 开启时间
+### Athena2 watchdog 开启时间
 
 Athena2 在 bl2 阶段就已经使能看门狗，在 kernel 启动后，内核会自动喂狗，保证系统不会重启
 
-#### 如何喂狗
+### 如何喂狗
 
 使用 busybox 命令设置看门狗喂狗时间以及超时时间：
 
@@ -1034,21 +855,21 @@ watchdog -t 3 -T 20 /dev/watchdog0
 
 关闭喂狗：kill 掉 watchdog 进程就可以关闭喂狗，过一段时间会重启
 
-#### 如何关闭看门狗
+### 如何关闭看门狗
 
 关闭看门狗首先需要向 `/dev/watchdog` 写入一个魔幻数 "V"，如 `echo V > /dev/watchdog`，才能够使能关闭看门狗命令
 
-### 固件升级常见问题
+## 固件升级常见问题
 
-#### 通过 SD 卡升级失败
+### 通过 SD 卡升级失败
 
 检查 SD 卡格式是否为 FAT32 格式，并且表头为 MRB 格式，如果不是上述要求，在上电初始会有 SD mount 失败的打印
 
-#### 通过 OTA 升级失败
+### 通过 OTA 升级失败
 
 OTA 升级失败，一般为升级的 OTA 包和原 SDK 固件的分区表不一致导致，OTA 升级脚本可以参考 sophon-tools/source/pota_update at main · sophgo/sophon-tools · GitHub
 
-#### USB 升级常见问题
+### USB 升级常见问题
 
 **a. 板子没有烧录，而是直接开机检查**
 
@@ -1076,13 +897,13 @@ E:\yh\ai>usb_dl.exe -c cv186x -i fw/
 [INFO] Waiting for USB device connection: ---
 ```
 
-# 外设常见问题
+### Windows 驱动安装（USB 升级）
 
 没有安装驱动需要执行 CviUsbInstallDriver.exe 进行安装
 
-# TPU 常见问题
+## TPU 常见问题
 
-## 常用命令介绍
+### 常用命令介绍
 
 a. cat /proc/bmtpu/bmdi_base_info # 查看 libsophon git 版本及内部代码信息
 
@@ -1096,7 +917,7 @@ e. busybox devmem 0x28102170 # 查看 ddr clk 状态
 
 f. busybox devmem 0x28102168 # 查看 tpu sys clk 状态
 
-## tpu hang 常见问题
+### tpu hang 常见问题
 
 a. 随时根据问题情况补充 4.1 命令中的信息和 log，方便后续问题的快速定位
 
@@ -1127,9 +948,9 @@ sudo tar -zxvflog.tgz /var/log/kern.log\ * /var/log/syslog
 sudo chown linaro:linaro log.tgz
 ```
 
-## bm-smi 常见问题
+### bm-smi 常见问题
 
-### bm-smi 各项参数含义
+#### bm-smi 各项参数含义
 
 Mon Dec 5 19:27:14 2024: 执行 bm-smi时的时间日期
 
@@ -1193,9 +1014,9 @@ TPU-ID PID Process name Usage
 
 排查ddr clk是否打开busybox devmem 0x28102170，bit 28
 
-# 内存常见问题
+## 内存常见问题
 
-## 内存大小
+### 内存大小
 
 进系统后查看命令
 
@@ -1207,13 +1028,13 @@ c. free -h
 
 d. bm-smi
 
-## 内存调整
+### 内存调整
 
 动态调整内存工具参考：
 
 https://doc.sophgo.com/bm1688_sdk-docs/v1.9/docs_latest_release/docs/BM1688_CV186AH_SophonSDK_doc/Appendix/2_mem_edit_tools.html
 
-## ION 查看
+### ION 查看
 
 ION 共分为 NPU 与 VPP 2 块，大小需要根据初始配置调整，查看 Ion 的大小的命令如下：
 
@@ -1222,7 +1043,7 @@ cat /sys/kernel/debug/ion/cvi_vpp_heap_dump/summary
 cat /sys/kernel/debug/ion/cvi_npu_heap_dump/summary
 ```
 
-# 休眠唤醒常见问题
+## 休眠唤醒常见问题
 
 休眠唤醒通常情况下 console_suspend 之后就没有日志打印, 可以通过以下命令打开休眠时日志打印定位问题:
 
@@ -1232,29 +1053,29 @@ echo N > /sys/module/printk/parameters/console_suspend
 echo 1 > /sys/power/pm_debug_messages
 ```
 
-# recovery 常见问题
+## recovery 常见问题
 
-## 进入 recovery
+### 进入 recovery
 
 系统在上电启动或者重启过程中出现 mount 分区失败，无法正常进入命令行的情况，整机会出现循环重启的情况，这个时候可以进入 recovery 模式，进行修复或者查看异常原因，recovery 模式的原理是启动 ramdisk 文件系统，是在 DDR 上运行一个临时的文件系统，和 EMMC 没有关联，这样可以避免因为 EMMC 分区异常，导致无法进入命令行。
 
 在 uboot 阶段，执行 CTRL + C 的操作，可以停留在 uboot 的命令行，然后执行 run recboot 命令，进入 recovery 模式。
 
-## recovery 模式问题排查
+### recovery 模式问题排查
 
 进入到 recovery 模式后，只会有简单的文件系统，EMMC 的分区不会进行挂载，如果要进到 EMMC 分区查看内容，可以先做分区挂载。
 
 如果要使用 SD 卡拷贝文件，可以先执行 mdev -s，才会生成设备节点才可以挂载，拷贝出对应的 log 信息后，才可以对问题进行分析。
 
-# OEM 常见问题
+## OEM 常见问题
 
 查看 oem 信息方法：cat /factory/OEMconfig.ini
 
 OEM 中最重要的参数就是 DTS_TYPE，这个决定全生命周期的 DTS 的选择，如果配置错误的 DTS，会出现 CPU 启动核数错误，内核 core dump 的情况。
 
-# OS 常见问题汇总
+## OS 常见问题汇总
 
-## 目前 1688&CV186AH 支持的 OS 如下所示
+### 目前 1688&CV186AH 支持的 OS 如下所示
 
 | 操作系统 | BM1688&CV186AH | BM1684× | 使用场景 |
 |---------|---------------|---------|---------|
@@ -1270,7 +1091,7 @@ OEM 中最重要的参数就是 DTS_TYPE，这个决定全生命周期的 DTS �
 
 背景：麒麟 OS 本身并不开源，所有使用麒麟 OS 的设备，都需要麒麟授权，算能并没有麒麟 OS 的源码，只有麒麟提供的烧录固件包，所以基于此现状，为了满足部分客户的定制需求，我们给出麒麟二次开发的方案，即使是二次开发的麒麟包，也需要麒麟正式授权。
 
-## 麒麟版本
+### 麒麟版本
 
 | 麒麟版本 | GCC 版本 | glibc 版本 | 补充说明 |
 |---------|---------|-----------|---------|
@@ -1279,7 +1100,7 @@ OEM 中最重要的参数就是 DTS_TYPE，这个决定全生命周期的 DTS �
 
 因为麒麟银河 OS 现在最高的 gcc 版本是 9.4，glibc 版本是 2.31，无法往上提升，所以才会和算能的 SDK1.9 的 gcc 和 glibc 会有差异。
 
-### 定制 fip.bin
+#### 定制 fip.bin
 
 如果你们的 BL2、BL31、BL32、u-boot 有定制需求，直接修改其中的 code，然后进行编译，生成 fip.bin，替换掉麒麟固件包中的 fip.bin 即可。如果你使用的是算能的 SDK1.9 的源码，需要修改编译的工具链，如下目录文件的内容 build/boards/sophon/edge_wevb_emmc/edge_wevb_emmc_defconfig
 
@@ -1287,7 +1108,7 @@ OEM 中最重要的参数就是 DTS_TYPE，这个决定全生命周期的 DTS �
 
 如果要做远程 OTA 升级，需要修改固件包里面 md5 文件中 fip.bin 的 md5 值。
 
-### 定制内核 kernel
+#### 定制内核 kernel
 
 如果你们要修改 DTS 里面的内容，或者增加 kernel 中的驱动，那需要拿到对应 SDK 版本算能提供的源码，修改完成后，build_kernel 命令后，生成 boot.itb，其中包含 kernel 和 dts 的固件，以 SDK1.8 为例，boot.itb 在 ramdisk/build/bm1688_wevb_emmc/workspace 目录，将其替换到盒子的/boot 目录下，然后重启。
 
@@ -1304,7 +1125,7 @@ root@sophon:/boot#
 
 所以保险起见，还是将设备的/mnt/system/ko 中的驱动 KO 全部替换成你重新编译的。
 
-### 导出二次开发麒麟包
+#### 导出二次开发麒麟包
 
 打开网址，下载工具 https://github.com/sophgo/sophon-tools/tree/main/source/psocbak
 

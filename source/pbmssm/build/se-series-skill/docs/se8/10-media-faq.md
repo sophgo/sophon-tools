@@ -1,10 +1,6 @@
 ---
 title: 多媒体FAQ
 description: 多媒体常见问题
-tableOfContents:
-  maxHeadingLevel: 3
-sidebar:
-  hidden: true
 ---
 
 ## 视频解码
@@ -258,7 +254,7 @@ extra_frame_buffer_num为1（默认为2）。Opencv内部在最新版本中会�
 2.  清除cache echo 3 \> /proc/sys/vm/drop_caches
 3.  再次执行程序，运行慢，即可确定是cache导致的。
 
-#### \[问题分析\]程序提示"VPU_DecGetOutputInfo decode fail framdIdx xxx error(0x00000000) reason(0x00400000), reasonExt(0x00000000)"是可能什么问题，这里reason的具体数值可能不同
+#### [问题分析]程序提示"VPU_DecGetOutputInfo decode fail framdIdx xxx error(0x00000000) reason(0x00400000), reasonExt(0x00000000)"是可能什么问题，这里reason的具体数值可能不同
 
 > 这个提示通常是由码流错误造成的，提示的含义是第xxx帧解码错误，错误原因为\....。这里具体原因对于上层应用来说，不用关心，只需知道这是由码流错误导致的即可。
 >
@@ -267,7 +263,7 @@ extra_frame_buffer_num为1（默认为2）。Opencv内部在最新版本中会�
 > 1.  网络情况导致的丢包。这时候可以用我们的测试程序vidmulti验证下，如果vidmulti没有解码错误，那么可以排除这种情况。如果确认网络丢包的话，要分辨下是否网络带宽本身就不够，如果本身带宽不够，那没有办法，只能降低视频码流的码率。如果带宽是够的，要检查下网线。当码流连接数超过20多路的时候，这时候有可能已经超出百兆了，这时网线也必须换到CAT6，与千兆网相匹配
 > 2.  解码性能达到上限造成丢包。这种情况发生在流媒体环境中，对于文件播放是不会发生的。这时也可以用我们的vidmulti跑一下，作为比较。如果vidmulti也发生错误，说明性能确实到了上限了，否则说明应用本身还有优化的空间。
 
-#### \[问题分析\]程序提示"coreIdx 0 InstIdx 0: VPU interrupt wait timeout"，这是怎么回事?
+#### [问题分析]程序提示"coreIdx 0 InstIdx 0: VPU interrupt wait timeout"，这是怎么回事?
 
 > 这个提示表示视频解码或者编码中断超时。这个提示只是警告，会再次尝试，因此只要没有连续出现就可以忽略。这种情况一般是由解码数据错误导致或者负荷过重产生的。例如在板卡情况下，由于板卡数据交换过于频繁，造成解码或者编码数据传输堵塞，使得中断超时。
 >
@@ -388,7 +384,7 @@ callback\*\*
 以下是middleware-soc中的一个使用avio + jpeg_bm解码静态jpeg图片的例子。
 (/opt/sophon/sophon-ffmpeg-latest/share/ffmpeg/examples/avio_decode_jpeg.c)
 
-#### 在soc模式下客户用ffmpeg解码时拿到AVframe将data\[0-3\] copy到系统内存发现copy时间是在20ms左右而相同数据量在系统内存两块地址copy只需要1-3ms
+#### 在soc模式下客户用ffmpeg解码时拿到AVframe将data[0-3] copy到系统内存发现copy时间是在20ms左右而相同数据量在系统内存两块地址copy只需要1-3ms
 
 答：上述问题的原因是系统在ffmpeg中默认是禁止cache的，因此用处理器
 copy性能很低，使能cache就能达到系统内存互相copy同样的速度。
@@ -411,7 +407,7 @@ copy性能很低，使能cache就能达到系统内存互相copy同样的速度�
 
         av_dict_set_int(&opts, "output_format", 101, 0);
 
-#### \[问题分析\]客户反馈碰到如下错误提示信息\"VPU_DecRegisterFrameBuffer failed Error code is 0x3\", 然后提示Allocate Frame Buffer内存失败。
+#### [问题分析]客户反馈碰到如下错误提示信息"VPU_DecRegisterFrameBuffer failed Error code is 0x3", 然后提示Allocate Frame Buffer内存失败。
 
 > 这个提示信息表示：分配的解码器缓存帧个数，超过了最大允许的解码帧。导致这个问题的原因有可能是：
 >
@@ -435,7 +431,7 @@ copy性能很低，使能cache就能达到系统内存互相copy同样的速度�
 解决方案是使用 AVCodecContext 中的 coded_width 和 coded_height
 来作为宽高信息传递给vpp做解压缩。
 
-#### 解码器报错\"lost a non key frame in first serveral packet\...\"
+#### 解码器报错"lost a non key frame in first serveral packet\..."
 
 错误信息的含义是：送入的码流数据还未检测到第一个关键帧，无法开始解码。
 造成这个问题的原因一般有两种情况：
@@ -446,7 +442,7 @@ copy性能很低，使能cache就能达到系统内存互相copy同样的速度�
 用户自定义填充的avPacket（不使用av_read_frame来获取avPacket）。这种情况下一般是由于没有填充avPacket-\>flags造成的，需要根据帧类型正确填充avPacket-\>flags。
 关键帧应该将avPacket-\>flags赋值为AV_PKT_FLAG_KEY。
 
-#### 使用ffmpeg命令 \"ffmpeg -c:v h264_bm -i h264_2560x1080.mp4 -c:v h264_bm -b:v 256K -an -y ii.mp4\" 进行转码时，程序卡死
+#### 使用ffmpeg命令 "ffmpeg -c:v h264_bm -i h264_2560x1080.mp4 -c:v h264_bm -b:v 256K -an -y ii.mp4" 进行转码时，程序卡死
 
 提示如下错误信息：
 
@@ -991,7 +987,7 @@ baseline的除了极少部分外，都用硬件加速支持，其他的jpeg/jpg/
 
     ret = avcodec_open2(pCodecContext, pCodec, &dict);
 
-#### \[问题分析\]当用ffmpeg jpeg_bm解码超大JPEG图片的时候，有时候会报"ERROR:DMA buffer size(5242880) is less than input data size(xxxxxxx)\"，如何解决？
+#### [问题分析]当用ffmpeg jpeg_bm解码超大JPEG图片的时候，有时候会报"ERROR:DMA buffer size(5242880) is less than input data size(xxxxxxx)"，如何解决？
 
 > 在用FFMPEG的jpeg_bm硬件解码器解码JPEG图片的时候，默认的输入buffer是5120K。在拿到JPEG文件前提前分配好输入缓存，在MJPG文件解码时可以避免频繁地创建和销毁内存。当出现默认输入buffer大小比输入jpeg文件小的时候，可以通过下面的命令来调大输入缓存。
 >
@@ -1200,7 +1196,7 @@ floating-point coe matrix =\> fixed-point coe matrix
 
 0.1826 0.6142 0.0620 16.0000 =\> 0x00bb 0x0275 0x003f 0x004000
 
-#### \[问题分析\]不同线程对同一个bm_imag调用 bm_image_destroy 时，程序崩溃。
+#### [问题分析]不同线程对同一个bm_imag调用 bm_image_destroy 时，程序崩溃。
 
 bm_image_destroy(bm_image image)
 接口设计时，采用了结构体做形参，内部释放了image.image_private指向的内存，但是对指针image.image_private的修改无法传到函数外，导致第二次调用时出现了野指针问题。

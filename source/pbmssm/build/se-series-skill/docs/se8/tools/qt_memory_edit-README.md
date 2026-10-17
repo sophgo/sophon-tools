@@ -39,8 +39,8 @@ windows中配置qt基础环境，将qt自带的cmake和mingw64的路径添加到
 ``` bash
 sudo apt install qt5-default qttools5-dev git g++ libgl1-mesa-dev patchelf fuse
 sudo apt download libssl1.1 libssl-dev
-cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/data/zzt/qt_mem_edit/temp/zlib_linux_arm64/
-cmake -DBUILD_STATIC_LIBS=OFF -DBUILD_SHARED_LIBS=ON -DENABLE_ZLIB_COMPRESSION=ON -DENABLE_DEBUG_LOGGING=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/data/zzt/qt_mem_edit/temp/libss2_linux_arm64/ -DZLIB_LIBRARY=/data/zzt/qt_mem_edit/temp/zlib_linux_arm64/lib/libz.so -DZLIB_INCLUDE_DIR=/data/zzt/qt_mem_edit/temp/zlib_linux_arm64/include -DOPENSSL_ROOT_DIR=/data/zzt/qt_mem_edit/qt_mem_edit/libs/linux_arm64/openssl/ -DOPENSSL_INCLUDE_DIR="/data/zzt/qt_mem_edit/qt_mem_edit/libs/linux_arm64/openssl/include;/data/zzt/qt_mem_edit/qt_mem_edit/libs/linux_arm64/openssl/include/aarch64-linux-gnu/" -DOPENSSL_CRYPTO_LIBRARY="/data/zzt/qt_mem_edit/qt_mem_edit/libs/linux_arm64/openssl/lib/libcrypto.so.1.1;/data/zzt/qt_mem_edit/qt_mem_edit/libs/linux_arm64/openssl/lib/libssl.so.1.1" ..
+cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/data/qt_mem_edit/temp/zlib_linux_arm64/
+cmake -DBUILD_STATIC_LIBS=OFF -DBUILD_SHARED_LIBS=ON -DENABLE_ZLIB_COMPRESSION=ON -DENABLE_DEBUG_LOGGING=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/data/qt_mem_edit/temp/libss2_linux_arm64/ -DZLIB_LIBRARY=/data/qt_mem_edit/temp/zlib_linux_arm64/lib/libz.so -DZLIB_INCLUDE_DIR=/data/qt_mem_edit/temp/zlib_linux_arm64/include -DOPENSSL_ROOT_DIR=/data/qt_mem_edit/qt_mem_edit/libs/linux_arm64/openssl/ -DOPENSSL_INCLUDE_DIR="/data/qt_mem_edit/qt_mem_edit/libs/linux_arm64/openssl/include;/data/qt_mem_edit/qt_mem_edit/libs/linux_arm64/openssl/include/aarch64-linux-gnu/" -DOPENSSL_CRYPTO_LIBRARY="/data/qt_mem_edit/qt_mem_edit/libs/linux_arm64/openssl/lib/libcrypto.so.1.1;/data/qt_mem_edit/qt_mem_edit/libs/linux_arm64/openssl/lib/libssl.so.1.1" ..
 ```
 
 从[https://github.com/AppImage/AppImageKit/releases](https://github.com/AppImage/AppImageKit/releases)中安装appimage工具包
