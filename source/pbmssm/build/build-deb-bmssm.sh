@@ -15,7 +15,7 @@
 #   release/bmssm_${VERSION}_${ARCH}_seskill.deb   带 SE 系列 skill：预载 se-series-knowledge-base
 #                                                    多型号知识库（SE7/SE8/SE9）+ SE 系列 agent 提示词
 #                                                    + se-rag 检索二进制 + 对应 Reasonix 配置
-# SE 系列资源来源：build/se-series-skill/（SKILL.md + docs + Go 索引 + 提示词 + 两套 reasonix 配置）
+# SE 系列资源来源：build/se-series-skill/（SKILL.md + docs + 提示词 + 两套 reasonix 配置；向量索引不预置，设备上按需构建）
 set -e
 
 cd "$(dirname "$0")/.."
@@ -42,7 +42,7 @@ if [ -d ../se-rag-core ]; then
   echo "✓ 已构建 se-rag ($ARCH): $SE_RAG_BIN"
 fi
 
-SE_SRC="$(cd build/se-series-skill && pwd)"   # SE 系列 skill/提示词/索引等资源
+SE_SRC="$(cd build/se-series-skill && pwd)"   # SE 系列 skill/提示词等资源
 
 # assemble_deb <suffix> <with_seskill: 1|0>
 assemble_deb() {
@@ -113,21 +113,19 @@ assemble_deb() {
     mkdir -p "$RXM/bin"
     cp "$SE_RAG_BIN" "$RXM/bin/se-rag"
     chmod 0755 "$RXM/bin/se-rag"
-    # 2) se-series-knowledge-base skill（SKILL.md + docs/se7,se8,se9 + 三套 Go 索引）
+    # 2) se-series-knowledge-base skill（SKILL.md + docs/se7,se8,se9）。
+    #    不预置向量索引（rag/data_se*）：索引由 se-rag build 在设备上按需构建（见 SKILL.md 第 0 步），
+    #    这里只建空的 rag/ 目录供其写入。
     local SK="$RXM/skills/se-series-knowledge-base"
     mkdir -p "$SK/rag"
     cp "$SE_SRC/SKILL.md" "$SK/SKILL.md"
     cp -r "$SE_SRC/docs/." "$SK/docs/"
-    for p in se7 se8 se9; do
-      mkdir -p "$SK/rag/data_$p"
-      cp -a "$SE_SRC/rag/data_$p/." "$SK/rag/data_$p/"   # 含 .complete 完成标记（Open 依赖）
-    done
     # 3) SE 系列 agent 提示词（多型号版）
     mkdir -p "$RXM/prompts"
     cp "$SE_SRC/prompts/system.seskill.md" "$RXM/prompts/system.md"
     # 4) SE 系列 Reasonix 配置（引用 skill + system_prompt_file）
     cp "$SE_SRC/reasonix/config.toml" "$RXM/.reasonix/config.toml"
-    echo "  ✓ [$suffix] 已预载 SE 系列 skill（SE7/SE8/SE9）+ agent 提示词 + se-rag"
+    echo "  ✓ [$suffix] 已预载 SE 系列 skill（SE7/SE8/SE9，不含预建索引）+ agent 提示词 + se-rag"
   else
     # ===== 默认（noskill）变体：Reasonix 默认配置，无 SE 系列 skill；带通用提示词 =====
     mkdir -p "$RXM/prompts"

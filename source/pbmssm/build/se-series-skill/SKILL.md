@@ -1,6 +1,6 @@
 ---
 name: se-series-knowledge-base
-version: 4.3.0
+version: 4.3.1
 description: >-
   Technical knowledge base for Sophgo SE7, SE8, SE9 series micro-servers.
   SE7: BM1684X single SoC. SE8: BM1684X distributed cluster.
@@ -38,9 +38,7 @@ description: >-
 ```
 {baseDir}/                          # /data/sophon/reasonix-home/skills/se-series-knowledge-base
 ├── rag/
-│   ├── data_se7/          ← SE7 Go 检索索引 (meta.json + vectors.gob + bm25.gob + chunks.gob)
-│   ├── data_se8/          ← SE8 Go 检索索引
-│   └── data_se9/          ← SE9 Go 检索索引
+│   └── data_se{7,8,9}/    ← 各产品检索索引（meta.json + vectors.gob + bm25.gob + chunks.gob）。**不预置**，首次检索某产品前按需构建，见「第 0 步」
 ├── docs/
 │   ├── se7/               ← 产品手册 + BM1684X SDK 文档 + FAQ + 工具文档
 │   ├── se8/               ← 产品手册 + BM1684X SDK 文档 + FAQ + 工具文档
@@ -48,7 +46,29 @@ description: >-
 └── SKILL.md
 ```
 
-检索二进制已预置于 `/data/sophon/reasonix-home/bin/se-rag`，无需构建。
+检索二进制已预置于 `/data/sophon/reasonix-home/bin/se-rag`，无需构建；**向量索引不随包预置**，要在设备上按需构建。
+
+## 第 0 步：检索前确认索引存在（按需构建）
+
+检索哪个产品就只建哪个产品的索引，已建过的不用再建。检查（`.complete` 是隐藏文件，要用 `test -f`）：
+
+```bash
+test -f /data/sophon/reasonix-home/skills/se-series-knowledge-base/rag/data_se7/.complete && echo OK || echo MISSING   # se8/se9 同理
+```
+
+缺失时：先告诉用户「该产品索引尚未建立，正在构建（需联网，约 3–10 分钟，设备上可能更慢）」，再构建并校验：
+
+```bash
+/data/sophon/reasonix-home/bin/se-rag build \
+  --docs-dir /data/sophon/reasonix-home/skills/se-series-knowledge-base/docs/se7 \
+  -index-dir /data/sophon/reasonix-home/skills/se-series-knowledge-base/rag/data_se7
+/data/sophon/reasonix-home/bin/se-rag doctor \
+  -index-dir /data/sophon/reasonix-home/skills/se-series-knowledge-base/rag/data_se7
+```
+
+- 构建要联网调用 embedding 网关，是**写操作**，会触发审批卡片，向用户说明用途后等批准。
+- 构建失败（断网 / 网关不可达 / `http 4xx`）可原样重跑一次；仍失败就用 `grep -rn "关键词" docs/se7/` 兜底检索（关键词用文档原文里的命令名、文件名、报错原文），并在答案里明确说明「未经 RAG 检索，结果可能不全」。
+- 索引没建好时，不要在没有任何检索的情况下凭记忆回答。
 
 ## 检索（必须用 Go se-rag）
 

@@ -84,3 +84,6 @@ docs/superpowers/
 
 # pnpm 缓存
 .pnpm-store/
+
+# se-series skill 的向量索引不预置、不入库：设备上用 se-rag build 按需构建
+source/pbmssm/build/se-series-skill/rag/data_*/
