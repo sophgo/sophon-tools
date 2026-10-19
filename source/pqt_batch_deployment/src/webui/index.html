@@ -1,0 +1,730 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>批量部署工具</title>
+<style>
+  :root {
+    --brand: #e03030;
+    --brand-dark: #c82424;
+    --text: #22262e;
+    --muted: #6b7080;
+    --line: #d4d9e0;
+    --surface: #f6f7f9;
+    --surface-2: #ecf0f3;
+    --ok: #1e8e3e;
+    --warn: #c77c00;
+    --danger: #c62828;
+    --run: #1565c0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; color: var(--text); background: #fff;
+    font: 14px/1.55 "Source Han Sans SC", "Noto Sans CJK SC",
+          "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+  }
+  header {
+    display: flex; align-items: center; gap: 14px;
+    padding: 10px 16px; border-bottom: 1px solid var(--line);
+    background: var(--surface);
+  }
+  header .title { font-size: 19px; font-weight: 700; }
+  header .ver { color: var(--muted); font-size: 12px; }
+  header .spacer { flex: 1; }
+  a { color: var(--brand); }
+
+  .bar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 16px; border-bottom: 1px solid var(--line);
+    flex-wrap: wrap;
+  }
+  .bar label { font-weight: 700; color: #333842; white-space: nowrap; }
+  input[type=text], input[type=password], input[type=number], select, textarea {
+    font: inherit; color: inherit; padding: 5px 8px;
+    border: 1px solid var(--line); border-radius: 5px; background: #fff;
+  }
+  input[type=text]:focus, input[type=password]:focus, select:focus, textarea:focus {
+    outline: 2px solid var(--brand); outline-offset: -1px;
+  }
+  textarea { width: 100%; resize: vertical; min-height: 62px; font-family: ui-monospace, monospace; }
+  .grow { flex: 1; min-width: 160px; }
+
+  button {
+    font: inherit; padding: 6px 12px; border-radius: 5px; cursor: pointer;
+    border: 1px solid var(--line); background: #fff; color: var(--text);
+    white-space: nowrap;
+  }
+  button:hover:not(:disabled) { background: var(--surface-2); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.primary { background: var(--brand); border-color: var(--brand); color: #fff; font-weight: 700; }
+  button.primary:hover:not(:disabled) { background: var(--brand-dark); }
+  button.warn { border-color: #e0b060; color: var(--warn); }
+  button.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+  button.danger:hover:not(:disabled) { filter: brightness(.92); }
+  button.small { padding: 3px 8px; font-size: 13px; }
+
+  main { display: grid; grid-template-columns: minmax(420px, 2fr) minmax(480px, 3fr); gap: 0; }
+  @media (max-width: 1080px) { main { grid-template-columns: 1fr; } }
+  section { padding: 10px 16px 14px; min-width: 0; }
+  section + section { border-left: 1px solid var(--line); }
+  @media (max-width: 1080px) { section + section { border-left: 0; border-top: 1px solid var(--line); } }
+  h2 { font-size: 15px; margin: 2px 0 8px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); }
+  th { background: var(--surface-2); font-weight: 700; position: sticky; top: 0; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: #fafbfc; }
+  tbody tr.sel { background: #fff2f2; box-shadow: inset 3px 0 0 var(--brand); }
+  .tablewrap { max-height: 240px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; }
+
+  .status { font-weight: 700; }
+  .s-ok { color: var(--ok); }
+  .s-fail { color: var(--danger); }
+  .s-wait { color: var(--warn); }
+  .s-run { color: var(--run); }
+  .s-none { color: var(--muted); font-weight: 400; }
+  .incomplete { color: var(--warn); font-weight: 700; }
+
+  .toolbar { display: flex; gap: 6px; margin: 8px 0; flex-wrap: wrap; }
+  .form { display: grid; grid-template-columns: 110px 1fr; gap: 6px 10px; align-items: center; margin: 8px 0; }
+  .form > label { color: #333842; font-weight: 700; text-align: right; }
+  .tabs { display: flex; gap: 4px; margin: 10px 0 0; border-bottom: 1px solid var(--line); }
+  .tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; }
+  .tabs button.on { color: var(--brand); border-bottom-color: var(--brand); font-weight: 700; }
+  .hint { color: var(--muted); font-size: 12px; }
+  .log {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+    white-space: pre-wrap; word-break: break-all;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 6px;
+    padding: 8px; height: 190px; overflow: auto; margin: 0;
+  }
+  footer {
+    display: flex; align-items: center; gap: 10px;
+    padding: 6px 16px; border-top: 1px solid var(--line);
+    background: var(--surface); color: var(--muted); font-size: 13px;
+  }
+  #toast {
+    position: fixed; right: 16px; bottom: 44px; max-width: 460px;
+    background: #22262e; color: #fff; padding: 9px 13px; border-radius: 6px;
+    opacity: 0; transform: translateY(8px); transition: .18s; pointer-events: none;
+    white-space: pre-wrap; z-index: 50;
+  }
+  #toast.show { opacity: 1; transform: none; }
+  #toast.err { background: var(--danger); }
+  .busy-tag { color: var(--run); font-weight: 700; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="title">批量部署工具</div>
+    <div class="ver">V<span id="ver">-</span> · Web 模式</div>
+  </div>
+  <div class="spacer"></div>
+  <a href="https://sophon.cn" target="_blank" rel="noopener">https://sophon.cn</a>
+  <button onclick="showHelp()">帮助</button>
+</header>
+
+<div class="bar">
+  <label>文件操作根目录</label>
+  <input type="text" id="root" class="grow" placeholder="上传/下载的相对路径基准目录">
+  <span class="hint">服务器上的绝对路径</span>
+</div>
+
+<div class="bar">
+  <label>内置预设</label>
+  <select id="preset"></select>
+  <button onclick="loadPreset()">载入</button>
+  <button onclick="exportConfig()">导出配置</button>
+  <button onclick="document.getElementById('file').click()">导入配置</button>
+  <input type="file" id="file" accept=".json,application/json" style="display:none" onchange="importConfig(this)">
+  <div class="spacer" style="flex:1"></div>
+  <label>并行上限</label>
+  <select id="maxpar">
+    <option>200</option><option selected>100</option><option>50</option><option>20</option><option>2</option>
+  </select>
+  <button class="primary" id="runBtn" onclick="runBatch()">▶ 执行配置</button>
+  <button class="danger" id="cancelBtn" onclick="cancelBatch()" disabled>■ 中止执行</button>
+</div>
+
+<main>
+  <section>
+    <h2>远程设备信息配置</h2>
+    <div class="toolbar">
+      <button class="small" onclick="addDevice()">＋ 新增设备</button>
+      <button class="small" onclick="cloneSel('device')">克隆</button>
+      <button class="small" onclick="editSel('device')">编辑</button>
+      <button class="small warn" onclick="removeSel('device')">删除</button>
+    </div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>IPv4地址</th><th>SSH端口</th><th>用户名</th><th>密码</th><th>执行状态</th></tr></thead>
+        <tbody id="devBody"></tbody>
+      </table>
+    </div>
+    <div style="margin-top:12px; display:flex; align-items:center; gap:8px;">
+      <strong id="devLabel">设备详情（未选中）</strong>
+      <span class="hint" id="devProg"></span>
+    </div>
+    <pre class="log" id="devLog">在左侧选中一台设备查看其执行日志</pre>
+  </section>
+
+  <section>
+    <h2>操作信息配置</h2>
+    <div class="toolbar">
+      <button class="small" onclick="addOp()">＋ 新增操作</button>
+      <button class="small" onclick="cloneSel('op')">克隆</button>
+      <button class="small warn" onclick="removeSel('op')">删除</button>
+    </div>
+    <div class="tablewrap" style="max-height:150px">
+      <table>
+        <thead><tr><th>操作名称</th><th>操作类型</th><th>内容信息</th></tr></thead>
+        <tbody id="opBody"></tbody>
+      </table>
+    </div>
+
+    <div class="form" style="margin-top:12px">
+      <label>操作名称</label>
+      <input type="text" id="opName" oninput="onEdit()" placeholder="例如 检查时间">
+    </div>
+
+    <div class="tabs" id="tabs">
+      <button data-tab="0" onclick="switchTab(0)">命令下发</button>
+      <button data-tab="1" onclick="switchTab(1)">文件上传</button>
+      <button data-tab="2" onclick="switchTab(2)">文件下载</button>
+    </div>
+
+    <div class="tabpane" data-pane="0">
+      <div class="form">
+        <label>命令</label>
+        <textarea id="cmdStr" oninput="onEdit()" placeholder="需要执行的命令"></textarea>
+        <label>执行成功关键字</label>
+        <input type="text" id="cmdOK" oninput="onEdit()" placeholder="判断执行是否成功，为空不检查">
+        <label>执行失败关键字</label>
+        <input type="text" id="cmdErr" oninput="onEdit()" placeholder="判断执行是否失败，为空不检查">
+      </div>
+      <p class="hint">两种情况都判失败：命中失败关键字；配了成功关键字但输出里没有。</p>
+    </div>
+
+    <div class="tabpane" data-pane="1" style="display:none">
+      <div class="form">
+        <label>本地文件</label>
+        <input type="text" id="upLocal" oninput="onEdit()" placeholder="相对根目录，或绝对路径">
+        <label>远程目标路径</label>
+        <input type="text" id="upRemote" oninput="onEdit()" placeholder="例如 /tmp/a.bin（以 / 结尾则拼上原文件名）">
+        <label>校验方式</label>
+        <select id="upCheck" onchange="onEdit()"></select>
+      </div>
+    </div>
+
+    <div class="tabpane" data-pane="2" style="display:none">
+      <div class="form">
+        <label>远程文件路径</label>
+        <input type="text" id="downRemote" oninput="onEdit()" placeholder="设备上的文件路径">
+        <label>本地目录</label>
+        <input type="text" id="downDir" oninput="onEdit()" placeholder="相对根目录，或绝对路径">
+        <label>校验方式</label>
+        <select id="downCheck" onchange="onEdit()"></select>
+      </div>
+      <p class="hint">下载文件名格式：IP_端口_时间戳_原名（重名自动加序号）。</p>
+    </div>
+
+    <div style="margin-top:10px; font-weight:700" id="opComplete">该项当前完整度：未选中</div>
+    <div class="toolbar">
+      <button class="small" onclick="saveOp()">确认当前操作</button>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <span id="status">就绪</span>
+  <div class="spacer" style="flex:1"></div>
+  <span class="hint" id="conn">未连接事件流</span>
+</footer>
+
+<div id="toast"></div>
+
+<script>
+"use strict";
+
+const CHECK_OPTIONS = ["MD5校验值", "文件大小校验", "不进行校验"];
+let S = { devices: [], ops: [], running: false, gen: 0, rootDir: "", maxParallel: 100 };
+let selDevice = -1;
+let selOp = -1;
+let curTab = 0;
+let editing = false;     // 正在把状态写进表单，输入回调不应回写
+let evtSrc = null;
+
+// ---------- 基础设施 ----------
+function toast(msg, isErr) {
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.className = "show" + (isErr ? " err" : "");
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => { t.className = ""; }, isErr ? 6000 : 3000);
+}
+function setStatus(s) { document.getElementById("status").textContent = s; }
+
+async function api(path, opts) {
+  const r = await fetch(path, Object.assign({headers: {"Content-Type": "application/json"}}, opts || {}));
+  const text = await r.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch (e) { data = {error: text}; }
+  if (!r.ok) throw new Error((data && data.error) || ("HTTP " + r.status));
+  return data;
+}
+
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, c => (
+    {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+}
+
+// 状态 → 语义 class（与桌面版配色一致）
+function statusClass(st) {
+  if (!st) return "s-none";
+  if (st.startsWith("成功")) return "s-ok";
+  if (st.startsWith("失败")) return "s-fail";
+  if (st.startsWith("等待")) return "s-wait";
+  return "s-run";
+}
+function statusText(st) {
+  if (!st) return "—";
+  for (const p of ["成功", "失败", "等待中"]) if (st.startsWith(p)) return p;
+  return st;
+}
+
+// ---------- 渲染 ----------
+function applyState(s) {
+  S = s;
+  document.getElementById("ver").textContent = s.version || "-";
+  document.getElementById("root").value = s.rootDir || "";
+  document.getElementById("maxpar").value = String(s.maxParallel || 100);
+  fillPresets(s.presets || []);
+  setRunning(s.running);
+  renderDevices();
+  renderOps();
+  if (selOp >= 0 && selOp < S.ops.length) loadOpIntoForm(selOp);
+  else if (S.ops.length && selOp < 0) selectOp(0);
+  renderDeviceLog();
+}
+
+function fillPresets(list) {
+  const sel = document.getElementById("preset");
+  const cur = sel.value;
+  sel.innerHTML = "";
+  for (const n of list) {
+    const o = document.createElement("option");
+    o.value = n; o.textContent = n;
+    sel.appendChild(o);
+  }
+  if (list.includes(cur)) sel.value = cur;
+}
+
+function setRunning(running) {
+  S.running = running;
+  document.getElementById("runBtn").disabled = running;
+  document.getElementById("cancelBtn").disabled = !running;
+  // 执行期间锁定所有会改配置的入口（与桌面版一致）
+  for (const el of document.querySelectorAll(
+      "#root,#preset,#maxpar,#devBody button,#opBody button,.toolbar button," +
+      ".form input,.form textarea,.form select,.tabs button,#opName,#file")) {
+    if (el.id === "runBtn" || el.id === "cancelBtn") continue;
+    el.disabled = running;
+  }
+}
+
+function renderDevices() {
+  const tb = document.getElementById("devBody");
+  tb.innerHTML = "";
+  S.devices.forEach((d, i) => {
+    const tr = document.createElement("tr");
+    if (i === selDevice) tr.className = "sel";
+    tr.onclick = () => selectDevice(i);
+    tr.innerHTML =
+      "<td>" + esc(d.IP) + "</td>" +
+      "<td>" + esc(d.Port) + "</td>" +
+      "<td>" + esc(d.Username) + "</td>" +
+      "<td>" + esc("•".repeat((d.Password || "").length)) + "</td>" +
+      '<td class="status ' + statusClass(d.status) + '">' +
+        esc(statusText(d.status)) + "</td>";
+    tb.appendChild(tr);
+  });
+  if (!S.devices.length) {
+    tb.innerHTML = '<tr><td colspan="5" class="hint">还没有设备，点「新增设备」</td></tr>';
+  }
+}
+
+function renderOps() {
+  const tb = document.getElementById("opBody");
+  tb.innerHTML = "";
+  S.ops.forEach((o, i) => {
+    const tr = document.createElement("tr");
+    if (i === selOp) tr.className = "sel";
+    tr.onclick = () => selectOp(i);
+    const name = o.complete ? esc(o.name)
+      : '<span class="incomplete">⚠ ' + esc(o.name) + "（不完整）</span>";
+    const info = !o.complete ? '<span class="hint">该项配置不完整，将不会执行</span>'
+      : esc(o.type === 0 ? o.commandStr
+          : (o.transferFileSourcePath + " → " + o.transferFileDestinationPath));
+    tr.innerHTML = "<td>" + name + "</td><td>" + esc(o.typeName) + "</td><td>" + info + "</td>";
+    tb.appendChild(tr);
+  });
+  if (!S.ops.length) {
+    tb.innerHTML = '<tr><td colspan="3" class="hint">还没有操作，点「新增操作」</td></tr>';
+  }
+}
+
+function renderDeviceLog() {
+  const label = document.getElementById("devLabel");
+  const pane = document.getElementById("devLog");
+  if (selDevice < 0 || selDevice >= S.devices.length) {
+    label.textContent = "设备详情（未选中）";
+    pane.textContent = "在左侧选中一台设备查看其执行日志";
+    return;
+  }
+  const d = S.devices[selDevice];
+  label.textContent = "设备" + (selDevice + 1) + "  " + d.IP + ":" + d.Port;
+  api("/api/log?index=" + selDevice)
+    .then(r => { pane.textContent = r.log || "（暂无日志）"; pane.scrollTop = pane.scrollHeight; })
+    .catch(() => {});
+}
+
+function selectDevice(i) {
+  selDevice = i;
+  renderDevices();
+  renderDeviceLog();
+}
+
+// ---------- 表单 ----------
+function switchTab(tab) {
+  if (editing) return;
+  curTab = tab;
+  if (selOp >= 0) {
+    // 切换标签页即切换操作类型（桌面版同样是双向同步）
+    S.ops[selOp].type = tab;
+    onEdit();
+    renderOps();
+  }
+  paintTab();
+}
+
+function paintTab() {
+  for (const b of document.querySelectorAll("#tabs button")) {
+    b.classList.toggle("on", Number(b.dataset.tab) === curTab);
+  }
+  for (const p of document.querySelectorAll(".tabpane")) {
+    p.style.display = Number(p.dataset.pane) === curTab ? "" : "none";
+  }
+}
+
+function selectOp(i) {
+  selOp = i;
+  loadOpIntoForm(i);
+  renderOps();
+}
+
+function loadOpIntoForm(i) {
+  if (i < 0 || i >= S.ops.length) {
+    selOp = -1;
+    document.getElementById("opComplete").textContent = "该项当前完整度：未选中";
+    return;
+  }
+  const o = S.ops[i];
+  editing = true;
+  curTab = o.type;
+  document.getElementById("opName").value = o.name || "";
+  document.getElementById("cmdStr").value = o.commandStr || "";
+  document.getElementById("cmdOK").value = o.checkSuccessStr || "";
+  document.getElementById("cmdErr").value = o.checkErrorStr || "";
+  document.getElementById("upLocal").value = o.transferFileSourcePath || "";
+  document.getElementById("upRemote").value = o.transferFileDestinationPath || "";
+  document.getElementById("downRemote").value = o.transferFileSourcePath || "";
+  document.getElementById("downDir").value = o.transferFileDestinationPath || "";
+  fillCheckSelects(o.checkFile);
+  paintTab();
+  updateCompleteLabel();
+  editing = false;
+}
+
+function fillCheckSelects(sel) {
+  for (const id of ["upCheck", "downCheck"]) {
+    const el = document.getElementById(id);
+    el.innerHTML = "";
+    CHECK_OPTIONS.forEach((name, v) => {
+      const o = document.createElement("option");
+      o.value = String(v); o.textContent = name;
+      el.appendChild(o);
+    });
+    el.value = String(sel == null ? 0 : sel);
+  }
+}
+
+function readForm() {
+  const o = {type: curTab};
+  o.name = document.getElementById("opName").value;
+  if (curTab === 0) {
+    o.commandStr = document.getElementById("cmdStr").value;
+    o.checkSuccessStr = document.getElementById("cmdOK").value;
+    o.checkErrorStr = document.getElementById("cmdErr").value;
+    o.checkFile = 0;
+  } else if (curTab === 1) {
+    o.transferFileSourcePath = document.getElementById("upLocal").value;
+    o.transferFileDestinationPath = document.getElementById("upRemote").value;
+    o.checkFile = Number(document.getElementById("upCheck").value);
+  } else {
+    o.transferFileSourcePath = document.getElementById("downRemote").value;
+    o.transferFileDestinationPath = document.getElementById("downDir").value;
+    o.checkFile = Number(document.getElementById("downCheck").value);
+  }
+  return o;
+}
+
+// 编辑即时生效（桌面版的关键改进），不是"按保存才写回"
+function onEdit() {
+  if (editing || selOp < 0 || selOp >= S.ops.length) return;
+  S.ops[selOp] = Object.assign({}, S.ops[selOp], readForm());
+  updateCompleteLabel();
+  clearTimeout(onEdit._t);
+  onEdit._t = setTimeout(syncOp, 250);
+}
+
+function syncOp() {
+  if (selOp < 0 || selOp >= S.ops.length) return;
+  const op = S.ops[selOp];
+  api("/api/op", {method: "POST", body: JSON.stringify({action: "update", index: selOp, op: op})})
+    .then(s => { const keep = selOp; applyState(s); selOp = keep; renderOps(); })
+    .catch(e => toast(e.message, true));
+}
+
+function updateCompleteLabel() {
+  const el = document.getElementById("opComplete");
+  if (selOp < 0 || selOp >= S.ops.length) {
+    el.textContent = "该项当前完整度：未选中";
+    return;
+  }
+  const o = Object.assign({}, S.ops[selOp], readForm());
+  const reason = completeReason(o);
+  el.textContent = reason
+    ? "该项当前完整度：不完整（不会被执行）— " + reason
+    : "该项当前完整度：完整 ✓";
+  el.style.color = reason ? "var(--warn)" : "var(--ok)";
+}
+
+// 与后端 OperationInf.Validate 同一套规则
+function completeReason(o) {
+  if (!(o.name || "").trim()) return "操作名称为空";
+  if (o.type === 0) {
+    if (!(o.commandStr || "").trim()) return '操作 "' + o.name + '"：命令为空';
+  } else {
+    if (!(o.transferFileSourcePath || "").trim()) return '操作 "' + o.name + '"：源路径为空';
+    if (!(o.transferFileDestinationPath || "").trim()) return '操作 "' + o.name + '"：目标路径为空';
+  }
+  return "";
+}
+
+// ---------- 设备/操作 增删改 ----------
+function addDevice() {
+  api("/api/device", {method: "POST", body: JSON.stringify({
+    action: "add",
+    device: {IP: "192.168.1.1", Port: 22, Username: "linaro", Password: ""}
+  })}).then(s => { applyState(s); selDevice = S.devices.length - 1; renderDevices(); renderDeviceLog(); })
+     .catch(e => toast(e.message, true));
+}
+
+function editSel(kind) {
+  if (kind === "device") {
+    if (selDevice < 0) return toast("请先选中一台设备", true);
+    const d = S.devices[selDevice];
+    const ip = prompt("IPv4 地址", d.IP); if (ip === null) return;
+    const port = prompt("SSH 端口", d.Port); if (port === null) return;
+    const user = prompt("用户名", d.Username); if (user === null) return;
+    const pass = prompt("密码", d.Password); if (pass === null) return;
+    api("/api/device", {method: "POST", body: JSON.stringify({
+      action: "update", index: selDevice,
+      device: {IP: ip.trim(), Port: Number(port), Username: user, Password: pass}
+    })}).then(applyState).catch(e => toast(e.message, true));
+  } else {
+    if (selOp < 0) return toast("请先选中一条操作", true);
+    const name = prompt("操作名称", S.ops[selOp].name);
+    if (name === null) return;
+    document.getElementById("opName").value = name;
+    onEdit();
+  }
+}
+
+function removeSel(kind) {
+  if (kind === "device") {
+    if (selDevice < 0) return toast("请先选中一台设备", true);
+    if (!confirm("确认删除第 " + (selDevice + 1) + " 台设备？")) return;
+    api("/api/device", {method: "POST", body: JSON.stringify({action: "remove", index: selDevice})})
+      .then(s => { applyState(s); selDevice = -1; renderDevices(); renderDeviceLog(); })
+      .catch(e => toast(e.message, true));
+  } else {
+    if (selOp < 0) return toast("请先选中一条操作", true);
+    if (!confirm("确认删除该操作？")) return;
+    api("/api/op", {method: "POST", body: JSON.stringify({action: "remove", index: selOp})})
+      .then(s => { selOp = -1; applyState(s); })
+      .catch(e => toast(e.message, true));
+  }
+}
+
+function cloneSel(kind) {
+  const idx = kind === "device" ? selDevice : selOp;
+  if (idx < 0) return toast(kind === "device" ? "请先选中一台设备" : "请先选中一条操作", true);
+  api("/api/" + kind, {method: "POST", body: JSON.stringify({action: "clone", index: idx})})
+    .then(s => { applyState(s); if (kind === "device") { selDevice = idx + 1; renderDevices(); } else { selOp = idx + 1; renderOps(); } })
+    .catch(e => toast(e.message, true));
+}
+
+function addOp() {
+  api("/api/op", {method: "POST", body: JSON.stringify({
+    action: "add",
+    op: {name: "新操作", type: 0, commandStr: "", checkFile: 0}
+  })}).then(s => { applyState(s); selectOp(S.ops.length - 1); })
+     .catch(e => toast(e.message, true));
+}
+
+function saveOp() {
+  if (selOp < 0) return toast("请先选中一条操作", true);
+  onEdit();
+  setTimeout(() => toast("当前操作配置已更新"), 120);
+}
+
+// ---------- 预设 / 配置 ----------
+function loadPreset() {
+  const name = document.getElementById("preset").value;
+  if (!name) return toast("请先选择一个内置预设", true);
+  api("/api/presets", {method: "POST", body: JSON.stringify({name: name})})
+    .then(s => { selOp = -1; selDevice = -1; applyState(s); setStatus("已载入预设 " + name); })
+    .catch(e => toast(e.message, true));
+}
+
+function exportConfig() {
+  api("/api/config").then(cfg => {
+    const blob = new Blob([JSON.stringify(cfg, null, 4)], {type: "application/json"});
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "batch_deployment_" + new Date().toISOString().slice(0, 19).replace(/[:T]/g, "_") + ".json";
+    a.click();
+    URL.revokeObjectURL(a.href);
+    setStatus("已导出配置（注意：含明文 SSH 密码）");
+  }).catch(e => toast(e.message, true));
+}
+
+function importConfig(input) {
+  const f = input.files && input.files[0];
+  if (!f) return;
+  const fr = new FileReader();
+  fr.onload = () => {
+    let cfg;
+    try { cfg = JSON.parse(fr.result); }
+    catch (e) { return toast("JSON 解析失败: " + e.message, true); }
+    api("/api/config", {method: "POST", body: JSON.stringify(cfg)})
+      .then(s => { selOp = -1; selDevice = -1; applyState(s); setStatus("已导入配置: " + f.name); })
+      .catch(e => toast(e.message, true));
+  };
+  fr.readAsText(f);
+  input.value = "";
+}
+
+// 根目录 / 并行上限跟随输入立即生效
+document.getElementById("root").addEventListener("change", e => {
+  S.rootDir = e.target.value.trim();
+  setStatus("根目录: " + S.rootDir);
+});
+document.getElementById("maxpar").addEventListener("change", e => {
+  S.maxParallel = Number(e.target.value);
+});
+
+// ---------- 执行 ----------
+function runBatch() {
+  api("/api/run", {method: "POST"}).then(r => {
+    setRunning(true);
+    setStatus("执行中…");
+    connectEvents(r.gen);
+  }).catch(e => toast(e.message, true));
+}
+
+function cancelBatch() {
+  if (!confirm("确认中止当前批量执行？\n已完成的设备结果会保留。")) return;
+  api("/api/cancel", {method: "POST"})
+    .then(() => setStatus("正在中止…"))
+    .catch(e => toast(e.message, true));
+}
+
+function connectEvents(gen) {
+  if (evtSrc) { evtSrc.close(); evtSrc = null; }
+  const badge = document.getElementById("conn");
+  evtSrc = new EventSource("/api/events");
+  evtSrc.onopen = () => { badge.textContent = "事件流已连接"; badge.style.color = "var(--ok)"; };
+  evtSrc.onerror = () => { badge.textContent = "事件流断开，正在重连…"; badge.style.color = "var(--danger)"; };
+  evtSrc.onmessage = ev => {
+    const d = JSON.parse(ev.data);
+    if (d.gen !== undefined && gen !== undefined && d.gen !== gen && d.kind !== "snapshot") return;
+    handleEvent(d);
+  };
+}
+
+function handleEvent(d) {
+  switch (d.kind) {
+    case "start":
+      setStatus(d.stage);
+      break;
+    case "done":
+      setRunning(false);
+      setStatus(d.stage);
+      toast(d.stage);
+      refreshState();
+      break;
+    case "device":
+      if (d.deviceIndex >= 0 && d.deviceIndex < S.devices.length) {
+        S.devices[d.deviceIndex].status = d.status || d.stage || "";
+      }
+      renderDevices();
+      if (selDevice === d.deviceIndex && d.log) {
+        renderDeviceLog();
+      }
+      break;
+    case "eos":
+      break;
+  }
+}
+
+function refreshState() {
+  api("/api/state").then(s => {
+    const keepDev = selDevice, keepOp = selOp;
+    applyState(s);
+    selDevice = keepDev; selOp = keepOp;
+    renderDevices(); renderOps(); renderDeviceLog();
+  }).catch(() => {});
+}
+
+function showHelp() {
+  alert(
+    "批量部署工具（Web 模式）\n\n" +
+    "1. 文件操作根目录：上传/下载的相对路径以此为准（服务器上的路径）。\n" +
+    "2. 远程设备：每行一台设备。选中后可克隆/编辑/删除。\n" +
+    "3. 操作：三类——命令下发 / 文件上传 / 文件下载。\n" +
+    "   选中操作后在下方编辑，改动即时生效；\n" +
+    "   「完整/不完整」实时显示，不完整的操作不会被执行。\n" +
+    "4. 执行：设置并行上限后点「执行配置」；执行中可点「中止执行」。\n" +
+    "   执行期间配置区锁定。\n" +
+    "5. 导出/导入配置：JSON 与旧版格式完全兼容。\n\n" +
+    "注意：配置文件含明文 SSH 密码，请自行妥善保管。"
+  );
+}
+
+// ---------- 启动 ----------
+paintTab();
+fillCheckSelects(0);
+api("/api/state").then(s => {
+  applyState(s);
+  setStatus("就绪");
+  connectEvents(s.gen);
+}).catch(e => toast("无法获取状态: " + e.message, true));
+</script>
+</body>
+</html>

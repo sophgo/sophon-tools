@@ -1,3 +1,5 @@
+//go:build !headless
+
 package main
 
 // 界面主题与视觉规范。

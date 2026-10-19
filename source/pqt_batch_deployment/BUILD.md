@@ -59,7 +59,7 @@ bash release.sh linux
 bash release.sh windows
 
 # 指定版本号（默认取 src/version.go）
-bash release.sh all 2.0.1
+bash release.sh all 2.1.0
 
 # 指定产物目录
 OUTPUT_DIR=/tmp/out bash release.sh linux
@@ -69,9 +69,27 @@ OUTPUT_DIR=/tmp/out bash release.sh linux
 
 产物命名：
 ```
-qt_batch_deployment_V<ver>_linux_amd64
-qt_batch_deployment_V<ver>_windows_amd64.exe
-qt_batch_deployment_V<ver>_linux_amd64.deps.txt   # Linux 动态依赖清单
+qt_batch_deployment_V<ver>_linux_amd64                 # 桌面版（Fyne GUI + Web UI）
+qt_batch_deployment_V<ver>_linux_amd64_headless        # 无图形栈版（纯 Web UI，静态链接）
+qt_batch_deployment_V<ver>_windows_amd64.exe           # Windows 桌面版
+qt_batch_deployment_V<ver>_linux_amd64.deps.txt        # 桌面版动态依赖清单
+```
+
+### 3.1 两种 Linux 构建
+
+| 构建 | 命令 | 说明 |
+| --- | --- | --- |
+| 桌面版 | `CGO_ENABLED=1 go build` | 链接 X11/GL，提供 Fyne GUI，也能 `--web` |
+| headless | `CGO_ENABLED=0 go build -tags headless` | **不编译任何 Fyne 代码**，静态链接，零图形依赖 |
+
+`-tags headless` 会排除 `gui.go`/`theme.go`/`cell.go`/`dialogs.go`/`resources_gui.go`
+（这几个文件带 `//go:build !headless`），因此产物不链接任何图形库。
+`release.sh` 在构建 headless 后会**自动断言** `ldd` 里没有 `libX11|libGL|libwayland|libxkb`，
+防止以后误加依赖而悄悄退化。
+
+```bash
+bash release.sh headless   # 只出 headless
+bash release.sh linux      # 桌面版 + headless
 ```
 
 ## 4. 交付形态说明（重要）

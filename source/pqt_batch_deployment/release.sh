@@ -2,18 +2,24 @@
 # qt_batch_deployment（批量部署工具）构建入口 —— Go + Fyne 单二进制
 #
 # 用法: bash release.sh [ARCH] [VERSION]
-#   ARCH:    linux | windows | all（默认 all）
+#   ARCH:    linux | windows | headless | all（默认 all；linux 含桌面版与 headless 版）
 #   VERSION: 显式版本号（默认从 src/version.go 解析，唯一版本源）
 #   env OUTPUT_DIR: 产物目录（默认 <repo>/output/pqt_batch_deployment/）
 #
 # 产物（每种平台都是**单个可执行文件**，无需安装、不随附任何资源目录）:
-#   qt_batch_deployment_V<ver>_linux_amd64      Linux 可执行文件
-#   qt_batch_deployment_V<ver>_windows_amd64.exe Windows 可执行文件
+#   qt_batch_deployment_V<ver>_linux_amd64          Linux 桌面版（Fyne GUI + Web UI）
+#   qt_batch_deployment_V<ver>_linux_amd64_headless Linux 无图形栈版（纯 Web UI，静态链接）
+#   qt_batch_deployment_V<ver>_windows_amd64.exe   Windows 桌面版（Fyne GUI + Web UI）
+#
+# headless 版用 -tags headless + CGO_ENABLED=0 编译：
+#   不编译任何 Fyne 代码 -> 不链接 X11/GL/wayland -> 在无图形栈的服务器上可直接运行。
+#   无参数启动即 Web UI（默认 127.0.0.1:8080）。
 #
 # 依赖:
 #   * Go >= 1.25.5（与统一镜像 docker/versions.env 的 GO_VERSION 一致；
 #     go.mod 的 go 指令也是 1.25.5，低于它会导致 GOTOOLCHAIN 联网拉工具链）
-#   * Linux 构建：gcc + 系统图形开发库（libgl1-mesa-dev libx11-dev 等）
+#   * Linux 构建：gcc + 系统图形开发库（libgl1-mesa-dev libx11-dev 等）；
+#     headless 产物不需要这些（CGO_ENABLED=0）
 #   * Windows 构建：mingw-w64 交叉编译器（x86_64-w64-mingw32-gcc）
 #
 # 为什么这个工具不再用 Qt/AppImage/Enigma:
@@ -75,6 +81,25 @@ build_linux() {
   ldd "$out" 2>/dev/null | awk '{print $1}' | grep -E '^lib' | sort -u > "$out.deps.txt" || true
 }
 
+# headless：不链接任何图形库，专供无图形栈的服务器
+build_headless() {
+  local out="$OUTPUT_DIR/qt_batch_deployment_V${VERSION}_linux_amd64_headless"
+  echo "==> 构建 Linux headless 单文件（Web UI，静态链接）..."
+  if ! CGO_ENABLED=0 go build -tags headless -trimpath \
+       -ldflags "-s -w" -o "$out" . ; then
+    echo "ERROR: headless 构建失败" >&2
+    return 1
+  fi
+  chmod +x "$out"
+  echo "    产物: $out ($(du -h "$out" | cut -f1))"
+  # 断言真的没有图形依赖：这是 headless 版存在的唯一理由
+  if ldd "$out" 2>/dev/null | grep -qiE 'libX11|libGL|libwayland|libxkb'; then
+    echo "ERROR: headless 产物仍然链接了图形库，构建标记没生效" >&2
+    return 1
+  fi
+  echo "    依赖检查: 无图形库依赖 ✓"
+}
+
 build_windows() {
   local out="$OUTPUT_DIR/qt_batch_deployment_V${VERSION}_windows_amd64.exe"
   local cc="x86_64-w64-mingw32-gcc"
@@ -96,11 +121,14 @@ build_windows() {
 
 rc=0
 case "$ARCH" in
-  linux)   build_linux   || rc=1 ;;
+  linux)   build_linux   || rc=1
+           build_headless || rc=1 ;;
   windows|win) build_windows || rc=1 ;;
   all)     build_linux   || rc=1
+           build_headless || rc=1
            build_windows || rc=1 ;;
-  *) echo "ERROR: ARCH 必须是 linux|windows|all，得到: $ARCH" >&2; exit 1 ;;
+  headless) build_headless || rc=1 ;;
+  *) echo "ERROR: ARCH 必须是 linux|windows|headless|all，得到: $ARCH" >&2; exit 1 ;;
 esac
 
 echo "==> 完成，产物目录: $OUTPUT_DIR"

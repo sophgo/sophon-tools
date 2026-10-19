@@ -1,3 +1,5 @@
+//go:build !headless
+
 package main
 
 // 图形界面（Fyne）。
