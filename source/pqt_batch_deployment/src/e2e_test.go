@@ -7,6 +7,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,9 +26,16 @@ func execAgainst(t *testing.T, s *testSSHServer, root string, ops []OperationInf
 	}
 	e.RootDir = root
 	e.MaxParallel = 1
-	e.DialTimeout = 3 * time.Second
-	e.CommandTimeout = 5 * time.Second
-	e.TransferTimeout = 5 * time.Second
+	// 只填零值，不覆盖调用方显式设置的值（否则超时用例测的就不是自己设的数了）。
+	if e.DialTimeout <= 0 {
+		e.DialTimeout = 3 * time.Second
+	}
+	if e.CommandTimeout <= 0 {
+		e.CommandTimeout = 5 * time.Second
+	}
+	if e.TransferTimeout <= 0 {
+		e.TransferTimeout = 5 * time.Second
+	}
 	return e.Run(t.Context(), cfg)
 }
 
@@ -223,5 +231,92 @@ func TestSFTPTransferHangIsInterruptedByTimeout(t *testing.T) {
 		}
 	case <-time.After(25 * time.Second):
 		t.Fatal("传输卡死没有被超时打断：transferTimeout 仍未生效")
+	}
+}
+
+// 取消必须能打断「已建立连接、正在等命令返回」的执行。
+// 这里用真实的 SSH 服务器（会正常握手），让用例真正覆盖握手之后的取消路径；
+// 裸 TCP 假服务器只能测到握手超时，测不到这条。
+func TestCancelInterruptsRunningCommand(t *testing.T) {
+	s := newTestSSHServer(t)
+	s.SetHangCommand(true) // 握手正常，命令收下后永不回应
+
+	e := &Executor{DialTimeout: 5 * time.Second,
+		// 给足超时，证明是「取消」而不是「超时」结束的
+		CommandTimeout: 10 * time.Minute}
+	cfg := &Config{
+		RemoteInf:    []RemoteInf{{IP: "127.0.0.1", Port: s.Port(), Username: "u", Password: "p"}},
+		OperationInf: []OperationInf{{Name: "hang", Type: OpCommand, CommandStr: "sleep forever"}},
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan []DeviceResult, 1)
+	go func() { done <- e.Run(ctx, cfg) }()
+
+	time.Sleep(500 * time.Millisecond) // 等握手完成、命令发出
+	cancel()
+
+	select {
+	case res := <-done:
+		if len(res) != 1 || res[0].OK {
+			t.Fatalf("取消后应判失败, got %+v", res)
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("取消后没有及时结束：取消未打通到命令阶段")
+	}
+}
+
+// 命令超时必须真实生效（不是在握手阶段被 DialTimeout 打断）。
+// 服务器正常握手但永不回应命令，DialTimeout 给足，只有 CommandTimeout 能结束它。
+func TestCommandTimeoutInterruptsHungCommand(t *testing.T) {
+	s := newTestSSHServer(t)
+	s.SetHangCommand(true)
+
+	e := &Executor{
+		DialTimeout:    10 * time.Second, // 远大于命令超时，排除握手干扰
+		CommandTimeout: 700 * time.Millisecond,
+	}
+	done := make(chan []DeviceResult, 1)
+	go func() {
+		done <- execAgainst(t, s, t.TempDir(), []OperationInf{{
+			Name: "hang", Type: OpCommand, CommandStr: "sleep forever",
+		}}, e)
+	}()
+
+	select {
+	case res := <-done:
+		if len(res) != 1 || res[0].OK {
+			t.Fatalf("命令卡死应判失败, got %+v", res)
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("命令卡死没有被 CommandTimeout 打断")
+	}
+}
+
+// 同一设备同一秒内两次下载同一 basename，两个文件都必须保留（旧版会互相截断）。
+func TestDownloadSameSecondDoesNotOverwrite(t *testing.T) {
+	s := newTestSSHServer(t)
+	s.SetFile("/remote/a.bin", []byte("payload"))
+
+	root := t.TempDir()
+	op := OperationInf{Name: "down", Type: OpDownFile,
+		TransferFileSourcePath:      "/remote/a.bin",
+		TransferFileDestinationPath: "out",
+		CheckFile:                   CheckNone}
+
+	// 连续两次执行，落在同一秒内
+	for i := 0; i < 2; i++ {
+		res := execAgainst(t, s, root, []OperationInf{op}, nil)
+		if !res[0].OK {
+			t.Fatalf("第 %d 次下载失败: %v", i+1, res[0].Err)
+		}
+	}
+
+	entries, err := os.ReadDir(filepath.Join(root, "out"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("两次下载应产生 2 个文件, 实际 %d: %v", len(entries), entries)
 	}
 }

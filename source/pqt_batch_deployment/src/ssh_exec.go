@@ -33,14 +33,31 @@ const (
 	// 这里改为按需分配的中等缓冲，内存占用与并发数线性但系数小得多。
 	copyBufSize = 256 * 1024
 
-	// 命令与传输各自的硬上限。超时通过给底层 SSH 连接设 deadline 实现，
+	// 命令与传输各自的默认上限。超时通过给底层 SSH 连接设 deadline 实现，
 	// 因此远端「不读不写但连接不断」时也会被强制打断（仅靠 session 超时做不到）。
+	//
+	// 这两个值只是**默认**：现场有 6 分钟以上的刷机命令、几十 GB 的镜像传输，
+	// 硬编码会让原本能跑完的任务被判失败。可通过 JSON 配置的
+	// commandTimeoutSec / transferTimeoutSec 按需放宽（0 或省略 = 用默认）。
 	defaultCommandTimeout  = 5 * time.Minute
 	defaultTransferTimeout = 30 * time.Minute
 
 	// SSH 连接保活间隔。旧版 libssh2 无 keepalive，链路被中间设备静默丢弃后
 	// 读写会永久挂住；这里定期发 keepalive@openssh.com 探测。
 	defaultKeepaliveInterval = 30 * time.Second
+
+	// 连续这么多次探测失败才判定链路已死（单次失败可能只是 deadline 到点）。
+	keepaliveMaxFails = 3
+
+	// 清理阶段（关闭 SFTP / session / 连接）的短 deadline。
+	// 不设的话，链路已死时往 socket 写 CLOSE 包会永久阻塞在 defer 里，
+	// 超时机制在最需要它的时刻反而失效。
+	cleanupTimeout = 5 * time.Second
+
+	// 进度事件节流：进度前进不足 1% 且距上次上报不足 200ms 时不发事件。
+	// 256KiB 一报的话，100 台并行传 1GB 会产生数十万次 UI 回调，主线程被打爆。
+	progressMinDelta  = 0.01
+	progressMinPeriod = 200 * time.Millisecond
 )
 
 // StepEvent 一条执行进展/结果，UI 与 CLI 共用。
@@ -169,8 +186,10 @@ func (e *Executor) runDevice(ctx context.Context, idx int, label string,
 
 	// 取消必须能打断「正在握手」的连接：ssh.NewClientConn 是阻塞调用，
 	// 只有底层 conn 被关掉才会返回。这里把 ctx 接到 conn 上。
+	// 取消必须能打断「正在握手」的连接：ssh.NewClientConn 是阻塞调用，
+	// 只有底层 conn 被关掉才会返回。这个 watcher 在握手结束时就退出，
+	// 之后由 client.Close() 负责取消，两条路径职责不重叠。
 	hsDone := make(chan struct{})
-	defer close(hsDone)
 	go func() {
 		select {
 		case <-ctx.Done():
@@ -180,6 +199,7 @@ func (e *Executor) runDevice(ctx context.Context, idx int, label string,
 	}()
 
 	c, chans, reqs, err := ssh.NewClientConn(conn, addr, cfg)
+	close(hsDone)
 	if err != nil {
 		if ctx.Err() != nil {
 			return errors.New("已取消")
@@ -219,6 +239,9 @@ func (e *Executor) runDevice(ctx context.Context, idx int, label string,
 	}
 	defer func() {
 		if sftpClient != nil {
+			// 清理也要限时：链路已死时 Close 会往 socket 写 CLOSE 包并永久阻塞，
+			// 那样超时机制反而在最需要它的时刻失效。
+			_ = conn.SetDeadline(time.Now().Add(cleanupTimeout))
 			sftpClient.Close()
 		}
 	}()
@@ -237,16 +260,17 @@ func (e *Executor) runDevice(ctx context.Context, idx int, label string,
 
 		out, err := e.runOperation(ctx, client, getSFTP, remote, op, idx, label, timeout)
 
-		_ = conn.SetDeadline(time.Time{})
-		if ctx.Err() != nil {
-			return fmt.Errorf("%s: 已取消", op.Name)
-		}
+		// 保留已拿到的输出：取消/超时时它是判断卡在哪一步的关键线索。
 		if out != "" {
 			res.Log.WriteString(out)
 			if !strings.HasSuffix(out, "\n") {
 				res.Log.WriteString("\n")
 			}
 			e.emit(StepEvent{DeviceIndex: idx, DeviceLabel: label, Log: out, Progress: -1})
+		}
+		_ = conn.SetDeadline(time.Time{})
+		if ctx.Err() != nil {
+			return fmt.Errorf("%s: 已取消", op.Name)
 		}
 		if err != nil {
 			return fmt.Errorf("%s: %w", op.Name, err)
@@ -257,15 +281,43 @@ func (e *Executor) runDevice(ctx context.Context, idx int, label string,
 
 // keepaliveLoop 定期发 keepalive@openssh.com；连续失败说明链路已死，
 // 关闭客户端让阻塞中的读写返回错误，而不是无限等待。
+// keepaliveLoop 定期发 keepalive@openssh.com 探测链路。
+//
+// 判据刻意保守：只有「连续多次失败」才认定链路已死并关闭连接。
+// 单次失败可能只是当前操作的 deadline 恰好到点（应答被 deadline 打断），
+// 或者服务端繁忙，把它当链路死亡会误杀正常任务。
+// 另外探测放在独立 goroutine 里，服务端不回应 unknown global request 时
+// 不会阻塞 ticker（那样 keepalive 会静默失效）。
 func keepaliveLoop(client *ssh.Client, stop <-chan struct{}) {
 	t := time.NewTicker(defaultKeepaliveInterval)
 	defer t.Stop()
+
+	fails := 0
 	for {
 		select {
 		case <-stop:
 			return
 		case <-t.C:
-			if _, _, err := client.SendRequest("keepalive@openssh.com", true, nil); err != nil {
+			done := make(chan error, 1)
+			go func() {
+				_, _, err := client.SendRequest("keepalive@openssh.com", true, nil)
+				done <- err
+			}()
+			var err error
+			select {
+			case err = <-done:
+			case <-stop:
+				return
+			case <-time.After(defaultKeepaliveInterval):
+				// 探针本身超时：记一次失败，但不阻塞后续探测。
+				err = errors.New("keepalive 探测超时")
+			}
+			if err == nil {
+				fails = 0
+				continue
+			}
+			fails++
+			if fails >= keepaliveMaxFails {
 				client.Close()
 				return
 			}
@@ -407,7 +459,11 @@ func (e *Executor) doUpload(ctx context.Context, client *ssh.Client,
 		return "", fmt.Errorf("创建远程文件失败: %w", err)
 	}
 
+	throttle := &progressThrottle{}
 	written, cpErr := copyWithProgress(dst, f, st.Size(), func(p float64) {
+		if !throttle.allow(p) {
+			return
+		}
 		e.emit(StepEvent{DeviceIndex: idx, DeviceLabel: label,
 			Stage: "上传中", Progress: p})
 	})
@@ -498,17 +554,21 @@ func (e *Executor) doDownload(ctx context.Context, client *ssh.Client,
 	}
 
 	// 目标文件名带设备标识与时间戳，与旧版一致，避免多设备互相覆盖。
+	// 时间戳只到秒：同一设备上两条下载同 basename 的操作在同一秒内完成时，
+	// os.Create 会截断前一个文件。这里独占创建并在重名时加序号。
 	base := fmt.Sprintf("%s_%d_%s_%s",
 		remote.IP, remote.Port, time.Now().Format("2006_01_02_15_04_05"),
 		filepath.Base(remotePath))
-	localPath := filepath.Join(dir, base)
-
-	f, err := os.Create(localPath)
+	localPath, f, err := createUnique(dir, base)
 	if err != nil {
 		return "", fmt.Errorf("创建本地文件失败: %w", err)
 	}
 
+	throttle := &progressThrottle{}
 	written, cpErr := copyWithProgress(f, src, st.Size(), func(p float64) {
+		if !throttle.allow(p) {
+			return
+		}
 		e.emit(StepEvent{DeviceIndex: idx, DeviceLabel: label,
 			Stage: "下载中", Progress: p})
 	})
@@ -649,4 +709,26 @@ func parseInt(s string) (int64, error) {
 // shellQuote 单引号包裹，避免路径里的空格/特殊字符破坏命令。
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// createUnique 以独占方式创建文件；同名已存在时追加 _2、_3 …
+// 避免同一设备同一秒内的两次下载互相截断（旧版直接 os.Create）。
+func createUnique(dir, base string) (string, *os.File, error) {
+	ext := filepath.Ext(base)
+	stem := strings.TrimSuffix(base, ext)
+	for i := 1; i <= 1000; i++ {
+		name := base
+		if i > 1 {
+			name = fmt.Sprintf("%s_%d%s", stem, i, ext)
+		}
+		p := filepath.Join(dir, name)
+		f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if err == nil {
+			return p, f, nil
+		}
+		if !os.IsExist(err) {
+			return "", nil, err
+		}
+	}
+	return "", nil, fmt.Errorf("同名文件过多: %s", base)
 }

@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 )
 
 // 操作类型，取值与旧版 OperationInfData::operationType 一致。
@@ -53,9 +54,29 @@ type OperationInf struct {
 }
 
 // Config 顶层配置文件。
+//
+// 超时字段是**可选新增**：旧配置没有它们，取零值时使用内置默认，
+// 因此对旧文件完全向后兼容（encoding/json 对缺失字段就是零值）。
 type Config struct {
 	RemoteInf    []RemoteInf    `json:"remoteInf"`
 	OperationInf []OperationInf `json:"operationInf"`
+
+	// 单条命令的超时秒数；0 或省略 = 默认 5 分钟。
+	// 刷机、升级等长任务需要放宽时在此配置。
+	CommandTimeoutSec int `json:"commandTimeoutSec,omitempty"`
+	// 单次文件传输的超时秒数；0 或省略 = 默认 30 分钟。
+	TransferTimeoutSec int `json:"transferTimeoutSec,omitempty"`
+}
+
+// Timeouts 把配置里的秒数换算成 time.Duration，零值保持 0（由执行器取默认）。
+func (c *Config) Timeouts() (command, transfer time.Duration) {
+	if c.CommandTimeoutSec > 0 {
+		command = time.Duration(c.CommandTimeoutSec) * time.Second
+	}
+	if c.TransferTimeoutSec > 0 {
+		transfer = time.Duration(c.TransferTimeoutSec) * time.Second
+	}
+	return command, transfer
 }
 
 // TypeName 返回操作类型的中文名，与旧版 operationTypeStrList 一致。
@@ -213,4 +234,24 @@ func SaveConfig(path string, c *Config) error {
 		return fmt.Errorf("写入配置文件失败: %w", err)
 	}
 	return nil
+}
+
+// checkFileOptions 返回校验方式下拉的选项，顺序与 CheckName 一致。
+func checkFileOptions() []string {
+	return []string{
+		(OperationInf{CheckFile: CheckMD5}).CheckName(),
+		(OperationInf{CheckFile: CheckSize}).CheckName(),
+		(OperationInf{CheckFile: CheckNone}).CheckName(),
+	}
+}
+
+// parseCheckFile 把下拉选项还原成 checkFile 取值；无法识别时保守取 MD5。
+func parseCheckFile(name string) int {
+	switch name {
+	case (OperationInf{CheckFile: CheckSize}).CheckName():
+		return CheckSize
+	case (OperationInf{CheckFile: CheckNone}).CheckName():
+		return CheckNone
+	}
+	return CheckMD5
 }

@@ -42,6 +42,16 @@ type testSSHServer struct {
 	hangCommand bool
 
 	wg sync.WaitGroup
+	// release 在 Close 时关闭，用来结束那些故意"挂住"的会话处理协程。
+	// 没有它的话，模拟挂起只能靠 return，而 return 会关闭 channel，
+	// 客户端立刻收到 EOF —— 那不是"卡住"，测不出超时。
+	release   chan struct{}
+	closeOnce sync.Once
+	// conns 记录所有已建立的 TCP 连接，Close 时一并关闭。
+	// 不关的话 handleConn 里的 `for newCh := range chans` 永不返回，
+	// t.Cleanup 里的 wg.Wait() 会一直挂到 go test 超时，且没有任何诊断信息。
+	connMu sync.Mutex
+	conns  []net.Conn
 }
 
 func newTestSSHServer(t *testing.T) *testSSHServer {
@@ -60,6 +70,7 @@ func newTestSSHServer(t *testing.T) *testSSHServer {
 		t:        t,
 		files:    map[string][]byte{},
 		commands: map[string]string{},
+		release:  make(chan struct{}),
 	}
 	s.config = &ssh.ServerConfig{
 		PasswordCallback: func(c ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error) {
@@ -109,7 +120,15 @@ func (s *testSSHServer) SetHangCommand(v bool) {
 }
 
 func (s *testSSHServer) Close() {
-	_ = s.listener.Close()
+	s.closeOnce.Do(func() {
+		close(s.release)
+		_ = s.listener.Close()
+		s.connMu.Lock()
+		for _, c := range s.conns {
+			_ = c.Close()
+		}
+		s.connMu.Unlock()
+	})
 	s.wg.Wait()
 }
 
@@ -130,6 +149,9 @@ func (s *testSSHServer) serve() {
 
 func (s *testSSHServer) handleConn(conn net.Conn) {
 	defer conn.Close()
+	s.connMu.Lock()
+	s.conns = append(s.conns, conn)
+	s.connMu.Unlock()
 
 	sc, chans, reqs, err := ssh.NewServerConn(conn, s.config)
 	if err != nil {
@@ -172,10 +194,10 @@ func (s *testSSHServer) handleSession(ch ssh.Channel, reqs <-chan *ssh.Request) 
 			hang := s.hangSFTP
 			s.mu.Unlock()
 			if hang {
-				// 收下请求但永不回应：模拟"连接还在，但传输不动"。
-				// 必须持续读，否则客户端写满窗口后会因为 TCP 反压而"看起来"卡住，
-				// 那是另一种现象，不是我们要测的服务端不响应。
-				_, _ = io.Copy(io.Discard, ch)
+				// 收下请求但永不回应，且**保持 channel 打开**直到服务器关闭。
+				// 同时把客户端写入的数据丢掉，避免 TCP 反压造成"另一种卡住"。
+				go func() { _, _ = io.Copy(io.Discard, ch) }()
+				<-s.release
 				return
 			}
 			s.serveSFTP(ch)
@@ -190,7 +212,8 @@ func (s *testSSHServer) handleSession(ch ssh.Channel, reqs <-chan *ssh.Request) 
 			s.mu.Unlock()
 
 			if hang {
-				_, _ = io.Copy(io.Discard, ch)
+				go func() { _, _ = io.Copy(io.Discard, ch) }()
+				<-s.release
 				return
 			}
 

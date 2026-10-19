@@ -7,8 +7,8 @@ package main
 //	顶部：Logo + 标题 + 帮助
 //	配置行 A：根目录 [输入框] [选择根目录]
 //	配置行 B：内置预设 [下拉] [载入] [保存配置] [执行配置] [并行上限 下拉]
-//	中部左：远程设备信息配置（表格 + 右键克隆/删除 + 选中设备日志）
-//	中部右：操作信息配置（表格 + 右键克隆/删除 + 三段式配置区）
+//	中部左：远程设备信息配置（表格 + 工具栏克隆/编辑/删除 + 选中设备日志）
+//	中部右：操作信息配置（表格 + 工具栏新增/删除 + 三段式配置区）
 //
 // 人机功效上的改进（需求 2 允许"更优方案"）：
 //   * 编辑即时生效，不再需要先按"储存该项"——旧版忘按就丢配置。
@@ -66,6 +66,8 @@ type gui struct {
 
 	downRemote *widget.Entry
 	downDir    *widget.Entry
+	upCheck    *widget.Select
+	downCheck  *widget.Select
 
 	rootEntry *widget.Entry
 	presetSel *widget.Select
@@ -101,6 +103,7 @@ func runGUI() int {
 
 	g.state.SetRootDir(mustGetwd())
 	g.win.SetContent(g.content())
+	g.attachCloseGuard()
 	// 自动选中第一条操作，使配置区一打开就有内容（旧版同样默认展示首行配置）
 	if len(g.state.Ops()) > 0 {
 		g.loadOpIntoEditor(0)
@@ -509,10 +512,15 @@ func (g *gui) opPane() fyne.CanvasObject {
 	g.upRemote.SetPlaceHolder("远程目标路径，例如 /tmp/a.bin")
 	g.upRemote.OnChanged = func(string) { g.saveOpEditor() }
 
+	// 校验方式：旧版固定 MD5，但配置格式本身支持三档（config.go CheckName）。
+	// 这里把真实值暴露出来，避免"界面写 MD5、配置是不校验"的静默不一致。
+	g.upCheck = widget.NewSelect(checkFileOptions(), func(string) { g.saveOpEditor() })
+	g.downCheck = widget.NewSelect(checkFileOptions(), func(string) { g.saveOpEditor() })
+
 	upTab := container.NewVBox(widget.NewForm(
 		widget.NewFormItem("选择本地文件", container.NewBorder(nil, nil, nil, pickUp, g.upLocal)),
 		widget.NewFormItem("远程目标路径", g.upRemote),
-		widget.NewFormItem("校验方式", widget.NewLabel("MD5 校验值（上传后自动校验）")),
+		widget.NewFormItem("校验方式", g.upCheck),
 	))
 
 	g.downRemote = widget.NewEntry()
@@ -542,7 +550,7 @@ func (g *gui) opPane() fyne.CanvasObject {
 	downTab := container.NewVBox(widget.NewForm(
 		widget.NewFormItem("远程文件路径", g.downRemote),
 		widget.NewFormItem("本地目录", container.NewBorder(nil, nil, nil, pickDown, g.downDir)),
-		widget.NewFormItem("校验方式", widget.NewLabel("MD5 校验值（下载后自动校验）")),
+		widget.NewFormItem("校验方式", g.downCheck),
 	), openDown)
 
 	g.opTabs = container.NewAppTabs(
@@ -550,6 +558,21 @@ func (g *gui) opPane() fyne.CanvasObject {
 		container.NewTabItem("文件上传", upTab),
 		container.NewTabItem("文件下载", downTab),
 	)
+	// 标签页与「操作类型」双向同步。只做单向的话，用户点开「文件下载」页
+	// 看到的是上传页的路径、改完却被按旧类型丢弃——属于静默数据丢失。
+	g.opTabs.OnSelected = func(item *container.TabItem) {
+		if g.editing {
+			return
+		}
+		switch item.Text {
+		case "下发命令":
+			g.opType.SetSelected("下发命令")
+		case "文件上传":
+			g.opType.SetSelected("上传文件")
+		case "文件下载":
+			g.opType.SetSelected("下载文件")
+		}
+	}
 
 	g.opComplete = widget.NewLabel("该项当前完整度:未选中")
 
@@ -573,6 +596,9 @@ func (g *gui) opPane() fyne.CanvasObject {
 		g.confirmDelete("删除操作", "确认删除该操作？", func() {
 			g.state.RemoveOp(idx)
 			g.selectedOp = -1
+			// 清空编辑区：否则选中已删除项的内容还留在界面上，
+			// 用户继续输入会被 saveOpEditor 静默丢弃（selectedOp<0）。
+			g.clearOpEditor()
 			g.refreshTables()
 		})
 	})
@@ -582,7 +608,7 @@ func (g *gui) opPane() fyne.CanvasObject {
 	// 表格不支持 Disable，其交互改由 isRunning() 在回调里拦下。
 	g.lockable = append(g.lockable,
 		g.opName, g.opType, g.cmdEntry, g.cmdOKCheck, g.cmdErrCheck,
-		g.upLocal, g.upRemote, g.downRemote, g.downDir,
+		g.upLocal, g.upRemote, g.downRemote, g.downDir, g.upCheck, g.downCheck,
 		pickUp, pickDown, saveOp, addOp, delOp,
 		g.rootEntry, g.pickRoot, g.loadBtn, g.saveBtn, g.presetSel, g.maxParSel,
 	)
@@ -640,6 +666,8 @@ func (g *gui) loadOpIntoEditor(i int) {
 	g.upRemote.SetText(op.TransferFileDestinationPath)
 	g.downRemote.SetText(op.TransferFileSourcePath)
 	g.downDir.SetText(op.TransferFileDestinationPath)
+	g.upCheck.SetSelected(op.CheckName())
+	g.downCheck.SetSelected(op.CheckName())
 	g.applyOpType()
 	g.updateOpCompleteLabel()
 }
@@ -680,12 +708,12 @@ func (g *gui) saveOpEditor() bool {
 		op.Type = OpUpFile
 		op.TransferFileSourcePath = g.upLocal.Text
 		op.TransferFileDestinationPath = g.upRemote.Text
-		op.CheckFile = CheckMD5
+		op.CheckFile = parseCheckFile(g.upCheck.Selected)
 	case "下载文件":
 		op.Type = OpDownFile
 		op.TransferFileSourcePath = g.downRemote.Text
 		op.TransferFileDestinationPath = g.downDir.Text
-		op.CheckFile = CheckMD5
+		op.CheckFile = parseCheckFile(g.downCheck.Selected)
 	}
 
 	g.state.UpdateOp(g.selectedOp, op)
@@ -808,9 +836,12 @@ func (g *gui) runBatch() {
 	}
 	g.setStatus(msg)
 
+	cmdTimeout, xferTimeout := cfg.Timeouts()
 	exec := &Executor{
-		RootDir:     rootDir,
-		MaxParallel: g.state.MaxParallel(),
+		RootDir:         rootDir,
+		MaxParallel:     g.state.MaxParallel(),
+		CommandTimeout:  cmdTimeout,
+		TransferTimeout: xferTimeout,
 		Emit: func(ev StepEvent) {
 			// Executor 的回调来自多个 goroutine，统一转回 UI 线程更新控件。
 			fyne.Do(func() { g.onEvent(ev) })
@@ -899,7 +930,11 @@ func (g *gui) onEvent(ev StepEvent) {
 		g.state.AppendLog(ev.DeviceIndex, ev.Log+"\n")
 	}
 	if ev.Err != nil {
-		g.state.AppendLog(ev.DeviceIndex, "错误: "+ev.Err.Error()+"\n")
+		// 失败事件的 Log 里已经带了同一句原因（见 Executor.Run），
+		// 这里只在没有 Log 时补一条，避免日志里同一原因出现两遍。
+		if ev.Log == "" {
+			g.state.AppendLog(ev.DeviceIndex, "错误: "+ev.Err.Error()+"\n")
+		}
 		g.state.SetDeviceStatus(ev.DeviceIndex, "失败/"+ev.Err.Error())
 	} else if ev.Done {
 		// 结果以 Done 事件携带的 OK 为准，避免"连接失败却显示成功"。
@@ -972,4 +1007,46 @@ func relToRoot(root, p string) string {
 		return p
 	}
 	return rel
+}
+
+// clearOpEditor 清空操作编辑区并更新完整度提示。
+// 选中项被删除后必须调用，否则残留的控件内容会让用户以为还在编辑它。
+func (g *gui) clearOpEditor() {
+	g.editing = true
+	defer func() { g.editing = false }()
+
+	g.opName.SetText("")
+	g.cmdEntry.SetText("")
+	g.cmdOKCheck.SetText("")
+	g.cmdErrCheck.SetText("")
+	g.upLocal.SetText("")
+	g.upRemote.SetText("")
+	g.downRemote.SetText("")
+	g.downDir.SetText("")
+	g.opComplete.SetText("该项当前完整度:未选中")
+}
+
+// attachCloseGuard 让「执行中关闭窗口」先取消任务再退出。
+//
+// 不做的话 ShowAndRun 返回后 main 立刻 os.Exit(0)，正在上传/下载的文件会被
+// 硬生生截断——远端留下半截镜像、本地留下残缺下载文件，而这类文件后续
+// 可能被直接使用。
+func (g *gui) attachCloseGuard() {
+	g.win.SetCloseIntercept(func() {
+		if !g.isRunning() {
+			g.win.Close()
+			return
+		}
+		showConfirm("正在执行",
+			"当前仍有批量任务在执行，关闭窗口会中止它。\n已完成的设备结果会保留，进行中的传输会被中断。",
+			func() {
+				g.mu.Lock()
+				cancel := g.cancel
+				g.mu.Unlock()
+				if cancel != nil {
+					cancel()
+				}
+				g.win.Close()
+			}, g.win)
+	})
 }

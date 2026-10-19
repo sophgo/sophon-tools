@@ -2,10 +2,8 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"io"
-	"net"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -270,101 +268,5 @@ func TestExecutorTimeoutDefaultsAndOverrides(t *testing.T) {
 	}
 	if got := e.transferTimeout(); got != 7*time.Second {
 		t.Fatalf("传输超时覆盖失效: %s", got)
-	}
-}
-
-// 传输超时必须真实生效：用一个只接受连接、永不响应的假服务器，
-// 断言命令在限定时间内失败，而不是永久阻塞。
-// 注意 DialTimeout 必须给足，否则测到的是握手超时而不是命令超时。
-func TestCommandHonorsCommandTimeout(t *testing.T) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Skipf("无法监听本地端口: %v", err)
-	}
-	defer ln.Close()
-	// 接受连接后什么都不做——模拟"服务端不读不写但连接不断"。
-	go func() {
-		for {
-			c, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			defer c.Close()
-		}
-	}()
-
-	addr := ln.Addr().(*net.TCPAddr)
-	e := &Executor{
-		RootDir:     t.TempDir(),
-		MaxParallel: 1,
-		// 握手超时给足，让失败只可能来自命令阶段。
-		DialTimeout:     2 * time.Second,
-		CommandTimeout:  400 * time.Millisecond,
-		TransferTimeout: 400 * time.Millisecond,
-	}
-	cfg := &Config{
-		RemoteInf: []RemoteInf{{IP: "127.0.0.1", Port: addr.Port, Username: "u", Password: "p"}},
-		OperationInf: []OperationInf{
-			{Name: "c", Type: OpCommand, CommandStr: "date"},
-		},
-	}
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		e.Run(t.Context(), cfg)
-	}()
-
-	select {
-	case <-done:
-	case <-time.After(20 * time.Second):
-		t.Fatal("未在超时内失败：超时控制失效")
-	}
-}
-
-// 取消必须能打断执行，而不是等超时。
-func TestRunHonorsContextCancel(t *testing.T) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Skipf("无法监听本地端口: %v", err)
-	}
-	defer ln.Close()
-	go func() {
-		for {
-			c, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			defer c.Close()
-		}
-	}()
-
-	addr := ln.Addr().(*net.TCPAddr)
-	e := &Executor{
-		RootDir:     t.TempDir(),
-		MaxParallel: 1,
-		// 故意给很长的超时，证明是"取消"而不是"超时"结束的。
-		DialTimeout:     30 * time.Second,
-		CommandTimeout:  30 * time.Second,
-		TransferTimeout: 30 * time.Second,
-	}
-	cfg := &Config{
-		RemoteInf:    []RemoteInf{{IP: "127.0.0.1", Port: addr.Port, Username: "u", Password: "p"}},
-		OperationInf: []OperationInf{{Name: "c", Type: OpCommand, CommandStr: "date"}},
-	}
-
-	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan []DeviceResult, 1)
-	go func() { done <- e.Run(ctx, cfg) }()
-
-	time.Sleep(300 * time.Millisecond)
-	cancel()
-
-	select {
-	case res := <-done:
-		if len(res) != 1 || res[0].Err == nil {
-			t.Fatalf("取消后应返回失败结果, got %+v", res)
-		}
-	case <-time.After(15 * time.Second):
-		t.Fatal("取消后执行没有及时结束")
 	}
 }

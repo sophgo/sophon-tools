@@ -18,6 +18,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 const usageText = `用法: %s [根目录] [配置文件路径] [最大并行数]
@@ -81,10 +82,21 @@ func runCLI(rootDir, jsonPath string, maxParallel int) int {
 		}
 	}
 
+	// 超时取配置（可选字段），未配置时执行器用内置默认值。
+	cmdTimeout, xferTimeout := cfg.Timeouts()
+
+	var outMu sync.Mutex
+
 	exec := &Executor{
-		RootDir:     rootDir,
-		MaxParallel: maxParallel,
+		RootDir:         rootDir,
+		MaxParallel:     maxParallel,
+		CommandTimeout:  cmdTimeout,
+		TransferTimeout: xferTimeout,
 		Emit: func(ev StepEvent) {
+			// Emit 会被多个设备 goroutine 并发调用；不加锁会让多台设备的
+			// 输出在半行处交错，脚本无法按行解析。
+			outMu.Lock()
+			defer outMu.Unlock()
 			if ev.Log != "" {
 				for _, line := range strings.Split(strings.TrimRight(ev.Log, "\n"), "\n") {
 					fmt.Printf("[%s] %s\n", ev.DeviceLabel, line)
