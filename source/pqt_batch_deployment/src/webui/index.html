@@ -330,7 +330,7 @@ function setRunning(running) {
   // 执行期间锁定所有会改配置的入口（与桌面版一致）
   for (const el of document.querySelectorAll(
       "#root,#preset,#maxpar,#devBody button,#opBody button,.toolbar button," +
-      ".form input,.form textarea,.form select,.tabs button,#opName,#file")) {
+      ".bar button,.form input,.form textarea,.form select,.tabs button,#opName,#file")) {
     if (el.id === "runBtn" || el.id === "cancelBtn") continue;
     el.disabled = running;
   }
@@ -491,12 +491,24 @@ function onEdit() {
   onEdit._t = setTimeout(syncOp, 250);
 }
 
+// 串行化，避免两次 update 乱序覆盖。
+let syncChain = Promise.resolve();
 function syncOp() {
   if (selOp < 0 || selOp >= S.ops.length) return;
-  const op = S.ops[selOp];
-  api("/api/op", {method: "POST", body: JSON.stringify({action: "update", index: selOp, op: op})})
-    .then(s => { const keep = selOp; applyState(s); selOp = keep; renderOps(); })
-    .catch(e => toast(e.message, true));
+  const idx = selOp;
+  const op = Object.assign({}, S.ops[idx]);
+  syncChain = syncChain.then(() =>
+    api("/api/op", {method: "POST", body: JSON.stringify({action: "update", index: idx, op: op})})
+      .then(s => {
+        // 只更新列表与非表单字段：**不要**回填表单，
+        // 否则请求在途时用户继续敲的字会被服务端回显覆盖掉。
+        S.ops = s.ops;
+        S.running = s.running;
+        renderOps();
+        renderDevices();
+      })
+      .catch(e => toast(e.message, true))
+  );
 }
 
 function updateCompleteLabel() {
@@ -518,9 +530,11 @@ function completeReason(o) {
   if (!(o.name || "").trim()) return "操作名称为空";
   if (o.type === 0) {
     if (!(o.commandStr || "").trim()) return '操作 "' + o.name + '"：命令为空';
-  } else {
+  } else if (o.type === 1 || o.type === 2) {
     if (!(o.transferFileSourcePath || "").trim()) return '操作 "' + o.name + '"：源路径为空';
     if (!(o.transferFileDestinationPath || "").trim()) return '操作 "' + o.name + '"：目标路径为空';
+  } else {
+    return '操作 "' + o.name + '"：未知类型 ' + o.type;
   }
   return "";
 }
@@ -630,13 +644,18 @@ function importConfig(input) {
   input.value = "";
 }
 
-// 根目录 / 并行上限跟随输入立即生效
+// 根目录 / 并行上限必须写到服务端——执行时用的是服务端的值，
+// 只改前端会造成"界面显示 A、实际用 B"的静默错误。
+function saveSettings(patch) {
+  return api("/api/settings", {method: "POST", body: JSON.stringify(patch)})
+    .then(s => { applyState(s); setStatus("设置已保存"); })
+    .catch(e => { toast(e.message, true); refreshState(); });
+}
 document.getElementById("root").addEventListener("change", e => {
-  S.rootDir = e.target.value.trim();
-  setStatus("根目录: " + S.rootDir);
+  saveSettings({rootDir: e.target.value.trim()});
 });
 document.getElementById("maxpar").addEventListener("change", e => {
-  S.maxParallel = Number(e.target.value);
+  saveSettings({maxParallel: Number(e.target.value)});
 });
 
 // ---------- 执行 ----------
@@ -663,7 +682,9 @@ function connectEvents(gen) {
   evtSrc.onerror = () => { badge.textContent = "事件流断开，正在重连…"; badge.style.color = "var(--danger)"; };
   evtSrc.onmessage = ev => {
     const d = JSON.parse(ev.data);
-    if (d.gen !== undefined && gen !== undefined && d.gen !== gen && d.kind !== "snapshot") return;
+    // 别的标签页发起新一轮时，这里要跟着换绑，否则会把它的事件全部丢掉。
+    if (d.kind === "start") gen = d.gen;
+    if (d.gen !== undefined && gen !== undefined && d.gen !== gen) return;
     handleEvent(d);
   };
 }
@@ -688,7 +709,13 @@ function handleEvent(d) {
         renderDeviceLog();
       }
       break;
+    case "snapshot":
+      // 重连（或首次连上）后以服务端为准，修正本地可能过期的 running 状态。
+      refreshState();
+      break;
     case "eos":
+      // 订阅被重置：重连后靠 snapshot 重新同步，这里先拉一次兜底。
+      refreshState();
       break;
   }
 }

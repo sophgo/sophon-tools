@@ -26,6 +26,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -40,8 +41,6 @@ var webAssets embed.FS
 type webOptions struct {
 	// Listen 监听地址，默认 127.0.0.1:8080。
 	Listen string
-	// OpenBrowser 启动后尝试打开浏览器；服务器上通常是 false。
-	OpenBrowser bool
 }
 
 func parseWebArgs(args []string) (webOptions, error) {
@@ -54,8 +53,6 @@ func parseWebArgs(args []string) (webOptions, error) {
 			}
 			opts.Listen = args[i+1]
 			i++
-		case "--open":
-			opts.OpenBrowser = true
 		default:
 			return opts, fmt.Errorf("未知参数 %q", args[i])
 		}
@@ -108,7 +105,7 @@ func runWeb(opts webOptions) int {
 	}
 
 	srv := &http.Server{
-		Handler:           mux,
+		Handler:           guardLocalOrigin(mux),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -146,6 +143,56 @@ func isLoopback(listen string) bool {
 
 // ---------- 路由 ----------
 
+// guardLocalOrigin 挡住跨站请求与 DNS rebinding。
+//
+// 为什么需要：服务默认只监听 127.0.0.1，但**这挡不住浏览器**——
+// 恶意页面可以直接 POST 到 http://127.0.0.1:8080，或用 DNS rebinding
+// 把自己的域名解析到 127.0.0.1 从而被当作同源，读走 /api/config 里的
+// 明文 SSH 密码。所以校验 Origin/Host 必须是本机名。
+func guardLocalOrigin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !isLocalRequest(r) {
+			writeErr(w, http.StatusForbidden,
+				"只接受本机访问（Host/Origin 不是 localhost/127.0.0.1）。"+
+					"远程请用 SSH 端口转发。")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// isLocalRequest 判断请求是否来自本机页面。
+func isLocalRequest(r *http.Request) bool {
+	// Host 必须是本机名/回环地址，挡 DNS rebinding。
+	host := r.Host
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	if !isLocalHostName(host) {
+		return false
+	}
+	// 带 Origin 时（跨站 POST 一定带），必须也是本机。
+	if origin := r.Header.Get("Origin"); origin != "" {
+		u, err := url.Parse(origin)
+		if err != nil {
+			return false
+		}
+		if !isLocalHostName(u.Hostname()) {
+			return false
+		}
+	}
+	return true
+}
+
+func isLocalHostName(h string) bool {
+	switch strings.ToLower(h) {
+	case "localhost", "127.0.0.1", "::1", "[::1]":
+		return true
+	}
+	ip := net.ParseIP(h)
+	return ip != nil && ip.IsLoopback()
+}
+
 func (ws *webServer) routes(mux *http.ServeMux) {
 	sub, err := fs.Sub(webAssets, "webui")
 	if err != nil {
@@ -154,18 +201,21 @@ func (ws *webServer) routes(mux *http.ServeMux) {
 	mux.Handle("/", http.FileServer(http.FS(sub)))
 
 	mux.HandleFunc("/api/state", ws.handleState)
-	mux.HandleFunc("/api/config", ws.handleConfig)   // GET 导出 / POST 覆盖
-	mux.HandleFunc("/api/presets", ws.handlePresets) // GET 列表 / POST 载入
-	mux.HandleFunc("/api/device", ws.handleDevice)   // POST 增删改克隆
-	mux.HandleFunc("/api/op", ws.handleOp)           // POST 增删改克隆
-	mux.HandleFunc("/api/run", ws.handleRun)         // POST 开始
-	mux.HandleFunc("/api/cancel", ws.handleCancel)   // POST 中止
-	mux.HandleFunc("/api/events", ws.handleEvents)   // GET SSE 事件流
-	mux.HandleFunc("/api/log", ws.handleLog)         // GET 单设备日志
+	mux.HandleFunc("/api/config", ws.handleConfig)     // GET 导出 / POST 覆盖
+	mux.HandleFunc("/api/presets", ws.handlePresets)   // GET 列表 / POST 载入
+	mux.HandleFunc("/api/settings", ws.handleSettings) // POST 根目录 / 并行上限
+	mux.HandleFunc("/api/device", ws.handleDevice)     // POST 增删改克隆
+	mux.HandleFunc("/api/op", ws.handleOp)             // POST 增删改克隆
+	mux.HandleFunc("/api/run", ws.handleRun)           // POST 开始
+	mux.HandleFunc("/api/cancel", ws.handleCancel)     // POST 中止
+	mux.HandleFunc("/api/events", ws.handleEvents)     // GET SSE 事件流
+	mux.HandleFunc("/api/log", ws.handleLog)           // GET 单设备日志
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	// 响应里含明文 SSH 密码，禁止浏览器落盘缓存。
+	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(v)
 }
@@ -268,6 +318,10 @@ func (ws *webServer) handleConfig(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, ws.state.ToConfig())
 
 	case http.MethodPost:
+		if ws.isRunning() {
+			writeErr(w, http.StatusConflict, "批量任务执行中，配置已锁定")
+			return
+		}
 		var cfg Config
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<20)).Decode(&cfg); err != nil {
 			writeErr(w, http.StatusBadRequest, "解析配置失败: "+err.Error())
@@ -286,6 +340,50 @@ func (ws *webServer) handleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleSettings 保存根目录与并行上限。
+//
+// 这两个值必须落到服务端：早先只在前端 JS 里改，界面显示了新值但执行时
+// 用的仍是旧值（根目录永远是启动 cwd、并行上限永远是 100），属于会让人
+// 把文件传到错误目录的静默错误。
+func (ws *webServer) handleSettings(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeErr(w, http.StatusMethodNotAllowed, "只支持 POST")
+		return
+	}
+	if ws.isRunning() {
+		writeErr(w, http.StatusConflict, "批量任务执行中，配置已锁定")
+		return
+	}
+	var body struct {
+		RootDir     *string `json:"rootDir"`
+		MaxParallel *int    `json:"maxParallel"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "请求格式错误: "+err.Error())
+		return
+	}
+	if body.RootDir != nil {
+		root := strings.TrimSpace(*body.RootDir)
+		if root == "" {
+			writeErr(w, http.StatusBadRequest, "根目录不能为空")
+			return
+		}
+		if st, err := os.Stat(root); err != nil || !st.IsDir() {
+			writeErr(w, http.StatusBadRequest, "根目录不存在或不是目录: "+root)
+			return
+		}
+		ws.state.SetRootDir(root)
+	}
+	if body.MaxParallel != nil {
+		if *body.MaxParallel <= 0 {
+			writeErr(w, http.StatusBadRequest, "并行上限必须大于 0")
+			return
+		}
+		ws.state.SetMaxParallel(*body.MaxParallel)
+	}
+	writeJSON(w, http.StatusOK, ws.snapshot())
+}
+
 func (ws *webServer) handlePresets(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		writeJSON(w, http.StatusOK, BuiltinPresets())
@@ -293,6 +391,10 @@ func (ws *webServer) handlePresets(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method != http.MethodPost {
 		writeErr(w, http.StatusMethodNotAllowed, "只支持 GET/POST")
+		return
+	}
+	if ws.isRunning() {
+		writeErr(w, http.StatusConflict, "批量任务执行中，配置已锁定")
 		return
 	}
 	var body struct {
@@ -448,25 +550,38 @@ func (ws *webServer) handleRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 先抢占 running，避免两个并发 POST 都通过检查、起两轮执行
+	// （那样 cancel 只能拿到后者，前者跑完前杀不掉）。
 	ws.mu.Lock()
 	if ws.running {
 		ws.mu.Unlock()
 		writeErr(w, http.StatusConflict, "已有任务在执行")
 		return
 	}
+	ws.running = true
 	ws.mu.Unlock()
+
+	// 校验失败要把 running 放回去，否则界面永远处于"执行中"。
+	release := func() {
+		ws.mu.Lock()
+		ws.running = false
+		ws.mu.Unlock()
+	}
 
 	cfg := ws.state.ToConfig()
 	if err := cfg.ValidateDevices(); err != nil {
+		release()
 		writeErr(w, http.StatusBadRequest, "配置无效: "+err.Error())
 		return
 	}
 	if len(cfg.CompleteOperations()) == 0 {
+		release()
 		writeErr(w, http.StatusBadRequest, "没有配置完整的操作可执行")
 		return
 	}
 	rootDir := ws.state.RootDir()
 	if st, err := os.Stat(rootDir); err != nil || !st.IsDir() {
+		release()
 		writeErr(w, http.StatusBadRequest, "根目录不存在或不是目录: "+rootDir)
 		return
 	}
@@ -478,7 +593,6 @@ func (ws *webServer) handleRun(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	ws.mu.Lock()
-	ws.running = true
 	ws.cancel = cancel
 	ws.gen++
 	gen := ws.gen

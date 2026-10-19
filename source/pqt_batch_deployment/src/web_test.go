@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -400,5 +401,199 @@ func TestParseWebArgs(t *testing.T) {
 	}
 	if _, err := parseWebArgs([]string{"--bogus"}); err == nil {
 		t.Fatal("未知参数应报错")
+	}
+}
+
+// 执行期间必须锁住**所有**会改配置的入口。
+// 早先只锁了 device/op，config 与 presets 漏了——执行中用「载入预设」会整体
+// 替换设备表，导致在途事件写到已经不存在的位置，日志与状态全错位。
+func TestWebAllMutatingEndpointsLockedWhileRunning(t *testing.T) {
+	ws, srv := newTestWeb(t)
+
+	ws.mu.Lock()
+	ws.running = true
+	ws.mu.Unlock()
+	defer func() {
+		ws.mu.Lock()
+		ws.running = false
+		ws.mu.Unlock()
+	}()
+
+	cases := []struct {
+		name string
+		path string
+		body any
+	}{
+		{"导入配置", "/api/config", map[string]any{
+			"remoteInf":    []any{map[string]any{"IP": "1.1.1.1", "Port": 22, "Username": "u"}},
+			"operationInf": []any{map[string]any{"name": "x", "type": 0, "commandStr": "date"}},
+		}},
+		{"载入预设", "/api/presets", map[string]any{"name": BuiltinPresets()[0]}},
+		{"改设备", "/api/device", map[string]any{"action": "add",
+			"device": map[string]any{"IP": "1.1.1.1", "Port": 22, "Username": "u"}}},
+		{"改操作", "/api/op", map[string]any{"action": "remove", "index": 0}},
+		{"改设置", "/api/settings", map[string]any{"maxParallel": 5}},
+	}
+	for _, c := range cases {
+		resp, _ := postJSON(t, srv, c.path, c.body)
+		if resp.StatusCode != http.StatusConflict {
+			t.Errorf("%s: 状态码 = %d, 期望 409（执行期必须只读）", c.name, resp.StatusCode)
+		}
+	}
+}
+
+// 根目录与并行上限必须真的落到服务端——执行时读的是服务端的值。
+// 早先这两个值只改前端 JS，界面显示新值、实际执行仍用旧值。
+func TestWebSettingsPersist(t *testing.T) {
+	ws, srv := newTestWeb(t)
+
+	dir := t.TempDir()
+	resp, body := postJSON(t, srv, "/api/settings", map[string]any{
+		"rootDir": dir, "maxParallel": 7,
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("设置状态码 = %d, body=%s", resp.StatusCode, body)
+	}
+	if ws.state.RootDir() != dir {
+		t.Fatalf("根目录未保存: got %q want %q", ws.state.RootDir(), dir)
+	}
+	if ws.state.MaxParallel() != 7 {
+		t.Fatalf("并行上限未保存: got %d", ws.state.MaxParallel())
+	}
+
+	// 不存在的目录必须拒绝（否则执行时才失败，且报错位置远离问题）
+	resp, _ = postJSON(t, srv, "/api/settings", map[string]any{
+		"rootDir": "/definitely/not/a/dir/xyz",
+	})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("非法根目录状态码 = %d, 期望 400", resp.StatusCode)
+	}
+	if ws.state.RootDir() != dir {
+		t.Fatal("被拒绝的设置不应改动已有值")
+	}
+}
+
+// handleRun 的 running 抢占必须是原子的：并发 POST 只能有一个真正开跑，
+// 否则两轮执行同时进行，cancel 只能杀掉其中一轮。
+//
+// 关键是要**真并发**地打进去，而不是等第一轮置位后再打——后者无论如何都过。
+// 用「服务端收下命令后永不回应」让胜出的那轮保持在进行中，便于断言与清场。
+func TestWebRunIsExclusive(t *testing.T) {
+	srvSSH := newTestSSHServer(t)
+	srvSSH.SetHangCommand(true)
+
+	ws, srv := newTestWeb(t)
+	postJSON(t, srv, "/api/config", map[string]any{
+		"remoteInf": []any{map[string]any{
+			"IP": "127.0.0.1", "Port": srvSSH.Port(), "Username": "u", "Password": "p"}},
+		"operationInf": []any{map[string]any{"name": "c", "type": 0, "commandStr": "hang"}},
+	})
+
+	// 多轮并发，每轮都从"无人执行"状态起跑，放大竞争窗口。
+	const rounds, perRound = 30, 8
+	for r := 0; r < rounds; r++ {
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		codes := make([]int, perRound)
+		for i := 0; i < perRound; i++ {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				<-start // 同一个起跑线
+				resp, _ := postJSON(t, srv, "/api/run", nil)
+				codes[i] = resp.StatusCode
+			}(i)
+		}
+		close(start)
+		wg.Wait()
+
+		ok, conflict := 0, 0
+		for _, c := range codes {
+			switch c {
+			case http.StatusOK:
+				ok++
+			case http.StatusConflict:
+				conflict++
+			}
+		}
+		if ok != 1 || conflict != perRound-1 {
+			t.Fatalf("第 %d 轮: 成功 %d 次、409 %d 次（期望 1 / %d），codes=%v",
+				r+1, ok, conflict, perRound-1, codes)
+		}
+
+		// 清场：中止并等它退出，再进入下一轮
+		postJSON(t, srv, "/api/cancel", nil)
+		deadline := time.Now().Add(15 * time.Second)
+		for ws.isRunning() && time.Now().Before(deadline) {
+			time.Sleep(10 * time.Millisecond)
+		}
+		if ws.isRunning() {
+			t.Fatalf("第 %d 轮: 取消后仍未退出", r+1)
+		}
+	}
+}
+
+// 校验失败时 running 必须被放回去，否则界面永远卡在"执行中"。
+func TestWebRunReleasesLockOnValidationFailure(t *testing.T) {
+	ws, srv := newTestWeb(t)
+	postJSON(t, srv, "/api/config", map[string]any{
+		"remoteInf":    []any{map[string]any{"IP": "127.0.0.1", "Port": 1, "Username": "u"}},
+		"operationInf": []any{map[string]any{"name": "空", "type": 0, "commandStr": "  "}},
+	})
+	resp, _ := postJSON(t, srv, "/api/run", nil)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("状态码 = %d, 期望 400", resp.StatusCode)
+	}
+	if ws.isRunning() {
+		t.Fatal("校验失败后 running 必须复位，否则界面永久锁定")
+	}
+}
+
+// 含明文 SSH 密码的响应不能被浏览器缓存。
+func TestWebResponsesNotCached(t *testing.T) {
+	_, srv := newTestWeb(t)
+	for _, p := range []string{"/api/state", "/api/config"} {
+		resp, err := http.Get(srv.URL + p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if cc := resp.Header.Get("Cache-Control"); !strings.Contains(cc, "no-store") {
+			t.Errorf("%s 的 Cache-Control = %q, 期望含 no-store", p, cc)
+		}
+	}
+}
+
+// 跨站请求与 DNS rebinding 必须被挡住（配置里有明文密码）。
+func TestGuardLocalOrigin(t *testing.T) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	h := guardLocalOrigin(next)
+
+	cases := []struct {
+		name   string
+		host   string
+		origin string
+		want   int
+	}{
+		{"本机 Host", "127.0.0.1:8080", "", http.StatusOK},
+		{"localhost Host", "localhost:8080", "", http.StatusOK},
+		{"本机 Origin", "127.0.0.1:8080", "http://127.0.0.1:8080", http.StatusOK},
+		{"外部 Host（DNS rebinding）", "evil.example.com", "", http.StatusForbidden},
+		{"外部 Origin（跨站）", "127.0.0.1:8080", "http://evil.example.com", http.StatusForbidden},
+		{"IPv6 回环", "[::1]:8080", "", http.StatusOK},
+	}
+	for _, c := range cases {
+		req := httptest.NewRequest(http.MethodPost, "http://"+c.host+"/api/run", nil)
+		req.Host = c.host
+		if c.origin != "" {
+			req.Header.Set("Origin", c.origin)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != c.want {
+			t.Errorf("%s: 状态码 = %d, 期望 %d", c.name, rec.Code, c.want)
+		}
 	}
 }
