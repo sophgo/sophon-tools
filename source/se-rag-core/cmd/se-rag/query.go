@@ -14,14 +14,30 @@ import (
 	"se-rag-core/internal/retriever"
 )
 
-// warnStaleIndex 索引的分块策略落后于当前版本时向 stderr 提示重建（不影响查询结果输出）。
-func warnStaleIndex(indexDir, product string) {
+// warnStaleIndex 索引落后（分块策略或 docs 内容）时向 stderr 提示重建（不影响查询结果输出）。
+// docsDir 为空时只比对分块策略——调用方没给 docs 就无从判断内容是否漂移。
+func warnStaleIndex(indexDir, product, docsDir string) {
 	meta, err := (&docstore.Store{IndexDir: indexDir}).ReadMeta(product)
-	if err != nil || !meta.StrategyStale() {
+	if err != nil {
 		return
 	}
-	fmt.Fprintf(os.Stderr, "warning: index chunk strategy %q is older than current %q; rebuild recommended: se-rag build --docs-dir <docs> -index-dir %s\n",
-		meta.ChunkStrategy, chunker.StrategyVersion, indexDir)
+	if meta.StrategyStale() {
+		fmt.Fprintf(os.Stderr, "warning: index chunk strategy %q is older than current %q; rebuild recommended: se-rag build --docs-dir <docs> -index-dir %s\n",
+			meta.ChunkStrategy, chunker.StrategyVersion, indexDir)
+		return
+	}
+	if docsDir == "" {
+		return
+	}
+	chunkMap, err := chunker.NewDefaultChunker().ChunkDirectory(docsDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: cannot read docs dir %q: %v\n", docsDir, err)
+		return
+	}
+	if want := chunker.HashDocs(docsDir, chunkMap); meta.DocsStale(want) {
+		fmt.Fprintf(os.Stderr, "warning: index was built from different docs content; rebuild recommended: se-rag build --docs-dir %s -index-dir %s\n",
+			docsDir, indexDir)
+	}
 }
 
 func runQuery(rc runCtx) error {
@@ -30,7 +46,7 @@ func runQuery(rc runCtx) error {
 	if rc.product == "" {
 		rc.product = metaProductLabel
 	}
-	warnStaleIndex(rc.indexDir, rc.product)
+	warnStaleIndex(rc.indexDir, rc.product, rc.docsDir)
 	if rc.offline {
 		return runQueryOffline(rc)
 	}

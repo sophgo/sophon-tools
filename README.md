@@ -49,7 +49,6 @@ bash release.sh
 
 # 常用变体
 bash release.sh --project pbmssm            # 单项目快速构建
-bash release.sh --version 2.1.0             # 全量 + 统一版本号
 bash release.sh --project pqt_memory_edit   # 宿主执行（pqt 系列在统一镜像内直接构建，无需 docker-in-docker）
 ```
 

@@ -70,7 +70,7 @@ func printUsage() {
 	fmt.Println("Commands:")
 	fmt.Println("  build  --docs-dir <dir> -index-dir <dir>")
 	fmt.Println("  query  -index-dir <dir> [-top-n N] [-offline] \"question\"")
-	fmt.Println("  doctor -index-dir <dir>")
+	fmt.Println("  doctor -index-dir <dir> [--docs-dir <dir>]")
 	fmt.Println()
 	fmt.Println("不同知识库只需指定不同 -index-dir / --docs-dir，无需 product 维度。")
 	fmt.Println()
@@ -120,6 +120,7 @@ func dispatch(args []string) int {
 		fs.IntVar(&rc.topN, "top-n", 8, "top N results")
 		fs.BoolVar(&rc.useBuiltin, "builtin-key", true, "use builtin key")
 		fs.BoolVar(&rc.offline, "offline", false, "offline: BM25 only, no network")
+		fs.StringVar(&rc.docsDir, "docs-dir", "", "docs dir (optional; when set, warn if the index was built from different docs)")
 		pos := parseInterspersed(fs, rest)
 		if len(pos) > 0 {
 			rc.query = pos[0]
@@ -134,6 +135,7 @@ func dispatch(args []string) int {
 	case "doctor":
 		fs := flag.NewFlagSet("doctor", flag.ExitOnError)
 		fs.StringVar(&rc.indexDir, "index-dir", defaultIndexDir(), "index dir")
+		fs.StringVar(&rc.docsDir, "docs-dir", "", "docs dir (optional; when set, index is also checked against docs content)")
 		warnExtraArgs("doctor", parseInterspersed(fs, rest))
 		fatal, err := runDoctor(rc)
 		if err != nil {

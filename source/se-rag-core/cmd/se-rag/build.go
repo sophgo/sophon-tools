@@ -131,6 +131,9 @@ func runBuild(rc runCtx) error {
 	if err != nil {
 		return fmt.Errorf("chunk docs: %w", err)
 	}
+	// docs 内容指纹：写入 meta，供 doctor/query 发现「docs 变了但索引没重建」。
+	// 直接复用本处 chunkMap 的键集，保证参与哈希的文件与实际分块的文件完全一致。
+	docsHash := chunker.HashDocs(rc.docsDir, chunkMap)
 	var allChunks []chunker.Chunk
 	var orders []string
 	var docsText []string
@@ -210,6 +213,7 @@ func runBuild(rc runCtx) error {
 		ChunkCount:          len(allChunks),
 		BuildVersion:        "1.0",
 		ChunkStrategy:       chunker.StrategyVersion,
+		DocsHash:            docsHash,
 	}
 	store := &docstore.Store{IndexDir: rc.indexDir}
 	if err := store.SaveIndex(rc.product, meta, vecs, vecIDs, bmi, allChunks); err != nil {

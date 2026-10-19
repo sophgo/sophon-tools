@@ -180,9 +180,16 @@ func TestDoctorFingerprintProviderMismatch(t *testing.T) {
 	}
 
 	strategy := chunker.StrategyVersion
+	// 当前 docs 的内容指纹：doctor 现在也比对它，写 meta 时必须与之一致才代表「未过期」。
+	chunkMap, err := chunker.NewDefaultChunker().ChunkDirectory(docsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	curDocsHash := chunker.HashDocs(docsDir, chunkMap)
+	docsHash := curDocsHash
 	writeMeta := func(fp string, dim int) {
 		t.Helper()
-		m := docstore.Meta{Product: "se7", EmbedderFingerprint: fp, Dim: dim, BuildVersion: "1.0", ChunkStrategy: strategy}
+		m := docstore.Meta{Product: "se7", EmbedderFingerprint: fp, Dim: dim, BuildVersion: "1.0", ChunkStrategy: strategy, DocsHash: docsHash}
 		b, err := json.MarshalIndent(m, "", "  ")
 		if err != nil {
 			t.Fatal(err)
@@ -223,6 +230,36 @@ func TestDoctorFingerprintProviderMismatch(t *testing.T) {
 		t.Error("doctor: stale chunk strategy -> want rebuild-needed")
 	}
 	strategy = chunker.StrategyVersion
+
+	// 场景 2c：docs 内容变了但索引没重建（#214 把索引搬到设备端后新增的失效模式）→ 需要重建
+	writeMeta("siliconflow.BAAI/bge-m3", 1024)
+	if needRebuild, err = runDoctor(rc); err != nil {
+		t.Fatalf("doctor err: %v", err)
+	} else if needRebuild {
+		t.Fatal("doctor: fresh index -> want no rebuild (precondition for 2c)")
+	}
+	if err := os.WriteFile(filepath.Join(docsDir, "a.md"), []byte("# SE7\n\n## 网络\n\n配置 netplan 命令。\n\n## 新增\n\nKEYWORD_NEW"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	needRebuild, err = runDoctor(rc)
+	if err != nil {
+		t.Fatalf("doctor err: %v", err)
+	}
+	if !needRebuild {
+		t.Error("doctor: docs content changed -> want rebuild-needed")
+	}
+
+	// 场景 2d：旧索引没有 docs_hash（legacy）→ 无法确认与 docs 同源，需重建
+	docsHash = ""
+	writeMeta("siliconflow.BAAI/bge-m3", 1024)
+	needRebuild, err = runDoctor(rc)
+	if err != nil {
+		t.Fatalf("doctor err: %v", err)
+	}
+	if !needRebuild {
+		t.Error("doctor: legacy index without docs_hash -> want rebuild-needed")
+	}
+	docsHash = curDocsHash
 
 	// 场景 3：历史索引无 embedder_fingerprint 字段（legacy meta.json）→ 无法验证向量空间 → 提示重建
 	legacy := `{"product":"se7","dim":1024,"chunk_count":1,"build_version":"1.0"}`
