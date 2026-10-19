@@ -9,6 +9,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -66,6 +67,29 @@ func TestWebServesIndex(t *testing.T) {
 	}
 	if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, "text/html") {
 		t.Fatalf("首页 Content-Type = %q", ct)
+	}
+}
+
+// 页面引用的 logo / favicon 必须由二进制自身提供（单二进制，无外部资源）。
+func TestWebServesBrandImages(t *testing.T) {
+	_, srv := newTestWeb(t)
+
+	for _, p := range []string{"/logo.png", "/favicon.png"} {
+		resp, err := http.Get(srv.URL + p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("%s 状态码 = %d", p, resp.StatusCode)
+		}
+		if ct := resp.Header.Get("Content-Type"); ct != "image/png" {
+			t.Fatalf("%s Content-Type = %q", p, ct)
+		}
+		if !bytes.HasPrefix(body, []byte("\x89PNG")) {
+			t.Fatalf("%s 不是 PNG 数据", p)
+		}
 	}
 }
 

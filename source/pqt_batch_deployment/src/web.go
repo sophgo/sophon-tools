@@ -199,6 +199,9 @@ func (ws *webServer) routes(mux *http.ServeMux) {
 		panic(err) // 只可能在 embed 声明写错时发生
 	}
 	mux.Handle("/", http.FileServer(http.FS(sub)))
+	// 品牌图片复用 assets/ 里已内嵌的同一份文件，不在 webui/ 再存一份。
+	mux.HandleFunc("/logo.png", serveAsset("sophgo-logo-new2.png"))
+	mux.HandleFunc("/favicon.png", serveAsset("ic_action_database.png"))
 
 	mux.HandleFunc("/api/state", ws.handleState)
 	mux.HandleFunc("/api/config", ws.handleConfig)     // GET 导出 / POST 覆盖
@@ -210,6 +213,20 @@ func (ws *webServer) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/cancel", ws.handleCancel)     // POST 中止
 	mux.HandleFunc("/api/events", ws.handleEvents)     // GET SSE 事件流
 	mux.HandleFunc("/api/log", ws.handleLog)           // GET 单设备日志
+}
+
+// serveAsset 输出一份内嵌 PNG 资源。
+func serveAsset(name string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		data, err := ReadAsset(name)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Cache-Control", "max-age=86400")
+		_, _ = w.Write(data)
+	}
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

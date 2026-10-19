@@ -4,18 +4,19 @@ package main
 
 // 图形界面（Fyne）。
 //
-// 布局与旧版 mainwindow.ui 对齐：
+// 布局（与 Web UI 同一套结构与配色）：
 //
-//	顶部：Logo + 标题 + 帮助
-//	配置行 A：根目录 [输入框] [选择根目录]
-//	配置行 B：内置预设 [下拉] [载入] [保存配置] [执行配置] [并行上限 下拉]
-//	中部左：远程设备信息配置（表格 + 工具栏克隆/编辑/删除 + 选中设备日志）
-//	中部右：操作信息配置（表格 + 工具栏新增/删除 + 三段式配置区）
+//	顶栏：Logo | 标题 + 版本 + 执行中标记 ............ 官网链接 / 帮助
+//	控制卡：根目录 [输入框][浏览]；配置 [预设][载入][保存] ... 并行上限 [中止][执行配置]
+//	左卡「远程设备」：工具栏 + 概览统计 + 成功/失败比例条 + 设备表 + 执行日志
+//	右卡「操作序列」：工具栏 + 操作表 + 编辑区（名称 / 类型分段选择 / 表单 / 完整度）
+//	底栏：状态点 + 状态文字
 //
 // 人机功效上的改进（需求 2 允许"更优方案"）：
 //   * 编辑即时生效，不再需要先按"储存该项"——旧版忘按就丢配置。
-//   * 表格下方常驻"完整/不完整"标记，不完整的操作会被明确标出并跳过。
-//   * 执行中禁用配置区，执行结束自动恢复；旧版靠 enableEdit 手工翻转容易漏。
+//   * 操作类型只有一个入口（分段选择器），不再「下拉框 + 标签页」两处同步。
+//   * 「完整/不完整」常驻徽标提示，不完整的操作会被明确标出并跳过。
+//   * 执行中禁用配置区，执行结束自动恢复；概览统计与比例条实时反映进度。
 //   * 删除到空表、未选中即操作等旧版崩溃场景，全部有明确提示而不是闪退。
 
 import (
@@ -48,16 +49,23 @@ type gui struct {
 	running bool
 	mu      sync.Mutex
 
-	// 设备表
+	// 设备表与日志
 	deviceTable *widget.Table
-	deviceLog   *widget.Entry
-	deviceLabel *widget.Label
+	deviceLog   *logView
+	deviceLabel *canvas.Text
+	deviceCount *canvas.Text
 
-	// 操作表与配置区
+	// 概览统计
+	statTotal, statOK, statFail, statRun *statTile
+	ratio                                *ratioBar
+
+	// 操作表与编辑区
 	opTable    *widget.Table
+	opCount    *canvas.Text
 	opName     *widget.Entry
-	opType     *widget.Select
-	opComplete *widget.Label
+	opType     *segmented
+	opForms    [3]fyne.CanvasObject
+	opComplete *badge
 
 	cmdEntry    *widget.Entry
 	cmdOKCheck  *widget.Entry
@@ -74,8 +82,9 @@ type gui struct {
 	rootEntry *widget.Entry
 	presetSel *widget.Select
 	maxParSel *widget.Select
-	statusLbl *widget.Label
-	opTabs    *container.AppTabs
+	statusLbl *canvas.Text
+	statusDot *canvas.Circle
+	liveChip  fyne.CanvasObject
 
 	// 执行期间需要整体禁用/恢复的控件。README 承诺「执行期间配置区自动禁用」，
 	// 这里落实为显式清单，避免漏掉某个入口。
@@ -96,11 +105,11 @@ type gui struct {
 }
 
 func runGUI() int {
-	g := &gui{state: NewGUIState()}
+	g := &gui{state: NewGUIState(), selectedOp: -1}
 	g.app = app.NewWithID("cn.sophon.batchdeployment")
 	g.app.Settings().SetTheme(newAppTheme())
 	g.win = g.app.NewWindow("批量部署工具 V" + Version)
-	g.win.Resize(fyne.NewSize(1280, 840))
+	g.win.Resize(fyne.NewSize(1360, 880))
 	g.win.SetIcon(appIcon())
 
 	g.state.SetRootDir(mustGetwd())
@@ -110,6 +119,7 @@ func runGUI() int {
 	if len(g.state.Ops()) > 0 {
 		g.loadOpIntoEditor(0)
 	}
+	g.refreshTables()
 	g.win.ShowAndRun()
 	return 0
 }
@@ -124,34 +134,60 @@ func mustGetwd() string {
 
 // content 组装主界面。
 func (g *gui) content() fyne.CanvasObject {
+	split := container.NewHSplit(g.devicePane(), g.opPane())
+	split.Offset = 0.47
+	body := container.NewBorder(
+		g.controls(), nil, nil, nil,
+		split,
+	)
 	return container.NewBorder(
-		g.header(), // top
+		g.appBar(), // top
 		g.footer(), // bottom
 		nil, nil,
-		container.NewHSplit(g.devicePane(), g.opPane()),
+		container.New(&insetLayout{x: 10, y: 8}, body),
 	)
 }
 
-func (g *gui) header() fyne.CanvasObject {
-	title := widget.NewLabelWithStyle("批量部署工具",
-		fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-	ver := widget.NewLabelWithStyle("V"+Version, fyne.TextAlignLeading, fyne.TextStyle{})
-	ver.Importance = widget.LowImportance
-
-	link := widget.NewHyperlink("https://sophon.cn", parseURL("https://sophon.cn"))
-
+// appBar 顶栏：白底 + 底部分隔线。
+func (g *gui) appBar() fyne.CanvasObject {
 	logo := canvas.NewImageFromResource(logoResource())
 	logo.FillMode = canvas.ImageFillContain
-	logo.SetMinSize(fyne.NewSize(148, 46))
+	logo.SetMinSize(fyne.NewSize(100, 35))
 
+	vline := canvas.NewRectangle(colorBorder)
+	vline.SetMinSize(fyne.NewSize(1, 24))
+
+	title := canvas.NewText("批量部署工具", colorText)
+	title.TextStyle = fyne.TextStyle{Bold: true}
+	title.TextSize = theme.Size(theme.SizeNameHeadingText)
+
+	ver := newChipBox(newChipText("V"+Version, colorText2), colorSurfaceAlt, colorBorder)
+	live := newChipText("执行中", colorBrand)
+	live.TextStyle = fyne.TextStyle{Bold: true}
+	g.liveChip = newChipBox(live, colorBrandSoft, nil)
+	g.liveChip.Hide()
+
+	link := widget.NewHyperlink("sophon.cn", parseURL("https://sophon.cn"))
 	help := widget.NewButtonWithIcon("帮助", theme.HelpIcon(), g.showHelp)
 
-	// 配置行 A：根目录
+	left := container.NewHBox(logo, hSpacer(4), container.NewCenter(vline), hSpacer(4),
+		container.NewCenter(title), container.NewCenter(ver), container.NewCenter(g.liveChip))
+	right := container.NewHBox(link, help)
+
+	bg := canvas.NewRectangle(colorSurface)
+	bar := container.NewStack(bg, container.New(&insetLayout{x: 14, y: 6},
+		container.NewBorder(nil, nil, left, right)))
+	return container.NewVBox(bar, widget.NewSeparator())
+}
+
+// controls 全局配置与执行控制卡片。
+func (g *gui) controls() fyne.CanvasObject {
+	// 根目录
 	g.rootEntry = widget.NewEntry()
 	g.rootEntry.SetText(g.state.RootDir())
 	g.rootEntry.SetPlaceHolder("文件上传/下载的相对路径基准目录")
 	g.rootEntry.OnChanged = func(s string) { g.state.SetRootDir(s) }
-	g.pickRoot = widget.NewButton("选择根目录", func() {
+	g.pickRoot = widget.NewButtonWithIcon("选择", theme.FolderOpenIcon(), func() {
 		dialog.ShowFolderOpen(func(u fyne.ListableURI, err error) {
 			if err != nil || u == nil {
 				return
@@ -160,9 +196,8 @@ func (g *gui) header() fyne.CanvasObject {
 			g.state.SetRootDir(u.Path())
 		}, g.win)
 	})
-	pickRoot := g.pickRoot
 
-	// 配置行 B：预设 / 载入 / 保存 / 并行上限 / 执行
+	// 预设 / 载入 / 保存 / 并行上限 / 执行
 	g.presetSel = widget.NewSelect(BuiltinPresets(), func(s string) {
 		// 旧版选中预设即刻载入（currentTextChanged 直连读表）。
 		// 这里保留该行为，但改为可撤销的显式「载入」，避免误触清空已配设备。
@@ -170,13 +205,12 @@ func (g *gui) header() fyne.CanvasObject {
 	if len(g.presetSel.Options) > 0 {
 		g.presetSel.SetSelectedIndex(0)
 	}
-	loadBtn := widget.NewButton("载入配置", g.loadConfig)
-	saveBtn := widget.NewButton("保存配置", g.saveConfig)
-	g.loadBtn, g.saveBtn = loadBtn, saveBtn
+	g.loadBtn = widget.NewButtonWithIcon("载入预设", theme.DownloadIcon(), g.loadConfig)
+	g.saveBtn = widget.NewButtonWithIcon("保存配置", theme.DocumentSaveIcon(), g.saveConfig)
 
 	g.runBtn = widget.NewButtonWithIcon("执行配置", theme.MediaPlayIcon(), g.runBatch)
 	g.runBtn.Importance = widget.HighImportance
-	g.cancelBtn = widget.NewButtonWithIcon("中止执行", theme.MediaStopIcon(), g.cancelRun)
+	g.cancelBtn = widget.NewButtonWithIcon("中止", theme.MediaStopIcon(), g.cancelRun)
 	g.cancelBtn.Importance = widget.DangerImportance
 	g.cancelBtn.Disable() // 未执行时不可点
 
@@ -187,57 +221,62 @@ func (g *gui) header() fyne.CanvasObject {
 	})
 	g.maxParSel.SetSelected("100")
 
+	// 各区块在自己的构造函数里登记执行期禁用的控件：不依赖区块的构造顺序
+	// （先构造的区块若引用后构造区块的控件，拿到的是 nil，执行时 Disable 即崩溃）。
+	g.lockable = append(g.lockable,
+		g.rootEntry, g.pickRoot, g.loadBtn, g.saveBtn, g.presetSel, g.maxParSel)
+
 	rowA := container.NewBorder(nil, nil,
-		sectionLabel("文件操作根目录"), pickRoot, g.rootEntry)
-
+		fixedWidth(96, fieldLabel("文件操作根目录")), g.pickRoot, g.rootEntry)
 	rowB := container.NewHBox(
-		sectionLabel("内置预设"), g.presetSel, loadBtn, saveBtn,
+		fixedWidth(96, fieldLabel("配置")), fixedWidth(220, framed(g.presetSel)), g.loadBtn, g.saveBtn,
 		layout.NewSpacer(),
-		sectionLabel("并行上限"), g.maxParSel,
-		g.runBtn, g.cancelBtn,
+		fieldLabel("并行上限"), fixedWidth(90, framed(g.maxParSel)),
+		hSpacer(6), g.cancelBtn, g.runBtn,
 	)
-
-	top := container.NewVBox(
-		container.NewBorder(nil, nil,
-			container.NewHBox(logo, container.NewVBox(title, ver), layout.NewSpacer(), link),
-			help,
-		),
-		widget.NewSeparator(),
-		rowA,
-		rowB,
-		widget.NewSeparator(),
-	)
-	return top
+	return container.NewPadded(newCard(nil, container.NewVBox(rowA, rowB)))
 }
 
-// sectionLabel 统一的小标题样式：加粗、次要色，用于行内字段名。
-func sectionLabel(s string) *widget.Label {
-	l := widget.NewLabelWithStyle(s, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-	l.Importance = widget.MediumImportance
-	return l
+// fieldLabel 行内字段名：次要色、左对齐、垂直居中；宽度由调用方的 fixedWidth 控制。
+func fieldLabel(s string) fyne.CanvasObject {
+	t := canvas.NewText(s, colorText2)
+	t.TextStyle = fyne.TextStyle{Bold: true}
+	t.TextSize = theme.TextSize() - 1
+	return container.NewVBox(layout.NewSpacer(), t, layout.NewSpacer())
 }
 
 func (g *gui) footer() fyne.CanvasObject {
-	g.statusLbl = widget.NewLabel("就绪")
-	g.statusLbl.Importance = widget.LowImportance
-	return container.NewVBox(widget.NewSeparator(), container.NewPadded(g.statusLbl))
+	g.statusDot = canvas.NewCircle(colorTextMuted)
+	dotBox := container.New(&fixedSizeLayout{size: fyne.NewSize(8, 8)}, g.statusDot)
+	g.statusLbl = canvas.NewText("就绪", colorText2)
+	g.statusLbl.TextSize = theme.Size(theme.SizeNameCaptionText)
+
+	ver := canvas.NewText("V"+Version, colorTextMuted)
+	ver.TextSize = theme.Size(theme.SizeNameCaptionText)
+
+	bg := canvas.NewRectangle(colorSurface)
+	row := container.NewHBox(container.NewCenter(dotBox), g.statusLbl, layout.NewSpacer(), ver)
+	return container.NewVBox(widget.NewSeparator(),
+		container.NewStack(bg, container.New(&insetLayout{x: 14, y: 4}, row)))
 }
 
 // ---------- 设备面板 ----------
 
 func (g *gui) devicePane() fyne.CanvasObject {
+	headers := []string{"#", "IPv4地址", "SSH端口", "用户名", "密码", "执行状态"}
 	g.deviceTable = widget.NewTable(
 		func() (int, int) {
-			return g.state.DeviceCount() + 1, 5 // +1 表头
+			return g.state.DeviceCount() + 1, len(headers) // +1 表头
 		},
 		func() fyne.CanvasObject { return newCellText() },
 		func(id widget.TableCellID, o fyne.CanvasObject) {
 			l := o.(*cellText)
+			l.SetPill(nil)
 			if id.Row == 0 {
-				headers := []string{"IPv4地址", "SSH端口", "用户名", "密码", "执行状态"}
 				l.SetText(headers[id.Col])
 				l.SetBold(true)
-				l.SetColor(theme.ForegroundColor())
+				l.SetColor(colorText2)
+				l.SetRowBackground(colorSurfaceAlt)
 				return
 			}
 			l.SetBold(false)
@@ -246,94 +285,171 @@ func (g *gui) devicePane() fyne.CanvasObject {
 			i := id.Row - 1
 			if i < 0 || i >= len(devs) {
 				l.SetText("")
+				l.SetRowBackground(nil)
 				return
+			}
+			if i == g.state.SelectedDevice() {
+				l.SetRowBackground(colorBrandSoft)
+			} else {
+				l.SetRowBackground(nil)
 			}
 			d := devs[i].Inf
 			switch id.Col {
 			case 0:
-				l.SetText(d.IP)
+				l.SetText(strconv.Itoa(i + 1))
+				l.SetColor(colorTextMuted)
 			case 1:
-				l.SetText(strconv.Itoa(d.Port))
+				l.SetText(d.IP)
 			case 2:
-				l.SetText(d.Username)
+				l.SetText(strconv.Itoa(d.Port))
 			case 3:
-				l.SetText(strings.Repeat("*", len(d.Password)))
+				l.SetText(d.Username)
 			case 4:
+				n := len(d.Password)
+				if n > 8 {
+					n = 8
+				}
+				l.SetText(strings.Repeat("*", n))
+				l.SetColor(colorTextMuted)
+			case 5:
+				// 状态列用「色块 + 文字」双编码，不只靠颜色区分。
+				fg, bg := statusColors(devs[i].Status)
 				l.SetText(statusText(devs[i].Status))
-				// 状态列用语义色区分，不再只靠文字。
-				l.SetColor(statusColor(devs[i].Status))
+				l.SetColor(fg)
 				l.SetBold(devs[i].Status != "")
+				l.SetPill(bg)
 			}
 		},
 	)
-	g.deviceTable.SetColumnWidth(0, 150)
-	g.deviceTable.SetColumnWidth(1, 80)
-	g.deviceTable.SetColumnWidth(2, 110)
-	g.deviceTable.SetColumnWidth(3, 100)
-	g.deviceTable.SetColumnWidth(4, 190)
+	for i, w := range []float32{40, 130, 88, 90, 76, 150} {
+		g.deviceTable.SetColumnWidth(i, w)
+	}
 
 	g.deviceTable.OnSelected = func(id widget.TableCellID) {
+		g.deviceTable.UnselectAll()
 		if id.Row == 0 {
-			g.deviceTable.UnselectAll()
 			return
 		}
 		g.state.SelectDevice(id.Row - 1)
 		g.refreshDeviceLog()
-		g.deviceTable.UnselectAll()
+		g.deviceTable.Refresh()
 	}
-	g.deviceLabel = widget.NewLabelWithStyle("设备详情（未选中）",
-		fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-	g.deviceLog = widget.NewMultiLineEntry()
-	g.deviceLog.Wrapping = fyne.TextWrapWord
-	g.deviceLog.SetPlaceHolder("选中左侧设备行查看其执行日志")
 
-	editBtn := widget.NewButton("编辑", g.editSelectedDevice)
-	delBtn := widget.NewButton("删除", g.deleteSelectedDevice)
-	delBtn.Importance = widget.WarningImportance
-	cloneBtn := widget.NewButton("克隆", g.cloneSelectedDevice)
-	addBtn := widget.NewButtonWithIcon("新增设备", theme.ContentAddIcon(), func() {
+	g.deviceLabel = canvas.NewText("未选中设备", colorTextMuted)
+	g.deviceLabel.TextSize = theme.Size(theme.SizeNameCaptionText)
+	g.deviceLog = newLogView()
+	g.deviceLog.SetPlaceholder("在上方表格中选中一台设备，查看其执行日志")
+
+	addBtn := widget.NewButtonWithIcon("新增", theme.ContentAddIcon(), func() {
 		g.state.AppendDevice(RemoteInf{IP: "192.168.1.1", Port: 22, Username: "linaro"})
+		g.state.SelectDevice(g.state.DeviceCount() - 1)
 		g.refreshTables()
+		g.refreshDeviceLog()
+		g.editSelectedDevice()
 	})
-
-	toolbar := container.NewHBox(addBtn, cloneBtn, editBtn, delBtn)
-
+	cloneBtn := widget.NewButtonWithIcon("克隆", theme.ContentCopyIcon(), g.cloneSelectedDevice)
+	editBtn := widget.NewButtonWithIcon("编辑", theme.DocumentCreateIcon(), g.editSelectedDevice)
+	delBtn := dangerToolButton(g.deleteSelectedDevice)
 	g.lockable = append(g.lockable, addBtn, cloneBtn, editBtn, delBtn)
 
-	box := container.NewBorder(
-		container.NewVBox(
-			paneTitle("远程设备信息配置"),
-			toolbar,
-		),
-		nil, nil, nil,
-		container.NewVSplit(
-			container.NewStack(canvas.NewRectangle(color.Transparent), g.deviceTable),
-			container.NewBorder(
-				container.NewVBox(widget.NewSeparator(), g.deviceLabel),
-				nil, nil, nil, g.deviceLog),
-		),
+	g.deviceCount = newChipText("0", colorText2)
+	head := container.NewBorder(nil, nil,
+		cardTitle(theme.ComputerIcon(), "远程设备", g.deviceCount), nil,
+		container.NewHBox(layout.NewSpacer(), addBtn, cloneBtn, editBtn, delBtn))
+
+	// 概览统计 + 比例条
+	g.statTotal = newStatTile("设备总数", colorBorderDark, colorText)
+	g.statOK = newStatTile("成功", colorSuccess, colorSuccess)
+	g.statFail = newStatTile("失败", colorDanger, colorDanger)
+	g.statRun = newStatTile("进行中/等待", colorRunning, colorRunning)
+	g.ratio = newRatioBar()
+	stats := container.NewVBox(
+		container.NewGridWithColumns(4, g.statTotal.obj, g.statOK.obj, g.statFail.obj, g.statRun.obj),
+		g.ratio,
 	)
-	return container.NewPadded(box)
+
+	copyBtn := widget.NewButtonWithIcon("复制", theme.ContentCopyIcon(), func() {
+		txt := g.deviceLog.Text()
+		if txt == "" {
+			showInfo("提示", "没有可复制的日志", g.win)
+			return
+		}
+		g.app.Clipboard().SetContent(txt)
+		g.setStatus("日志已复制到剪贴板")
+	})
+	copyBtn.Importance = widget.LowImportance
+	logTitle := canvas.NewText("执行日志", colorText)
+	logTitle.TextStyle = fyne.TextStyle{Bold: true}
+	logHead := container.NewHBox(
+		widget.NewIcon(theme.NewColoredResource(theme.ListIcon(), colorNameMuted)),
+		container.NewCenter(logTitle), container.NewCenter(g.deviceLabel),
+		layout.NewSpacer(), copyBtn)
+
+	tableBox := tableFrame(g.deviceTable)
+	logBox := container.NewBorder(logHead, nil, nil, nil, g.deviceLog.obj)
+	split := container.NewVSplit(tableBox, logBox)
+	split.Offset = 0.5
+
+	body := container.NewBorder(container.NewVBox(stats, hSpacer(0)), nil, nil, nil, split)
+	return container.NewPadded(newCard(head, body))
 }
 
-// paneTitle 分栏标题：字号更大、加粗，与表头形成层次。
-func paneTitle(s string) fyne.CanvasObject {
-	l := widget.NewLabelWithStyle(s, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-	l.TextStyle = fyne.TextStyle{Bold: true}
-	l.SizeName = theme.SizeNameSubHeadingText
-	return container.NewVBox(l, widget.NewSeparator())
+// tableFrame 给表格加白底圆角描边，和卡片内其他元素对齐。
+func tableFrame(t *widget.Table) fyne.CanvasObject {
+	bg := canvas.NewRectangle(colorSurface)
+	bg.StrokeColor = colorBorder
+	bg.StrokeWidth = 1
+	bg.CornerRadius = 8
+	return container.NewStack(bg, container.New(&insetLayout{x: 1, y: 1}, t))
+}
+
+// dangerToolButton 工具栏里的删除按钮：红色图标 + 普通底色，
+// 醒目但不像实心红按钮那样和主操作抢视线。
+func dangerToolButton(onTap func()) *widget.Button {
+	b := widget.NewButtonWithIcon("删除",
+		theme.NewColoredResource(theme.DeleteIcon(), theme.ColorNameError), onTap)
+	return b
 }
 
 func (g *gui) refreshDeviceLog() {
 	if _, ok := g.state.SelectedDeviceInf(); !ok {
-		g.deviceLabel.SetText("设备详情（未选中）")
-		g.deviceLog.SetText("")
+		g.deviceLabel.Text = "未选中设备"
+		g.deviceLabel.Refresh()
+		g.deviceLog.SetPlaceholder("在上方表格中选中一台设备，查看其执行日志")
 		return
 	}
 	idx := g.state.SelectedDevice()
 	d, _ := g.state.SelectedDeviceInf()
-	g.deviceLabel.SetText(fmt.Sprintf("设备%d  %s:%d", idx+1, d.IP, d.Port))
-	g.deviceLog.SetText(g.state.Log(idx))
+	g.deviceLabel.Text = fmt.Sprintf("#%d  %s:%d", idx+1, d.IP, d.Port)
+	g.deviceLabel.Refresh()
+	g.deviceLog.SetTextFor(strconv.Itoa(idx), g.state.Log(idx))
+}
+
+// refreshStats 重算概览统计与比例条。
+func (g *gui) refreshStats() {
+	if g.statTotal == nil || g.statOK == nil || g.statFail == nil ||
+		g.statRun == nil || g.ratio == nil || g.deviceCount == nil {
+		return
+	}
+	devs := g.state.Devices()
+	ok, fail, run := 0, 0, 0
+	for _, d := range devs {
+		switch classifyStatus(d.Status) {
+		case statusOK:
+			ok++
+		case statusFail:
+			fail++
+		case statusRun, statusWait:
+			run++
+		}
+	}
+	g.statTotal.Set(len(devs))
+	g.statOK.Set(ok)
+	g.statFail.Set(fail)
+	g.statRun.Set(run)
+	g.ratio.Set(ok, fail, len(devs))
+	g.deviceCount.Text = strconv.Itoa(len(devs))
+	g.deviceCount.Refresh()
 }
 
 func (g *gui) editSelectedDevice() {
@@ -359,34 +475,39 @@ func (g *gui) editSelectedDevice() {
 		widget.NewFormItem("用户名", user),
 		widget.NewFormItem("密码", pass),
 	)
-	dialog.ShowCustomConfirm("编辑设备", "保存", "取消", form, func(ok bool) {
-		if !ok {
-			return
-		}
-		p, err := strconv.Atoi(strings.TrimSpace(port.Text))
-		if err != nil || p <= 0 || p > 65535 {
-			showError(fmt.Errorf("端口必须是 1-65535 的整数"), g.win)
-			return
-		}
-		if strings.TrimSpace(ip.Text) == "" {
-			showError(fmt.Errorf("IP 不能为空"), g.win)
-			return
-		}
-		g.state.UpdateDevice(idx, RemoteInf{
-			IP: strings.TrimSpace(ip.Text), Port: p,
-			Username: user.Text, Password: pass.Text,
-		})
-		g.refreshTables()
-	}, g.win)
+	dlg := dialog.NewCustomConfirm(fmt.Sprintf("编辑设备 #%d", idx+1), "保存", "取消",
+		fixedWidth(380, form), func(ok bool) {
+			if !ok {
+				return
+			}
+			p, err := strconv.Atoi(strings.TrimSpace(port.Text))
+			if err != nil || p <= 0 || p > 65535 {
+				showError(fmt.Errorf("端口必须是 1-65535 的整数"), g.win)
+				return
+			}
+			if strings.TrimSpace(ip.Text) == "" {
+				showError(fmt.Errorf("IP 不能为空"), g.win)
+				return
+			}
+			g.state.UpdateDevice(idx, RemoteInf{
+				IP: strings.TrimSpace(ip.Text), Port: p,
+				Username: user.Text, Password: pass.Text,
+			})
+			g.refreshTables()
+			g.refreshDeviceLog()
+		}, g.win)
+	dlg.Show()
+	g.win.Canvas().Focus(ip)
 }
 
 func (g *gui) deleteSelectedDevice() {
 	idx := g.state.SelectedDevice()
-	if idx < 0 {
+	d, ok := g.state.SelectedDeviceInf()
+	if idx < 0 || !ok {
 		showInfo("提示", "请先在表格中选中一台设备", g.win)
 		return
 	}
-	g.confirmDelete("删除设备", fmt.Sprintf("确认删除第 %d 台设备？", idx+1), func() {
+	g.confirmDelete("删除设备", fmt.Sprintf("确认删除第 %d 台设备（%s:%d）？", idx+1, d.IP, d.Port), func() {
 		g.state.RemoveDevice(idx)
 		g.refreshTables()
 		g.refreshDeviceLog()
@@ -405,17 +526,21 @@ func (g *gui) cloneSelectedDevice() {
 
 // ---------- 操作面板 ----------
 
+var opTypeNames = []string{"命令下发", "文件上传", "文件下载"}
+
 func (g *gui) opPane() fyne.CanvasObject {
+	headers := []string{"#", "操作名称", "类型", "内容"}
 	g.opTable = widget.NewTable(
-		func() (int, int) { return len(g.state.Ops()) + 1, 3 },
+		func() (int, int) { return len(g.state.Ops()) + 1, len(headers) },
 		func() fyne.CanvasObject { return newCellText() },
 		func(id widget.TableCellID, o fyne.CanvasObject) {
 			l := o.(*cellText)
+			l.SetPill(nil)
 			if id.Row == 0 {
-				h := []string{"操作名称", "操作类型", "内容信息"}[id.Col]
-				l.SetText(h)
+				l.SetText(headers[id.Col])
 				l.SetBold(true)
-				l.SetColor(theme.ForegroundColor())
+				l.SetColor(colorText2)
+				l.SetRowBackground(colorSurfaceAlt)
 				return
 			}
 			l.SetBold(false)
@@ -424,84 +549,109 @@ func (g *gui) opPane() fyne.CanvasObject {
 			i := id.Row - 1
 			if i < 0 || i >= len(ops) {
 				l.SetText("")
+				l.SetRowBackground(nil)
 				return
+			}
+			if i == g.selectedOp {
+				l.SetRowBackground(colorBrandSoft)
+			} else {
+				l.SetRowBackground(nil)
 			}
 			op := ops[i].Inf
 			switch id.Col {
 			case 0:
+				l.SetText(strconv.Itoa(i + 1))
+				l.SetColor(colorTextMuted)
+			case 1:
 				if op.IsComplete() {
 					l.SetText(op.Name)
 				} else {
 					// 不完整的操作会被跳过，名称直接用警示色标出。
-					l.SetText("! " + op.Name + "（不完整）")
+					name := op.Name
+					if strings.TrimSpace(name) == "" {
+						name = "(未命名)"
+					}
+					l.SetText("! " + name)
 					l.SetColor(colorWarning)
 					l.SetBold(true)
 				}
-			case 1:
-				l.SetText(op.TypeName())
 			case 2:
+				t := op.Type
+				if t < 0 || t > 2 {
+					t = 0
+				}
+				l.SetText(op.TypeName())
+				l.SetColor(colorTypeFg[t])
+				l.SetBold(true)
+				l.SetPill(colorTypeBg[t])
+			case 3:
 				if !op.IsComplete() {
-					l.SetText("该项配置不完整，将不会执行")
+					l.SetText("配置不完整，执行时将跳过")
 					l.SetColor(colorTextMuted)
 				} else if op.Type == OpCommand {
 					l.SetText(op.CommandStr)
 				} else {
-					l.SetText(op.TransferFileSourcePath + " -> " + op.TransferFileDestinationPath)
+					l.SetText(op.TransferFileSourcePath + "  ->  " + op.TransferFileDestinationPath)
 				}
 			}
 		},
 	)
-	g.opTable.SetColumnWidth(0, 200)
-	g.opTable.SetColumnWidth(1, 120)
-	g.opTable.SetColumnWidth(2, 380)
+	for i, w := range []float32{40, 160, 104, 420} {
+		g.opTable.SetColumnWidth(i, w)
+	}
 
 	g.opTable.OnSelected = func(id widget.TableCellID) {
+		g.opTable.UnselectAll()
 		if id.Row == 0 {
-			g.opTable.UnselectAll()
 			return
 		}
 		// 执行期间禁止切换正在编辑的操作，避免把执行中的配置改掉。
 		if g.isRunning() {
-			g.opTable.UnselectAll()
 			return
 		}
 		g.loadOpIntoEditor(id.Row - 1)
-		g.opTable.UnselectAll()
+		g.refreshOpTableOnly()
 	}
 
-	// 配置区
+	// ---- 编辑区 ----
 	g.opName = widget.NewEntry()
+	g.opName.SetPlaceHolder("例如 检查系统时间")
 	g.opName.OnChanged = func(string) { g.saveOpEditor() }
 
-	g.opType = widget.NewSelect([]string{"下发命令", "上传文件", "下载文件"}, func(string) {
+	g.opType = newSegmented(opTypeNames,
+		[]fyne.Resource{theme.ComputerIcon(), theme.UploadIcon(), theme.DownloadIcon()})
+	g.opType.OnChange = func(i int) {
+		// 切换类型即切换表单页；内容即时写回（与 Web 版一致）。
 		g.applyOpType()
 		g.saveOpEditor()
-	})
+	}
 
 	g.cmdEntry = widget.NewMultiLineEntry()
-	g.cmdEntry.SetPlaceHolder("需要执行的命令")
+	g.cmdEntry.SetPlaceHolder("需要在设备上执行的 shell 命令")
+	g.cmdEntry.SetMinRowsVisible(3)
 	g.cmdEntry.OnChanged = func(string) { g.saveOpEditor() }
 
 	g.cmdOKCheck = widget.NewEntry()
-	g.cmdOKCheck.SetPlaceHolder("判断执行是否成功，为空不检查")
+	g.cmdOKCheck.SetPlaceHolder("输出中必须包含，为空不检查")
 	g.cmdOKCheck.OnChanged = func(string) { g.saveOpEditor() }
 
 	g.cmdErrCheck = widget.NewEntry()
-	g.cmdErrCheck.SetPlaceHolder("判断执行是否失败，为空不检查")
+	g.cmdErrCheck.SetPlaceHolder("输出中一旦出现即判失败，为空不检查")
 	g.cmdErrCheck.OnChanged = func(string) { g.saveOpEditor() }
 
-	cmdTab := container.NewVBox(
+	g.opForms[OpCommand] = container.NewVBox(
 		widget.NewForm(
 			widget.NewFormItem("命令", g.cmdEntry),
-			widget.NewFormItem("执行成功关键字", g.cmdOKCheck),
-			widget.NewFormItem("执行失败关键字", g.cmdErrCheck),
+			widget.NewFormItem("成功关键字", g.cmdOKCheck),
+			widget.NewFormItem("失败关键字", g.cmdErrCheck),
 		),
+		hintLine("两种情况判失败: 输出命中失败关键字, 或配置了成功关键字但输出里没有。"),
 	)
 
 	g.upLocal = widget.NewEntry()
-	g.upLocal.SetPlaceHolder("本地文件（相对根目录）")
+	g.upLocal.SetPlaceHolder("本地文件（相对根目录，或绝对路径）")
 	g.upLocal.OnChanged = func(string) { g.saveOpEditor() }
-	pickUp := widget.NewButton("选择文件", func() {
+	pickUp := widget.NewButtonWithIcon("选择", theme.FileIcon(), func() {
 		dialog.ShowFileOpen(func(r fyne.URIReadCloser, err error) {
 			if err != nil || r == nil {
 				return
@@ -511,7 +661,7 @@ func (g *gui) opPane() fyne.CanvasObject {
 		}, g.win)
 	})
 	g.upRemote = widget.NewEntry()
-	g.upRemote.SetPlaceHolder("远程目标路径，例如 /tmp/a.bin")
+	g.upRemote.SetPlaceHolder("例如 /tmp/a.bin（以 / 结尾则拼上原文件名）")
 	g.upRemote.OnChanged = func(string) { g.saveOpEditor() }
 
 	// 校验方式：旧版固定 MD5，但配置格式本身支持三档（config.go CheckName）。
@@ -519,19 +669,19 @@ func (g *gui) opPane() fyne.CanvasObject {
 	g.upCheck = widget.NewSelect(checkFileOptions(), func(string) { g.saveOpEditor() })
 	g.downCheck = widget.NewSelect(checkFileOptions(), func(string) { g.saveOpEditor() })
 
-	upTab := container.NewVBox(widget.NewForm(
-		widget.NewFormItem("选择本地文件", container.NewBorder(nil, nil, nil, pickUp, g.upLocal)),
+	g.opForms[OpUpFile] = container.NewVBox(widget.NewForm(
+		widget.NewFormItem("本地文件", container.NewBorder(nil, nil, nil, pickUp, g.upLocal)),
 		widget.NewFormItem("远程目标路径", g.upRemote),
-		widget.NewFormItem("校验方式", g.upCheck),
+		widget.NewFormItem("校验方式", framed(g.upCheck)),
 	))
 
 	g.downRemote = widget.NewEntry()
-	g.downRemote.SetPlaceHolder("远程文件路径")
+	g.downRemote.SetPlaceHolder("设备上的文件路径")
 	g.downRemote.OnChanged = func(string) { g.saveOpEditor() }
 	g.downDir = widget.NewEntry()
-	g.downDir.SetPlaceHolder("本地目录（相对根目录）")
+	g.downDir.SetPlaceHolder("本地目录（相对根目录，或绝对路径）")
 	g.downDir.OnChanged = func(string) { g.saveOpEditor() }
-	pickDown := widget.NewButton("选择目录", func() {
+	pickDown := widget.NewButtonWithIcon("选择", theme.FolderOpenIcon(), func() {
 		dialog.ShowFolderOpen(func(u fyne.ListableURI, err error) {
 			if err != nil || u == nil {
 				return
@@ -539,7 +689,7 @@ func (g *gui) opPane() fyne.CanvasObject {
 			g.downDir.SetText(relToRoot(g.state.RootDir(), u.Path()))
 		}, g.win)
 	})
-	openDown := widget.NewButton("打开下载目录", func() {
+	openDown := widget.NewButtonWithIcon("打开", theme.FolderIcon(), func() {
 		p := g.downDir.Text
 		if !filepath.IsAbs(p) {
 			p = filepath.Join(g.state.RootDir(), p)
@@ -548,54 +698,49 @@ func (g *gui) opPane() fyne.CanvasObject {
 			showError(err, g.win)
 		}
 	})
+	openDown.Importance = widget.LowImportance
 
-	downTab := container.NewVBox(widget.NewForm(
+	g.opForms[OpDownFile] = container.NewVBox(widget.NewForm(
 		widget.NewFormItem("远程文件路径", g.downRemote),
-		widget.NewFormItem("本地目录", container.NewBorder(nil, nil, nil, pickDown, g.downDir)),
-		widget.NewFormItem("校验方式", g.downCheck),
-	), openDown)
+		widget.NewFormItem("本地目录", container.NewBorder(nil, nil, nil,
+			container.NewHBox(pickDown, openDown), g.downDir)),
+		widget.NewFormItem("校验方式", framed(g.downCheck)),
+	), hintLine("下载文件名格式: IP_端口_时间戳_原名（重名自动加序号）。"))
 
-	g.opTabs = container.NewAppTabs(
-		container.NewTabItem("命令下发", cmdTab),
-		container.NewTabItem("文件上传", upTab),
-		container.NewTabItem("文件下载", downTab),
-	)
-	// 标签页与「操作类型」双向同步。只做单向的话，用户点开「文件下载」页
-	// 看到的是上传页的路径、改完却被按旧类型丢弃——属于静默数据丢失。
-	g.opTabs.OnSelected = func(item *container.TabItem) {
-		if g.editing {
-			return
-		}
-		switch item.Text {
-		case "下发命令":
-			g.opType.SetSelected("下发命令")
-		case "文件上传":
-			g.opType.SetSelected("上传文件")
-		case "文件下载":
-			g.opType.SetSelected("下载文件")
-		}
-	}
-
-	g.opComplete = widget.NewLabel("该项当前完整度:未选中")
+	g.opComplete = newBadge()
+	g.opComplete.Set(badgeNone, "未选中操作")
 
 	// 「编辑即时生效」已让保存按钮变得多余，但旧版用户习惯按一下才安心；
 	// 保留它作为显式确认（不改变语义：内容本来就已经写回了）。
-	saveOp := widget.NewButton("确认当前操作", func() {
+	saveOp := widget.NewButtonWithIcon("确认当前操作", theme.ConfirmIcon(), func() {
 		if g.saveOpEditor() {
 			g.setStatus("当前操作配置已更新")
 		}
 	})
-	addOp := widget.NewButtonWithIcon("新增操作", theme.ContentAddIcon(), func() {
+	addOp := widget.NewButtonWithIcon("新增", theme.ContentAddIcon(), func() {
 		g.state.AppendOp(OperationInf{Name: "新操作", Type: OpCommand, CommandStr: ""})
+		g.loadOpIntoEditor(len(g.state.Ops()) - 1)
 		g.refreshTables()
+		g.win.Canvas().Focus(g.opName)
 	})
-	delOp := widget.NewButton("删除选中操作", func() {
+	cloneOp := widget.NewButtonWithIcon("克隆", theme.ContentCopyIcon(), func() {
 		idx := g.selectedOp
 		if idx < 0 {
 			showInfo("提示", "请先在操作表中选中一行", g.win)
 			return
 		}
-		g.confirmDelete("删除操作", "确认删除该操作？", func() {
+		g.state.CloneOp(idx)
+		g.loadOpIntoEditor(idx + 1)
+		g.refreshTables()
+	})
+	delOp := dangerToolButton(func() {
+		idx := g.selectedOp
+		ops := g.state.Ops()
+		if idx < 0 || idx >= len(ops) {
+			showInfo("提示", "请先在操作表中选中一行", g.win)
+			return
+		}
+		g.confirmDelete("删除操作", fmt.Sprintf("确认删除操作（%s）？", ops[idx].Inf.Name), func() {
 			g.state.RemoveOp(idx)
 			g.selectedOp = -1
 			// 清空编辑区：否则选中已删除项的内容还留在界面上，
@@ -604,46 +749,58 @@ func (g *gui) opPane() fyne.CanvasObject {
 			g.refreshTables()
 		})
 	})
-	delOp.Importance = widget.WarningImportance
 
 	// 执行期间禁用的控件清单（对应 README「执行期间配置区自动禁用」）。
 	// 表格不支持 Disable，其交互改由 isRunning() 在回调里拦下。
 	g.lockable = append(g.lockable,
 		g.opName, g.opType, g.cmdEntry, g.cmdOKCheck, g.cmdErrCheck,
 		g.upLocal, g.upRemote, g.downRemote, g.downDir, g.upCheck, g.downCheck,
-		pickUp, pickDown, saveOp, addOp, delOp,
-		g.rootEntry, g.pickRoot, g.loadBtn, g.saveBtn, g.presetSel, g.maxParSel,
+		pickUp, pickDown, saveOp, addOp, cloneOp, delOp,
 	)
 
-	editor := container.NewBorder(
-		container.NewVBox(
-			widget.NewForm(widget.NewFormItem("操作名称", g.opName)),
-			widget.NewSeparator(),
-			g.opTabs,
-			widget.NewSeparator(),
-			g.opComplete,
-			container.NewHBox(saveOp, layout.NewSpacer(), addOp, delOp),
-		),
-		nil, nil, nil,
-		widget.NewLabel(""),
-	)
+	editTitle := canvas.NewText("编辑操作", colorText)
+	editTitle.TextStyle = fyne.TextStyle{Bold: true}
+	editHint := canvas.NewText("改动即时生效", colorTextMuted)
+	editHint.TextSize = theme.Size(theme.SizeNameCaptionText)
 
-	box := container.NewBorder(
-		paneTitle("操作信息配置"),
-		nil, nil, nil,
-		container.NewVSplit(
-			container.NewStack(canvas.NewRectangle(color.Transparent), g.opTable),
-			editor,
+	editor := container.NewVBox(
+		container.NewHBox(container.NewCenter(editTitle), container.NewCenter(editHint)),
+		widget.NewForm(
+			widget.NewFormItem("操作名称", g.opName),
+			widget.NewFormItem("操作类型", g.opType.obj),
 		),
+		container.NewStack(g.opForms[0], g.opForms[1], g.opForms[2]),
+		container.NewBorder(nil, nil, g.opComplete.box, saveOp),
 	)
-	return container.NewPadded(box)
+	g.applyOpType()
+
+	g.opCount = newChipText("0", colorText2)
+	hint := canvas.NewText("按顺序在每台设备上执行", colorTextMuted)
+	hint.TextSize = theme.Size(theme.SizeNameCaptionText)
+	head := container.NewBorder(nil, nil,
+		container.NewHBox(cardTitle(theme.ListIcon(), "操作序列", g.opCount), container.NewCenter(hint)),
+		nil,
+		container.NewHBox(layout.NewSpacer(), addOp, cloneOp, delOp))
+
+	split := container.NewVSplit(tableFrame(g.opTable),
+		container.NewVScroll(container.NewVBox(widget.NewSeparator(), editor)))
+	split.Offset = 0.24
+	return container.NewPadded(newCard(head, split))
+}
+
+// hintLine 表单下方的说明文字（小号、次要色，可换行）。
+func hintLine(s string) fyne.CanvasObject {
+	rt := widget.NewRichText(&widget.TextSegment{Text: s, Style: widget.RichTextStyle{
+		ColorName: colorNameMuted, SizeName: theme.SizeNameCaptionText}})
+	rt.Wrapping = fyne.TextWrapWord
+	return rt
 }
 
 func (g *gui) loadOpIntoEditor(i int) {
 	ops := g.state.Ops()
 	if i < 0 || i >= len(ops) {
 		g.selectedOp = -1
-		g.opComplete.SetText("该项当前完整度:未选中")
+		g.opComplete.Set(badgeNone, "未选中操作")
 		return
 	}
 	g.selectedOp = i
@@ -653,13 +810,8 @@ func (g *gui) loadOpIntoEditor(i int) {
 	defer func() { g.editing = false }()
 
 	g.opName.SetText(op.Name)
-	switch op.Type {
-	case OpCommand:
-		g.opType.SetSelectedIndex(0)
-	case OpUpFile:
-		g.opType.SetSelectedIndex(1)
-	case OpDownFile:
-		g.opType.SetSelectedIndex(2)
+	if op.Type >= OpCommand && op.Type <= OpDownFile {
+		g.opType.Select(op.Type)
 	}
 	g.cmdEntry.SetText(op.CommandStr)
 	g.cmdOKCheck.SetText(op.CheckSuccessStr)
@@ -674,15 +826,18 @@ func (g *gui) loadOpIntoEditor(i int) {
 	g.updateOpCompleteLabel()
 }
 
-// applyOpType 让「操作类型」下拉与下方标签页保持同步。
+// applyOpType 只显示当前操作类型对应的表单。
 func (g *gui) applyOpType() {
-	switch g.opType.Selected {
-	case "下发命令":
-		g.opTabs.SelectIndex(0)
-	case "上传文件":
-		g.opTabs.SelectIndex(1)
-	case "下载文件":
-		g.opTabs.SelectIndex(2)
+	sel := g.opType.Selected()
+	for i, f := range g.opForms {
+		if f == nil {
+			continue
+		}
+		if i == sel {
+			f.Show()
+		} else {
+			f.Hide()
+		}
 	}
 }
 
@@ -700,18 +855,18 @@ func (g *gui) saveOpEditor() bool {
 	op := ops[g.selectedOp].Inf
 	op.Name = g.opName.Text
 
-	switch g.opType.Selected {
-	case "下发命令":
+	switch g.opType.Selected() {
+	case OpCommand:
 		op.Type = OpCommand
 		op.CommandStr = g.cmdEntry.Text
 		op.CheckSuccessStr = g.cmdOKCheck.Text
 		op.CheckErrorStr = g.cmdErrCheck.Text
-	case "上传文件":
+	case OpUpFile:
 		op.Type = OpUpFile
 		op.TransferFileSourcePath = g.upLocal.Text
 		op.TransferFileDestinationPath = g.upRemote.Text
 		op.CheckFile = parseCheckFile(g.upCheck.Selected)
-	case "下载文件":
+	case OpDownFile:
 		op.Type = OpDownFile
 		op.TransferFileSourcePath = g.downRemote.Text
 		op.TransferFileDestinationPath = g.downDir.Text
@@ -725,22 +880,29 @@ func (g *gui) saveOpEditor() bool {
 }
 
 func (g *gui) updateOpCompleteLabel() {
+	if g.opComplete == nil {
+		return
+	}
 	ops := g.state.Ops()
 	if g.selectedOp < 0 || g.selectedOp >= len(ops) {
-		g.opComplete.SetText("该项当前完整度:未选中")
+		g.opComplete.Set(badgeNone, "未选中操作")
 		return
 	}
 	op := ops[g.selectedOp].Inf
 	if op.IsComplete() {
-		g.opComplete.SetText("该项当前完整度:完整 OK")
+		g.opComplete.Set(badgeOK, "配置完整，可以执行")
 		return
 	}
-	g.opComplete.SetText("该项当前完整度:不完整（不会被执行）— " + op.Validate().Error())
+	g.opComplete.Set(badgeWarn, "不完整，执行时将跳过 - "+op.Validate().Error())
 }
 
 func (g *gui) refreshOpTableOnly() {
 	if g.opTable != nil {
 		g.opTable.Refresh()
+	}
+	if g.opCount != nil {
+		g.opCount.Text = strconv.Itoa(len(g.state.Ops()))
+		g.opCount.Refresh()
 	}
 }
 
@@ -748,9 +910,8 @@ func (g *gui) refreshTables() {
 	if g.deviceTable != nil {
 		g.deviceTable.Refresh()
 	}
-	if g.opTable != nil {
-		g.opTable.Refresh()
-	}
+	g.refreshOpTableOnly()
+	g.refreshStats()
 }
 
 // ---------- 载入 / 保存 / 执行 ----------
@@ -768,6 +929,10 @@ func (g *gui) loadConfig() {
 	}
 	g.state.LoadConfig(cfg)
 	g.selectedOp = -1
+	g.clearOpEditor()
+	if len(g.state.Ops()) > 0 {
+		g.loadOpIntoEditor(0)
+	}
 	g.refreshTables()
 	g.refreshDeviceLog()
 	g.setStatus(fmt.Sprintf("已载入预设 %s:%d 台设备，%d 条操作",
@@ -822,6 +987,7 @@ func (g *gui) runBatch() {
 		g.state.SetDeviceStatus(i, "等待中")
 	}
 	g.refreshTables()
+	g.refreshDeviceLog()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	g.mu.Lock()
@@ -836,7 +1002,7 @@ func (g *gui) runBatch() {
 	if skipped > 0 {
 		msg += fmt.Sprintf("（%d 条不完整操作已跳过）", skipped)
 	}
-	g.setStatus(msg)
+	g.setStatusKind(msg, colorRunning)
 
 	cmdTimeout, xferTimeout := cfg.Timeouts()
 	exec := &Executor{
@@ -868,14 +1034,19 @@ func (g *gui) runBatch() {
 				}
 			}
 			g.refreshTables()
+			// 最后一条事件可能落在节流窗口里没被画出来：收尾时强制刷新一次，
+			// 否则用户看到"失败 1"却看不到那句失败原因。
+			g.deviceLog.Flush()
+			g.refreshDeviceLog()
 			summary := fmt.Sprintf("执行结束:成功 %d，失败 %d", ok, failed)
 			if ctx.Err() != nil {
 				summary = fmt.Sprintf("执行已中止:成功 %d，失败/未完成 %d", ok, failed)
 			}
-			g.setStatus(summary)
-			if failed > 0 {
+			if failed > 0 || ctx.Err() != nil {
+				g.setStatusKind(summary, colorDanger)
 				showInfo("执行结束", summary+"\n\n失败设备可在左侧选中查看原因。", g.win)
 			} else {
+				g.setStatusKind(summary, colorSuccess)
 				showInfo("执行结束", summary, g.win)
 			}
 		})
@@ -894,7 +1065,7 @@ func (g *gui) cancelRun() {
 	}
 	showConfirm("中止执行", "确认中止当前批量执行？\n已完成的设备结果会保留。", func() {
 		cancel()
-		g.setStatus("正在中止…")
+		g.setStatusKind("正在中止…", colorRunning)
 	}, g.win)
 }
 
@@ -918,11 +1089,17 @@ func (g *gui) setRunningUI(running bool) {
 		}
 	}
 	if running {
+		g.runBtn.SetText("执行中…")
+		g.runBtn.SetIcon(theme.ViewRefreshIcon())
 		g.runBtn.Disable()
 		g.cancelBtn.Enable()
+		g.liveChip.Show()
 	} else {
+		g.runBtn.SetText("执行配置")
+		g.runBtn.SetIcon(theme.MediaPlayIcon())
 		g.runBtn.Enable()
 		g.cancelBtn.Disable()
+		g.liveChip.Hide()
 	}
 }
 
@@ -955,48 +1132,65 @@ func (g *gui) onEvent(ev StepEvent) {
 }
 
 func (g *gui) setStatus(s string) {
-	if g.statusLbl != nil {
-		g.statusLbl.SetText(s)
+	g.setStatusKind(s, colorTextMuted)
+}
+
+// setStatusKind 更新底栏状态文字与状态点颜色。
+func (g *gui) setStatusKind(s string, dot color.Color) {
+	if g.statusLbl == nil || g.statusDot == nil {
+		return
 	}
+	g.statusLbl.Text = s
+	g.statusLbl.Refresh()
+	g.statusDot.FillColor = dot
+	g.statusDot.Refresh()
 }
 
 func (g *gui) confirmDelete(title, msg string, onYes func()) {
 	showConfirm(title, msg, onYes, g.win)
 }
 
+// helpText 帮助文案。以 # 开头的行渲染为小标题，其余每行一段。
+const helpText = `批量部署工具 使用说明
+# 1. 文件操作根目录
+上传/下载的相对路径都以此目录为基准。
+# 2. 远程设备
+表格中每行一台设备，填写 IPv4 地址、SSH 端口、用户名、密码。
+选中一行后可（克隆 / 编辑 / 删除）;（新增）追加一行并打开编辑框。
+# 3. 操作序列
+操作分三类，按表格顺序在每台设备上依次执行:
+命令下发 —— 在每台设备上执行同一条命令，可配置成功/失败关键字。
+文件上传 —— 本地文件上传到设备，可选 MD5 / 文件大小校验。
+文件下载 —— 设备上的文件下载到本地目录，可选校验。
+选中操作行后在下方编辑，改动即时生效;不完整的操作会标出并在执行时跳过。
+# 4. 载入 / 保存配置
+可从内置预设载入，也可保存为 JSON 复用。配置文件格式与旧版完全兼容。
+# 5. 执行
+设置并行上限后点（执行配置）;执行过程中配置区不可编辑，可随时点（中止）。
+概览统计与进度条实时显示 成功 / 失败 / 进行中 的设备数;选中设备可查看其日志。
+# 6. 命令行模式
+qt_batch_deployment [根目录] [配置文件路径] [最大并行数]
+qt_batch_deployment --web [--listen 地址:端口]   启动 Web 界面
+不带参数启动图形界面。退出码:0 全部成功，1 有设备失败，2 参数或配置错误。`
+
 func (g *gui) showHelp() {
-	help := `批量部署工具 使用说明
-
-1. 选择文件操作根目录
-   上传/下载的相对路径都以此目录为基准。
-
-2. 配置远程设备
-   表格中每行一台设备，填写 IPv4 地址、SSH 端口、用户名、密码。
-   选中一行后可（克隆 / 编辑 / 删除）;（新增设备）追加一行。
-
-3. 配置操作
-   操作分三类:
-   - 命令下发 —— 在每台设备上执行同一条命令，可配置成功/失败关键字。
-   - 文件上传 —— 本地文件上传到设备，上传后按 MD5 校验。
-   - 文件下载 —— 设备上的文件下载到本地目录，下载后按 MD5 校验。
-   选中操作行后在下方编辑，改动即时生效。
-   （完整/不完整）会实时显示;不完整的操作不会被执行。
-
-4. 载入 / 保存配置
-   可从内置预设载入，也可保存为 JSON 复用。
-   配置文件格式与旧版完全兼容。
-
-5. 执行
-   设置并行上限后点（执行配置）。
-   执行过程中配置区不可编辑，可随时点（中止执行）中断。
-   在左侧选中设备可查看该设备的执行日志;
-   状态列按 成功 / 失败 / 等待中 / 执行中 用颜色区分。
-
-6. 命令行模式
-   qt_batch_deployment [根目录] [配置文件路径] [最大并行数]
-   不带参数启动图形界面。
-   退出码:0 全部成功，1 有设备失败，2 参数或配置错误。`
-	showInfo("帮助", help, g.win)
+	// 转成 Markdown：标题行 -> 三级标题，其余每行一段（不用列表：项目符号「•」不在内嵌字体里）。
+	var md strings.Builder
+	for i, ln := range strings.Split(helpText, "\n") {
+		switch {
+		case i == 0:
+			continue // 标题由对话框标题栏显示
+		case strings.HasPrefix(ln, "# "):
+			md.WriteString("### " + strings.TrimPrefix(ln, "# ") + "\n\n")
+		default:
+			md.WriteString(ln + "\n\n")
+		}
+	}
+	rt := widget.NewRichTextFromMarkdown(md.String())
+	rt.Wrapping = fyne.TextWrapWord
+	sc := container.NewVScroll(rt)
+	sc.SetMinSize(fyne.NewSize(620, 480))
+	dialog.NewCustom("使用说明", "知道了", sc, g.win).Show()
 }
 
 // relToRoot 把绝对路径转成相对根目录的路径，便于配置跨机器复用。
@@ -1025,7 +1219,7 @@ func (g *gui) clearOpEditor() {
 	g.upRemote.SetText("")
 	g.downRemote.SetText("")
 	g.downDir.SetText("")
-	g.opComplete.SetText("该项当前完整度:未选中")
+	g.opComplete.Set(badgeNone, "未选中操作")
 }
 
 // attachCloseGuard 让「执行中关闭窗口」先取消任务再退出。
