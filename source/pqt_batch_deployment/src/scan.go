@@ -34,12 +34,26 @@ type ScanOptions struct {
 	Timeout time.Duration
 	// Workers 并发发送数，默认 64。
 	Workers int
+	// Mode 发现方式：
+	//   ""/"auto"  优先 ARP（能拿 MAC），拿不到时自动降级为 ping；
+	//   "arp"      只用 ARP，失败即报错，不降级；
+	//   "ping"     只用 ICMP（不需要 MAC，可跨网段），普通用户即可运行。
+	Mode string
 }
 
+// 扫描模式取值。
+const (
+	ScanModeAuto = "auto"
+	ScanModeARP  = "arp"
+	ScanModePing = "ping"
+)
+
 // ScanResult 一台被发现的主机。
+//
+// MAC 可能为空：ping 模式拿不到 MAC，跨网段时也拿不到。
 type ScanResult struct {
 	IP  string `json:"ip"`
-	MAC string `json:"mac"`
+	MAC string `json:"mac,omitempty"`
 }
 
 // ScanSummary 扫描结果的汇总，供界面展示。
@@ -47,8 +61,10 @@ type ScanSummary struct {
 	Results []ScanResult `json:"results"`
 	// Total 网段内被探测的地址数
 	Total int `json:"total"`
-	// Method 实际使用的发现方式：arp / arp-cache
+	// Method 实际使用的发现方式：arp / arp-cache / ping
 	Method string `json:"method"`
+	// HasMAC 本模式是否能拿到 MAC（false 时 MACPrefix 不生效）
+	HasMAC bool `json:"hasMac"`
 	// Interface 实际使用的网口
 	Interface string `json:"interface"`
 	// Elapsed 耗时
@@ -179,13 +195,26 @@ func ScanLAN(ctx context.Context, opts ScanOptions) (*ScanSummary, error) {
 		workers = 64
 	}
 
+	ifaceName := opts.Interface
+	if strings.ToLower(strings.TrimSpace(opts.Mode)) == ScanModePing {
+		// ping 模式不绑定网口，选不到也不算错
+		if ifc, e := pickInterface(opts.Interface, ipnet, hosts); e == nil {
+			ifaceName = ifc.Name
+		}
+		return runPingScan(ctx, hosts, prefix, ifaceName, timeout, workers, time.Now())
+	}
 	iface, err := pickInterface(opts.Interface, ipnet, hosts)
 	if err != nil {
 		return nil, err
 	}
 
 	start := time.Now()
-	summary := &ScanSummary{Total: len(hosts), Interface: iface.Name}
+	mode := strings.ToLower(strings.TrimSpace(opts.Mode))
+	if mode == "" {
+		mode = ScanModeAuto
+	}
+
+	summary := &ScanSummary{Total: len(hosts), Interface: iface.Name, HasMAC: true}
 
 	found, scanErr := arpScan(ctx, iface, hosts, timeout, workers)
 	if scanErr == nil {
@@ -193,12 +222,21 @@ func ScanLAN(ctx context.Context, opts ScanOptions) (*ScanSummary, error) {
 	} else {
 		// 权限不足等情况下退化为读邻居表。
 		cached, cacheErr := readARPTable()
+		// 显式 ARP 模式不降级：用户明确要求"能拿 MAC 才算数"，
+		// 悄悄换成缓存或 ping 会让他以为 MAC 已校验。
+		if mode == ScanModeARP {
+			return nil, fmt.Errorf("ARP 扫描失败(%v)。当前为（仅 ARP）模式，"+
+				"请用 root 运行或 setcap cap_net_raw+ep;如需免权限扫描请改用（仅 Ping）模式", scanErr)
+		}
 		if cacheErr != nil {
-			return nil, fmt.Errorf("ARP 扫描失败(%v)，且读取本机邻居表也失败: %w", scanErr, cacheErr)
+			// auto：再退一层，用 ping
+			return runPingScan(ctx, hosts, prefix, iface.Name, timeout, workers, start)
 		}
 		summary.Method = "arp-cache"
-		summary.Note = fmt.Sprintf("无法主动发送 ARP（%v）。已改为读取本机 ARP 缓存，只能看到最近通信过的设备;"+
-			"要扫描整个网段，请用 root 运行，或执行:sudo setcap cap_net_raw+ep <程序路径>", scanErr)
+		summary.Note = fmt.Sprintf("无法主动发送 ARP(%v)。已改为读取本机 ARP 缓存，"+
+			"只能看到最近通信过的设备。要扫描整个网段，请用 root 运行，"+
+			"或执行:sudo setcap cap_net_raw+ep <程序路径>;"+
+			"也可以手动选择（仅 Ping）模式(不需要权限，但拿不到 MAC)", scanErr)
 		found = map[string]string{}
 		for ip, mac := range cached {
 			if ipnet.Contains(net.ParseIP(ip)) {
@@ -212,6 +250,36 @@ func ScanLAN(ctx context.Context, opts ScanOptions) (*ScanSummary, error) {
 			continue
 		}
 		summary.Results = append(summary.Results, ScanResult{IP: ip, MAC: NormalizeMAC(mac)})
+	}
+	sort.Slice(summary.Results, func(i, j int) bool {
+		return ipLess(summary.Results[i].IP, summary.Results[j].IP)
+	})
+	summary.Elapsed = time.Since(start)
+	return summary, nil
+}
+
+// runPingScan 执行 ICMP 模式扫描。
+//
+// 该模式不需要任何特权（Linux 的 ping socket），也不需要 MAC；
+// 代价是拿不到 MAC，因此 MACPrefix 不生效——这一点必须在结果里明确告知，
+// 否则用户会以为"按 MAC 过滤了"却拿到全部结果。
+func runPingScan(ctx context.Context, hosts []net.IP, prefix, iface string,
+	timeout time.Duration, workers int, start time.Time) (*ScanSummary, error) {
+
+	found, err := pingScan(ctx, hosts, timeout, workers)
+	if err != nil {
+		return nil, err
+	}
+	summary := &ScanSummary{
+		Results:   found,
+		Total:     len(hosts),
+		Method:    "ping",
+		Interface: iface,
+		HasMAC:    false,
+	}
+	if prefix != "" {
+		summary.Note = "当前为（仅 Ping）模式，无法获取 MAC——MAC 前缀过滤在此模式下不生效，" +
+			"结果是网段内所有在线主机。需要按 MAC 筛选请改用 ARP 模式。"
 	}
 	sort.Slice(summary.Results, func(i, j int) bool {
 		return ipLess(summary.Results[i].IP, summary.Results[j].IP)

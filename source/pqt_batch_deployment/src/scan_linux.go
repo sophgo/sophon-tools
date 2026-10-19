@@ -305,3 +305,103 @@ func isPrivilegedForRawSocket() bool {
 	syscall.Close(fd)
 	return true
 }
+
+// ---------- ICMP 探测（非特权，走内核 ping socket） ----------
+
+// icmpAvailable 检查能否创建 ICMP ping socket。
+func icmpAvailable() error {
+	fd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_DGRAM, syscall.IPPROTO_ICMP)
+	if err != nil {
+		return err
+	}
+	return syscall.Close(fd)
+}
+
+// pingHost 发一个 ICMP echo，判断主机是否响应。
+func pingHost(ctx context.Context, ip net.IP, timeout time.Duration) bool {
+	v4 := ip.To4()
+	if v4 == nil {
+		return false
+	}
+	fd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_DGRAM, syscall.IPPROTO_ICMP)
+	if err != nil {
+		return false
+	}
+	defer syscall.Close(fd)
+
+	// 非阻塞 + 轮询，便于响应 ctx 取消
+	_ = syscall.SetNonblock(fd, true)
+
+	id := uint16(os.Getpid() & 0xffff)
+	seq := uint16(time.Now().UnixNano() & 0xffff)
+	pkt := buildICMPEcho(id, seq)
+
+	sa := &syscall.SockaddrInet4{}
+	copy(sa.Addr[:], v4)
+	if err := syscall.Sendto(fd, pkt, 0, sa); err != nil {
+		return false
+	}
+
+	deadline := time.Now().Add(timeout)
+	buf := make([]byte, 1500)
+	for time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return false
+		default:
+		}
+		n, from, err := syscall.Recvfrom(fd, buf, 0)
+		if err != nil {
+			if errors.Is(err, syscall.EAGAIN) || errors.Is(err, syscall.EWOULDBLOCK) {
+				time.Sleep(5 * time.Millisecond)
+				continue
+			}
+			if errors.Is(err, syscall.EINTR) {
+				continue
+			}
+			return false
+		}
+		from4, ok := from.(*syscall.SockaddrInet4)
+		if !ok || n < 8 {
+			continue
+		}
+		if !net.IP(from4.Addr[:]).Equal(v4) {
+			continue
+		}
+		// ping socket 的 SOCK_DGRAM 不收 IP 头，直接就是 ICMP 报文
+		if buf[0] == 0 { // type 0 = echo reply
+			return true
+		}
+	}
+	return false
+}
+
+// buildICMPEcho 构造 ICMP echo request（含校验和）。
+func buildICMPEcho(id, seq uint16) []byte {
+	const payload = 16
+	pkt := make([]byte, 8+payload)
+	pkt[0] = 8 // echo request
+	pkt[1] = 0
+	binary.BigEndian.PutUint16(pkt[4:], id)
+	binary.BigEndian.PutUint16(pkt[6:], seq)
+	for i := 8; i < len(pkt); i++ {
+		pkt[i] = byte(i)
+	}
+	binary.BigEndian.PutUint16(pkt[2:], icmpChecksum(pkt))
+	return pkt
+}
+
+// icmpChecksum 标准 ICMP 反码求和。
+func icmpChecksum(b []byte) uint16 {
+	var sum uint32
+	for i := 0; i+1 < len(b); i += 2 {
+		sum += uint32(b[i])<<8 | uint32(b[i+1])
+	}
+	if len(b)%2 == 1 {
+		sum += uint32(b[len(b)-1]) << 8
+	}
+	for sum>>16 != 0 {
+		sum = (sum & 0xffff) + (sum >> 16)
+	}
+	return ^uint16(sum)
+}

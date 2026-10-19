@@ -366,3 +366,53 @@ go test -run 'TestScan|TestNormalizeMAC|TestMACHasPrefix|TestParseScanCIDR|TestP
 扫描只用 ARP，不产生跨网段流量、不依赖目标机开放端口，因此不触发目标机防火墙。
 界面在扫描页**固定标注**了可能触发网关/IDS 告警的三种情况（跨网段、本机监控、交换机 DAI）。
 详见 README §8.4。
+
+## 8. 无 MAC 降级扫描（2.4.0）
+
+### 8.1 先回答一个前提问题：有没有低权限拿 MAC 的办法？
+
+实测结论：**Linux 上没有**。
+
+| 尝试 | 结果 |
+| --- | --- |
+| 非特权原始套接字（AF_PACKET / SOCK_RAW） | `operation not permitted` |
+| UDP 发往关闭端口触发内核 ARP 解析，再读 `/proc/net/arp` | **不填充**邻居表 |
+| TCP connect 触发同样路径 | 同上，且 4 台目标全部 `i/o timeout` |
+| 以 root 重做以上两项 | 依然不填充 |
+
+原因：内核只有在**确实要发包**时才解析邻居；目标端口关闭时连接会先失败，
+不产生 ARP 解析结果。所以降级方案只能放弃 MAC——这正是需求里说的
+"降级为不使用 mac，仅通过 ping 等方式扫描"。
+
+唯一例外是 Windows 的 `SendARP`（iphlpapi），无需特权即可取 MAC；
+但 Windows 端本就不支持主动扫描，未纳入本次范围。
+
+### 8.2 三种模式
+
+| 模式 | 特权 | MAC | 跨网段 |
+| --- | --- | --- | --- |
+| auto（默认） | 否 | 尽量 | 否 |
+| arp | 是 | 是 | 否 |
+| ping | **否** | 否 | **是** |
+
+`ping` 走 Linux 内核 ping socket（`SOCK_DGRAM` + `IPPROTO_ICMP`），
+受 `ping_group_range` 控制，默认全组开放，普通用户可用。
+
+### 8.3 验证
+
+| 场景 | 结果 |
+| --- | --- |
+| 非 root，`ping` 模式扫 /24 | **13 台在线，6.6 秒**（不需要任何权限） |
+| 非 root，`arp` 模式 | 明确报错并提示改用 ping，**不静默降级** ✅ |
+| 非 root，`auto` 模式 | 降级为读 ARP 缓存并给出 setcap 提示 ✅ |
+| root，`arp` 模式 + `f8:ed` | 2 台，MAC 列正常显示 ✅ |
+| `ping` 模式 + MAC 前缀 | 返回全部在线主机，并明确提示前缀不生效 ✅ |
+| Web / 桌面 | 两种界面均已接入，MAC 列在 ping 模式下自动隐藏 ✅ |
+
+### 8.4 自查修掉的 bug
+
+- Web 端 `renderScanResults()` 在 `scanHasMac` 赋值**之前**调用，导致 ping 模式
+  仍渲染出空 MAC 列（显示成"—"）。
+- 桌面版扫描状态文案写死为「ARP 广播」/「本机 ARP 缓存」，ping 模式显示错误，
+  已改为跟随实际 method。
+- `arp` 显式模式原本会静默降级到 ARP 缓存，与"用户明确要 MAC"的意图冲突，已改为报错。

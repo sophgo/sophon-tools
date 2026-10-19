@@ -34,6 +34,7 @@ type scanDialog struct {
 	cidr     *widget.Entry
 	macPre   *widget.Entry
 	timeout  *widget.Select
+	mode     *widget.Select
 
 	status     *widget.Label
 	resultHint *widget.Label
@@ -69,6 +70,14 @@ func (g *gui) showScanDialog() {
 
 	sd.timeout = widget.NewSelect([]string{"2 秒", "4 秒", "8 秒", "15 秒"}, nil)
 	sd.timeout.SetSelected("4 秒")
+
+	// 扫描方式：auto 优先 ARP，拿不到 MAC 时自动降级
+	sd.mode = widget.NewSelect([]string{
+		"自动(优先 ARP，拿不到 MAC 时改用 Ping)",
+		"仅 ARP(需 root，能按 MAC 过滤)",
+		"仅 Ping(无需权限，拿不到 MAC)",
+	}, nil)
+	sd.mode.SetSelectedIndex(0)
 
 	sd.status = widget.NewLabel("尚未扫描")
 	sd.status.TextStyle = fyne.TextStyle{Italic: true}
@@ -146,6 +155,7 @@ func (g *gui) showScanDialog() {
 		widget.NewFormItem("网段", sd.cidr),
 		widget.NewFormItem("MAC 前缀", sd.macPre),
 		widget.NewFormItem("等待时间", sd.timeout),
+		widget.NewFormItem("扫描方式", sd.mode),
 	)
 
 	credForm := widget.NewForm(
@@ -209,7 +219,15 @@ func (sd *scanDialog) startScan() {
 	ctx, cancel := context.WithCancel(context.Background())
 	sd.cancel = cancel
 	sd.scanning = true
-	sd.status.SetText("正在扫描…（ARP 广播，不经过网关）")
+	// 提示文案要跟随所选模式，不能一律写 ARP
+	switch scanModeFromIndex(sd.mode.SelectedIndex()) {
+	case ScanModePing:
+		sd.status.SetText("正在扫描…（ICMP echo，不需权限）")
+	case ScanModeARP:
+		sd.status.SetText("正在扫描…（ARP 广播，不经过网关）")
+	default:
+		sd.status.SetText("正在扫描…（优先 ARP，不经过网关）")
+	}
 	sd.results = nil
 	sd.checks = nil
 	sd.list.Refresh()
@@ -220,6 +238,7 @@ func (sd *scanDialog) startScan() {
 		CIDR:      sd.cidr.Text,
 		MACPrefix: prefix,
 		Timeout:   secondsDur(timeout),
+		Mode:      scanModeFromIndex(sd.mode.SelectedIndex()),
 	}
 
 	go func() {
@@ -242,9 +261,12 @@ func (sd *scanDialog) startScan() {
 
 			msg := fmt.Sprintf("扫描完成:网段内 %d 个地址，找到 %d 台（%.1fs）",
 				res.Total, len(res.Results), res.Elapsed.Seconds())
-			if res.Method == "arp" {
+			switch res.Method {
+			case "arp":
 				sd.status.SetText(msg + "，方式:ARP 广播")
-			} else {
+			case "ping":
+				sd.status.SetText(msg + "，方式:ICMP Ping（无 MAC）")
+			default:
 				sd.status.SetText(msg + "，方式:本机 ARP 缓存（权限不足，未主动发包）")
 			}
 			if res.Note != "" {
@@ -308,4 +330,15 @@ func listFrame(l *widget.List) fyne.CanvasObject {
 	bg.StrokeWidth = 1
 	bg.CornerRadius = 8
 	return container.NewStack(bg, container.New(&insetLayout{x: 1, y: 1}, l))
+}
+
+// scanModeFromIndex 把下拉序号映射成模式。
+func scanModeFromIndex(i int) string {
+	switch i {
+	case 1:
+		return ScanModeARP
+	case 2:
+		return ScanModePing
+	}
+	return ScanModeAuto
 }

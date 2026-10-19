@@ -534,6 +534,8 @@
         也不依赖目标机开放任何端口，因此通常不会触发目标机防火墙。
         但若网段填成跨网段地址，或本机 / 交换机上装有网络监控与 IDS，仍可能产生告警。
         请确认已获得网络管理授权后再扫描。
+        <br>若本机无权限获取 MAC、或目标不在同一网段，可切换到「仅 Ping」模式：
+        该模式用 ICMP echo 探测，普通用户即可运行，但拿不到 MAC、无法按前缀过滤。
       </div>
       <div class="form" style="margin-top:12px">
         <label>网口</label><select id="scanIface" onchange="onScanIfaceChange()"></select>
@@ -542,6 +544,12 @@
         <input type="text" id="scanMac" placeholder="留空=全部；支持 00:1a、001a2b、98:a9:2d 等任意长度">
         <label>等待时间</label>
         <select id="scanTimeout"><option>2</option><option selected>4</option><option>8</option><option>15</option></select>
+        <label>扫描方式</label>
+        <select id="scanMode" onchange="onScanModeChange()">
+          <option value="auto" selected>自动（优先 ARP，拿不到 MAC 时改用 Ping）</option>
+          <option value="arp">仅 ARP（需 root，能按 MAC 过滤）</option>
+          <option value="ping">仅 Ping（无需权限，拿不到 MAC）</option>
+        </select>
       </div>
       <div style="display:flex;align-items:center;gap:10px;margin:12px 0">
         <button class="btn primary" id="scanBtn" onclick="doScan()">开始扫描</button>
@@ -551,7 +559,7 @@
         <table>
           <thead><tr>
             <th style="width:44px"><input type="checkbox" id="scanAll" onchange="scanSelectAll(this.checked)"></th>
-            <th>IPv4 地址</th><th>MAC 地址</th>
+            <th>IPv4 地址</th><th id="scanMacCol" style="width:38%">MAC 地址</th>
           </tr></thead>
           <tbody id="scanBody"><tr><td colspan="3" class="hint">还没有结果</td></tr></tbody>
         </table>
@@ -1203,13 +1211,16 @@ function refreshState() {
 let scanResults = [];
 let scanChecked = [];
 let scanIfaces = [];
+let scanHasMac = true;
 
 function openScan() {
   $("scanMask").classList.add("show");
   $("scanBody").innerHTML = '<tr><td colspan="3" class="hint">还没有结果</td></tr>';
   $("scanStatus").textContent = "尚未扫描";
   $("scanHint").textContent = "";
-  scanResults = []; scanChecked = [];
+  scanResults = []; scanChecked = []; scanHasMac = true;
+  $("scanMacCol").style.display = "";
+  $("scanMac").disabled = false;
   loadScanIfaces();
 }
 
@@ -1238,6 +1249,12 @@ async function loadScanIfaces() {
   }
 }
 
+function onScanModeChange() {
+  const ping = $("scanMode").value === "ping";
+  $("scanMac").disabled = ping;
+  if (ping) $("scanMac").value = "";
+}
+
 function onScanIfaceChange() {
   const name = $("scanIface").value;
   const it = scanIfaces.find(x => x.name === name);
@@ -1255,14 +1272,25 @@ async function doScan() {
       cidr: $("scanCidr").value.trim(),
       macPrefix: $("scanMac").value.trim(),
       timeoutSec: Number($("scanTimeout").value),
+      mode: $("scanMode").value,
     })});
     scanResults = res.results || [];
     scanChecked = scanResults.map(() => true);
+    // 先确定本次是否带 MAC，再渲染——否则渲染时读到的还是上一次的值，
+    // 会把没有 MAC 的结果渲染出一个空的 MAC 列。
+    scanHasMac = !!res.hasMac;
     renderScanResults();
     const secs = (res.elapsed / 1e9).toFixed(1);
+    const methodName = res.method === "arp" ? "ARP 广播"
+      : res.method === "ping" ? "ICMP Ping"
+      : "本机 ARP 缓存（权限不足）";
     $("scanStatus").textContent =
-      `网段内 ${res.total} 个地址，找到 ${scanResults.length} 台（${secs}s），方式：` +
-      (res.method === "arp" ? "ARP 广播" : "本机 ARP 缓存（权限不足）");
+      `网段内 ${res.total} 个地址，找到 ${scanResults.length} 台（${secs}s），方式：` + methodName;
+    // ping 模式拿不到 MAC：把 MAC 列隐藏，避免看起来"MAC 全空像出错了"
+    const macCol = $("scanMacCol");
+    macCol.style.display = scanHasMac ? "" : "none";
+    macCol.style.width = scanHasMac ? "38%" : "0";
+    $("scanMac").disabled = !scanHasMac;
     if (res.note) {
       $("scanHint").textContent = res.note;
       $("scanHint").style.color = "var(--warn, #b26b00)";
@@ -1281,14 +1309,15 @@ function renderScanResults() {
   const tb = $("scanBody");
   tb.innerHTML = "";
   if (!scanResults.length) {
-    tb.innerHTML = '<tr><td colspan="3" class="hint">没有匹配的设备</td></tr>';
+    tb.innerHTML = '<tr><td colspan="' + (scanHasMac ? 3 : 2) + '" class="hint">没有匹配的设备</td></tr>';
     return;
   }
   scanResults.forEach((r, i) => {
     const tr = document.createElement("tr");
     tr.innerHTML =
       '<td><input type="checkbox" data-i="' + i + '"' + (scanChecked[i] ? " checked" : "") + '></td>' +
-      "<td>" + esc(r.ip) + "</td><td>" + esc(r.mac) + "</td>";
+      "<td>" + esc(r.ip) + "</td>" +
+      (scanHasMac ? "<td>" + esc(r.mac || "—") + "</td>" : "");
     tr.querySelector("input").onchange = ev => {
       scanChecked[Number(ev.target.dataset.i)] = ev.target.checked;
     };
