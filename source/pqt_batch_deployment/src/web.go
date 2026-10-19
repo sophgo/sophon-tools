@@ -204,15 +204,18 @@ func (ws *webServer) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/favicon.png", serveAsset("ic_action_database.png"))
 
 	mux.HandleFunc("/api/state", ws.handleState)
-	mux.HandleFunc("/api/config", ws.handleConfig)     // GET 导出 / POST 覆盖
-	mux.HandleFunc("/api/presets", ws.handlePresets)   // GET 列表 / POST 载入
-	mux.HandleFunc("/api/settings", ws.handleSettings) // POST 根目录 / 并行上限
-	mux.HandleFunc("/api/device", ws.handleDevice)     // POST 增删改克隆
-	mux.HandleFunc("/api/op", ws.handleOp)             // POST 增删改克隆
-	mux.HandleFunc("/api/run", ws.handleRun)           // POST 开始
-	mux.HandleFunc("/api/cancel", ws.handleCancel)     // POST 中止
-	mux.HandleFunc("/api/events", ws.handleEvents)     // GET SSE 事件流
-	mux.HandleFunc("/api/log", ws.handleLog)           // GET 单设备日志
+	mux.HandleFunc("/api/config", ws.handleConfig)          // GET 导出 / POST 覆盖
+	mux.HandleFunc("/api/presets", ws.handlePresets)        // GET 列表 / POST 载入
+	mux.HandleFunc("/api/settings", ws.handleSettings)      // POST 根目录 / 并行上限
+	mux.HandleFunc("/api/device", ws.handleDevice)          // POST 增删改克隆
+	mux.HandleFunc("/api/op", ws.handleOp)                  // POST 增删改克隆
+	mux.HandleFunc("/api/run", ws.handleRun)                // POST 开始
+	mux.HandleFunc("/api/cancel", ws.handleCancel)          // POST 中止
+	mux.HandleFunc("/api/events", ws.handleEvents)          // GET SSE 事件流
+	mux.HandleFunc("/api/log", ws.handleLog)                // GET 单设备日志
+	mux.HandleFunc("/api/scan", ws.handleScan)              // POST 局域网扫描
+	mux.HandleFunc("/api/scan/add", ws.handleScanAdd)       // POST 批量添加
+	mux.HandleFunc("/api/scan/ifaces", ws.handleScanIfaces) // GET 网口列表
 }
 
 // serveAsset 输出一份内嵌 PNG 资源。

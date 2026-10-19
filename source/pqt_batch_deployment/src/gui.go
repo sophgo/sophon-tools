@@ -354,15 +354,16 @@ func (g *gui) devicePane() fyne.CanvasObject {
 		g.refreshDeviceLog()
 		g.editSelectedDevice()
 	})
+	scanBtn := widget.NewButtonWithIcon("扫描局域网", theme.SearchIcon(), g.showScanDialog)
 	cloneBtn := widget.NewButtonWithIcon("克隆", theme.ContentCopyIcon(), g.cloneSelectedDevice)
 	editBtn := widget.NewButtonWithIcon("编辑", theme.DocumentCreateIcon(), g.editSelectedDevice)
 	delBtn := dangerToolButton(g.deleteSelectedDevice)
-	g.lockable = append(g.lockable, addBtn, cloneBtn, editBtn, delBtn)
+	g.lockable = append(g.lockable, addBtn, scanBtn, cloneBtn, editBtn, delBtn)
 
 	g.deviceCount = newChipText("0", colorText2)
 	head := container.NewBorder(nil, nil,
 		cardTitle(theme.ComputerIcon(), "远程设备", g.deviceCount), nil,
-		container.NewHBox(layout.NewSpacer(), addBtn, cloneBtn, editBtn, delBtn))
+		container.NewHBox(layout.NewSpacer(), scanBtn, addBtn, cloneBtn, editBtn, delBtn))
 
 	// 概览统计 + 比例条
 	g.statTotal = newStatTile("设备总数", colorBorderDark, colorText)

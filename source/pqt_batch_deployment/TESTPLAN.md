@@ -328,3 +328,41 @@ V2.2.0 windows_amd64.exe      27M    仅依赖系统 DLL
 - **Windows**：Wine 下 GUI 与 Linux 渲染一致，空格正常；Web 模式 API 可用。
 
 > 仍未覆盖：真 Windows 机器上的人工操作；100+ 台真机并发压测。
+
+## 7. 局域网扫描（2.3.0）
+
+### 7.1 自动化用例
+
+新增 13 项，覆盖 MAC 前缀规范化/匹配、网段解析、降级路径、参数校验、网口排序：
+
+```
+go test -run 'TestScan|TestNormalizeMAC|TestMACHasPrefix|TestParseScanCIDR|TestPhysicalIfaceOrder' ./...
+```
+
+其中：
+- `TestNormalizeMACPrefix` / `TestMACHasPrefix`：`98`、`f8:ed`、`98a92d`、`00-1A-2B`、
+  大小写、带空格等写法都要正确；且必须按**十六进制字符串**匹配而不是简单前缀
+  （否则 `a9` 会误匹配到 `98:a9:...` 的中间）。
+- `TestScanDegradesWithNote`：无权限时必须降级并给出 setcap 提示，不能静默返回空。
+- `TestScanRejectsBadOptions`：过大网段（/8）、非法 MAC、不存在的网口都要在扫描前拒绝。
+- `TestPhysicalIfaceOrder`：虚拟网口（docker/virbr/tun…）排在物理网口之后。
+
+### 7.2 真机验证（eno1 / 172.26.13.0/24）
+
+| 场景 | 结果 |
+| --- | --- |
+| sudo 运行，无 MAC 过滤 | 4.1 秒找到 9 台，与 `arp-scan` 结果一致 |
+| `f8:ed` 前缀 | 2 台：172.26.13.38、172.26.13.249 ✅ |
+| `98` 前缀 | 1 台：172.26.13.1 ✅ |
+| `98:a9:2d` 前缀 | 1 台：172.26.13.1 ✅ |
+| `7c4d8f` 前缀 | 1 台：172.26.13.236 ✅ |
+| `ff` 前缀（无匹配） | 0 台 ✅ |
+| 非 root 运行 | 降级为 ARP 缓存，界面提示 setcap 方法 ✅ |
+| 批量添加（Web） | 选中 2 台 → 设备列表由 1 台变 3 台 ✅ |
+| 批量添加（桌面） | 选中 9 台 → 状态栏「已添加 9 台设备」，总数 1→10 ✅ |
+
+### 7.3 防火墙相关
+
+扫描只用 ARP，不产生跨网段流量、不依赖目标机开放端口，因此不触发目标机防火墙。
+界面在扫描页**固定标注**了可能触发网关/IDS 告警的三种情况（跨网段、本机监控、交换机 DAI）。
+详见 README §8.4。
