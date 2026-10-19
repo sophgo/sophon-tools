@@ -11,6 +11,7 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/test"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -298,5 +299,57 @@ func TestLogViewPlaceholderNotStuck(t *testing.T) {
 	last := v.rich.Segments[len(v.rich.Segments)-1].(*widget.TextSegment)
 	if last.Text != "some log more" {
 		t.Fatalf("占位符之后重新选中，正文仍是占位符: %q", last.Text)
+	}
+}
+
+// 窗口标题只放应用名，不带版本号。
+//
+// 窗口管理器在标题放不下时会从**左侧**截断，"批量部署工具 V2.2.0" 就会显示成
+// "…V2.2.0"，用户看到的标题栏里只剩版本号。版本号在应用内顶栏徽标与帮助里都有。
+func TestWindowTitleHasNoVersion(t *testing.T) {
+	g := newTestGUI(t)
+	// 用真实标题重建窗口（newTestGUI 用的是占位标题）
+	g.win.SetTitle(appTitle)
+	title := g.win.Title()
+	if title == "" {
+		t.Fatal("窗口标题为空")
+	}
+	if !strings.Contains(title, appTitle) {
+		t.Fatalf("标题应包含应用名, got %q", title)
+	}
+	if strings.Contains(title, Version) {
+		t.Fatalf("标题不应包含版本号（窄标题栏下会被截成只剩版本号）, got %q", title)
+	}
+}
+
+// 下拉菜单必须跟随整体风格：圆角与卡片一致，选中态不能是高饱和色块。
+//
+// Fyne 的 menuItem / Select 都用 ColorNameFocus 画背景：若把 Focus 直接映射成
+// 品牌蓝，下拉框聚焦时整块变纯蓝、展开后选中项也是一条纯蓝，与浅色卡片风格割裂。
+func TestThemeMenuMatchesCardStyle(t *testing.T) {
+	th := newAppTheme()
+
+	menuR := th.Size(theme.SizeNameMenuRadius)
+	cardR := th.Size(theme.SizeNameCardRadius)
+	if menuR != cardR {
+		t.Fatalf("下拉菜单圆角(%v)应与卡片圆角(%v)一致，否则展开后是直角的，风格割裂", menuR, cardR)
+	}
+	if menuR <= 0 {
+		t.Fatalf("下拉菜单圆角应大于 0, got %v", menuR)
+	}
+
+	// 选中/聚焦底不能等于品牌色（那会变成整块高饱和蓝）
+	focus := th.Color(theme.ColorNameFocus, theme.VariantLight)
+	brand := th.Color(theme.ColorNamePrimary, theme.VariantLight)
+	fr, fg, fb, _ := focus.RGBA()
+	br, bg, bb, _ := brand.RGBA()
+	if fr == br && fg == bg && fb == bb {
+		t.Fatal("Focus 色与品牌色相同：下拉框聚焦/选中会变成整块品牌蓝，与整体风格不一致")
+	}
+
+	// 也不该是深色（浅色卡片风格）
+	lum := (0.299*float64(fr) + 0.587*float64(fg) + 0.114*float64(fb)) / 65535
+	if lum < 0.6 {
+		t.Fatalf("Focus/选中底色过深(亮度 %.2f)，应为浅色", lum)
 	}
 }
