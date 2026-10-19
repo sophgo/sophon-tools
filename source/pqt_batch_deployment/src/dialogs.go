@@ -1,3 +1,5 @@
+//go:build !headless
+
 package main
 
 // 对话框封装。

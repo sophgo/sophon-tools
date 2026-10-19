@@ -1,3 +1,5 @@
+//go:build !headless
+
 package main
 
 // 表格单元格控件。

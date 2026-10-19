@@ -1,10 +1,10 @@
 # 功能验证记录
 
-本文记录 v2.0.1 各功能的验证方式与实测结果。**每条都能被第三方复现**：
+本文记录 v2.1.0 各功能的验证方式与实测结果。**每条都能被第三方复现**：
 命令、输入、期望输出、实际输出。
 
 - 验证环境：13.24 构建机（x86_64）+ SE7 真机 172.26.166.185（BM1684X, aarch64）
-- 构建产物：`qt_batch_deployment_V2.0.1_linux_amd64`
+- 构建产物：`qt_batch_deployment_V2.1.0_linux_amd64`
 - 验证日期：2026-10-19
 
 ## 0. 自动化测试
@@ -39,7 +39,7 @@ go vet ./...           # 干净
 ```
 
 ```bash
-./qt_batch_deployment_V2.0.1_linux_amd64 /tmp/qbdtest /tmp/qbdtest/cfg_cmd.json 4
+./qt_batch_deployment_V2.1.0_linux_amd64 /tmp/qbdtest /tmp/qbdtest/cfg_cmd.json 4
 ```
 
 实际输出（退出码 0）：
@@ -106,7 +106,7 @@ b9e59df2331dfeccbf33a59cbed1d75b  payload.bin
 ### 1.5 不完整操作：警告 + 跳过，不静默
 
 ```bash
-./qt_batch_deployment_V2.0.1_linux_amd64 /tmp/qbdtest /tmp/qbdtest/cfg_skip.json 4
+./qt_batch_deployment_V2.1.0_linux_amd64 /tmp/qbdtest /tmp/qbdtest/cfg_skip.json 4
 ```
 
 ```
@@ -162,3 +162,88 @@ b9e59df2331dfeccbf33a59cbed1d75b  payload.bin
   glibc）；不是纯静态。已与需求方确认接受，`release.sh` 同时产出 `.deps.txt`。
 - Windows 产物为真正的单二进制，仅依赖系统 DLL；交叉编译产物未在 Windows 实机
   上做过 GUI 交互验证（构建与依赖检查已完成）。
+
+## 5. Web 模式（无图形栈服务器）
+
+### 5.1 headless 产物形态
+
+```bash
+CGO_ENABLED=0 go build -tags headless -trimpath -ldflags "-s -w" -o qbd_headless .
+file qbd_headless     # statically linked
+ldd  qbd_headless     # not a dynamic executable
+```
+
+对比：桌面版 `ldd` 里有 `libX11`/`libGL`/`libwayland-client` 等 7 个图形库。
+这就是为什么无图形栈机器必须用 headless 产物——桌面版在那里连加载都过不去。
+
+桌面版也无法交叉编译到 arm64（宿主没有 aarch64 图形工具链，`runtime/cgo` 直接报
+`no such instruction`），headless 版可以：
+
+```bash
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags headless ...
+```
+
+### 5.2 SE7 真机（aarch64，无图形栈）
+
+SE7 上 `DISPLAY` 与 `WAYLAND_DISPLAY` 均为空，属典型无图形栈服务器：
+
+```
+$ ssh linaro@172.26.166.185 'echo "DISPLAY=[$DISPLAY] WAYLAND=[$WAYLAND_DISPLAY]"'
+DISPLAY=[] WAYLAND=[]
+$ /tmp/qbd_headless_arm64 --web --listen 127.0.0.1:8090
+批量部署工具 Web UI 已启动: http://127.0.0.1:8090
+提示: 仅监听本机。配置含明文 SSH 密码，对外提供请显式 --listen 0.0.0.0:端口 并自加访问控制。
+```
+
+经 Web API 下发命令并按成功关键字判定：
+
+```
+$ curl -X POST http://127.0.0.1:8090/api/run
+$ curl http://127.0.0.1:8090/api/state | ... 执行状态: ['成功']
+$ curl "http://127.0.0.1:8090/api/log?index=0"
+aarch64
+SE7_HEADLESS_OK
+```
+
+### 5.3 Web 界面（Chromium 实拍）
+
+截图见 PR 附件。逐项核对：
+
+| 功能 | 验证方式 | 结果 |
+| --- | --- | --- |
+| 界面渲染 | Chromium 1500x980 截图 | 布局与桌面版一致，中文正常 |
+| 设备表 | 导入 3 台设备 | IPv4/端口/用户名/密码掩码/状态 五列齐全 |
+| 操作表 | 导入 3 条操作（含 1 条不完整） | 不完整项显示「⚠ …（不完整）」且内容列提示不会执行 |
+| 三段式配置 | 选中「上传文件」操作 | 自动切到上传页，字段与校验方式下拉回显正确 |
+| 完整度实时提示 | 选中完整项 | 显示「该项当前完整度: 完整 ✓」（绿色） |
+| 执行与实时状态 | 点「执行配置」 | 状态列显示蓝色「执行: 慢命令」，逐设备实时更新 |
+| 执行期锁定 | 执行中观察 | 预设/根目录/并行上限/设备与操作按钮/表单全部置灰 |
+| 中止按钮 | 执行中 | 「执行配置」置灰、「中止执行」变红可点 |
+| 完成后解锁 | 等 done 事件 | 控件全部恢复，状态栏「执行结束: 成功 1，失败 0」 |
+| 事件流 | SSE | 先连流后执行也能收到 start + 11 条 device + done，3 台设备事件齐全 |
+| 浏览器控制台 | 全程监听 | 无 error |
+
+### 5.4 Web 端到端（含真实设备）
+
+经 Web API 对 SE7 做完整三类操作，与命令行模式结果一致：
+
+- 命令下发 + 成功关键字 → 成功，日志含 `SE7_OK`
+- 上传 1MB → `校验通过`，远端独立 `md5sum` 与本地一致
+- 下载 → `校验通过`，文件名符合 `IP_端口_时间戳_原名`
+
+### 5.5 自查发现并修掉的问题
+
+| 问题 | 处理 |
+| --- | --- |
+| 执行锁只覆盖 device/op，**config 与 presets 没锁**，且「载入」按钮不在前端的禁用清单里 | 五个改配置的入口全部加 409 守卫；前端禁用范围补上 `.bar button` |
+| **根目录与并行上限只改前端 JS**，界面显示新值、执行时仍用旧值（根目录永远是启动 cwd、并行上限永远是 100） | 新增 `/api/settings`，落到服务端并校验目录存在；有回归用例 |
+| `handleRun` 的 running 是 check-then-set，并发 POST 可能起两轮（cancel 只能杀一轮） | 改成原子抢占；用例用 30 轮 x 8 并发验证，退回旧写法必失败 |
+| 无 Origin/Host 校验：恶意页面可跨站 POST，DNS rebinding 还能读走明文密码 | 加 `guardLocalOrigin`，Host/Origin 必须是本机名；响应加 `Cache-Control: no-store` |
+| SSE 订阅被重置或 done 被丢弃后，前端永远停在「执行中」 | 前端处理 `snapshot`/`eos` 时重新拉状态；`start` 事件重绑 gen（多标签页也能跟上） |
+| `syncOp` 把服务端回显写回表单，会吞掉请求在途时用户继续输入的字 | 只合并列表与状态，不回填表单；并把 update 串行化 |
+| `--open` 是解析了但从未使用的死参数 | 删除 |
+
+### 5.6 安全取向
+
+配置文件含明文 SSH 密码，因此默认 `127.0.0.1:8080`；指定 `0.0.0.0` 时启动日志会
+打印醒目警告。测试覆盖了默认必须为回环地址这条约束。
