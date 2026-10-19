@@ -1,88 +1,108 @@
 #!/bin/bash
-# pqt_batch_deployment 统一构建接口 (M1 规范 v0.1)
+# qt_batch_deployment（批量部署工具）构建入口 —— Go + Fyne 单二进制
+#
 # 用法: bash release.sh [ARCH] [VERSION]
-#   ARCH:    amd64 | arm64 | linux（默认 amd64；linux AppImage 为宿主架构，见下）
-#            windows=Windows exe 交叉编译
-#   VERSION: 显式版本号（默认从 CMakeLists MY_PROJECT_VERSION 解析）
+#   ARCH:    linux | windows | all（默认 all）
+#   VERSION: 显式版本号（默认从 src/version.go 解析，唯一版本源）
 #   env OUTPUT_DIR: 产物目录（默认 <repo>/output/pqt_batch_deployment/）
-# 说明: linux AppImage 走 docker/pqt 镜像（glibc≤2.31），windows exe 走 sophon-tools-build mingw。
-#       AppImage 的 linuxdeployqt/appimagetool 为宿主架构预编译二进制，无法交叉：
-#       ARCH=amd64 要求构建宿主为 x86_64，ARCH=arm64 要求宿主为 aarch64，否则报错退出。
-set -euo pipefail
+#
+# 产物（每种平台都是**单个可执行文件**，无需安装、不随附任何资源目录）:
+#   qt_batch_deployment_V<ver>_linux_amd64      Linux 可执行文件
+#   qt_batch_deployment_V<ver>_windows_amd64.exe Windows 可执行文件
+#
+# 依赖:
+#   * Go >= 1.25.5（与统一镜像 docker/versions.env 的 GO_VERSION 一致；
+#     go.mod 的 go 指令也是 1.25.5，低于它会导致 GOTOOLCHAIN 联网拉工具链）
+#   * Linux 构建：gcc + 系统图形开发库（libgl1-mesa-dev libx11-dev 等）
+#   * Windows 构建：mingw-w64 交叉编译器（x86_64-w64-mingw32-gcc）
+#
+# 为什么这个工具不再用 Qt/AppImage/Enigma:
+#   单二进制是硬需求。Qt 在 Linux 只能靠 AppImage（自挂载 squashfs 包）假装单文件，
+#   Windows 则依赖 Enigma Virtual Box 打箱;两者都不满足"单个可执行文件"。
+#   Go + Fyne 两端都能直接产出单个二进制（资源用 go:embed 内嵌）。
+set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-ARCH="${1:-amd64}"
+SRC_DIR="$SCRIPT_DIR/src"
+ARCH="${1:-all}"
 OUTPUT_DIR="${OUTPUT_DIR:-$REPO_ROOT/output/pqt_batch_deployment}"
 
-VERSION="${2:-$(grep -E 'set\(MY_PROJECT_VERSION "[^"]+"\)' "$SCRIPT_DIR/CMakeLists.txt" | grep -o -E '[0-9]+\.[0-9]+\.[0-9]+')}"
+VERSION="${2:-$(grep -oE 'Version = "[^"]+"' "$SRC_DIR/version.go" 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')}"
 if [ -z "$VERSION" ]; then
-  echo "ERROR: 无法从 CMakeLists.txt 解析版本号，请显式传入 VERSION" >&2
+  echo "ERROR: 无法从 src/version.go 解析版本号，请显式传入 VERSION" >&2
   exit 1
 fi
-echo "==> pqt_batch_deployment version=$VERSION arch=$ARCH"
+
+echo "==> qt_batch_deployment (Go+Fyne) version=$VERSION arch=$ARCH"
+
+MIN_GO="1.25.5"
+if ! command -v go >/dev/null 2>&1; then
+  echo "ERROR: 未找到 go，请先安装 Go >= ${MIN_GO}" >&2
+  exit 1
+fi
+# 只提示不阻断：GOTOOLCHAIN=auto 时可以自动拉取，但受限网络下会失败。
+GO_VER="$(go env GOVERSION 2>/dev/null | sed 's/^go//')"
+if [ -n "$GO_VER" ] && [ "$(printf '%s\n%s\n' "$MIN_GO" "$GO_VER" | sort -V | head -1)" != "$MIN_GO" ]; then
+  echo "WARN: 当前 Go ${GO_VER} 低于 go.mod 要求的 ${MIN_GO}，将依赖 GOTOOLCHAIN 联网拉取工具链" >&2
+fi
 
 mkdir -p "$OUTPUT_DIR"
+cd "$SRC_DIR" || exit 1
 
-# ARCH 必须真实影响构建：AppImage 工具链绑定宿主架构，无法交叉。
-# amd64/arm64 分别要求 x86_64/aarch64 宿主；linux 按宿主自动选择。
+# 国内模块代理：proxy.golang.org 在部分构建机不可达
+export GOPROXY="${GOPROXY:-https://goproxy.cn,direct}"
+export GOSUMDB="${GOSUMDB:-sum.golang.google.cn}"
+export GOFLAGS="${GOFLAGS:-}"
+
+# 先跑测试：构建失败或测试不过都不出包
+echo "==> go test ..."
+if ! go test ./... 2>&1 | tail -20; then
+  echo "ERROR: 测试未通过，终止出包" >&2
+  exit 1
+fi
+
 build_linux() {
-  local want_arch="$1"
-  local host_arch
-  host_arch="$(arch 2>/dev/null || uname -m)"
-  case "$want_arch" in
-    amd64)
-      if [[ "$host_arch" != "x86_64" ]]; then
-        echo "ERROR: ARCH=amd64 需要 x86_64 构建宿主（当前 $host_arch），AppImage 工具链无法交叉" >&2
-        exit 1
-      fi
-      ;;
-    arm64)
-      if [[ "$host_arch" != "aarch64" ]]; then
-        echo "ERROR: ARCH=arm64 需要 aarch64 构建宿主（当前 $host_arch），AppImage 工具链无法交叉" >&2
-        exit 1
-      fi
-      ;;
-    linux) : ;;  # 宿主自动
-  esac
-  echo "==> 构建 linux AppImage (arch=$want_arch) ..."
-  bash "$REPO_ROOT/docker/pqt/build-pqt.sh" --project pqt_batch_deployment --linux --version "$VERSION" --output "$OUTPUT_DIR"
-  # 精确定位 GUI 版 AppImage（排除 no_ui；产物名形如 qt_batch_deployment-x86_64.AppImage）
-  local app="$(find "$OUTPUT_DIR" -maxdepth 1 -name 'qt_batch_deployment*.AppImage' ! -name '*no_ui*' | head -1)"
-  if [ -z "$app" ]; then app="$(find "$OUTPUT_DIR" -maxdepth 1 -name '*.AppImage' ! -name '*no_ui*' | head -1)"; fi
-  if [ -z "$app" ]; then echo "ERROR: 未找到 AppImage 产物" >&2; exit 1; fi
-  # linux_release.sh 已把 AppImage 生成到 OUTPUT_DIR（WORK_DIR），已在则不再重复拷贝
-  local appname
-  appname="$(basename "$app")"
-  if [ ! -f "$OUTPUT_DIR/$appname" ]; then cp "$app" "$OUTPUT_DIR/"; fi
-  file "$app" | head -1
+  local out="$OUTPUT_DIR/qt_batch_deployment_V${VERSION}_linux_amd64"
+  echo "==> 构建 Linux 单文件 ..."
+  if ! CGO_ENABLED=1 go build -trimpath -ldflags "-s -w" -o "$out" . ; then
+    echo "ERROR: Linux 构建失败" >&2
+    return 1
+  fi
+  chmod +x "$out"
+  echo "    产物: $out ($(du -h "$out" | cut -f1))"
+  # 记录动态依赖，便于发布说明里如实交代"不是纯静态"
+  ldd "$out" 2>/dev/null | awk '{print $1}' | grep -E '^lib' | sort -u > "$out.deps.txt" || true
 }
 
 build_windows() {
-  echo "==> windows exe 交叉编译 ..."
-  bash "$REPO_ROOT/docker/pqt/build-pqt.sh" --project pqt_batch_deployment --windows --version "$VERSION" --output "$OUTPUT_DIR"
-  local exe
-  exe="$(find "$OUTPUT_DIR" "$SCRIPT_DIR" -maxdepth 3 -name 'qt_batch_deployment_*.exe' 2>/dev/null | grep -v 'libs/' | head -1)"
-  exe="${exe:-$(find "$OUTPUT_DIR" "$SCRIPT_DIR" -maxdepth 3 -name '*.exe' 2>/dev/null | grep -v 'libs/' | head -1)}"
-  if [ -n "$exe" ]; then
-    # build-pqt.sh 已把 exe 收拢到 OUTPUT_DIR 根；仅当不在 OUTPUT_DIR 时才拷贝（避免 cp: same file）
-    local out_dir="${OUTPUT_DIR%/}"
-    if [ "$exe" != "$out_dir/$(basename "$exe")" ]; then
-      cp "$exe" "$out_dir/"
-    fi
-    file "$exe" | head -1
-  else
-    echo "ERROR: 未找到 windows exe 产物" >&2
-    exit 1
+  local out="$OUTPUT_DIR/qt_batch_deployment_V${VERSION}_windows_amd64.exe"
+  local cc="x86_64-w64-mingw32-gcc"
+  local cxx="x86_64-w64-mingw32-g++"
+  if ! command -v "$cc" >/dev/null 2>&1; then
+    echo "ERROR: 未找到 mingw-w64 交叉编译器 ($cc)" >&2
+    echo "       Ubuntu: apt-get install gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64" >&2
+    return 1
   fi
+  echo "==> 构建 Windows 单文件 ..."
+  # -H windowsgui: 双击不弹控制台窗口（命令行模式仍可用，参数照常传入）
+  if ! CGO_ENABLED=1 GOOS=windows GOARCH=amd64 CC="$cc" CXX="$cxx" \
+       go build -trimpath -ldflags "-s -w -H windowsgui" -o "$out" . ; then
+    echo "ERROR: Windows 构建失败" >&2
+    return 1
+  fi
+  echo "    产物: $out ($(du -h "$out" | cut -f1))"
 }
 
+rc=0
 case "$ARCH" in
-  amd64|arm64|linux) build_linux "$ARCH" ;;
-  windows|win) build_windows ;;
-  all) build_linux amd64; build_windows ;;
-  *) echo "ERROR: ARCH 必须是 amd64|arm64|windows|all" >&2; exit 1 ;;
+  linux)   build_linux   || rc=1 ;;
+  windows|win) build_windows || rc=1 ;;
+  all)     build_linux   || rc=1
+           build_windows || rc=1 ;;
+  *) echo "ERROR: ARCH 必须是 linux|windows|all，得到: $ARCH" >&2; exit 1 ;;
 esac
 
-echo "==> pqt_batch_deployment 完成, 产物: $OUTPUT_DIR"
+echo "==> 完成，产物目录: $OUTPUT_DIR"
 ls -la "$OUTPUT_DIR"
+exit $rc

@@ -1,13 +1,18 @@
 #!/usr/bin/env bash
 # pqt 系列(Qt GUI 工具)一键编译脚本 —— linux AppImage / windows exe
 #
-# 支持子项目: pqt_memory_edit(图形化远程内存修改工具), pqt_batch_deployment(批量部署工具)
+# 支持子项目: pqt_memory_edit(图形化远程内存修改工具)
+#
+# 注意: pqt_batch_deployment(批量部署工具)自 v2.0.0 起改为 Go + Fyne 实现,
+#   不再走 Qt/AppImage/Enigma 这套流程, 请直接用它的自带脚本:
+#       cd source/pqt_batch_deployment && bash release.sh all
+#   本脚本对它只报错退出, 避免有人照着旧文档跑出莫名其妙的 CMake 错误。
 #
 # 用法:
 #   bash docker/pqt/build-pqt.sh --project pqt_memory_edit --linux       # linux AppImage
 #   bash docker/pqt/build-pqt.sh --project pqt_memory_edit --windows     # windows exe (需 Qt mingw)
 #   bash docker/pqt/build-pqt.sh --project pqt_memory_edit --all         # 两端
-#   bash docker/pqt/build-pqt.sh --project pqt_batch_deployment --linux
+#   bash docker/pqt/build-pqt.sh --project pqt_memory_edit --all
 #
 # 两种运行模式:
 #   * 宿主模式(默认): 用 docker 起 pqt 专用容器(旧三镜像方案, 镜像 sophon-tools-build-pqt)。
@@ -60,6 +65,13 @@ done
 [[ -n "${MODE}" ]] || { echo "请指定 --linux 或 --windows 或 --all" >&2; exit 1; }
 SRC_DIR="${REPO_ROOT}/source/${PROJECT}"
 [[ -d "${SRC_DIR}" ]] || { echo "未找到子项目: ${SRC_DIR}" >&2; exit 1; }
+
+# pqt_batch_deployment 已迁到 Go + Fyne，本脚本的 Qt/AppImage 流程对它不再适用。
+if [[ "${PROJECT}" = "pqt_batch_deployment" ]]; then
+  echo "ERROR: ${PROJECT} 自 v2.0.0 起为 Go + Fyne 实现，不再使用本脚本。" >&2
+  echo "       请改用: cd source/${PROJECT} && bash release.sh [all|linux|windows]" >&2
+  exit 1
+fi
 
 # ---- 准备 memory_edit.tar.xz (pqt_memory_edit 专用) ----
 prepare_memory_edit_tarxz() {
@@ -156,7 +168,6 @@ build_windows() {
   local exe_basename
   case "$PROJECT" in
     pqt_memory_edit) exe_basename="qt_mem_edit.exe" ;;
-    pqt_batch_deployment) exe_basename="qt_batch_deployment.exe" ;;
     *) exe_basename="" ;;
   esac
   local qt_prefix="${QT_PREFIX:-/opt/qt-mingw}"
