@@ -104,11 +104,18 @@ type gui struct {
 	editing bool
 }
 
+// appTitle 窗口标题与应用内标题共用，避免两处写死后不一致。
+const appTitle = "批量部署工具"
+
 func runGUI() int {
 	g := &gui{state: NewGUIState(), selectedOp: -1}
 	g.app = app.NewWithID("cn.sophon.batchdeployment")
 	g.app.Settings().SetTheme(newAppTheme())
-	g.win = g.app.NewWindow("批量部署工具 V" + Version)
+	// 窗口标题只放应用名，不带版本号：
+	// 系统的标题栏宽度有限，不少窗口管理器在放不下时会从**左侧**截断，
+	// 于是"批量部署工具 V2.2.0"会显示成"…V2.2.0"，看起来像标题只有版本号。
+	// 版本号在应用内顶栏的徽标里、以及「帮助」里都能看到，不必占用标题栏。
+	g.win = g.app.NewWindow(appTitle)
 	g.win.Resize(fyne.NewSize(1360, 880))
 	g.win.SetIcon(appIcon())
 
@@ -157,7 +164,7 @@ func (g *gui) appBar() fyne.CanvasObject {
 	vline := canvas.NewRectangle(colorBorder)
 	vline.SetMinSize(fyne.NewSize(1, 24))
 
-	title := canvas.NewText("批量部署工具", colorText)
+	title := canvas.NewText(appTitle, colorText)
 	title.TextStyle = fyne.TextStyle{Bold: true}
 	title.TextSize = theme.Size(theme.SizeNameHeadingText)
 

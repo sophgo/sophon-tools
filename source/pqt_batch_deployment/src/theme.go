@@ -95,8 +95,13 @@ func newAppTheme() fyne.Theme {
 
 func (t *appTheme) Color(name fyne.ThemeColorName, v fyne.ThemeVariant) color.Color {
 	switch name {
-	case theme.ColorNamePrimary, theme.ColorNameHyperlink, theme.ColorNameFocus:
+	case theme.ColorNamePrimary, theme.ColorNameHyperlink:
 		return colorBrand
+	case theme.ColorNameFocus:
+		// 注意：Fyne 的下拉菜单项选中态也用这个颜色画**整行背景**。
+		// 直接给品牌蓝会变成一大块高饱和色块，与整体浅色卡片风格割裂；
+		// 这里给浅色选中底，输入框的焦点框由 InputBorder+Primary 负责，不受影响。
+		return colorBrandSoft
 	case theme.ColorNameForeground:
 		return colorText
 	case theme.ColorNameBackground:
@@ -160,7 +165,8 @@ func (t *appTheme) Size(name fyne.ThemeSizeName) float32 {
 		return 15
 	case theme.SizeNameInputRadius, theme.SizeNameButtonRadius, theme.SizeNameSelectionRadius:
 		return 6
-	case theme.SizeNameCardRadius, theme.SizeNameDialogRadius, theme.SizeNamePopupRadius:
+	case theme.SizeNameCardRadius, theme.SizeNameDialogRadius,
+		theme.SizeNamePopupRadius, theme.SizeNameMenuRadius:
 		return 10
 	case theme.SizeNameInputBorder:
 		return 1
