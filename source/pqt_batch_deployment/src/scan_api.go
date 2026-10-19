@@ -43,6 +43,7 @@ func (ws *webServer) handleScan(w http.ResponseWriter, r *http.Request) {
 		CIDR       string `json:"cidr"`
 		MACPrefix  string `json:"macPrefix"`
 		TimeoutSec int    `json:"timeoutSec"`
+		Mode       string `json:"mode"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "请求格式错误: "+err.Error())
@@ -66,6 +67,7 @@ func (ws *webServer) handleScan(w http.ResponseWriter, r *http.Request) {
 		CIDR:      body.CIDR,
 		MACPrefix: prefix,
 		Timeout:   secondsDur(to),
+		Mode:      body.Mode,
 	})
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())

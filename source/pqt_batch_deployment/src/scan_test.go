@@ -201,3 +201,65 @@ func TestScanCompletesWithinTimeout(t *testing.T) {
 		t.Fatalf("探测数 = %d, 期望 6", res.Total)
 	}
 }
+
+// ping 模式不需要任何特权，也不需要网口。
+func TestScanPingModeNoPrivilegeNeeded(t *testing.T) {
+	res, err := ScanLAN(context.Background(), ScanOptions{
+		CIDR:    "127.0.0.0/30",
+		Mode:    ScanModePing,
+		Timeout: 500 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("ping 模式不应要求特权: %v", err)
+	}
+	if res.Method != "ping" {
+		t.Fatalf("方式 = %q, 期望 ping", res.Method)
+	}
+	if res.HasMAC {
+		t.Fatal("ping 模式不应声称能拿到 MAC")
+	}
+	// 回环地址必然在线
+	foundLoopback := false
+	for _, r := range res.Results {
+		if r.IP == "127.0.0.1" {
+			foundLoopback = true
+		}
+		if r.MAC != "" {
+			t.Errorf("ping 模式不该有 MAC: %+v", r)
+		}
+	}
+	if !foundLoopback {
+		t.Fatalf("应探测到回环地址, got %+v", res.Results)
+	}
+}
+
+// ping 模式下 MAC 前缀不生效，必须明确告知，不能静默返回全部。
+func TestScanPingModeWarnsMACPrefixIgnored(t *testing.T) {
+	res, err := ScanLAN(context.Background(), ScanOptions{
+		CIDR:      "127.0.0.0/30",
+		Mode:      ScanModePing,
+		MACPrefix: "aa:bb",
+		Timeout:   400 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Note, "MAC") {
+		t.Fatalf("应提示 MAC 前缀在 ping 模式下不生效, got %q", res.Note)
+	}
+}
+
+// arp 模式失败时必须报错，而不是偷偷降级（用户显式要求了 ARP）。
+func TestScanARPOnlyModeDoesNotSilentlyDegrade(t *testing.T) {
+	if isPrivilegedForRawSocket() {
+		t.Skip("有特权时 ARP 会成功，测不到失败路径")
+	}
+	res, err := ScanLAN(context.Background(), ScanOptions{
+		CIDR:    "127.0.0.0/30",
+		Mode:    ScanModeARP,
+		Timeout: 300 * time.Millisecond,
+	})
+	if err == nil && res.Method != "arp" {
+		t.Fatalf("显式 ARP 模式不应降级, got method=%q", res.Method)
+	}
+}

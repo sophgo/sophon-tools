@@ -36,3 +36,7 @@ func readARPTablePlatform() (map[string]string, error) {
 }
 
 func isPrivilegedForRawSocket() bool { return false }
+
+func icmpAvailable() error { return errScanUnsupported }
+
+func pingHost(ctx context.Context, ip net.IP, timeout time.Duration) bool { return false }
