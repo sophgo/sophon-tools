@@ -15,7 +15,9 @@ context_window = 200000
 
 [tools]
 enabled = []   # empty = all built-in tools
-bash_timeout_seconds = 120
+# 600s：与 config.toml 保持一致。noskill 变体不预置 skill，但用户可能在会话中
+# 触发 se-rag build（实测最长 212s），120s 会截断长任务。
+bash_timeout_seconds = 600
 
 [permissions]
 mode  = "auto"   # 普通写/bash 自动放行（工作目录内少打扰）；嵌套/敏感/deny 仍拦截

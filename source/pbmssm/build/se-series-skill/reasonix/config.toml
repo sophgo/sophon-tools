@@ -15,7 +15,9 @@ context_window = 200000
 
 [tools]
 enabled = []   # empty = all built-in tools
-bash_timeout_seconds = 120
+# 600s：设备端 se-rag build 实测 se7=143s / se8=154s / se9=212s（内置 key 限流下），
+# 120s 会把构建截断且不留可续建状态；600s 覆盖最慢产品并留网络波动余量。
+bash_timeout_seconds = 600
 
 [skills]
 # 预载 SE 系列多型号知识库 skill（se-series-knowledge-base/SKILL.md）

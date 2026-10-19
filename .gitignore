@@ -85,5 +85,6 @@ docs/superpowers/
 # pnpm 缓存
 .pnpm-store/
 
-# se-series skill 的向量索引不预置、不入库：设备上用 se-rag build 按需构建
+# se-series skill 的向量索引不入库：出包时在构建机的临时目录生成并打进 deb，
+# 仓库里不保存（避免 55MB 二进制进 git 历史）。
 source/pbmssm/build/se-series-skill/rag/data_*/

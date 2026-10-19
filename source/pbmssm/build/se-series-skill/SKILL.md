@@ -1,6 +1,6 @@
 ---
 name: se-series-knowledge-base
-version: 4.3.1
+version: 4.4.0
 description: >-
   Technical knowledge base for Sophgo SE7, SE8, SE9 series micro-servers.
   SE7: BM1684X single SoC. SE8: BM1684X distributed cluster.
@@ -38,7 +38,7 @@ description: >-
 ```
 {baseDir}/                          # /data/sophon/reasonix-home/skills/se-series-knowledge-base
 ├── rag/
-│   └── data_se{7,8,9}/    ← 各产品检索索引（meta.json + vectors.gob + bm25.gob + chunks.gob）。**不预置**，首次检索某产品前按需构建，见「第 0 步」
+│   └── data_se{7,8,9}/    ← 各产品检索索引（meta.json + vectors.gob + bm25.gob + chunks.gob）。**出厂已预置**（出包时构建），仅在 docs 更新或索引损坏时才需重建，见「第 0 步」
 ├── docs/
 │   ├── se7/               ← 产品手册 + BM1684X SDK 文档 + FAQ + 工具文档
 │   ├── se8/               ← 产品手册 + BM1684X SDK 文档 + FAQ + 工具文档
@@ -46,24 +46,35 @@ description: >-
 └── SKILL.md
 ```
 
-检索二进制已预置于 `/data/sophon/reasonix-home/bin/se-rag`，无需构建；**向量索引不随包预置**，要在设备上按需构建。
+检索二进制已预置于 `/data/sophon/reasonix-home/bin/se-rag`，无需构建；**向量索引随包预置**，通常可直接检索。
 
-## 第 0 步：检索前确认索引存在（按需构建）
+## 第 0 步：检索前确认索引可用（通常无需构建）
 
-检索哪个产品就只建哪个产品的索引，已建过的不用再建。检查（`.complete` 是隐藏文件，要用 `test -f`）：
+索引出厂即带，正常情况下直接进入「检索」小节。只有下列情况需要重建：索引文件缺失、`doctor` 报需要重建、或 docs 有更新。
+
+确认（`.complete` 是隐藏文件，要用 `test -f`）：
 
 ```bash
 test -f /data/sophon/reasonix-home/skills/se-series-knowledge-base/rag/data_se7/.complete && echo OK || echo MISSING   # se8/se9 同理
 ```
 
-缺失时：先告诉用户「该产品索引尚未建立，正在构建（需联网，约 3–10 分钟，设备上可能更慢）」，再构建并校验：
+**校验索引是否与当前 docs 一致**（`--docs-dir` 会比对文档内容指纹，不一致即提示重建）：
+
+```bash
+/data/sophon/reasonix-home/bin/se-rag doctor \
+  -index-dir /data/sophon/reasonix-home/skills/se-series-knowledge-base/rag/data_se7 \
+  --docs-dir /data/sophon/reasonix-home/skills/se-series-knowledge-base/docs/se7
+```
+
+索引缺失或 `doctor` 提示重建时：先告诉用户「该产品索引需要重建（需联网，约 3–4 分钟）」，再构建并校验：
 
 ```bash
 /data/sophon/reasonix-home/bin/se-rag build \
   --docs-dir /data/sophon/reasonix-home/skills/se-series-knowledge-base/docs/se7 \
   -index-dir /data/sophon/reasonix-home/skills/se-series-knowledge-base/rag/data_se7
 /data/sophon/reasonix-home/bin/se-rag doctor \
-  -index-dir /data/sophon/reasonix-home/skills/se-series-knowledge-base/rag/data_se7
+  -index-dir /data/sophon/reasonix-home/skills/se-series-knowledge-base/rag/data_se7 \
+  --docs-dir /data/sophon/reasonix-home/skills/se-series-knowledge-base/docs/se7
 ```
 
 - 构建要联网调用 embedding 网关，是**写操作**，会触发审批卡片，向用户说明用途后等批准。

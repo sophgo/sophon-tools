@@ -44,6 +44,42 @@ fi
 
 SE_SRC="$(cd build/se-series-skill && pwd)"   # SE 系列 skill/提示词等资源
 
+# ---- 出包时预建向量索引 ------------------------------------------------------
+# 索引与架构无关（gob 编码，见 se-rag-core/internal/docstore），因此用宿主 se-rag
+# 二进制在构建机上生成一次，两套 deb 变体共用。
+# 失败不阻断打包：SKILL.md「第 0 步」仍支持设备端按需构建，只是首次检索需联网跑几分钟。
+# SE_RAG_SKIP_INDEX_BUILD=1 可显式跳过（离线环境 / 只想快速出包）。
+SE_INDEX_DIR=""
+if [ -d ../se-rag-core ] && [ "${SE_RAG_SKIP_INDEX_BUILD:-0}" != "1" ]; then
+  echo "==> 出包时构建 SE 系列向量索引（se7/se8/se9，需联网调用 embedding 网关）"
+  BUILD_SE_RAG_HOST=""
+  mkdir -p /tmp/se-rag-host
+  if (cd ../se-rag-core && CGO_ENABLED=0 go build -trimpath -o /tmp/se-rag-host/se-rag ./cmd/se-rag); then
+    BUILD_SE_RAG_HOST="/tmp/se-rag-host/se-rag"
+  else
+    echo "  WARN: 宿主 se-rag 构建失败，跳过索引预建" >&2
+  fi
+  if [ -n "$BUILD_SE_RAG_HOST" ]; then
+    SE_INDEX_DIR="/tmp/se-rag-host/index"
+    rm -rf "$SE_INDEX_DIR"
+    for p in se7 se8 se9; do
+      if [ ! -d "$SE_SRC/docs/$p" ]; then
+        echo "  WARN: docs/$p 不存在，跳过" >&2
+        continue
+      fi
+      echo "  -> build index: $p"
+      if ! "$BUILD_SE_RAG_HOST" build \
+             --docs-dir "$SE_SRC/docs/$p" \
+             -index-dir "$SE_INDEX_DIR/data_$p" >/tmp/se-rag-host/build-$p.log 2>&1; then
+        echo "  WARN: $p 索引构建失败（详见 /tmp/se-rag-host/build-$p.log），该产品将不带索引" >&2
+      fi
+    done
+    if [ ! -d "$SE_INDEX_DIR" ]; then SE_INDEX_DIR=""; fi
+  fi
+elif [ "${SE_RAG_SKIP_INDEX_BUILD:-0}" = "1" ]; then
+  echo "==> SE_RAG_SKIP_INDEX_BUILD=1：跳过索引预建（设备端首次检索将按 SKILL.md 第 0 步构建）"
+fi
+
 # assemble_deb <suffix> <with_seskill: 1|0>
 assemble_deb() {
   local suffix="$1" with_seskill="$2"
@@ -113,19 +149,31 @@ assemble_deb() {
     mkdir -p "$RXM/bin"
     cp "$SE_RAG_BIN" "$RXM/bin/se-rag"
     chmod 0755 "$RXM/bin/se-rag"
-    # 2) se-series-knowledge-base skill（SKILL.md + docs/se7,se8,se9）。
-    #    不预置向量索引（rag/data_se*）：索引由 se-rag build 在设备上按需构建（见 SKILL.md 第 0 步），
-    #    这里只建空的 rag/ 目录供其写入。
+    # 2) se-series-knowledge-base skill（SKILL.md + docs/se7,se8,se9 + 预建向量索引）。
+    #    索引在出包时就地构建（见下方 build_indexes），随 deb 分发；设备端只需在
+    #    docs 变化或索引缺失时才重建，避免出厂即联网跑 3-10 分钟的构建。
     local SK="$RXM/skills/se-series-knowledge-base"
     mkdir -p "$SK/rag"
     cp "$SE_SRC/SKILL.md" "$SK/SKILL.md"
     cp -r "$SE_SRC/docs/." "$SK/docs/"
+    # 预建索引进 deb（失败不阻断打包：SKILL.md 第 0 步仍可让用户在设备上按需构建）
+    if [ -d "$SE_INDEX_DIR" ]; then
+      for p in se7 se8 se9; do
+        if [ -f "$SE_INDEX_DIR/data_$p/.complete" ]; then
+          mkdir -p "$SK/rag/data_$p"
+          cp -a "$SE_INDEX_DIR/data_$p/." "$SK/rag/data_$p/"
+        fi
+      done
+      echo "  ✓ [$suffix] 已预置向量索引（出包时构建）"
+    else
+      echo "  WARN: [$suffix] 未预置向量索引（出包时未构建成功），设备端首次检索需按 SKILL.md 第 0 步构建" >&2
+    fi
     # 3) SE 系列 agent 提示词（多型号版）
     mkdir -p "$RXM/prompts"
     cp "$SE_SRC/prompts/system.seskill.md" "$RXM/prompts/system.md"
     # 4) SE 系列 Reasonix 配置（引用 skill + system_prompt_file）
     cp "$SE_SRC/reasonix/config.toml" "$RXM/.reasonix/config.toml"
-    echo "  ✓ [$suffix] 已预载 SE 系列 skill（SE7/SE8/SE9，不含预建索引）+ agent 提示词 + se-rag"
+    echo "  ✓ [$suffix] 已预载 SE 系列 skill（SE7/SE8/SE9）+ agent 提示词 + se-rag"
   else
     # ===== 默认（noskill）变体：Reasonix 默认配置，无 SE 系列 skill；带通用提示词 =====
     mkdir -p "$RXM/prompts"
