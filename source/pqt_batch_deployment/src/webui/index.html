@@ -251,6 +251,11 @@
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
   .dot.ok { background: var(--ok); } .dot.bad { background: var(--danger); } .dot.run { background: var(--run); animation: pulse 1.2s infinite; }
 
+  .warn-note {
+    background: var(--warn-soft, #fdf3e1); color: #8a5300; border: 1px solid #f0dcb8;
+    border-radius: 8px; padding: 10px 12px; font-size: 12.5px; line-height: 1.6;
+  }
+
   /* ---------- 弹窗 / 提示 ---------- */
   .modal-mask {
     position: fixed; inset: 0; background: rgba(17, 24, 39, .45); z-index: 60;
@@ -298,6 +303,7 @@
 
 <!-- 图标集：内联 SVG，单二进制交付下不依赖任何外部资源 -->
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
   <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
   <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></symbol>
   <symbol id="i-edit" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></symbol>
@@ -377,6 +383,7 @@
         <h2>远程设备</h2>
         <span class="count" id="devCount">0</span>
         <div class="toolbar">
+          <button class="btn sm" onclick="openScan()"><svg class="i"><use href="#i-search"/></svg>扫描局域网</button>
           <button class="btn sm" onclick="addDevice()"><svg class="i"><use href="#i-plus"/></svg>新增</button>
           <button class="btn sm" onclick="cloneSel('device')"><svg class="i"><use href="#i-copy"/></svg>克隆</button>
           <button class="btn sm" onclick="editSel('device')"><svg class="i"><use href="#i-edit"/></svg>编辑</button>
@@ -514,6 +521,55 @@
   </div>
 </div>
 
+<!-- 局域网扫描 -->
+<div class="modal-mask" id="scanMask">
+  <div class="modal" style="max-width:760px" role="dialog" aria-modal="true">
+    <div class="modal-head">
+      <span class="ico brand"><svg class="i"><use href="#i-search"/></svg></span>
+      <h3>扫描局域网设备</h3>
+    </div>
+    <div class="modal-body">
+      <div class="warn-note">
+        <b>关于防火墙：</b>本功能用 ARP 在本网段广播发现设备，请求不经过网关，
+        也不依赖目标机开放任何端口，因此通常不会触发目标机防火墙。
+        但若网段填成跨网段地址，或本机 / 交换机上装有网络监控与 IDS，仍可能产生告警。
+        请确认已获得网络管理授权后再扫描。
+      </div>
+      <div class="form" style="margin-top:12px">
+        <label>网口</label><select id="scanIface" onchange="onScanIfaceChange()"></select>
+        <label>网段</label><input type="text" id="scanCidr" placeholder="例如 192.168.1.0/24">
+        <label>MAC 前缀</label>
+        <input type="text" id="scanMac" placeholder="留空=全部；支持 00:1a、001a2b、98:a9:2d 等任意长度">
+        <label>等待时间</label>
+        <select id="scanTimeout"><option>2</option><option selected>4</option><option>8</option><option>15</option></select>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;margin:12px 0">
+        <button class="btn primary" id="scanBtn" onclick="doScan()">开始扫描</button>
+        <span class="hint" id="scanStatus">尚未扫描</span>
+      </div>
+      <div class="tablewrap" style="max-height:220px">
+        <table>
+          <thead><tr>
+            <th style="width:44px"><input type="checkbox" id="scanAll" onchange="scanSelectAll(this.checked)"></th>
+            <th>IPv4 地址</th><th>MAC 地址</th>
+          </tr></thead>
+          <tbody id="scanBody"><tr><td colspan="3" class="hint">还没有结果</td></tr></tbody>
+        </table>
+      </div>
+      <div class="hint" id="scanHint" style="margin-top:6px"></div>
+      <div class="form" style="margin-top:12px">
+        <label>SSH 端口</label><input type="text" id="scanPort" value="22">
+        <label>用户名</label><input type="text" id="scanUser" value="linaro">
+        <label>密码</label><input type="password" id="scanPass" value="linaro">
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeScan()">关闭</button>
+      <button class="btn primary" onclick="scanAddSelected()">添加选中设备</button>
+    </div>
+  </div>
+</div>
+
 <div id="toasts"></div>
 
 <script>
@@ -527,6 +583,7 @@ let selDevice = -1;
 let selOp = -1;
 let curTab = 0;
 let editing = false;     // 正在把状态写进表单，输入回调不应回写
+let evtGen = 0;          // 当前事件流的世代号（模块级：handleEvent 也要用）
 let evtSrc = null;
 
 const $ = id => document.getElementById(id);
@@ -1082,6 +1139,7 @@ function cancelBatch() {
 }
 
 function connectEvents(gen) {
+  if (gen !== undefined && gen !== null) evtGen = gen;
   if (evtSrc) { evtSrc.close(); evtSrc = null; }
   evtSrc = new EventSource("/api/events");
   evtSrc.onopen = () => { $("conn").textContent = "事件流已连接"; $("connDot").className = "dot ok"; };
@@ -1089,8 +1147,8 @@ function connectEvents(gen) {
   evtSrc.onmessage = ev => {
     const d = JSON.parse(ev.data);
     // 别的标签页发起新一轮时，这里要跟着换绑，否则会把它的事件全部丢掉。
-    if (d.kind === "start") gen = d.gen;
-    if (d.gen !== undefined && gen !== undefined && d.gen !== gen) return;
+    if (d.kind === "start" && d.gen !== undefined) evtGen = d.gen;
+    if (d.gen !== undefined && d.gen !== evtGen) return;
     handleEvent(d);
   };
 }
@@ -1122,7 +1180,7 @@ function handleEvent(d) {
       // 重连（或首次连上）后以服务端为准：既要修正过期的 running 状态，
       // 也要把 gen 换到服务端的当前值——断线期间若别处发起了新一轮，
       // 不换绑会让后续 device/done 事件全被 gen 守卫丢掉，页面卡在"执行中"。
-      if (d.gen !== undefined) gen = d.gen;
+      if (d.gen !== undefined) evtGen = d.gen;
       refreshState();
       break;
     case "eos":
@@ -1139,6 +1197,128 @@ function refreshState() {
     selDevice = keepDev; selOp = keepOp;
     renderDevices(); renderOps(); renderDeviceLog();
   }).catch(() => {});
+}
+
+// ---------- 局域网扫描 ----------
+let scanResults = [];
+let scanChecked = [];
+let scanIfaces = [];
+
+function openScan() {
+  $("scanMask").classList.add("show");
+  $("scanBody").innerHTML = '<tr><td colspan="3" class="hint">还没有结果</td></tr>';
+  $("scanStatus").textContent = "尚未扫描";
+  $("scanHint").textContent = "";
+  scanResults = []; scanChecked = [];
+  loadScanIfaces();
+}
+
+function closeScan() { $("scanMask").classList.remove("show"); }
+
+async function loadScanIfaces() {
+  try {
+    const r = await api("/api/scan/ifaces");
+    scanIfaces = r.interfaces || [];
+    const sel = $("scanIface");
+    sel.innerHTML = "";
+    for (const it of scanIfaces) {
+      const o = document.createElement("option");
+      o.value = it.name; o.textContent = it.name;
+      sel.appendChild(o);
+    }
+    if (!r.privileged) {
+      $("scanHint").textContent =
+        "提示：当前进程没有原始套接字权限，扫描将退化为读取本机 ARP 缓存（只能看到最近通信过的设备）。" +
+        "要扫描整个网段，请用 root 运行，或执行：sudo setcap cap_net_raw+ep <程序路径>";
+      $("scanHint").style.color = "var(--warn, #b26b00)";
+    }
+    onScanIfaceChange();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function onScanIfaceChange() {
+  const name = $("scanIface").value;
+  const it = scanIfaces.find(x => x.name === name);
+  if (it && it.defaultCidr) $("scanCidr").value = it.defaultCidr;
+}
+
+async function doScan() {
+  const btn = $("scanBtn");
+  if (btn.disabled) return;
+  btn.disabled = true;
+  $("scanStatus").textContent = "正在扫描…（ARP 广播，不经过网关）";
+  try {
+    const res = await api("/api/scan", {method: "POST", body: JSON.stringify({
+      iface: $("scanIface").value,
+      cidr: $("scanCidr").value.trim(),
+      macPrefix: $("scanMac").value.trim(),
+      timeoutSec: Number($("scanTimeout").value),
+    })});
+    scanResults = res.results || [];
+    scanChecked = scanResults.map(() => true);
+    renderScanResults();
+    const secs = (res.elapsed / 1e9).toFixed(1);
+    $("scanStatus").textContent =
+      `网段内 ${res.total} 个地址，找到 ${scanResults.length} 台（${secs}s），方式：` +
+      (res.method === "arp" ? "ARP 广播" : "本机 ARP 缓存（权限不足）");
+    if (res.note) {
+      $("scanHint").textContent = res.note;
+      $("scanHint").style.color = "var(--warn, #b26b00)";
+    } else {
+      $("scanHint").textContent = "";
+    }
+  } catch (e) {
+    $("scanStatus").textContent = "扫描失败";
+    toast(e.message, true);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function renderScanResults() {
+  const tb = $("scanBody");
+  tb.innerHTML = "";
+  if (!scanResults.length) {
+    tb.innerHTML = '<tr><td colspan="3" class="hint">没有匹配的设备</td></tr>';
+    return;
+  }
+  scanResults.forEach((r, i) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      '<td><input type="checkbox" data-i="' + i + '"' + (scanChecked[i] ? " checked" : "") + '></td>' +
+      "<td>" + esc(r.ip) + "</td><td>" + esc(r.mac) + "</td>";
+    tr.querySelector("input").onchange = ev => {
+      scanChecked[Number(ev.target.dataset.i)] = ev.target.checked;
+    };
+    tb.appendChild(tr);
+  });
+}
+
+function scanSelectAll(v) {
+  scanChecked = scanResults.map(() => v);
+  renderScanResults();
+}
+
+async function scanAddSelected() {
+  const hosts = scanResults.filter((_, i) => scanChecked[i]).map(r => r.ip);
+  if (!hosts.length) return toast("请先勾选要添加的设备", true);
+  try {
+    const r = await api("/api/scan/add", {method: "POST", body: JSON.stringify({
+      hosts,
+      port: Number($("scanPort").value),
+      username: $("scanUser").value.trim(),
+      password: $("scanPass").value,
+    })});
+    applyState(r.state);
+    let msg = `已添加 ${r.added} 台设备`;
+    if (r.skipped) msg += `，跳过 ${r.skipped} 台（已存在）`;
+    toast(msg);
+    closeScan();
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 function showHelp() {
