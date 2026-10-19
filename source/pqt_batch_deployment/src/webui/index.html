@@ -1119,7 +1119,10 @@ function handleEvent(d) {
       }
       break;
     case "snapshot":
-      // 重连（或首次连上）后以服务端为准，修正本地可能过期的 running 状态。
+      // 重连（或首次连上）后以服务端为准：既要修正过期的 running 状态，
+      // 也要把 gen 换到服务端的当前值——断线期间若别处发起了新一轮，
+      // 不换绑会让后续 device/done 事件全被 gen 守卫丢掉，页面卡在"执行中"。
+      if (d.gen !== undefined) gen = d.gen;
       refreshState();
       break;
     case "eos":

@@ -422,12 +422,13 @@ func (g *gui) refreshDeviceLog() {
 	d, _ := g.state.SelectedDeviceInf()
 	g.deviceLabel.Text = fmt.Sprintf("#%d  %s:%d", idx+1, d.IP, d.Port)
 	g.deviceLabel.Refresh()
-	g.deviceLog.SetText(g.state.Log(idx))
+	g.deviceLog.SetTextFor(strconv.Itoa(idx), g.state.Log(idx))
 }
 
 // refreshStats 重算概览统计与比例条。
 func (g *gui) refreshStats() {
-	if g.statTotal == nil {
+	if g.statTotal == nil || g.statOK == nil || g.statFail == nil ||
+		g.statRun == nil || g.ratio == nil || g.deviceCount == nil {
 		return
 	}
 	devs := g.state.Devices()
@@ -879,6 +880,9 @@ func (g *gui) saveOpEditor() bool {
 }
 
 func (g *gui) updateOpCompleteLabel() {
+	if g.opComplete == nil {
+		return
+	}
 	ops := g.state.Ops()
 	if g.selectedOp < 0 || g.selectedOp >= len(ops) {
 		g.opComplete.Set(badgeNone, "未选中操作")
@@ -1030,6 +1034,10 @@ func (g *gui) runBatch() {
 				}
 			}
 			g.refreshTables()
+			// 最后一条事件可能落在节流窗口里没被画出来：收尾时强制刷新一次，
+			// 否则用户看到"失败 1"却看不到那句失败原因。
+			g.deviceLog.Flush()
+			g.refreshDeviceLog()
 			summary := fmt.Sprintf("执行结束:成功 %d，失败 %d", ok, failed)
 			if ctx.Err() != nil {
 				summary = fmt.Sprintf("执行已中止:成功 %d，失败/未完成 %d", ok, failed)
@@ -1129,7 +1137,7 @@ func (g *gui) setStatus(s string) {
 
 // setStatusKind 更新底栏状态文字与状态点颜色。
 func (g *gui) setStatusKind(s string, dot color.Color) {
-	if g.statusLbl == nil {
+	if g.statusLbl == nil || g.statusDot == nil {
 		return
 	}
 	g.statusLbl.Text = s

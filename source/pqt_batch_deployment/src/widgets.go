@@ -254,6 +254,8 @@ type logView struct {
 	// logRenderInterval 重建一次，末尾再做一次全量刷新兜底。
 	lastRender time.Time
 	pending    bool
+	// key 当前内容的来源（设备下标）。变化时立即渲染，不走节流。
+	key string
 	// onRender 仅供测试观测"真正重建了几次"，生产代码不设置。
 	onRender func()
 }
@@ -269,8 +271,14 @@ func newLogView() *logView {
 }
 
 // SetPlaceholder 显示灰色提示语。
+//
+// 必须直接渲染并清掉 pending：否则会出现「pending=true 且 raw==""」的稳定状态，
+// 之后即便 Flush 也会因为 raw 为空而什么都不画，界面永久停在占位符上。
 func (v *logView) SetPlaceholder(s string) {
 	v.raw = ""
+	v.pending = false
+	v.key = ""
+	v.lastRender = time.Now()
 	v.rich.Segments = []widget.RichTextSegment{&widget.TextSegment{
 		Text: s, Style: widget.RichTextStyle{ColorName: colorNameTermDim},
 	}}
@@ -283,6 +291,26 @@ const logRenderInterval = 300 * time.Millisecond
 
 // SetText 设置日志正文。高频调用时会合并，见 lastRender 的说明。
 func (v *logView) SetText(s string) {
+	v.SetTextFor("", s)
+}
+
+// SetTextFor 带上内容来源标识（这里是设备下标）。
+//
+// 来源一变就必须立刻渲染，不能走节流：否则切换设备后标题已是新设备、
+// 正文还停在上一个设备的日志上，而且那台已完成的设备不会再有事件来纠正它，
+// 错位会永久保留。「复制」取的是 raw（新内容），与显示不一致更误导。
+func (v *logView) SetTextFor(key string, s string) {
+	if key != v.key {
+		v.key = key
+		v.raw = s
+		v.pending = false
+		if s == "" {
+			v.SetPlaceholder("(暂无日志)")
+			return
+		}
+		v.renderNow()
+		return
+	}
 	v.raw = s
 	if s == "" {
 		v.SetPlaceholder("(暂无日志)")
