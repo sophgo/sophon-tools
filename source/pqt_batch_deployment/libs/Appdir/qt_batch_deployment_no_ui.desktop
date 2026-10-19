@@ -1,8 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=qt_batch_deployment_no_ui
-Comment=基于Qt的远程内存修改工具(算能科技)
-Exec=qt_batch_deployment_no_ui
-Icon=qt_batch_deployment_no_ui
-Categories=Office;
-X-AppImage-Version=06990f0

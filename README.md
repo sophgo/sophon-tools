@@ -18,7 +18,7 @@
 | [get_info](./source/pget_info) | source/pget_info | 用于获取BM1684/BM1684X/BM1688/CV186AH芯片的性能指标 |
 | [memory_edit](./source/pmemory_edit) | source/pmemory_edit | 用于修改BM1684/BM1684X/BM1688/CV186AH的设备内存布局 |
 | [qt_memory_edit](./source/pqt_memory_edit) | source/pqt_memory_edit | 图形化的远程修改设备内存布局的工具 |
-| [qt_batch_deployment](./source/pqt_batch_deployment) | source/pqt_batch_deployment | 基于SSH的批量部署工具 |
+| [qt_batch_deployment](./source/pqt_batch_deployment) | source/pqt_batch_deployment | 基于SSH的批量部署工具（Go+Fyne，Linux/Windows 单二进制） |
 | [dfss_cpp](./source/pdfss_cpp) | source/pdfss_cpp | DFSS工具CPP工程 |
 | [spacc_efuse_demo](./source/pspacc_efuse_demo) | source/pspacc_efuse_demo | efuse+spacc加解密Demo |
 | [SophUI](./source/pSophUI) | source/pSophUI | HDMI配网页面工程 |

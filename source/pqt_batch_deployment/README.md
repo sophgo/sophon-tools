@@ -1,50 +1,120 @@
-# 批量部署工具
-### 1. Linux
-##### 1.1 环境配置
-需要安装的依赖如下：
-qt5-default qttools5-dev git g++ libgl1-mesa-dev patchelf fuse  
+# 批量部署工具（批量执行工具）
 
-##### 1.2 运行编译
-在目录下可以看到linux_docker.sh和linux_release.sh两个脚本文件；  
-可以直接运行脚本文件进行编译，目前推荐使用linux_docker.sh文件进行编译；  
-在编译执行完成后会生成output文件夹，在文件夹下有qt_batch_deployment_Vxxx.AppImage文件；  
+面向多台设备的批量运维工具：在多台 SSH 可达的设备上批量执行命令、批量上传/下发文件、
+批量下载文件，并逐台汇总执行结果。
 
-##### 1.3 程序运行
-程序运行指令如下：
-./qt_batch_deployment_Vxxx.AppImage [Root Directory] [Json File Path] [Max Value]  
-Root Directory，Json File Path， Max Value为可选参数；
+**当前实现：Go + Fyne，Linux / Windows 均为单个可执行文件。**
+历史版本为 Qt 5 实现（AppImage + Enigma Virtual Box 打箱），已由本实现取代。
 
-##### 1.3.1 图形化模式
-当不输入Root Directory，Json File Path， Max Value参数时启动图形化模式；
+## 1. 运行
 
-##### 1.3.2 命令行模式
-当输入这部分参数时使用命令行模式；  
-Root Directory：命令行模式运行根目录，其他相对路径会以该路径为主目录，需要为绝对路径；  
-Json File Path：配置文件所在的路径，需要为绝对路径；  
-Max Value：最大并行数量，默认为100； 
+```
+qt_batch_deployment [根目录] [配置文件路径] [最大并行数]
+```
 
-### 2. Windows
-##### 2.1 环境配置
-windows中配置qt基础环境，将qt自带的cmake和mingw64的路径添加到系统变量中；  
-将C:/Qt/5.15.2/mingw81_64类似的目录添加到QT_PLATFORM_DIR的环境变量中；  
-将C:/Qt/Tools/mingw810_64/bin类似的目录添加到QT_GCC_PLATFORM_DIR的环境变量中；  
+| 参数 | 说明 |
+| --- | --- |
+| 根目录 | 文件类操作的基准目录，需为绝对路径 |
+| 配置文件路径 | JSON 配置文件路径，需为绝对路径 |
+| 最大并行数 | 并发执行的设备数上限，默认 100 |
 
-##### 2.2 运行编译
-在目录下可以看到windows_release.ps1脚本文件；  
-运行windows_release.ps1脚本文件进行编译；
-编译完成后会得到qt_batch_deployment_Vxxx.exe和qt_batch_deployment_Vxxx.7z两个文件；
-qt_batch_deployment_Vxxx.exe为图形化模式应用程序；
-将qt_batch_deployment_Vxxx.7z进行解压，其中qt_batch_deployment_no_ui.exe为命令行模式应用程序；
+**不带任何参数启动图形界面。**
 
-##### 2.3 程序运行
-##### 1.3.1 图形化模式
-双击qt_batch_deployment_Vxxx.exe启动图形化模式；
+退出码：`0` 全部成功；`1` 有设备执行失败；`2` 参数或配置错误。
+（旧版在参数错误时返回 0，脚本调用方无法判断失败，此处已修正。）
 
-##### 1.3.2 命令行模式
-命令行模式使用cmd或powershell运行qt_batch_deployment_no_ui.exe文件；
-运行指令如下：
-./qt_batch_deployment_no_ui.exe [Root Directory] [Json File Path] [Max Value]
-Root Directory，Json File Path， Max Value为可选参数；  
-Root Directory：命令行模式运行根目录，其他相对路径会以该路径为主目录，需要为绝对路径；  
-Json File Path：配置文件所在的路径，需要为绝对路径；  
-Max Value：最大并行数量，默认为100； 
+## 2. 图形界面
+
+界面与原 Qt 版对齐，自上而下：
+
+- **顶部**：Logo、标题、官网链接、帮助。
+- **配置行**：文件操作根目录；内置预设下拉 + 载入 / 保存配置；并行上限；执行配置。
+- **左栏 远程设备信息配置**：设备表格（IPv4 / 端口 / 用户名 / 密码 / 执行状态），
+  支持新增、克隆、编辑、删除；下方是选中设备的执行日志。
+- **右栏 操作信息配置**：操作表格 + 三段式配置区
+  （命令下发 / 文件上传 / 文件下载），实时显示该项「完整 / 不完整」。
+
+相对旧版的交互改进：
+
+- **编辑即时生效**，不再需要先按「储存该项」——旧版忘了按就会丢配置。
+- **不完整的操作明确标注**并自动跳过，不会静默执行空命令。
+- 执行期间配置区自动禁用，结束后自动恢复。
+- 旧版会闪退的操作（删到空表、未选中即点保存、读入空配置）现在都给出明确提示。
+
+## 3. 配置文件格式
+
+与旧版完全兼容，旧配置文件可直接使用，无需迁移：
+
+```json
+{
+    "remoteInf": [
+        {"IP": "172.16.140.11", "Port": 22, "Username": "linaro", "Password": "linaro"}
+    ],
+    "operationInf": [
+        {"name": "检查时间", "type": 0, "commandStr": "date",
+         "checkSuccessStr": "", "checkErrorStr": "",
+         "transferFileSourcePath": "", "transferFileDestinationPath": "", "checkFile": 0}
+    ]
+}
+```
+
+`type`：`0`=下发命令，`1`=上传文件，`2`=下载文件。
+`checkFile`：`0`=MD5 校验，`1`=文件大小校验，`2`=不校验。
+
+字段名刻意保持旧版的大写形式（`IP`/`Port`/`Username`/`Password`），
+以保证双向兼容。
+
+## 4. 三项操作的语义
+
+| 操作 | 行为 | 校验 |
+| --- | --- | --- |
+| 命令下发 | 在每台设备执行同一条命令 | 可选「成功关键字 / 失败关键字」，都为空则不校验 |
+| 文件上传 | 本地文件 → 设备指定路径（目标以 `/` 结尾时拼上原文件名） | MD5 |
+| 文件下载 | 设备文件 → 本地目录（文件名带 `IP_端口_时间戳_原名`） | MD5 |
+
+> **行为变更（重要）**：旧版「失败关键字」实际上从未生效——代码在错误分支里判断的
+> 是成功关键字。本版按配置语义正确实现：命中失败关键字即判定失败，未命中成功关键字
+> 也判定失败。若历史配置依赖了旧版的失效行为，升级后可能开始报失败，这是预期修正。
+
+## 5. 相对旧版修掉的问题
+
+崩溃（旧版可稳定复现 SIGSEGV）：
+
+- 设备表格删到空行后，选中变更回调解引用空指针。
+- 未选中任何操作就点「储存该项」。
+- 读入 `remoteInf` 为空的配置后强制触发 `itemChanged(nullptr)`。
+- 连接失败等错误路径上的资源清理缺陷。
+
+功能与健壮性：
+
+- 「失败关键字」从未生效（见 §4）。
+- 远端输出为空时 `split(" ").at(0)` 越界。
+- `sftp_write` 返回值未判负会导致死循环。
+- 下载不检查本地写入结果，磁盘满时会「成功但内容残缺」。
+- 无连接超时、无 keepalive，挂死设备会永久占坑。
+- 远端 `fsync` 无上限重试，服务器不支持时永久卡死。
+- 缺少 `remoteInf`/`operationInf` 时静默继续，现已显式报错。
+- 不再使用 `echo <密码> | sudo -S`，密码不会出现在进程命令行里。
+
+## 6. 构建
+
+```bash
+bash release.sh all              # Linux + Windows
+bash release.sh linux            # 仅 Linux
+bash release.sh windows 2.0.0    # 仅 Windows，显式版本号
+```
+
+产物为 `output/pqt_batch_deployment/` 下带版本号的单个可执行文件。
+版本号唯一来源是 `src/version.go`。
+
+构建依赖：Go ≥ 1.22；Linux 需要 gcc 与图形开发库；Windows 需要 mingw-w64。
+详见 [BUILD.md](./BUILD.md)。
+
+## 7. 测试
+
+```bash
+cd src && go test ./...
+```
+
+覆盖配置文件兼容性、校验逻辑、关键字判定、并发上限、超时行为，以及旧版三个
+崩溃场景的回归。

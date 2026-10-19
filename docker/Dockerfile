@@ -74,6 +74,7 @@ SHELL ["/bin/bash", "-c"]
 # pdfss_cpp 8 架构: aarch64/armel/riscv64 + mingw-w64(windows amd64/i686)
 # Rust/Go 静态: musl 工具链在 PATH(由 pbmssm 的 fetch-musl-toolchain.sh 识别复用)
 # pqt 系列: qtbase5-dev(Qt 5.12.8, 20.04 仓库) + libgl1-mesa-dev + fuse + patchelf(AppImage)
+# xorg-dev: pqt_batch_deployment 自 v2.0.0 起为 Go+Fyne，Linux 端 CGO 需要 X11/GL 头文件
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential gcc g++ make cmake pkg-config \
         gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
@@ -82,7 +83,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 gcc-mingw-w64-i686 g++-mingw-w64-i686 \
         dpkg dpkg-dev fakeroot \
         qtbase5-dev qttools5-dev-tools \
-        libgl1-mesa-dev libglib2.0-0 \
+        libgl1-mesa-dev libglib2.0-0 xorg-dev libxkbcommon-dev \
         ca-certificates curl wget git \
         zip unzip p7zip-full patchelf \
         python3 python3-pip python3-dev \
