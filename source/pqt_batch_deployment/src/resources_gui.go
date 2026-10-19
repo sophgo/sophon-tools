@@ -43,5 +43,3 @@ func imageFromAsset(name string) *canvas.Image {
 	}
 	return canvas.NewImageFromResource(fyne.NewStaticResource(name, data))
 }
-
-

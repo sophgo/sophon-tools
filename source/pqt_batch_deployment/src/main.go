@@ -71,6 +71,15 @@ func runCLI(rootDir, jsonPath string, maxParallel int) int {
 		fmt.Fprintf(os.Stderr, "错误: 配置无效: %v\n", err)
 		return 2
 	}
+	// 不完整的操作会被跳过——必须显式告知，不能让调用方以为全都跑了。
+	if skipped := cfg.IncompleteOperations(); len(skipped) > 0 {
+		fmt.Fprintf(os.Stderr, "警告: %d 条操作配置不完整，将被跳过:\n", len(skipped))
+		for i := 0; i < len(cfg.OperationInf); i++ {
+			if err, ok := skipped[i]; ok {
+				fmt.Fprintf(os.Stderr, "  第 %d 条: %v\n", i+1, err)
+			}
+		}
+	}
 
 	exec := &Executor{
 		RootDir:     rootDir,

@@ -29,24 +29,29 @@ import (
 )
 
 const (
-	dialTimeout    = 15 * time.Second
-	commandTimeout = 5 * time.Minute
-	transferTimeout = 30 * time.Minute
-
 	// 旧版把 10MB 读缓冲作为每个连接对象的成员，默认 200 并发时约 2GB；
 	// 这里改为按需分配的中等缓冲，内存占用与并发数线性但系数小得多。
 	copyBufSize = 256 * 1024
+
+	// 命令与传输各自的硬上限。超时通过给底层 SSH 连接设 deadline 实现，
+	// 因此远端「不读不写但连接不断」时也会被强制打断（仅靠 session 超时做不到）。
+	defaultCommandTimeout  = 5 * time.Minute
+	defaultTransferTimeout = 30 * time.Minute
+
+	// SSH 连接保活间隔。旧版 libssh2 无 keepalive，链路被中间设备静默丢弃后
+	// 读写会永久挂住；这里定期发 keepalive@openssh.com 探测。
+	defaultKeepaliveInterval = 30 * time.Second
 )
 
 // StepEvent 一条执行进展/结果，UI 与 CLI 共用。
 type StepEvent struct {
-	DeviceIndex int    // 从 0 开始
-	DeviceLabel string // 例如 172.16.140.11:22
-	Stage       string // 正在做什么
-	Log         string // 输出
-	Err         error  // 非空表示该设备本次执行失败
-	Done        bool   // 该设备全部操作结束
-	OK          bool   // 仅当 Done 为 true 时有效：该设备是否全部成功
+	DeviceIndex int     // 从 0 开始
+	DeviceLabel string  // 例如 172.16.140.11:22
+	Stage       string  // 正在做什么
+	Log         string  // 输出
+	Err         error   // 非空表示该设备本次执行失败
+	Done        bool    // 该设备全部操作结束
+	OK          bool    // 仅当 Done 为 true 时有效：该设备是否全部成功
 	Progress    float64 // 0..1，仅传输类操作有效；负数表示无进度
 }
 
@@ -60,10 +65,13 @@ type DeviceResult struct {
 
 // Executor 执行一批设备 × 一批操作。
 type Executor struct {
-	RootDir      string        // 相对路径基准目录
-	MaxParallel  int           // 并发上限
-	DialTimeout  time.Duration // 可覆盖，便于测试
-	RunTimeout   time.Duration
+	RootDir     string // 相对路径基准目录
+	MaxParallel int    // 并发上限
+
+	// 以下三项都可覆盖，便于测试与按现场调整；零值取内置默认。
+	DialTimeout     time.Duration
+	CommandTimeout  time.Duration
+	TransferTimeout time.Duration
 
 	// Emit 若非空，每产生一个事件回调一次；回调可能来自多个 goroutine，
 	// 调用方负责自身同步（GUI 侧会转到主线程）。
@@ -158,13 +166,44 @@ func (e *Executor) runDevice(ctx context.Context, idx int, label string,
 
 	// 握手也受超时约束，避免半开连接卡死。
 	_ = conn.SetDeadline(time.Now().Add(dialTimeout))
+
+	// 取消必须能打断「正在握手」的连接：ssh.NewClientConn 是阻塞调用，
+	// 只有底层 conn 被关掉才会返回。这里把 ctx 接到 conn 上。
+	hsDone := make(chan struct{})
+	defer close(hsDone)
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = conn.Close()
+		case <-hsDone:
+		}
+	}()
+
 	c, chans, reqs, err := ssh.NewClientConn(conn, addr, cfg)
 	if err != nil {
+		if ctx.Err() != nil {
+			return errors.New("已取消")
+		}
 		return fmt.Errorf("SSH 握手/认证失败: %w", err)
 	}
 	_ = conn.SetDeadline(time.Time{}) // 握手完成后取消整体 deadline，改由各操作自行限时
 	client := ssh.NewClient(c, chans, reqs)
 	defer client.Close()
+
+	// 保活 + 取消。旧版既无 keepalive 也无取消入口：链路被中间设备静默丢弃时
+	// 读写永久挂住，用户点不到任何能中断的东西。
+	stop := make(chan struct{})
+	defer close(stop)
+	go keepaliveLoop(client, stop)
+
+	go func() {
+		select {
+		case <-ctx.Done():
+			// 关闭客户端会让所有阻塞中的 Read/Write 立即返回，命令与传输都能被打断。
+			client.Close()
+		case <-stop:
+		}
+	}()
 
 	var sftpClient *sftp.Client
 	getSFTP := func() (*sftp.Client, error) {
@@ -188,7 +227,20 @@ func (e *Executor) runDevice(ctx context.Context, idx int, label string,
 		e.emit(StepEvent{DeviceIndex: idx, DeviceLabel: label,
 			Stage: "执行: " + op.Name, Progress: -1})
 
-		out, err := e.runOperation(ctx, client, getSFTP, remote, op, idx, label)
+		// 每条操作独立限时：deadline 设在底层连接上，因此「服务端不读不写但连接
+		// 不断」也能被打断——这正是旧版永久卡住的场景。
+		timeout := e.commandTimeout()
+		if op.Type != OpCommand {
+			timeout = e.transferTimeout()
+		}
+		_ = conn.SetDeadline(time.Now().Add(timeout))
+
+		out, err := e.runOperation(ctx, client, getSFTP, remote, op, idx, label, timeout)
+
+		_ = conn.SetDeadline(time.Time{})
+		if ctx.Err() != nil {
+			return fmt.Errorf("%s: 已取消", op.Name)
+		}
 		if out != "" {
 			res.Log.WriteString(out)
 			if !strings.HasSuffix(out, "\n") {
@@ -203,16 +255,48 @@ func (e *Executor) runDevice(ctx context.Context, idx int, label string,
 	return nil
 }
 
+// keepaliveLoop 定期发 keepalive@openssh.com；连续失败说明链路已死，
+// 关闭客户端让阻塞中的读写返回错误，而不是无限等待。
+func keepaliveLoop(client *ssh.Client, stop <-chan struct{}) {
+	t := time.NewTicker(defaultKeepaliveInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-t.C:
+			if _, _, err := client.SendRequest("keepalive@openssh.com", true, nil); err != nil {
+				client.Close()
+				return
+			}
+		}
+	}
+}
+
+func (e *Executor) commandTimeout() time.Duration {
+	if e.CommandTimeout > 0 {
+		return e.CommandTimeout
+	}
+	return defaultCommandTimeout
+}
+
+func (e *Executor) transferTimeout() time.Duration {
+	if e.TransferTimeout > 0 {
+		return e.TransferTimeout
+	}
+	return defaultTransferTimeout
+}
+
 const dialTimeoutDefault = 15 * time.Second
 
 // runOperation 执行单条操作，返回可展示的日志。
 func (e *Executor) runOperation(ctx context.Context, client *ssh.Client,
 	getSFTP func() (*sftp.Client, error), remote RemoteInf,
-	op OperationInf, idx int, label string) (string, error) {
+	op OperationInf, idx int, label string, timeout time.Duration) (string, error) {
 
 	switch op.Type {
 	case OpCommand:
-		out, err := runCommand(ctx, client, op.CommandStr, defaultCommandTimeout)
+		out, err := runCommand(ctx, client, op.CommandStr, timeout)
 		if err != nil {
 			return out, err
 		}
@@ -224,8 +308,6 @@ func (e *Executor) runOperation(ctx context.Context, client *ssh.Client,
 	}
 	return "", fmt.Errorf("未知操作类型 %d", op.Type)
 }
-
-const defaultCommandTimeout = 5 * time.Minute
 
 // checkKeywords 实现「成功/失败关键字」判定。
 //

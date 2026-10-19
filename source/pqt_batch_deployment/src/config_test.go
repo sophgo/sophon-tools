@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -181,5 +182,56 @@ func TestLoadConfigMalformed(t *testing.T) {
 	}
 	if _, err := LoadConfig(p); err == nil {
 		t.Fatal("非法 JSON 应报错")
+	}
+}
+
+// GUI 与 CLI 必须使用同一套校验语义：不完整的操作是"跳过"，不是"配置无效"。
+// 旧版两端口径不一致（GUI 放过、CLI 直接报错），同一份配置行为不同。
+func TestValidateAllowsIncompleteOpsAsLongAsOneComplete(t *testing.T) {
+	c := &Config{
+		RemoteInf: []RemoteInf{{IP: "1.2.3.4", Port: 22, Username: "u"}},
+		OperationInf: []OperationInf{
+			{Name: "good", Type: OpCommand, CommandStr: "date"},
+			{Name: "incomplete", Type: OpCommand, CommandStr: ""},
+		},
+	}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("有不完整操作但有完整操作时应可执行, got %v", err)
+	}
+
+	inc := c.IncompleteOperations()
+	if len(inc) != 1 {
+		t.Fatalf("不完整操作数 = %d, 期望 1", len(inc))
+	}
+	if _, ok := inc[1]; !ok {
+		t.Fatalf("应标记下标 1 为不完整, got %v", inc)
+	}
+	if !strings.Contains(inc[1].Error(), "命令为空") {
+		t.Fatalf("原因应说明缺什么, got %v", inc[1])
+	}
+}
+
+// 全是空操作时不可执行（否则会"成功执行 0 条操作"）。
+func TestValidateRejectsAllIncomplete(t *testing.T) {
+	c := &Config{
+		RemoteInf:    []RemoteInf{{IP: "1.2.3.4", Port: 22, Username: "u"}},
+		OperationInf: []OperationInf{{Name: "x", Type: OpCommand, CommandStr: "  "}},
+	}
+	if err := c.Validate(); err == nil {
+		t.Fatal("全部操作不完整时应报错")
+	}
+}
+
+// 设备校验独立可用：GUI 需要先单独校验设备再提示操作问题。
+func TestValidateDevicesIndependent(t *testing.T) {
+	c := &Config{
+		RemoteInf:    []RemoteInf{{IP: "", Port: 22, Username: "u"}},
+		OperationInf: []OperationInf{{Name: "x", Type: OpCommand, CommandStr: "date"}},
+	}
+	if err := c.ValidateDevices(); err == nil {
+		t.Fatal("空 IP 应被拒绝")
+	}
+	if err := c.Validate(); err == nil {
+		t.Fatal("整体校验也应失败")
 	}
 }

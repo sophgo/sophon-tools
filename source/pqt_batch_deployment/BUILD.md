@@ -16,12 +16,18 @@ Go + Fyne 两端都能直接 `go build` 出单个二进制，资源（Logo、字
 ## 2. 依赖
 
 ### 通用
-- Go ≥ 1.22（使用 `go:embed`；Fyne v2.8 要求）
+- **Go ≥ 1.25.5**（`go.mod` 的 `go` 指令即 1.25.5，与统一构建镜像自带版本一致）
 
 依赖通过 `go.mod` 锁定：
 - `fyne.io/fyne/v2` —— 跨平台 GUI
 - `golang.org/x/crypto/ssh` —— SSH
 - `github.com/pkg/sftp` —— SFTP
+
+> **为什么锁 1.25.5 而不是更高**：`docker/versions.env` 的 `GO_VERSION=1.25.5`，
+> 容器内 `GOTOOLCHAIN=auto`。若 `go.mod` 要求更高版本，首次构建会联网下载新工具链，
+> 在受限网络下直接失败。`golang.org/x/*` 也相应锁在仍声明 `go 1.25` 的版本上
+> （crypto v0.55.0 / net v0.57.0 / sys v0.47.0 / text v0.41.0 / term v0.45.0），
+> 否则 `go mod tidy` 会把 `go` 指令顶到 1.26。
 
 ### Linux
 ```bash
@@ -103,13 +109,7 @@ go vet ./...
 
 ## 7. 在统一构建镜像内构建
 
-`docker/Dockerfile` 已内置 Go 1.25.5 与 mingw-w64，但**默认未安装 Fyne 所需的
-Linux 图形开发库**。若要在镜像内出 Linux 包，需要补：
-
-```
-libgl1-mesa-dev xorg-dev
-```
-
-Windows 交叉编译已有 `gcc-mingw-w64-x86-64`，可直接用。
-
-> 待办：把这两项加入 `docker/Dockerfile` 的 apt 列表，即可在统一镜像内完成两端出包。
+`docker/Dockerfile` 已内置 Go 1.25.5 与 mingw-w64，并已补上 Fyne 所需的
+Linux 图形开发库（`libgl1-mesa-dev` / `xorg-dev` / `libxkbcommon-dev`）。
+`docker/build-all.sh` 里本项目的 `EXTRA_ENV` 也改为把 `/opt/go/bin` 加入 PATH，
+因此统一构建入口可以直接两端出包。

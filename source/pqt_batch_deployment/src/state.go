@@ -25,13 +25,13 @@ type OpRow struct {
 
 // GUIState 界面数据模型。
 type GUIState struct {
-	mu       sync.RWMutex
-	rootDir  string
-	devices  []DeviceRow
-	ops      []OpRow
-	maxPar   int
+	mu             sync.RWMutex
+	rootDir        string
+	devices        []DeviceRow
+	ops            []OpRow
+	maxPar         int
 	selectedDevice int // -1 表示未选中——旧版正是在未选中时读 currentRow()=-1 崩溃
-	logs     map[int]string
+	logs           map[int]string
 }
 
 // NewGUIState 构造初始状态（含一行示例设备，与旧版默认一致）。

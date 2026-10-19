@@ -11,7 +11,8 @@
 #   qt_batch_deployment_V<ver>_windows_amd64.exe Windows 可执行文件
 #
 # 依赖:
-#   * Go >= 1.22（go:embed / fyne v2.8）
+#   * Go >= 1.25.5（与统一镜像 docker/versions.env 的 GO_VERSION 一致；
+#     go.mod 的 go 指令也是 1.25.5，低于它会导致 GOTOOLCHAIN 联网拉工具链）
 #   * Linux 构建：gcc + 系统图形开发库（libgl1-mesa-dev libx11-dev 等）
 #   * Windows 构建：mingw-w64 交叉编译器（x86_64-w64-mingw32-gcc）
 #
@@ -35,9 +36,15 @@ fi
 
 echo "==> qt_batch_deployment (Go+Fyne) version=$VERSION arch=$ARCH"
 
+MIN_GO="1.25.5"
 if ! command -v go >/dev/null 2>&1; then
-  echo "ERROR: 未找到 go，请先安装 Go >= 1.22" >&2
+  echo "ERROR: 未找到 go，请先安装 Go >= ${MIN_GO}" >&2
   exit 1
+fi
+# 只提示不阻断：GOTOOLCHAIN=auto 时可以自动拉取，但受限网络下会失败。
+GO_VER="$(go env GOVERSION 2>/dev/null | sed 's/^go//')"
+if [ -n "$GO_VER" ] && [ "$(printf '%s\n%s\n' "$MIN_GO" "$GO_VER" | sort -V | head -1)" != "$MIN_GO" ]; then
+  echo "WARN: 当前 Go ${GO_VER} 低于 go.mod 要求的 ${MIN_GO}，将依赖 GOTOOLCHAIN 联网拉取工具链" >&2
 fi
 
 mkdir -p "$OUTPUT_DIR"

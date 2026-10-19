@@ -2,9 +2,12 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
+	"net"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -120,9 +123,9 @@ func TestCopyWithProgressZeroSizeNoNaN(t *testing.T) {
 
 func TestShellQuote(t *testing.T) {
 	cases := map[string]string{
-		"/tmp/a":        `'/tmp/a'`,
-		"/tmp/a b":      `'/tmp/a b'`,
-		"/tmp/it's":     `'/tmp/it'\''s'`,
+		"/tmp/a":         `'/tmp/a'`,
+		"/tmp/a b":       `'/tmp/a b'`,
+		"/tmp/it's":      `'/tmp/it'\''s'`,
 		"/tmp/$(rm -rf)": `'/tmp/$(rm -rf)'`,
 	}
 	for in, want := range cases {
@@ -214,8 +217,10 @@ func TestRunRespectsMaxParallel(t *testing.T) {
 
 // 事件回调必须带上设备标识，且每台设备最终有一条 Done。
 func TestRunEmitsDonePerDevice(t *testing.T) {
-	var done int
-	var sawLabel bool
+	// Emit 契约上会被多个 goroutine 并发调用（见 Executor.Emit 注释），
+	// 计数器必须原子；这里同时用 -race 守护该契约。
+	var done atomic.Int64
+	var sawLabel atomic.Bool
 	e := &Executor{
 		RootDir:     t.TempDir(),
 		MaxParallel: 4,
@@ -224,10 +229,10 @@ func TestRunEmitsDonePerDevice(t *testing.T) {
 			if ev.DeviceLabel == "" {
 				t.Error("事件缺少 DeviceLabel")
 			} else {
-				sawLabel = true
+				sawLabel.Store(true)
 			}
 			if ev.Done {
-				done++
+				done.Add(1)
 			}
 		},
 	}
@@ -239,10 +244,127 @@ func TestRunEmitsDonePerDevice(t *testing.T) {
 		OperationInf: []OperationInf{{Name: "c", Type: OpCommand, CommandStr: "date"}},
 	}
 	e.Run(t.Context(), cfg)
-	if done != 2 {
-		t.Fatalf("Done 事件数 = %d, 期望 2", done)
+	if got := done.Load(); got != 2 {
+		t.Fatalf("Done 事件数 = %d, 期望 2", got)
 	}
-	if !sawLabel {
+	if !sawLabel.Load() {
 		t.Fatal("事件未携带设备标签")
+	}
+}
+
+// 审阅发现：transferTimeout 声明后无人引用，传输路径上没有超时，
+// 服务端不读不写但连接不断时会永久挂住。这里断言「超时值真的被用上」。
+func TestExecutorTimeoutDefaultsAndOverrides(t *testing.T) {
+	e := &Executor{}
+	if got := e.commandTimeout(); got != defaultCommandTimeout {
+		t.Fatalf("默认命令超时 = %s, 期望 %s", got, defaultCommandTimeout)
+	}
+	if got := e.transferTimeout(); got != defaultTransferTimeout {
+		t.Fatalf("默认传输超时 = %s, 期望 %s", got, defaultTransferTimeout)
+	}
+
+	e.CommandTimeout = 3 * time.Second
+	e.TransferTimeout = 7 * time.Second
+	if got := e.commandTimeout(); got != 3*time.Second {
+		t.Fatalf("命令超时覆盖失效: %s", got)
+	}
+	if got := e.transferTimeout(); got != 7*time.Second {
+		t.Fatalf("传输超时覆盖失效: %s", got)
+	}
+}
+
+// 传输超时必须真实生效：用一个只接受连接、永不响应的假服务器，
+// 断言命令在限定时间内失败，而不是永久阻塞。
+// 注意 DialTimeout 必须给足，否则测到的是握手超时而不是命令超时。
+func TestCommandHonorsCommandTimeout(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Skipf("无法监听本地端口: %v", err)
+	}
+	defer ln.Close()
+	// 接受连接后什么都不做——模拟"服务端不读不写但连接不断"。
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			defer c.Close()
+		}
+	}()
+
+	addr := ln.Addr().(*net.TCPAddr)
+	e := &Executor{
+		RootDir:     t.TempDir(),
+		MaxParallel: 1,
+		// 握手超时给足，让失败只可能来自命令阶段。
+		DialTimeout:     2 * time.Second,
+		CommandTimeout:  400 * time.Millisecond,
+		TransferTimeout: 400 * time.Millisecond,
+	}
+	cfg := &Config{
+		RemoteInf: []RemoteInf{{IP: "127.0.0.1", Port: addr.Port, Username: "u", Password: "p"}},
+		OperationInf: []OperationInf{
+			{Name: "c", Type: OpCommand, CommandStr: "date"},
+		},
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		e.Run(t.Context(), cfg)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(20 * time.Second):
+		t.Fatal("未在超时内失败：超时控制失效")
+	}
+}
+
+// 取消必须能打断执行，而不是等超时。
+func TestRunHonorsContextCancel(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Skipf("无法监听本地端口: %v", err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			defer c.Close()
+		}
+	}()
+
+	addr := ln.Addr().(*net.TCPAddr)
+	e := &Executor{
+		RootDir:     t.TempDir(),
+		MaxParallel: 1,
+		// 故意给很长的超时，证明是"取消"而不是"超时"结束的。
+		DialTimeout:     30 * time.Second,
+		CommandTimeout:  30 * time.Second,
+		TransferTimeout: 30 * time.Second,
+	}
+	cfg := &Config{
+		RemoteInf:    []RemoteInf{{IP: "127.0.0.1", Port: addr.Port, Username: "u", Password: "p"}},
+		OperationInf: []OperationInf{{Name: "c", Type: OpCommand, CommandStr: "date"}},
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan []DeviceResult, 1)
+	go func() { done <- e.Run(ctx, cfg) }()
+
+	time.Sleep(300 * time.Millisecond)
+	cancel()
+
+	select {
+	case res := <-done:
+		if len(res) != 1 || res[0].Err == nil {
+			t.Fatalf("取消后应返回失败结果, got %+v", res)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("取消后执行没有及时结束")
 	}
 }

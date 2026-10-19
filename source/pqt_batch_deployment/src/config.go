@@ -42,14 +42,14 @@ type RemoteInf struct {
 
 // OperationInf 一条对每台设备执行的批量操作。
 type OperationInf struct {
-	Name                      string `json:"name"`
-	Type                      int    `json:"type"`
-	CommandStr                string `json:"commandStr"`
-	CheckSuccessStr           string `json:"checkSuccessStr"`
-	CheckErrorStr             string `json:"checkErrorStr"`
-	TransferFileSourcePath    string `json:"transferFileSourcePath"`
+	Name                        string `json:"name"`
+	Type                        int    `json:"type"`
+	CommandStr                  string `json:"commandStr"`
+	CheckSuccessStr             string `json:"checkSuccessStr"`
+	CheckErrorStr               string `json:"checkErrorStr"`
+	TransferFileSourcePath      string `json:"transferFileSourcePath"`
 	TransferFileDestinationPath string `json:"transferFileDestinationPath"`
-	CheckFile                 int    `json:"checkFile"`
+	CheckFile                   int    `json:"checkFile"`
 }
 
 // Config 顶层配置文件。
@@ -93,17 +93,17 @@ func (o OperationInf) Validate() error {
 	switch o.Type {
 	case OpCommand:
 		if strings.TrimSpace(o.CommandStr) == "" {
-			return fmt.Errorf("操作 %q：命令为空", o.Name)
+			return fmt.Errorf("操作 %q:命令为空", o.Name)
 		}
 	case OpUpFile, OpDownFile:
 		if strings.TrimSpace(o.TransferFileSourcePath) == "" {
-			return fmt.Errorf("操作 %q：源路径为空", o.Name)
+			return fmt.Errorf("操作 %q:源路径为空", o.Name)
 		}
 		if strings.TrimSpace(o.TransferFileDestinationPath) == "" {
-			return fmt.Errorf("操作 %q：目标路径为空", o.Name)
+			return fmt.Errorf("操作 %q:目标路径为空", o.Name)
 		}
 	default:
-		return fmt.Errorf("操作 %q：未知类型 %d", o.Name, o.Type)
+		return fmt.Errorf("操作 %q:未知类型 %d", o.Name, o.Type)
 	}
 	return nil
 }
@@ -111,11 +111,25 @@ func (o OperationInf) Validate() error {
 // IsComplete 供 UI 显示「完整/不完整」。
 func (o OperationInf) IsComplete() bool { return o.Validate() == nil }
 
-// Validate 校验整份配置。
+// Validate 校验整份配置是否可执行。
 //
-// 这是对旧版的一处修正：旧版 argsparse.cpp 在缺少 remoteInf/operationInf 或
-// 数组为空时既不报错也不退出，会静默跑空或走到空指针崩溃路径。这里显式报错。
+// 语义（GUI 与 CLI 完全一致）：设备必须全部合法，且至少有一条配置完整的操作。
+// 不完整的操作**不算错误**——它们会在执行时被跳过并在界面/终端上明确列出，
+// 这与旧版「标记不完整」的交互一致；旧版 argsparse.cpp 在缺少 remoteInf/
+// operationInf 或数组为空时既不报错也不退出，会静默跑空或走到空指针崩溃路径，
+// 这里显式报错。
 func (c *Config) Validate() error {
+	if err := c.ValidateDevices(); err != nil {
+		return err
+	}
+	if len(c.CompleteOperations()) == 0 {
+		return errors.New("没有配置完整的操作可执行")
+	}
+	return nil
+}
+
+// ValidateDevices 只校验设备表。
+func (c *Config) ValidateDevices() error {
 	if len(c.RemoteInf) == 0 {
 		return errors.New("配置中没有设备（remoteInf 为空）")
 	}
@@ -124,21 +138,28 @@ func (c *Config) Validate() error {
 	}
 	for i, r := range c.RemoteInf {
 		if strings.TrimSpace(r.IP) == "" {
-			return fmt.Errorf("第 %d 台设备：IP 为空", i+1)
+			return fmt.Errorf("第 %d 台设备:IP 为空", i+1)
 		}
 		if r.Port <= 0 || r.Port > 65535 {
-			return fmt.Errorf("第 %d 台设备（%s）：端口 %d 非法", i+1, r.IP, r.Port)
+			return fmt.Errorf("第 %d 台设备（%s）:端口 %d 非法", i+1, r.IP, r.Port)
 		}
 		if strings.TrimSpace(r.Username) == "" {
-			return fmt.Errorf("第 %d 台设备（%s）：用户名为空", i+1, r.IP)
-		}
-	}
-	for i, o := range c.OperationInf {
-		if err := o.Validate(); err != nil {
-			return fmt.Errorf("第 %d 条操作：%w", i+1, err)
+			return fmt.Errorf("第 %d 台设备（%s）:用户名为空", i+1, r.IP)
 		}
 	}
 	return nil
+}
+
+// IncompleteOperations 返回不会被执行的操作及其原因，供界面/CLI 明确提示。
+// 旧版只是把表格文字换成「该项配置不完整，将不会执行」，不说明缺了什么。
+func (c *Config) IncompleteOperations() map[int]error {
+	out := map[int]error{}
+	for i, o := range c.OperationInf {
+		if err := o.Validate(); err != nil {
+			out[i] = err
+		}
+	}
+	return out
 }
 
 // CompleteOperations 只返回配置完整的操作（旧版语义：不完整的跳过不执行）。
