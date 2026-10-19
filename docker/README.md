@@ -300,7 +300,10 @@ bash docker/verify.sh --image sophon-tools-build:unified --cross
 
 ## pqt 系列（Qt GUI 工具）专用构建
 
-`docker/pqt/` 提供 pqt 系列（`pqt_memory_edit` 图形化内存修改工具、`pqt_batch_deployment` 批量部署工具）的专用构建。
+`docker/pqt/` 提供 `pqt_memory_edit`（图形化内存修改工具）的 Qt 专用构建。
+
+> `pqt_batch_deployment`（批量部署工具）自 v2.0.0 起改为 Go + Fyne，**不再走本目录的
+> Qt/AppImage/Enigma 流程**，直接用其自带脚本：`cd source/pqt_batch_deployment && bash release.sh all`。
 
 > **M5 变更**：pqt 不再用独立镜像。统一镜像基座即 20.04（glibc 2.31），满足 linuxdeployqt 的
 > glibc≤2.31 硬约束；windows exe 的 Qt mingw 静态库由 `--with-qt-mingw` 内置。
@@ -308,7 +311,6 @@ bash docker/verify.sh --image sophon-tools-build:unified --cross
 ```bash
 # linux AppImage 一键编译（自动生成 memory_edit.tar.xz 前置依赖）
 bash docker/pqt/build-pqt.sh --project pqt_memory_edit --linux
-bash docker/pqt/build-pqt.sh --project pqt_batch_deployment --linux
 
 # windows exe（需先内置 Qt mingw 静态库，见上文）
 bash docker/pqt/build-qt-mingw.sh          # 交叉编译 Qt 5.15.2 mingw 静态（一次约 20-40 分钟）
