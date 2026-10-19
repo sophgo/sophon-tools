@@ -4,253 +4,524 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>批量部署工具</title>
+<link rel="icon" type="image/png" href="/favicon.png">
 <style>
+  /* 视觉规范与桌面版 theme.go 同一套 token：主色取自 SOPHGO logo 蓝，
+     红色只留给「删除 / 中止」这类破坏性操作，避免主次混淆。 */
   :root {
-    --brand: #e03030;
-    --brand-dark: #c82424;
-    --text: #22262e;
-    --muted: #6b7080;
-    --line: #d4d9e0;
-    --surface: #f6f7f9;
-    --surface-2: #ecf0f3;
-    --ok: #1e8e3e;
-    --warn: #c77c00;
-    --danger: #c62828;
-    --run: #1565c0;
+    --brand: #1d6bd6;
+    --brand-hover: #1758b4;
+    --brand-soft: #eaf2fd;
+    --brand-ring: rgba(29, 107, 214, .22);
+    --bg: #f3f5f8;
+    --surface: #fff;
+    --surface-2: #f7f8fa;
+    --line: #e1e5eb;
+    --line-strong: #cfd5dd;
+    --text: #1f2329;
+    --text-2: #4b5260;
+    --muted: #8a909c;
+    --ok: #18864b;     --ok-soft: #e7f5ed;
+    --warn: #b26b00;   --warn-soft: #fdf3e1;
+    --danger: #d93026; --danger-soft: #fdecea;
+    --run: #1d6bd6;    --run-soft: #eaf2fd;
+    --term-bg: #1b1f27;
+    --term-fg: #d6dde8;
+    --radius: 10px;
+    --radius-sm: 6px;
+    --shadow: 0 1px 2px rgba(16, 24, 40, .05), 0 1px 3px rgba(16, 24, 40, .06);
+    --shadow-lg: 0 20px 48px rgba(16, 24, 40, .22);
+    --mono: ui-monospace, "SFMono-Regular", "JetBrains Mono", Menlo, Consolas, monospace;
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; }
   body {
-    margin: 0; color: var(--text); background: #fff;
-    font: 14px/1.55 "Source Han Sans SC", "Noto Sans CJK SC",
+    margin: 0; color: var(--text); background: var(--bg);
+    font: 14px/1.5 "Source Han Sans SC", "Noto Sans CJK SC", "PingFang SC",
           "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+    display: flex; flex-direction: column; min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
   }
-  header {
+  a { color: var(--brand); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  svg.i { width: 16px; height: 16px; flex: none; stroke: currentColor; fill: none;
+          stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* ---------- 顶栏 ---------- */
+  .appbar {
     display: flex; align-items: center; gap: 14px;
-    padding: 10px 16px; border-bottom: 1px solid var(--line);
-    background: var(--surface);
+    height: 60px; padding: 0 20px;
+    background: var(--surface); border-bottom: 1px solid var(--line);
+    position: sticky; top: 0; z-index: 20;
   }
-  header .title { font-size: 19px; font-weight: 700; }
-  header .ver { color: var(--muted); font-size: 12px; }
-  header .spacer { flex: 1; }
-  a { color: var(--brand); }
-
-  .bar {
-    display: flex; align-items: center; gap: 8px;
-    padding: 8px 16px; border-bottom: 1px solid var(--line);
-    flex-wrap: wrap;
-  }
-  .bar label { font-weight: 700; color: #333842; white-space: nowrap; }
-  input[type=text], input[type=password], input[type=number], select, textarea {
-    font: inherit; color: inherit; padding: 5px 8px;
-    border: 1px solid var(--line); border-radius: 5px; background: #fff;
-  }
-  input[type=text]:focus, input[type=password]:focus, select:focus, textarea:focus {
-    outline: 2px solid var(--brand); outline-offset: -1px;
-  }
-  textarea { width: 100%; resize: vertical; min-height: 62px; font-family: ui-monospace, monospace; }
-  .grow { flex: 1; min-width: 160px; }
-
-  button {
-    font: inherit; padding: 6px 12px; border-radius: 5px; cursor: pointer;
-    border: 1px solid var(--line); background: #fff; color: var(--text);
+  .appbar img { height: 30px; display: block; }
+  .appbar .divider { width: 1px; height: 26px; background: var(--line); }
+  .appbar .title { font-size: 17px; font-weight: 700; letter-spacing: .5px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 1px 8px; border-radius: 999px; font-size: 12px; line-height: 20px;
+    background: var(--surface-2); color: var(--text-2); border: 1px solid var(--line);
     white-space: nowrap;
   }
-  button:hover:not(:disabled) { background: var(--surface-2); }
-  button:disabled { opacity: .45; cursor: not-allowed; }
-  button.primary { background: var(--brand); border-color: var(--brand); color: #fff; font-weight: 700; }
-  button.primary:hover:not(:disabled) { background: var(--brand-dark); }
-  button.warn { border-color: #e0b060; color: var(--warn); }
-  button.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
-  button.danger:hover:not(:disabled) { filter: brightness(.92); }
-  button.small { padding: 3px 8px; font-size: 13px; }
-
-  main { display: grid; grid-template-columns: minmax(420px, 2fr) minmax(480px, 3fr); gap: 0; }
-  @media (max-width: 1080px) { main { grid-template-columns: 1fr; } }
-  section { padding: 10px 16px 14px; min-width: 0; }
-  section + section { border-left: 1px solid var(--line); }
-  @media (max-width: 1080px) { section + section { border-left: 0; border-top: 1px solid var(--line); } }
-  h2 { font-size: 15px; margin: 2px 0 8px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
-
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); }
-  th { background: var(--surface-2); font-weight: 700; position: sticky; top: 0; }
-  tbody tr { cursor: pointer; }
-  tbody tr:hover { background: #fafbfc; }
-  tbody tr.sel { background: #fff2f2; box-shadow: inset 3px 0 0 var(--brand); }
-  .tablewrap { max-height: 240px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; }
-
-  .status { font-weight: 700; }
-  .s-ok { color: var(--ok); }
-  .s-fail { color: var(--danger); }
-  .s-wait { color: var(--warn); }
-  .s-run { color: var(--run); }
-  .s-none { color: var(--muted); font-weight: 400; }
-  .incomplete { color: var(--warn); font-weight: 700; }
-
-  .toolbar { display: flex; gap: 6px; margin: 8px 0; flex-wrap: wrap; }
-  .form { display: grid; grid-template-columns: 110px 1fr; gap: 6px 10px; align-items: center; margin: 8px 0; }
-  .form > label { color: #333842; font-weight: 700; text-align: right; }
-  .tabs { display: flex; gap: 4px; margin: 10px 0 0; border-bottom: 1px solid var(--line); }
-  .tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; }
-  .tabs button.on { color: var(--brand); border-bottom-color: var(--brand); font-weight: 700; }
-  .hint { color: var(--muted); font-size: 12px; }
-  .log {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
-    white-space: pre-wrap; word-break: break-all;
-    background: var(--surface); border: 1px solid var(--line); border-radius: 6px;
-    padding: 8px; height: 190px; overflow: auto; margin: 0;
+  .chip.brand { background: var(--brand-soft); color: var(--brand); border-color: transparent; }
+  .chip.live { background: var(--run-soft); color: var(--run); border-color: transparent; font-weight: 600; }
+  .chip.live::before {
+    content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor;
+    animation: pulse 1.2s ease-in-out infinite;
   }
-  footer {
+  @keyframes pulse { 50% { opacity: .25; } }
+  .spacer { flex: 1; }
+
+  /* ---------- 页面骨架 ---------- */
+  .page { flex: 1; padding: 16px 20px 12px; display: flex; flex-direction: column; gap: 16px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--radius); box-shadow: var(--shadow); min-width: 0;
+  }
+  .card-head {
     display: flex; align-items: center; gap: 10px;
-    padding: 6px 16px; border-top: 1px solid var(--line);
-    background: var(--surface); color: var(--muted); font-size: 13px;
+    padding: 12px 16px; border-bottom: 1px solid var(--line);
   }
-  #toast {
-    position: fixed; right: 16px; bottom: 44px; max-width: 460px;
-    background: #22262e; color: #fff; padding: 9px 13px; border-radius: 6px;
-    opacity: 0; transform: translateY(8px); transition: .18s; pointer-events: none;
-    white-space: pre-wrap; z-index: 50;
+  .card-head h2 { font-size: 15px; margin: 0; font-weight: 700; }
+  .card-body { padding: 14px 16px; }
+  .count {
+    min-width: 22px; padding: 0 7px; border-radius: 999px; text-align: center;
+    background: var(--surface-2); color: var(--text-2); font-size: 12px; line-height: 20px;
+    border: 1px solid var(--line);
   }
-  #toast.show { opacity: 1; transform: none; }
-  #toast.err { background: var(--danger); }
-  .busy-tag { color: var(--run); font-weight: 700; }
+
+  /* ---------- 控制栏 ---------- */
+  .controls { display: grid; grid-template-columns: 1fr auto; gap: 12px 24px; padding: 14px 16px; align-items: end; }
+  .field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+  .field > .lbl { font-size: 12px; color: var(--text-2); font-weight: 600; }
+  .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .input-icon { position: relative; }
+  .input-icon svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--muted); }
+  .input-icon input[type=text] { padding-left: 34px; width: 100%; }
+  .run-zone { display: flex; align-items: flex-end; gap: 10px; }
+  .run-zone .field select { width: 96px; }
+
+  /* ---------- 表单控件 ---------- */
+  input[type=text], input[type=password], input[type=number], select, textarea {
+    font: inherit; color: inherit; height: 36px; padding: 0 10px;
+    border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--surface);
+    transition: border-color .15s, box-shadow .15s;
+  }
+  textarea { height: auto; min-height: 84px; padding: 8px 10px; resize: vertical; width: 100%;
+             font-family: var(--mono); font-size: 13px; line-height: 1.55; }
+  select { padding-right: 28px; appearance: none; cursor: pointer;
+    background: var(--surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238a909c' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 10px center; }
+  input:hover:not(:disabled), select:hover:not(:disabled), textarea:hover:not(:disabled) { border-color: #b4bcc8; }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-ring); }
+  input:disabled, select:disabled, textarea:disabled { background: var(--surface-2); color: var(--muted); cursor: not-allowed; }
+  ::placeholder { color: #a8aeb8; }
+  .grow { flex: 1; min-width: 180px; }
+
+  /* ---------- 按钮 ---------- */
+  .btn {
+    font: inherit; height: 36px; padding: 0 14px; border-radius: var(--radius-sm); cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    border: 1px solid var(--line-strong); background: var(--surface); color: var(--text);
+    white-space: nowrap; transition: background .15s, border-color .15s, color .15s, box-shadow .15s;
+  }
+  .btn:hover:not(:disabled) { background: var(--surface-2); border-color: #b4bcc8; }
+  .btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--brand-ring); }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .btn.sm { height: 30px; padding: 0 10px; font-size: 13px; }
+  .btn.lg { height: 40px; padding: 0 20px; font-size: 15px; font-weight: 700; }
+  .btn.primary { background: var(--brand); border-color: var(--brand); color: #fff; }
+  .btn.primary:hover:not(:disabled) { background: var(--brand-hover); border-color: var(--brand-hover); }
+  .btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+  .btn.danger:hover:not(:disabled) { filter: brightness(.92); }
+  .btn.danger-ghost { color: var(--danger); border-color: #f1c0bc; }
+  .btn.danger-ghost:hover:not(:disabled) { background: var(--danger-soft); border-color: var(--danger); }
+  .btn.ghost { border-color: transparent; background: transparent; color: var(--text-2); }
+  .btn.ghost:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
+  .btn-group { display: inline-flex; }
+  .btn-group .btn { border-radius: 0; margin-left: -1px; }
+  .btn-group .btn:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); margin-left: 0; }
+  .btn-group .btn:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+  .spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid rgba(255,255,255,.45);
+          border-top-color: #fff; animation: rot .8s linear infinite; }
+  @keyframes rot { to { transform: rotate(360deg); } }
+
+  /* ---------- 主区 ---------- */
+  main { display: grid; grid-template-columns: minmax(440px, 5fr) minmax(500px, 6fr); gap: 16px; align-items: start; }
+  @media (max-width: 1100px) { main { grid-template-columns: 1fr; } .controls { grid-template-columns: 1fr; } }
+  .toolbar { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+
+  /* ---------- 表格 ---------- */
+  .tablewrap { max-height: 300px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+  table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
+  th, td { text-align: left; padding: 0 12px; height: 38px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { background: var(--surface-2); color: var(--text-2); font-weight: 600; font-size: 12px;
+       position: sticky; top: 0; z-index: 1; height: 34px; }
+  tbody tr:last-child td { border-bottom: 0; }
+  tbody tr { cursor: pointer; transition: background .1s; }
+  tbody tr:hover { background: #f8fafc; }
+  tbody tr.sel { background: var(--brand-soft); }
+  tbody tr.sel td:first-child { box-shadow: inset 3px 0 0 var(--brand); }
+  td.num { color: var(--muted); width: 36px; font-variant-numeric: tabular-nums; }
+  td.mono { font-family: var(--mono); font-size: 12.5px; }
+  td.ellip { max-width: 0; overflow: hidden; text-overflow: ellipsis; width: 100%; }
+  td.empty { text-align: center; color: var(--muted); height: 92px; cursor: default; white-space: normal; }
+  tr.empty-row:hover { background: none; }
+  .pw { letter-spacing: 2px; color: var(--muted); }
+
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px; padding: 0 9px; height: 22px;
+    border-radius: 999px; font-size: 12px; font-weight: 600; max-width: 220px;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  .pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
+  .s-ok   { color: var(--ok); background: var(--ok-soft); }
+  .s-fail { color: var(--danger); background: var(--danger-soft); }
+  .s-wait { color: var(--warn); background: var(--warn-soft); }
+  .s-run  { color: var(--run); background: var(--run-soft); }
+  .s-run::before { animation: pulse 1.2s ease-in-out infinite; }
+  .s-none { color: var(--muted); background: none; font-weight: 400; padding: 0; }
+  .s-none::before { display: none; }
+
+  .type-tag { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600;
+              padding: 0 8px; height: 22px; border-radius: 5px; }
+  .t-0 { color: #6b3fd4; background: #f1ecfd; }
+  .t-1 { color: #0b7a75; background: #e3f5f4; }
+  .t-2 { color: #a45a00; background: #fdf1e2; }
+  .incomplete { color: var(--warn); font-weight: 600; display: inline-flex; align-items: center; gap: 4px; }
+
+  /* ---------- 执行概览 ---------- */
+  .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 12px; }
+  .stat { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; background: var(--surface-2); }
+  .stat .k { font-size: 12px; color: var(--text-2); display: flex; align-items: center; gap: 6px; }
+  .stat .k::before { content: ""; width: 8px; height: 8px; border-radius: 2px; background: var(--c, var(--muted)); }
+  .stat .v { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.3; }
+  .progress { height: 6px; border-radius: 999px; background: var(--surface-2); overflow: hidden;
+              display: flex; margin: -2px 0 12px; border: 1px solid var(--line); }
+  .progress > span { height: 100%; transition: width .3s ease; }
+
+  /* ---------- 日志 ---------- */
+  .log-head { display: flex; align-items: center; gap: 8px; margin: 16px 0 8px; }
+  .log-head .t { font-weight: 700; }
+  .log-head .sub { color: var(--muted); font-size: 12px; font-family: var(--mono); }
+  .log {
+    font-family: var(--mono); font-size: 12.5px; line-height: 1.6;
+    white-space: pre-wrap; word-break: break-all; color: var(--term-fg);
+    background: var(--term-bg); border-radius: 8px; padding: 12px 14px;
+    height: 240px; overflow: auto; margin: 0;
+  }
+  .log.placeholder { color: #7d8696; }
+  .log .l-err { color: #ff8a80; }
+  .log .l-ok { color: #8be2a8; }
+
+  /* ---------- 操作编辑器 ---------- */
+  .editor { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 14px; }
+  .editor-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .editor-head .t { font-weight: 700; }
+  .seg { display: inline-flex; padding: 3px; gap: 3px; border-radius: 8px; background: var(--surface-2); border: 1px solid var(--line); }
+  .seg button {
+    font: inherit; font-size: 13px; height: 30px; padding: 0 14px; border: 0; border-radius: 6px;
+    background: transparent; color: var(--text-2); cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+  }
+  .seg button:hover:not(:disabled) { color: var(--text); }
+  .seg button.on { background: var(--surface); color: var(--brand); font-weight: 700; box-shadow: var(--shadow); }
+  .seg button:disabled { cursor: not-allowed; opacity: .6; }
+  .form { display: grid; grid-template-columns: 112px 1fr; gap: 10px 12px; align-items: center; margin: 14px 0 6px; }
+  .form > label { color: var(--text-2); font-weight: 600; text-align: right; font-size: 13px; }
+  .form > label.top { align-self: start; padding-top: 8px; }
+  .form input, .form select { width: 100%; }
+  .hint { color: var(--muted); font-size: 12px; }
+  .callout { display: flex; gap: 8px; align-items: flex-start; color: var(--text-2); font-size: 12px;
+             background: var(--surface-2); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; margin-left: 124px; }
+  .callout svg { color: var(--muted); margin-top: 1px; width: 14px; height: 14px; }
+  .editor-foot { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 6px;
+    font-size: 13px; font-weight: 600; max-width: 100%;
+  }
+  .badge.ok { color: var(--ok); background: var(--ok-soft); }
+  .badge.warn { color: var(--warn); background: var(--warn-soft); }
+  .badge.none { color: var(--muted); background: var(--surface-2); }
+
+  /* ---------- 状态栏 ---------- */
+  footer {
+    display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 20px;
+    border-top: 1px solid var(--line); background: var(--surface); color: var(--text-2); font-size: 12px;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+  .dot.ok { background: var(--ok); } .dot.bad { background: var(--danger); } .dot.run { background: var(--run); animation: pulse 1.2s infinite; }
+
+  /* ---------- 弹窗 / 提示 ---------- */
+  .modal-mask {
+    position: fixed; inset: 0; background: rgba(17, 24, 39, .45); z-index: 60;
+    display: none; align-items: center; justify-content: center; padding: 20px;
+    animation: fade .15s ease;
+  }
+  .modal-mask.show { display: flex; }
+  @keyframes fade { from { opacity: 0; } }
+  .modal {
+    background: var(--surface); border-radius: 12px; box-shadow: var(--shadow-lg);
+    width: 100%; max-width: 440px; max-height: calc(100vh - 40px); display: flex; flex-direction: column;
+    animation: pop .16s ease;
+  }
+  .modal.wide { max-width: 640px; }
+  @keyframes pop { from { transform: translateY(8px) scale(.98); opacity: 0; } }
+  .modal-head { display: flex; align-items: center; gap: 10px; padding: 16px 20px 0; }
+  .modal-head h3 { margin: 0; font-size: 16px; }
+  .modal-head .ico { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; flex: none; }
+  .modal-head .ico.danger { background: var(--danger-soft); color: var(--danger); }
+  .modal-head .ico.brand { background: var(--brand-soft); color: var(--brand); }
+  .modal-body { padding: 14px 20px 4px; overflow: auto; color: var(--text-2); }
+  .modal-body .form { grid-template-columns: 84px 1fr; margin: 4px 0; }
+  .modal-body .err { color: var(--danger); font-size: 12px; min-height: 18px; margin: 6px 0 0 96px; }
+  .modal-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 20px 18px; }
+  .help h4 { margin: 14px 0 4px; color: var(--text); font-size: 14px; }
+  .help h4:first-child { margin-top: 0; }
+  .help p, .help li { margin: 2px 0; font-size: 13px; }
+  .help ul { margin: 2px 0; padding-left: 20px; }
+  .help code { font-family: var(--mono); background: var(--surface-2); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+  .help .warnbox { margin-top: 14px; padding: 8px 10px; border-radius: 6px; background: var(--warn-soft); color: var(--warn); font-size: 12px; }
+
+  #toasts { position: fixed; right: 20px; bottom: 50px; display: flex; flex-direction: column; gap: 8px; z-index: 70; }
+  .toast {
+    display: flex; align-items: flex-start; gap: 8px; max-width: 440px;
+    background: #1f2329; color: #fff; padding: 10px 14px; border-radius: 8px; box-shadow: var(--shadow-lg);
+    white-space: pre-wrap; font-size: 13px; animation: slide .18s ease;
+  }
+  .toast.err { background: var(--danger); }
+  .toast.ok svg { color: #8be2a8; }
+  .toast.out { opacity: 0; transform: translateY(6px); transition: .2s; }
+  @keyframes slide { from { opacity: 0; transform: translateY(8px); } }
 </style>
 </head>
 <body>
 
-<header>
-  <div>
-    <div class="title">批量部署工具</div>
-    <div class="ver">V<span id="ver">-</span> · Web 模式</div>
-  </div>
+<!-- 图标集：内联 SVG，单二进制交付下不依赖任何外部资源 -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5z" fill="currentColor"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></symbol>
+  <symbol id="i-import" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></symbol>
+  <symbol id="i-export" viewBox="0 0 24 24"><path d="M12 15V3M7 8l5-5 5 5M5 21h14"/></symbol>
+  <symbol id="i-load" viewBox="0 0 24 24"><path d="M4 4h16v6H4zM4 14h16v6H4z"/><path d="M8 7h.01M8 17h.01"/></symbol>
+  <symbol id="i-term" viewBox="0 0 24 24"><path d="m5 8 4 4-4 4M12 16h7"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V6M6 12l6-6 6 6"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 5v13M6 12l6 6 6-6"/></symbol>
+  <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14M12 17h.01"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 5 5 9-10"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3 2 20h20Z"/><path d="M12 10v4M12 17h.01"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></symbol>
+  <symbol id="i-server" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/><path d="M7 7.5h.01M7 16.5h.01"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/></symbol>
+  <symbol id="i-ext" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></symbol>
+</svg>
+
+<header class="appbar">
+  <img src="/logo.png" alt="SOPHGO">
+  <div class="divider"></div>
+  <span class="title">批量部署工具</span>
+  <span class="chip">V<span id="ver">-</span></span>
+  <span class="chip brand">Web 模式</span>
+  <span class="chip live" id="liveChip" hidden>执行中</span>
   <div class="spacer"></div>
-  <a href="https://sophon.cn" target="_blank" rel="noopener">https://sophon.cn</a>
-  <button onclick="showHelp()">帮助</button>
+  <a class="btn ghost sm" href="https://sophon.cn" target="_blank" rel="noopener">
+    sophon.cn <svg class="i" style="width:13px;height:13px"><use href="#i-ext"/></svg></a>
+  <button class="btn sm" onclick="showHelp()"><svg class="i"><use href="#i-help"/></svg>帮助</button>
 </header>
 
-<div class="bar">
-  <label>文件操作根目录</label>
-  <input type="text" id="root" class="grow" placeholder="上传/下载的相对路径基准目录">
-  <span class="hint">服务器上的绝对路径</span>
+<div class="page">
+  <!-- 全局配置与执行控制 -->
+  <div class="card controls">
+    <div class="field" style="grid-column: 1 / -1">
+      <span class="lbl">文件操作根目录（服务器上的绝对路径，上传/下载的相对路径以此为准）</span>
+      <div class="input-icon">
+        <svg class="i"><use href="#i-folder"/></svg>
+        <input type="text" id="root" placeholder="例如 /home/linaro/deploy">
+      </div>
+    </div>
+    <div class="field">
+      <span class="lbl">配置</span>
+      <div class="row">
+        <select id="preset" style="min-width:200px" title="内置预设"></select>
+        <button class="btn" onclick="loadPreset()"><svg class="i"><use href="#i-load"/></svg>载入预设</button>
+        <span class="btn-group">
+          <button class="btn" onclick="document.getElementById('file').click()"><svg class="i"><use href="#i-import"/></svg>导入</button>
+          <button class="btn" onclick="exportConfig()"><svg class="i"><use href="#i-export"/></svg>导出</button>
+        </span>
+        <input type="file" id="file" accept=".json,application/json" hidden onchange="importConfig(this)">
+      </div>
+    </div>
+    <div class="run-zone">
+      <div class="field">
+        <span class="lbl">并行上限</span>
+        <select id="maxpar">
+          <option>200</option><option selected>100</option><option>50</option><option>20</option><option>2</option>
+        </select>
+      </div>
+      <button class="btn danger-ghost lg" id="cancelBtn" onclick="cancelBatch()" disabled>
+        <svg class="i"><use href="#i-stop"/></svg>中止</button>
+      <button class="btn primary lg" id="runBtn" onclick="runBatch()">
+        <svg class="i"><use href="#i-play"/></svg><span>执行配置</span></button>
+    </div>
+  </div>
+
+  <main>
+    <!-- 设备 -->
+    <section class="card">
+      <div class="card-head">
+        <svg class="i" style="color:var(--brand)"><use href="#i-server"/></svg>
+        <h2>远程设备</h2>
+        <span class="count" id="devCount">0</span>
+        <div class="toolbar">
+          <button class="btn sm" onclick="addDevice()"><svg class="i"><use href="#i-plus"/></svg>新增</button>
+          <button class="btn sm" onclick="cloneSel('device')"><svg class="i"><use href="#i-copy"/></svg>克隆</button>
+          <button class="btn sm" onclick="editSel('device')"><svg class="i"><use href="#i-edit"/></svg>编辑</button>
+          <button class="btn sm danger-ghost" onclick="removeSel('device')"><svg class="i"><use href="#i-trash"/></svg>删除</button>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="summary">
+          <div class="stat" style="--c:var(--line-strong)"><div class="k">设备总数</div><div class="v" id="stTotal">0</div></div>
+          <div class="stat" style="--c:var(--ok)"><div class="k">成功</div><div class="v" id="stOk" style="color:var(--ok)">0</div></div>
+          <div class="stat" style="--c:var(--danger)"><div class="k">失败</div><div class="v" id="stFail" style="color:var(--danger)">0</div></div>
+          <div class="stat" style="--c:var(--run)"><div class="k">进行中 / 等待</div><div class="v" id="stRun" style="color:var(--run)">0</div></div>
+        </div>
+        <div class="progress" id="progress" title="执行进度">
+          <span id="pgOk" style="background:var(--ok);width:0"></span>
+          <span id="pgFail" style="background:var(--danger);width:0"></span>
+        </div>
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>#</th><th>IPv4 地址</th><th>SSH 端口</th><th>用户名</th><th>密码</th><th>执行状态</th></tr></thead>
+            <tbody id="devBody"></tbody>
+          </table>
+        </div>
+        <div class="log-head">
+          <svg class="i" style="color:var(--text-2)"><use href="#i-term"/></svg>
+          <span class="t">执行日志</span>
+          <span class="sub" id="devLabel">未选中设备</span>
+          <span class="hint" id="devProg"></span>
+          <div class="spacer"></div>
+          <button class="btn ghost sm" onclick="copyLog()"><svg class="i"><use href="#i-copy"/></svg>复制</button>
+        </div>
+        <pre class="log placeholder" id="devLog">在上方表格中选中一台设备，查看其执行日志</pre>
+      </div>
+    </section>
+
+    <!-- 操作 -->
+    <section class="card">
+      <div class="card-head">
+        <svg class="i" style="color:var(--brand)"><use href="#i-list"/></svg>
+        <h2>操作序列</h2>
+        <span class="count" id="opCount">0</span>
+        <span class="hint">按顺序在每台设备上执行</span>
+        <div class="toolbar">
+          <button class="btn sm" onclick="addOp()"><svg class="i"><use href="#i-plus"/></svg>新增</button>
+          <button class="btn sm" onclick="cloneSel('op')"><svg class="i"><use href="#i-copy"/></svg>克隆</button>
+          <button class="btn sm danger-ghost" onclick="removeSel('op')"><svg class="i"><use href="#i-trash"/></svg>删除</button>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="tablewrap" style="max-height:220px">
+          <table>
+            <thead><tr><th>#</th><th>操作名称</th><th>类型</th><th style="width:100%">内容</th></tr></thead>
+            <tbody id="opBody"></tbody>
+          </table>
+        </div>
+
+        <div class="editor">
+          <div class="editor-head">
+            <span class="t">编辑操作</span>
+            <span class="hint">改动即时生效</span>
+          </div>
+          <div class="form" style="margin-top:0">
+            <label for="opName">操作名称</label>
+            <input type="text" id="opName" oninput="onEdit()" placeholder="例如 检查系统时间">
+            <label>操作类型</label>
+            <div><div class="seg" id="tabs">
+              <button data-tab="0" onclick="switchTab(0)"><svg class="i"><use href="#i-term"/></svg>命令下发</button>
+              <button data-tab="1" onclick="switchTab(1)"><svg class="i"><use href="#i-up"/></svg>文件上传</button>
+              <button data-tab="2" onclick="switchTab(2)"><svg class="i"><use href="#i-down"/></svg>文件下载</button>
+            </div></div>
+          </div>
+
+          <div class="tabpane" data-pane="0">
+            <div class="form">
+              <label class="top" for="cmdStr">命令</label>
+              <textarea id="cmdStr" oninput="onEdit()" placeholder="需要在设备上执行的 shell 命令" spellcheck="false"></textarea>
+              <label for="cmdOK">成功关键字</label>
+              <input type="text" id="cmdOK" oninput="onEdit()" placeholder="输出中必须包含，为空不检查">
+              <label for="cmdErr">失败关键字</label>
+              <input type="text" id="cmdErr" oninput="onEdit()" placeholder="输出中一旦出现即判失败，为空不检查">
+            </div>
+            <div class="callout"><svg class="i"><use href="#i-info"/></svg>
+              <span>两种情况判失败：输出命中失败关键字；配置了成功关键字但输出里没有。</span></div>
+          </div>
+
+          <div class="tabpane" data-pane="1" hidden>
+            <div class="form">
+              <label for="upLocal">本地文件</label>
+              <input type="text" id="upLocal" oninput="onEdit()" placeholder="相对根目录，或绝对路径">
+              <label for="upRemote">远程目标路径</label>
+              <input type="text" id="upRemote" oninput="onEdit()" placeholder="例如 /tmp/a.bin（以 / 结尾则拼上原文件名）">
+              <label for="upCheck">校验方式</label>
+              <select id="upCheck" onchange="onEdit()"></select>
+            </div>
+          </div>
+
+          <div class="tabpane" data-pane="2" hidden>
+            <div class="form">
+              <label for="downRemote">远程文件路径</label>
+              <input type="text" id="downRemote" oninput="onEdit()" placeholder="设备上的文件路径">
+              <label for="downDir">本地目录</label>
+              <input type="text" id="downDir" oninput="onEdit()" placeholder="相对根目录，或绝对路径">
+              <label for="downCheck">校验方式</label>
+              <select id="downCheck" onchange="onEdit()"></select>
+            </div>
+            <div class="callout"><svg class="i"><use href="#i-info"/></svg>
+              <span>下载文件名格式：IP_端口_时间戳_原名（重名自动加序号）。</span></div>
+          </div>
+
+          <div class="editor-foot">
+            <span class="badge none" id="opComplete">未选中操作</span>
+            <div class="spacer"></div>
+            <button class="btn sm" id="saveOpBtn" onclick="saveOp()"><svg class="i"><use href="#i-check"/></svg>确认当前操作</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
 </div>
-
-<div class="bar">
-  <label>内置预设</label>
-  <select id="preset"></select>
-  <button onclick="loadPreset()">载入</button>
-  <button onclick="exportConfig()">导出配置</button>
-  <button onclick="document.getElementById('file').click()">导入配置</button>
-  <input type="file" id="file" accept=".json,application/json" style="display:none" onchange="importConfig(this)">
-  <div class="spacer" style="flex:1"></div>
-  <label>并行上限</label>
-  <select id="maxpar">
-    <option>200</option><option selected>100</option><option>50</option><option>20</option><option>2</option>
-  </select>
-  <button class="primary" id="runBtn" onclick="runBatch()">▶ 执行配置</button>
-  <button class="danger" id="cancelBtn" onclick="cancelBatch()" disabled>■ 中止执行</button>
-</div>
-
-<main>
-  <section>
-    <h2>远程设备信息配置</h2>
-    <div class="toolbar">
-      <button class="small" onclick="addDevice()">＋ 新增设备</button>
-      <button class="small" onclick="cloneSel('device')">克隆</button>
-      <button class="small" onclick="editSel('device')">编辑</button>
-      <button class="small warn" onclick="removeSel('device')">删除</button>
-    </div>
-    <div class="tablewrap">
-      <table>
-        <thead><tr><th>IPv4地址</th><th>SSH端口</th><th>用户名</th><th>密码</th><th>执行状态</th></tr></thead>
-        <tbody id="devBody"></tbody>
-      </table>
-    </div>
-    <div style="margin-top:12px; display:flex; align-items:center; gap:8px;">
-      <strong id="devLabel">设备详情（未选中）</strong>
-      <span class="hint" id="devProg"></span>
-    </div>
-    <pre class="log" id="devLog">在左侧选中一台设备查看其执行日志</pre>
-  </section>
-
-  <section>
-    <h2>操作信息配置</h2>
-    <div class="toolbar">
-      <button class="small" onclick="addOp()">＋ 新增操作</button>
-      <button class="small" onclick="cloneSel('op')">克隆</button>
-      <button class="small warn" onclick="removeSel('op')">删除</button>
-    </div>
-    <div class="tablewrap" style="max-height:150px">
-      <table>
-        <thead><tr><th>操作名称</th><th>操作类型</th><th>内容信息</th></tr></thead>
-        <tbody id="opBody"></tbody>
-      </table>
-    </div>
-
-    <div class="form" style="margin-top:12px">
-      <label>操作名称</label>
-      <input type="text" id="opName" oninput="onEdit()" placeholder="例如 检查时间">
-    </div>
-
-    <div class="tabs" id="tabs">
-      <button data-tab="0" onclick="switchTab(0)">命令下发</button>
-      <button data-tab="1" onclick="switchTab(1)">文件上传</button>
-      <button data-tab="2" onclick="switchTab(2)">文件下载</button>
-    </div>
-
-    <div class="tabpane" data-pane="0">
-      <div class="form">
-        <label>命令</label>
-        <textarea id="cmdStr" oninput="onEdit()" placeholder="需要执行的命令"></textarea>
-        <label>执行成功关键字</label>
-        <input type="text" id="cmdOK" oninput="onEdit()" placeholder="判断执行是否成功，为空不检查">
-        <label>执行失败关键字</label>
-        <input type="text" id="cmdErr" oninput="onEdit()" placeholder="判断执行是否失败，为空不检查">
-      </div>
-      <p class="hint">两种情况都判失败：命中失败关键字；配了成功关键字但输出里没有。</p>
-    </div>
-
-    <div class="tabpane" data-pane="1" style="display:none">
-      <div class="form">
-        <label>本地文件</label>
-        <input type="text" id="upLocal" oninput="onEdit()" placeholder="相对根目录，或绝对路径">
-        <label>远程目标路径</label>
-        <input type="text" id="upRemote" oninput="onEdit()" placeholder="例如 /tmp/a.bin（以 / 结尾则拼上原文件名）">
-        <label>校验方式</label>
-        <select id="upCheck" onchange="onEdit()"></select>
-      </div>
-    </div>
-
-    <div class="tabpane" data-pane="2" style="display:none">
-      <div class="form">
-        <label>远程文件路径</label>
-        <input type="text" id="downRemote" oninput="onEdit()" placeholder="设备上的文件路径">
-        <label>本地目录</label>
-        <input type="text" id="downDir" oninput="onEdit()" placeholder="相对根目录，或绝对路径">
-        <label>校验方式</label>
-        <select id="downCheck" onchange="onEdit()"></select>
-      </div>
-      <p class="hint">下载文件名格式：IP_端口_时间戳_原名（重名自动加序号）。</p>
-    </div>
-
-    <div style="margin-top:10px; font-weight:700" id="opComplete">该项当前完整度：未选中</div>
-    <div class="toolbar">
-      <button class="small" onclick="saveOp()">确认当前操作</button>
-    </div>
-  </section>
-</main>
 
 <footer>
+  <span class="dot" id="statusDot"></span>
   <span id="status">就绪</span>
-  <div class="spacer" style="flex:1"></div>
-  <span class="hint" id="conn">未连接事件流</span>
+  <div class="spacer"></div>
+  <span class="dot" id="connDot"></span>
+  <span id="conn">未连接事件流</span>
 </footer>
 
-<div id="toast"></div>
+<!-- 通用弹窗：替代浏览器原生 prompt/confirm/alert -->
+<div class="modal-mask" id="mask">
+  <div class="modal" id="modal" role="dialog" aria-modal="true">
+    <div class="modal-head"><span class="ico" id="mIco"></span><h3 id="mTitle"></h3></div>
+    <div class="modal-body" id="mBody"></div>
+    <div class="modal-foot" id="mFoot"></div>
+  </div>
+</div>
+
+<div id="toasts"></div>
 
 <script>
 "use strict";
 
 const CHECK_OPTIONS = ["MD5校验值", "文件大小校验", "不进行校验"];
+const TYPE_NAMES = ["命令下发", "文件上传", "文件下载"];
+const TYPE_ICONS = ["i-term", "i-up", "i-down"];
 let S = { devices: [], ops: [], running: false, gen: 0, rootDir: "", maxParallel: 100 };
 let selDevice = -1;
 let selOp = -1;
@@ -258,15 +529,23 @@ let curTab = 0;
 let editing = false;     // 正在把状态写进表单，输入回调不应回写
 let evtSrc = null;
 
+const $ = id => document.getElementById(id);
+const icon = (name, style) => '<svg class="i"' + (style ? ' style="' + style + '"' : "") +
+  '><use href="#' + name + '"/></svg>';
+
 // ---------- 基础设施 ----------
 function toast(msg, isErr) {
-  const t = document.getElementById("toast");
-  t.textContent = msg;
-  t.className = "show" + (isErr ? " err" : "");
-  clearTimeout(toast._t);
-  toast._t = setTimeout(() => { t.className = ""; }, isErr ? 6000 : 3000);
+  const t = document.createElement("div");
+  t.className = "toast " + (isErr ? "err" : "ok");
+  t.innerHTML = icon(isErr ? "i-alert" : "i-check") + "<span></span>";
+  t.lastChild.textContent = msg;
+  $("toasts").appendChild(t);
+  setTimeout(() => { t.classList.add("out"); setTimeout(() => t.remove(), 220); }, isErr ? 6000 : 3000);
 }
-function setStatus(s) { document.getElementById("status").textContent = s; }
+function setStatus(s, kind) {
+  $("status").textContent = s;
+  $("statusDot").className = "dot" + (kind ? " " + kind : "");
+}
 
 async function api(path, opts) {
   const r = await fetch(path, Object.assign({headers: {"Content-Type": "application/json"}}, opts || {}));
@@ -282,6 +561,51 @@ function esc(s) {
     {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
 }
 
+// ---------- 弹窗 ----------
+// opts: {title, icon, tone, body(html), wide, buttons:[{text, cls, onClick -> false 表示不关闭}], onOpen}
+let modalKeyHandler = null;
+function openModal(opts) {
+  $("mTitle").textContent = opts.title;
+  const ico = $("mIco");
+  ico.className = "ico " + (opts.tone || "brand");
+  ico.innerHTML = icon(opts.icon || "i-info");
+  $("mBody").innerHTML = opts.body || "";
+  $("modal").classList.toggle("wide", !!opts.wide);
+  const foot = $("mFoot");
+  foot.innerHTML = "";
+  let primary = null;
+  (opts.buttons || [{text: "知道了", cls: "primary"}]).forEach(b => {
+    const el = document.createElement("button");
+    el.className = "btn " + (b.cls || "");
+    el.textContent = b.text;
+    el.onclick = () => { if (!b.onClick || b.onClick() !== false) closeModal(); };
+    foot.appendChild(el);
+    if (b.cls && /primary|danger/.test(b.cls)) primary = el;
+  });
+  $("mask").classList.add("show");
+  modalKeyHandler = e => {
+    if (e.key === "Escape") closeModal();
+    else if (e.key === "Enter" && primary && e.target.tagName !== "TEXTAREA") { e.preventDefault(); primary.click(); }
+  };
+  document.addEventListener("keydown", modalKeyHandler);
+  if (opts.onOpen) opts.onOpen();
+  else if (primary) primary.focus();
+}
+function closeModal() {
+  $("mask").classList.remove("show");
+  if (modalKeyHandler) document.removeEventListener("keydown", modalKeyHandler);
+  modalKeyHandler = null;
+}
+$("mask").addEventListener("mousedown", e => { if (e.target === $("mask")) closeModal(); });
+
+function confirmBox(title, msg, okText, onYes) {
+  openModal({
+    title: title, icon: "i-alert", tone: "danger",
+    body: "<p style='margin:0;white-space:pre-wrap'>" + esc(msg) + "</p>",
+    buttons: [{text: "取消"}, {text: okText || "确认", cls: "danger", onClick: onYes}]
+  });
+}
+
 // 状态 → 语义 class（与桌面版配色一致）
 function statusClass(st) {
   if (!st) return "s-none";
@@ -291,7 +615,7 @@ function statusClass(st) {
   return "s-run";
 }
 function statusText(st) {
-  if (!st) return "—";
+  if (!st) return "未执行";
   for (const p of ["成功", "失败", "等待中"]) if (st.startsWith(p)) return p;
   return st;
 }
@@ -299,9 +623,9 @@ function statusText(st) {
 // ---------- 渲染 ----------
 function applyState(s) {
   S = s;
-  document.getElementById("ver").textContent = s.version || "-";
-  document.getElementById("root").value = s.rootDir || "";
-  document.getElementById("maxpar").value = String(s.maxParallel || 100);
+  $("ver").textContent = s.version || "-";
+  $("root").value = s.rootDir || "";
+  $("maxpar").value = String(s.maxParallel || 100);
   fillPresets(s.presets || []);
   setRunning(s.running);
   renderDevices();
@@ -312,7 +636,7 @@ function applyState(s) {
 }
 
 function fillPresets(list) {
-  const sel = document.getElementById("preset");
+  const sel = $("preset");
   const cur = sel.value;
   sel.innerHTML = "";
   for (const n of list) {
@@ -325,71 +649,137 @@ function fillPresets(list) {
 
 function setRunning(running) {
   S.running = running;
-  document.getElementById("runBtn").disabled = running;
-  document.getElementById("cancelBtn").disabled = !running;
+  $("runBtn").disabled = running;
+  $("cancelBtn").disabled = !running;
+  $("runBtn").innerHTML = running
+    ? '<span class="spin"></span><span>执行中…</span>'
+    : icon("i-play") + "<span>执行配置</span>";
+  $("liveChip").hidden = !running;
   // 执行期间锁定所有会改配置的入口（与桌面版一致）
   for (const el of document.querySelectorAll(
-      "#root,#preset,#maxpar,#devBody button,#opBody button,.toolbar button," +
-      ".bar button,.form input,.form textarea,.form select,.tabs button,#opName,#file")) {
-    if (el.id === "runBtn" || el.id === "cancelBtn") continue;
+      "#root,#preset,#maxpar,.toolbar button,.controls .row button," +
+      ".form input,.form textarea,.form select,#tabs button,#saveOpBtn,#file")) {
     el.disabled = running;
   }
 }
 
+function renderSummary() {
+  let ok = 0, fail = 0, run = 0;
+  for (const d of S.devices) {
+    const c = statusClass(d.status);
+    if (c === "s-ok") ok++;
+    else if (c === "s-fail") fail++;
+    else if (c === "s-run" || c === "s-wait") run++;
+  }
+  const n = S.devices.length;
+  $("stTotal").textContent = n;
+  $("stOk").textContent = ok;
+  $("stFail").textContent = fail;
+  $("stRun").textContent = run;
+  $("devCount").textContent = n;
+  $("pgOk").style.width = n ? (ok * 100 / n) + "%" : "0";
+  $("pgFail").style.width = n ? (fail * 100 / n) + "%" : "0";
+}
+
 function renderDevices() {
-  const tb = document.getElementById("devBody");
+  const tb = $("devBody");
   tb.innerHTML = "";
   S.devices.forEach((d, i) => {
     const tr = document.createElement("tr");
     if (i === selDevice) tr.className = "sel";
     tr.onclick = () => selectDevice(i);
+    tr.ondblclick = () => { selectDevice(i); if (!S.running) editSel("device"); };
     tr.innerHTML =
-      "<td>" + esc(d.IP) + "</td>" +
-      "<td>" + esc(d.Port) + "</td>" +
+      '<td class="num">' + (i + 1) + "</td>" +
+      '<td class="mono">' + esc(d.IP) + "</td>" +
+      '<td class="mono">' + esc(d.Port) + "</td>" +
       "<td>" + esc(d.Username) + "</td>" +
-      "<td>" + esc("•".repeat((d.Password || "").length)) + "</td>" +
-      '<td class="status ' + statusClass(d.status) + '">' +
-        esc(statusText(d.status)) + "</td>";
+      '<td class="pw">' + esc("•".repeat(Math.min((d.Password || "").length, 10)) || "—") + "</td>" +
+      '<td><span class="pill ' + statusClass(d.status) + '" title="' + esc(d.status || "") + '">' +
+        esc(statusText(d.status)) + "</span></td>";
     tb.appendChild(tr);
   });
   if (!S.devices.length) {
-    tb.innerHTML = '<tr><td colspan="5" class="hint">还没有设备，点「新增设备」</td></tr>';
+    tb.innerHTML = '<tr class="empty-row"><td colspan="6" class="empty">还没有设备<br>' +
+      '<span class="hint">点右上角「新增」添加一台，或载入/导入配置</span></td></tr>';
   }
+  renderSummary();
 }
 
 function renderOps() {
-  const tb = document.getElementById("opBody");
+  const tb = $("opBody");
   tb.innerHTML = "";
   S.ops.forEach((o, i) => {
     const tr = document.createElement("tr");
     if (i === selOp) tr.className = "sel";
     tr.onclick = () => selectOp(i);
     const name = o.complete ? esc(o.name)
-      : '<span class="incomplete">⚠ ' + esc(o.name) + "（不完整）</span>";
-    const info = !o.complete ? '<span class="hint">该项配置不完整，将不会执行</span>'
+      : '<span class="incomplete" title="不完整的操作不会被执行">' + icon("i-alert", "width:13px;height:13px") +
+        esc(o.name || "（未命名）") + "</span>";
+    const info = !o.complete ? '<span class="hint">配置不完整，执行时将跳过</span>'
       : esc(o.type === 0 ? o.commandStr
-          : (o.transferFileSourcePath + " → " + o.transferFileDestinationPath));
-    tr.innerHTML = "<td>" + name + "</td><td>" + esc(o.typeName) + "</td><td>" + info + "</td>";
+          : (o.transferFileSourcePath + "  →  " + o.transferFileDestinationPath));
+    const t = (o.type >= 0 && o.type <= 2) ? o.type : 0;
+    tr.innerHTML = '<td class="num">' + (i + 1) + "</td><td>" + name + "</td>" +
+      '<td><span class="type-tag t-' + t + '">' + icon(TYPE_ICONS[t], "width:12px;height:12px") +
+      esc(o.typeName || TYPE_NAMES[t]) + "</span></td>" +
+      '<td class="ellip ' + (o.complete ? "mono" : "") + '" title="' + esc(o.complete ? stripTags(info) : "") + '">' + info + "</td>";
     tb.appendChild(tr);
   });
   if (!S.ops.length) {
-    tb.innerHTML = '<tr><td colspan="3" class="hint">还没有操作，点「新增操作」</td></tr>';
+    tb.innerHTML = '<tr class="empty-row"><td colspan="4" class="empty">还没有操作<br>' +
+      '<span class="hint">点右上角「新增」添加一条命令或文件传输</span></td></tr>';
   }
+  $("opCount").textContent = S.ops.length;
 }
+function stripTags(s) { const d = document.createElement("div"); d.innerHTML = s; return d.textContent; }
 
 function renderDeviceLog() {
-  const label = document.getElementById("devLabel");
-  const pane = document.getElementById("devLog");
+  const label = $("devLabel");
+  const pane = $("devLog");
   if (selDevice < 0 || selDevice >= S.devices.length) {
-    label.textContent = "设备详情（未选中）";
-    pane.textContent = "在左侧选中一台设备查看其执行日志";
+    label.textContent = "未选中设备";
+    pane.className = "log placeholder";
+    pane.textContent = "在上方表格中选中一台设备，查看其执行日志";
     return;
   }
   const d = S.devices[selDevice];
-  label.textContent = "设备" + (selDevice + 1) + "  " + d.IP + ":" + d.Port;
+  label.textContent = "#" + (selDevice + 1) + "  " + d.IP + ":" + d.Port;
   api("/api/log?index=" + selDevice)
-    .then(r => { pane.textContent = r.log || "（暂无日志）"; pane.scrollTop = pane.scrollHeight; })
+    .then(r => {
+      const text = r.log || "";
+      pane.className = "log" + (text ? "" : " placeholder");
+      if (!text) { pane.textContent = "（暂无日志）"; return; }
+      // 按行着色：失败/错误红色，成功绿色；内容一律转义。
+      pane.innerHTML = text.split("\n").map(line => {
+        const e = esc(line);
+        if (/失败|错误|error|fail/i.test(line)) return '<span class="l-err">' + e + "</span>";
+        if (/成功|OK\b|完成/.test(line)) return '<span class="l-ok">' + e + "</span>";
+        return e;
+      }).join("\n");
+      pane.scrollTop = pane.scrollHeight;
+    })
     .catch(() => {});
+}
+
+function copyLog() {
+  const pane = $("devLog");
+  if (pane.classList.contains("placeholder")) return toast("没有可复制的日志", true);
+  const text = pane.textContent;
+  const done = () => toast("日志已复制");
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
+  } else {
+    fallbackCopy(text, done);
+  }
+}
+// 非 https / 非 localhost 下 Clipboard API 不可用，退回 execCommand。
+function fallbackCopy(text, done) {
+  const ta = document.createElement("textarea");
+  ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand("copy"); done(); } catch (e) { toast("复制失败，请手动选择日志文本", true); }
+  ta.remove();
 }
 
 function selectDevice(i) {
@@ -403,7 +793,7 @@ function switchTab(tab) {
   if (editing) return;
   curTab = tab;
   if (selOp >= 0) {
-    // 切换标签页即切换操作类型（桌面版同样是双向同步）
+    // 切换操作类型（与桌面版一致：类型与表单页是同一个选择）
     S.ops[selOp].type = tab;
     onEdit();
     renderOps();
@@ -416,7 +806,7 @@ function paintTab() {
     b.classList.toggle("on", Number(b.dataset.tab) === curTab);
   }
   for (const p of document.querySelectorAll(".tabpane")) {
-    p.style.display = Number(p.dataset.pane) === curTab ? "" : "none";
+    p.hidden = Number(p.dataset.pane) !== curTab;
   }
 }
 
@@ -429,20 +819,20 @@ function selectOp(i) {
 function loadOpIntoForm(i) {
   if (i < 0 || i >= S.ops.length) {
     selOp = -1;
-    document.getElementById("opComplete").textContent = "该项当前完整度：未选中";
+    updateCompleteLabel();
     return;
   }
   const o = S.ops[i];
   editing = true;
   curTab = o.type;
-  document.getElementById("opName").value = o.name || "";
-  document.getElementById("cmdStr").value = o.commandStr || "";
-  document.getElementById("cmdOK").value = o.checkSuccessStr || "";
-  document.getElementById("cmdErr").value = o.checkErrorStr || "";
-  document.getElementById("upLocal").value = o.transferFileSourcePath || "";
-  document.getElementById("upRemote").value = o.transferFileDestinationPath || "";
-  document.getElementById("downRemote").value = o.transferFileSourcePath || "";
-  document.getElementById("downDir").value = o.transferFileDestinationPath || "";
+  $("opName").value = o.name || "";
+  $("cmdStr").value = o.commandStr || "";
+  $("cmdOK").value = o.checkSuccessStr || "";
+  $("cmdErr").value = o.checkErrorStr || "";
+  $("upLocal").value = o.transferFileSourcePath || "";
+  $("upRemote").value = o.transferFileDestinationPath || "";
+  $("downRemote").value = o.transferFileSourcePath || "";
+  $("downDir").value = o.transferFileDestinationPath || "";
   fillCheckSelects(o.checkFile);
   paintTab();
   updateCompleteLabel();
@@ -451,7 +841,7 @@ function loadOpIntoForm(i) {
 
 function fillCheckSelects(sel) {
   for (const id of ["upCheck", "downCheck"]) {
-    const el = document.getElementById(id);
+    const el = $(id);
     el.innerHTML = "";
     CHECK_OPTIONS.forEach((name, v) => {
       const o = document.createElement("option");
@@ -464,20 +854,20 @@ function fillCheckSelects(sel) {
 
 function readForm() {
   const o = {type: curTab};
-  o.name = document.getElementById("opName").value;
+  o.name = $("opName").value;
   if (curTab === 0) {
-    o.commandStr = document.getElementById("cmdStr").value;
-    o.checkSuccessStr = document.getElementById("cmdOK").value;
-    o.checkErrorStr = document.getElementById("cmdErr").value;
+    o.commandStr = $("cmdStr").value;
+    o.checkSuccessStr = $("cmdOK").value;
+    o.checkErrorStr = $("cmdErr").value;
     o.checkFile = 0;
   } else if (curTab === 1) {
-    o.transferFileSourcePath = document.getElementById("upLocal").value;
-    o.transferFileDestinationPath = document.getElementById("upRemote").value;
-    o.checkFile = Number(document.getElementById("upCheck").value);
+    o.transferFileSourcePath = $("upLocal").value;
+    o.transferFileDestinationPath = $("upRemote").value;
+    o.checkFile = Number($("upCheck").value);
   } else {
-    o.transferFileSourcePath = document.getElementById("downRemote").value;
-    o.transferFileDestinationPath = document.getElementById("downDir").value;
-    o.checkFile = Number(document.getElementById("downCheck").value);
+    o.transferFileSourcePath = $("downRemote").value;
+    o.transferFileDestinationPath = $("downDir").value;
+    o.checkFile = Number($("downCheck").value);
   }
   return o;
 }
@@ -512,29 +902,29 @@ function syncOp() {
 }
 
 function updateCompleteLabel() {
-  const el = document.getElementById("opComplete");
+  const el = $("opComplete");
   if (selOp < 0 || selOp >= S.ops.length) {
-    el.textContent = "该项当前完整度：未选中";
+    el.className = "badge none";
+    el.textContent = "未选中操作";
     return;
   }
   const o = Object.assign({}, S.ops[selOp], readForm());
   const reason = completeReason(o);
-  el.textContent = reason
-    ? "该项当前完整度：不完整（不会被执行）— " + reason
-    : "该项当前完整度：完整 ✓";
-  el.style.color = reason ? "var(--warn)" : "var(--ok)";
+  el.className = "badge " + (reason ? "warn" : "ok");
+  el.innerHTML = icon(reason ? "i-alert" : "i-check", "width:14px;height:14px") + "<span></span>";
+  el.lastChild.textContent = reason ? "不完整，执行时将跳过：" + reason : "配置完整，可以执行";
 }
 
 // 与后端 OperationInf.Validate 同一套规则
 function completeReason(o) {
   if (!(o.name || "").trim()) return "操作名称为空";
   if (o.type === 0) {
-    if (!(o.commandStr || "").trim()) return '操作 "' + o.name + '"：命令为空';
+    if (!(o.commandStr || "").trim()) return "命令为空";
   } else if (o.type === 1 || o.type === 2) {
-    if (!(o.transferFileSourcePath || "").trim()) return '操作 "' + o.name + '"：源路径为空';
-    if (!(o.transferFileDestinationPath || "").trim()) return '操作 "' + o.name + '"：目标路径为空';
+    if (!(o.transferFileSourcePath || "").trim()) return "源路径为空";
+    if (!(o.transferFileDestinationPath || "").trim()) return "目标路径为空";
   } else {
-    return '操作 "' + o.name + '"：未知类型 ' + o.type;
+    return "未知类型 " + o.type;
   }
   return "";
 }
@@ -544,44 +934,60 @@ function addDevice() {
   api("/api/device", {method: "POST", body: JSON.stringify({
     action: "add",
     device: {IP: "192.168.1.1", Port: 22, Username: "linaro", Password: ""}
-  })}).then(s => { applyState(s); selDevice = S.devices.length - 1; renderDevices(); renderDeviceLog(); })
+  })}).then(s => { applyState(s); selDevice = S.devices.length - 1; renderDevices(); renderDeviceLog(); editSel("device", true); })
      .catch(e => toast(e.message, true));
 }
 
-function editSel(kind) {
-  if (kind === "device") {
-    if (selDevice < 0) return toast("请先选中一台设备", true);
-    const d = S.devices[selDevice];
-    const ip = prompt("IPv4 地址", d.IP); if (ip === null) return;
-    const port = prompt("SSH 端口", d.Port); if (port === null) return;
-    const user = prompt("用户名", d.Username); if (user === null) return;
-    const pass = prompt("密码", d.Password); if (pass === null) return;
-    api("/api/device", {method: "POST", body: JSON.stringify({
-      action: "update", index: selDevice,
-      device: {IP: ip.trim(), Port: Number(port), Username: user, Password: pass}
-    })}).then(applyState).catch(e => toast(e.message, true));
-  } else {
-    if (selOp < 0) return toast("请先选中一条操作", true);
-    const name = prompt("操作名称", S.ops[selOp].name);
-    if (name === null) return;
-    document.getElementById("opName").value = name;
-    onEdit();
-  }
+function editSel(kind, isNew) {
+  if (kind !== "device") return;
+  if (selDevice < 0) return toast("请先选中一台设备", true);
+  const idx = selDevice;
+  const d = S.devices[idx];
+  openModal({
+    title: isNew ? "新增设备 #" + (idx + 1) : "编辑设备 #" + (idx + 1),
+    icon: "i-server",
+    body:
+      '<div class="form">' +
+      '<label for="dIP">IPv4 地址</label><input type="text" id="dIP" value="' + esc(d.IP) + '">' +
+      '<label for="dPort">SSH 端口</label><input type="number" id="dPort" min="1" max="65535" value="' + esc(d.Port) + '">' +
+      '<label for="dUser">用户名</label><input type="text" id="dUser" value="' + esc(d.Username) + '">' +
+      '<label for="dPass">密码</label><input type="password" id="dPass" value="' + esc(d.Password) + '" autocomplete="off">' +
+      "</div><div class='err' id='dErr'></div>",
+    buttons: [{text: "取消"}, {text: "保存", cls: "primary", onClick: () => {
+      const ip = $("dIP").value.trim();
+      const port = Number($("dPort").value);
+      // 与后端 Config.ValidateDevices 同一套规则（IP 不做格式限制，主机名同样可用）
+      const bad = (msg, id) => { $("dErr").textContent = msg; $(id).focus(); return false; };
+      if (!ip) return bad("IP 不能为空", "dIP");
+      if (!Number.isInteger(port) || port < 1 || port > 65535) return bad("端口必须是 1-65535 的整数", "dPort");
+      if (!$("dUser").value.trim()) return bad("用户名不能为空", "dUser");
+      api("/api/device", {method: "POST", body: JSON.stringify({
+        action: "update", index: idx,
+        device: {IP: ip, Port: port, Username: $("dUser").value, Password: $("dPass").value}
+      })}).then(s => { applyState(s); toast("设备 #" + (idx + 1) + " 已保存"); })
+         .catch(e => toast(e.message, true));
+    }}],
+    onOpen: () => { $("dIP").focus(); $("dIP").select(); }
+  });
 }
 
 function removeSel(kind) {
   if (kind === "device") {
     if (selDevice < 0) return toast("请先选中一台设备", true);
-    if (!confirm("确认删除第 " + (selDevice + 1) + " 台设备？")) return;
-    api("/api/device", {method: "POST", body: JSON.stringify({action: "remove", index: selDevice})})
-      .then(s => { applyState(s); selDevice = -1; renderDevices(); renderDeviceLog(); })
-      .catch(e => toast(e.message, true));
+    const idx = selDevice, d = S.devices[idx];
+    confirmBox("删除设备", "确认删除第 " + (idx + 1) + " 台设备（" + d.IP + ":" + d.Port + "）？", "删除", () => {
+      api("/api/device", {method: "POST", body: JSON.stringify({action: "remove", index: idx})})
+        .then(s => { applyState(s); selDevice = -1; renderDevices(); renderDeviceLog(); })
+        .catch(e => toast(e.message, true));
+    });
   } else {
     if (selOp < 0) return toast("请先选中一条操作", true);
-    if (!confirm("确认删除该操作？")) return;
-    api("/api/op", {method: "POST", body: JSON.stringify({action: "remove", index: selOp})})
-      .then(s => { selOp = -1; applyState(s); })
-      .catch(e => toast(e.message, true));
+    const idx = selOp;
+    confirmBox("删除操作", "确认删除操作「" + (S.ops[idx].name || "未命名") + "」？", "删除", () => {
+      api("/api/op", {method: "POST", body: JSON.stringify({action: "remove", index: idx})})
+        .then(s => { selOp = -1; applyState(s); })
+        .catch(e => toast(e.message, true));
+    });
   }
 }
 
@@ -589,7 +995,7 @@ function cloneSel(kind) {
   const idx = kind === "device" ? selDevice : selOp;
   if (idx < 0) return toast(kind === "device" ? "请先选中一台设备" : "请先选中一条操作", true);
   api("/api/" + kind, {method: "POST", body: JSON.stringify({action: "clone", index: idx})})
-    .then(s => { applyState(s); if (kind === "device") { selDevice = idx + 1; renderDevices(); } else { selOp = idx + 1; renderOps(); } })
+    .then(s => { applyState(s); if (kind === "device") { selDevice = idx + 1; renderDevices(); renderDeviceLog(); } else { selectOp(idx + 1); } })
     .catch(e => toast(e.message, true));
 }
 
@@ -597,7 +1003,7 @@ function addOp() {
   api("/api/op", {method: "POST", body: JSON.stringify({
     action: "add",
     op: {name: "新操作", type: 0, commandStr: "", checkFile: 0}
-  })}).then(s => { applyState(s); selectOp(S.ops.length - 1); })
+  })}).then(s => { applyState(s); selectOp(S.ops.length - 1); $("opName").focus(); $("opName").select(); })
      .catch(e => toast(e.message, true));
 }
 
@@ -609,10 +1015,10 @@ function saveOp() {
 
 // ---------- 预设 / 配置 ----------
 function loadPreset() {
-  const name = document.getElementById("preset").value;
+  const name = $("preset").value;
   if (!name) return toast("请先选择一个内置预设", true);
   api("/api/presets", {method: "POST", body: JSON.stringify({name: name})})
-    .then(s => { selOp = -1; selDevice = -1; applyState(s); setStatus("已载入预设 " + name); })
+    .then(s => { selOp = -1; selDevice = -1; applyState(s); setStatus("已载入预设 " + name); toast("已载入预设 " + name); })
     .catch(e => toast(e.message, true));
 }
 
@@ -637,7 +1043,7 @@ function importConfig(input) {
     try { cfg = JSON.parse(fr.result); }
     catch (e) { return toast("JSON 解析失败: " + e.message, true); }
     api("/api/config", {method: "POST", body: JSON.stringify(cfg)})
-      .then(s => { selOp = -1; selDevice = -1; applyState(s); setStatus("已导入配置: " + f.name); })
+      .then(s => { selOp = -1; selDevice = -1; applyState(s); setStatus("已导入配置: " + f.name); toast("已导入 " + f.name); })
       .catch(e => toast(e.message, true));
   };
   fr.readAsText(f);
@@ -651,10 +1057,10 @@ function saveSettings(patch) {
     .then(s => { applyState(s); setStatus("设置已保存"); })
     .catch(e => { toast(e.message, true); refreshState(); });
 }
-document.getElementById("root").addEventListener("change", e => {
+$("root").addEventListener("change", e => {
   saveSettings({rootDir: e.target.value.trim()});
 });
-document.getElementById("maxpar").addEventListener("change", e => {
+$("maxpar").addEventListener("change", e => {
   saveSettings({maxParallel: Number(e.target.value)});
 });
 
@@ -662,24 +1068,24 @@ document.getElementById("maxpar").addEventListener("change", e => {
 function runBatch() {
   api("/api/run", {method: "POST"}).then(r => {
     setRunning(true);
-    setStatus("执行中…");
+    setStatus("执行中…", "run");
     connectEvents(r.gen);
   }).catch(e => toast(e.message, true));
 }
 
 function cancelBatch() {
-  if (!confirm("确认中止当前批量执行？\n已完成的设备结果会保留。")) return;
-  api("/api/cancel", {method: "POST"})
-    .then(() => setStatus("正在中止…"))
-    .catch(e => toast(e.message, true));
+  confirmBox("中止执行", "确认中止当前批量执行？\n已完成的设备结果会保留，进行中的传输会被中断。", "中止", () => {
+    api("/api/cancel", {method: "POST"})
+      .then(() => setStatus("正在中止…", "run"))
+      .catch(e => toast(e.message, true));
+  });
 }
 
 function connectEvents(gen) {
   if (evtSrc) { evtSrc.close(); evtSrc = null; }
-  const badge = document.getElementById("conn");
   evtSrc = new EventSource("/api/events");
-  evtSrc.onopen = () => { badge.textContent = "事件流已连接"; badge.style.color = "var(--ok)"; };
-  evtSrc.onerror = () => { badge.textContent = "事件流断开，正在重连…"; badge.style.color = "var(--danger)"; };
+  evtSrc.onopen = () => { $("conn").textContent = "事件流已连接"; $("connDot").className = "dot ok"; };
+  evtSrc.onerror = () => { $("conn").textContent = "事件流断开，正在重连…"; $("connDot").className = "dot bad"; };
   evtSrc.onmessage = ev => {
     const d = JSON.parse(ev.data);
     // 别的标签页发起新一轮时，这里要跟着换绑，否则会把它的事件全部丢掉。
@@ -692,14 +1098,17 @@ function connectEvents(gen) {
 function handleEvent(d) {
   switch (d.kind) {
     case "start":
-      setStatus(d.stage);
+      setRunning(true);
+      setStatus(d.stage, "run");
       break;
-    case "done":
+    case "done": {
       setRunning(false);
-      setStatus(d.stage);
-      toast(d.stage);
+      const bad = /失败 [1-9]|中止/.test(d.stage || "");
+      setStatus(d.stage, bad ? "bad" : "ok");
+      toast(d.stage, bad);
       refreshState();
       break;
+    }
     case "device":
       if (d.deviceIndex >= 0 && d.deviceIndex < S.devices.length) {
         S.devices[d.deviceIndex].status = d.status || d.stage || "";
@@ -730,18 +1139,22 @@ function refreshState() {
 }
 
 function showHelp() {
-  alert(
-    "批量部署工具（Web 模式）\n\n" +
-    "1. 文件操作根目录：上传/下载的相对路径以此为准（服务器上的路径）。\n" +
-    "2. 远程设备：每行一台设备。选中后可克隆/编辑/删除。\n" +
-    "3. 操作：三类——命令下发 / 文件上传 / 文件下载。\n" +
-    "   选中操作后在下方编辑，改动即时生效；\n" +
-    "   「完整/不完整」实时显示，不完整的操作不会被执行。\n" +
-    "4. 执行：设置并行上限后点「执行配置」；执行中可点「中止执行」。\n" +
-    "   执行期间配置区锁定。\n" +
-    "5. 导出/导入配置：JSON 与旧版格式完全兼容。\n\n" +
-    "注意：配置文件含明文 SSH 密码，请自行妥善保管。"
-  );
+  openModal({
+    title: "使用说明", icon: "i-help", wide: true,
+    body: '<div class="help">' +
+      "<h4>1. 文件操作根目录</h4><p>上传/下载的相对路径都以此目录为基准（服务器上的路径）。</p>" +
+      "<h4>2. 远程设备</h4><p>每行一台设备。选中后可克隆 / 编辑 / 删除，双击行直接编辑。</p>" +
+      "<h4>3. 操作序列</h4><ul>" +
+      "<li><b>命令下发</b>：在每台设备上执行同一条命令，可配置成功 / 失败关键字。</li>" +
+      "<li><b>文件上传</b>：本地文件上传到设备，可选 MD5 / 文件大小校验。</li>" +
+      "<li><b>文件下载</b>：设备上的文件下载到本地目录，可选校验。</li></ul>" +
+      "<p>选中操作后在下方编辑，改动即时生效；不完整的操作会标出并在执行时跳过。</p>" +
+      "<h4>4. 执行</h4><p>设置并行上限后点「执行配置」，执行中可随时「中止」，期间配置区锁定。" +
+      "概览卡片与进度条实时统计成功 / 失败 / 进行中设备数；选中设备可查看日志。</p>" +
+      "<h4>5. 导入 / 导出</h4><p>JSON 与旧版格式完全兼容；也可从内置预设载入。</p>" +
+      '<div class="warnbox">配置文件与本页面均含明文 SSH 密码。默认只监听 127.0.0.1，远程使用请通过 <code>ssh -L</code> 端口转发。</div>' +
+      "</div>"
+  });
 }
 
 // ---------- 启动 ----------

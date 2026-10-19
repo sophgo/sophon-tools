@@ -130,6 +130,18 @@ func TestUIStringsCoveredByEmbeddedFont(t *testing.T) {
 	}
 }
 
+// 可打印 ASCII 必须全覆盖。上面的用例只查非 ASCII，曾漏掉子集化时丢失的
+// 空格（U+0020）：Fyne 退回 .notdef 宽度，界面里每个空格都变成一个全角空白，
+// 命令、路径、日志全部被拉散。
+func TestEmbeddedFontCoversPrintableASCII(t *testing.T) {
+	glyphs := embeddedFontGlyphSet(t)
+	for r := rune(0x20); r < 0x7F; r++ {
+		if !glyphs[r] {
+			t.Errorf("内嵌字体缺少 ASCII 字符 %q (U+%04X)", string(r), r)
+		}
+	}
+}
+
 // 帮助文本是用户最先看到的长文案，单独兜一层。
 func TestHelpTextHasNoMissingGlyph(t *testing.T) {
 	glyphs := embeddedFontGlyphSet(t)
