@@ -9,6 +9,7 @@ import (
 	"image/color"
 	"strconv"
 	"strings"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
@@ -247,6 +248,14 @@ type logView struct {
 	scroll *container.Scroll
 	obj    fyne.CanvasObject
 	raw    string
+	// lastRender 上次真正重建段的时间。重建要为每一行生成一个 TextSegment
+	// 并触发富文本布局，2000 行约 18ms；传输过程中进度事件每 200ms 一次、
+	// 每次都重建会把 UI 线程占满。所以高频更新只记录原文，最多每
+	// logRenderInterval 重建一次，末尾再做一次全量刷新兜底。
+	lastRender time.Time
+	pending    bool
+	// onRender 仅供测试观测"真正重建了几次"，生产代码不设置。
+	onRender func()
 }
 
 func newLogView() *logView {
@@ -269,14 +278,37 @@ func (v *logView) SetPlaceholder(s string) {
 	v.scroll.ScrollToTop()
 }
 
-// SetText 设置日志正文并滚动到底部。
+// logRenderInterval 日志重建的最小间隔。
+const logRenderInterval = 300 * time.Millisecond
+
+// SetText 设置日志正文。高频调用时会合并，见 lastRender 的说明。
 func (v *logView) SetText(s string) {
+	v.raw = s
 	if s == "" {
 		v.SetPlaceholder("(暂无日志)")
 		return
 	}
-	v.raw = s
-	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	if time.Since(v.lastRender) < logRenderInterval {
+		v.pending = true
+		return
+	}
+	v.renderNow()
+}
+
+// Flush 立即重建（执行结束时调用，保证最终内容一定是最新的）。
+func (v *logView) Flush() {
+	if v.pending {
+		v.renderNow()
+	}
+}
+
+func (v *logView) renderNow() {
+	v.lastRender = time.Now()
+	v.pending = false
+	if v.raw == "" {
+		return
+	}
+	lines := strings.Split(strings.TrimRight(v.raw, "\n"), "\n")
 	segs := make([]widget.RichTextSegment, 0, len(lines))
 	for _, ln := range lines {
 		segs = append(segs, &widget.TextSegment{
@@ -287,6 +319,9 @@ func (v *logView) SetText(s string) {
 	v.rich.Segments = segs
 	v.rich.Refresh()
 	v.scroll.ScrollToBottom()
+	if v.onRender != nil {
+		v.onRender()
+	}
 }
 
 // Text 返回当前日志原文（无日志时为空串），供「复制」使用。

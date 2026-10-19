@@ -6,10 +6,12 @@ package main
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/test"
+	"fyne.io/fyne/v2/widget"
 )
 
 func newTestGUI(t *testing.T) *gui {
@@ -110,5 +112,54 @@ func TestFitText(t *testing.T) {
 	}
 	if fitText("", 13, fyne.TextStyle{}, 10) != "" {
 		t.Fatal("空串应原样返回")
+	}
+}
+
+// 日志高频更新必须合并，但**最终内容不能被吞掉**。
+// 传输过程中进度事件每 200ms 一次，每次都重建富文本会占满 UI 线程
+// （2000 行实测约 18ms/次）。
+//
+// 断言方式：直接盯 renderNow 的调用次数，不依赖时序——若按"两次调用间隔
+// 是否够长"来判断，测试跑得太快时无论有没有节流都会通过（假阳性）。
+func TestLogViewThrottleKeepsFinalContent(t *testing.T) {
+	a := test.NewApp()
+	t.Cleanup(a.Quit)
+	a.Settings().SetTheme(newAppTheme())
+
+	v := newLogView()
+
+	var renders int
+	v.onRender = func() { renders++ }
+
+	v.SetText("line 1\n")
+	if renders != 1 {
+		t.Fatalf("首次设置应立即渲染, renders=%d", renders)
+	}
+
+	// 紧接着的多次更新应被合并（不重建），原文仍要更新
+	for i := 2; i <= 50; i++ {
+		v.SetText(strings.Repeat("x", i) + "\n")
+	}
+	if renders != 1 {
+		t.Fatalf("高频更新没有被合并, 重建了 %d 次", renders)
+	}
+	if !strings.HasSuffix(v.Text(), strings.Repeat("x", 50)+"\n") {
+		t.Fatal("被合并时原文也应更新到最新")
+	}
+
+	// Flush 必须强制重建，并呈现最后一版
+	v.Flush()
+	if renders != 2 {
+		t.Fatalf("Flush 应强制重建一次, renders=%d", renders)
+	}
+	last := v.rich.Segments[len(v.rich.Segments)-1].(*widget.TextSegment)
+	if !strings.HasPrefix(last.Text, "xxx") {
+		t.Fatalf("Flush 后日志不是最新内容: %q", last.Text)
+	}
+
+	// 已经 Flush 过就不该再重复重建
+	v.Flush()
+	if renders != 2 {
+		t.Fatalf("无待处理内容时 Flush 不应重建, renders=%d", renders)
 	}
 }
