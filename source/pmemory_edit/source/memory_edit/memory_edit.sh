@@ -313,7 +313,7 @@ ddr1_size=0
 ddr2_size=0
 ddr3_size=0
 ddr4_size=0
-echo "INFO: version: 2.12.2"
+echo "INFO: version: 2.12.3"
 if ( [ $# -eq 1 ] || [ $# -eq 2 ] ) && [ "$1" == "-p" ]; then
 	# 仅打印信息
 	print_info=1
@@ -567,9 +567,25 @@ if [[ $runtime_info_target == "cv84x6" ]]; then
 fi
 echo "Info: =======================================================================" | tee -a $log_file_path
 echo "Info: get max memory size ..." | tee -a $log_file_path
-if [[ $runtime_info_target == "bm1688" || $runtime_info_target == "cv84x6" ]]; then
+# 必须给 Linux 留出的内存下限：max(1GiB, vmemmap + 512MiB)。
+# vmemmap 约 ddr/64（64G DDR 时约 1G），再加 512M 给 early 页表 / rootfs 解包 / init。
+# 32G 出厂默认布局余 1960M、64G 默认布局余 28328M，均远高于此下限，不受影响。
+# 注意：护栏只对 cv84x6 生效。bm1688 的 npu_size_add 取值未在真机标定过，
+# 直接套用可能在低容量 bm1688 上误拒现有配置，故不纳入本次范围。
+linux_mem_min=$((1024 * $size_1m))
+if [[ $runtime_info_target == "cv84x6" ]]; then
+	linux_mem_vmemmap=$(($ddr_size / 64 + 512 * $size_1m))
+	[[ $linux_mem_vmemmap -gt $linux_mem_min ]] && linux_mem_min=$linux_mem_vmemmap
+fi
+if [[ $runtime_info_target == "cv84x6" ]]; then
 	# npu+vpp 总量受 npu_size_add(底部 CMA+200M) 与 vpp_size_add(顶部 FREERTOS 预留) 共同约束，
-	# 必须都减去，否则 -p 报的总量比真实可配多 vpp_size_add（bm1688 该值为 0 不受影响）
+	# 还必须留出 linux_mem_min 给 Linux 运行 —— 否则内核会在 rootfs 解包阶段 OOM panic，
+	# 且 panic=0 不会自动重启，只能断电恢复（CV84X6 64GB 实机已踩过）。
+	echo "Info: min linux memory: $(printf "%d MiB" "$(($linux_mem_min / $SIZE1M))")" | tee -a $log_file_path
+	echo "Info: max npu+vpp size: $(printf "0x%x" $(($ddr_size - $npu_size_add - $vpp_size_add - $linux_mem_min))) [$(printf "%d MiB" "$(($(($ddr_size - $npu_size_add - $vpp_size_add - $linux_mem_min)) / $SIZE1M))")]" | tee -a $log_file_path
+	echo "Info: max npu size: $(printf "0x%x" $(($ddr_size - $npu_size_add - $linux_mem_min))) [$(printf "%d MiB" "$(($(($ddr_size - $npu_size_add - $linux_mem_min)) / $SIZE1M))")]" | tee -a $log_file_path
+elif [[ $runtime_info_target == "bm1688" ]]; then
+	# bm1688 不加 Linux 下限（见上），保持原有打印口径，确保 -p 与 -c 仍然一致
 	echo "Info: max npu+vpp size: $(printf "0x%x" $(($ddr_size - $npu_size_add - $vpp_size_add))) [$(printf "%d MiB" "$(($(($ddr_size - $npu_size_add - $vpp_size_add)) / $SIZE1M))")]" | tee -a $log_file_path
 	echo "Info: max npu size: $(printf "0x%x" $(($ddr_size - $npu_size_add))) [$(printf "%d MiB" "$(($(($ddr_size - $npu_size_add)) / $SIZE1M))")]" | tee -a $log_file_path
 elif [[ $runtime_info_target == "bm1684" ]]; then
@@ -786,6 +802,28 @@ elif [[ $runtime_info_target == "cv84x6" ]]; then
 	fi
 	if [[ $((${user_mem_size["vpp"]} + $vpp_size_add + $npu_size_add + ${user_mem_size["npu"]})) -gt $(($ddr_size)) ]]; then
 		echo "Error: vpp+npu size ${user_mem_size["vpp"]}+${user_mem_size["npu"]} error" | tee -a $log_file_path
+		exit -1
+	fi
+fi
+# 给 Linux 留出可运行的内存（CV84X6 64GB 实机 panic 的护栏）
+#
+# 上面的总量校验只保证 npu/vpp 不越过 DDR 顶，没保证「剩下的够 Linux 活」。
+# 高位 DDR 区被 npu/vpp 吃满后，内核在 rootfs 解包阶段就 OOM panic：
+#   Memory: 22640K/66048000K available
+#   Out of memory and no killable processes...
+#   Kernel panic - not syncing: System is deadlocked on memory
+# 该 panic 的 panic=0 不会自动重启，串口/现场都救不回，只能断电。
+#
+# 剩余给 Linux 的量（与内核 "Memory: X available" 实测吻合）：
+#   ddr_size - npu_size_add - npu - vpp - vpp_size_add
+if [[ $runtime_info_target == "cv84x6" ]]; then
+	# vpp=0 时 vpp heap 被删除，顶部 FREERTOS 2M 不再被 dtb 预留，不计入占用。
+	linux_vpp_add=0
+	[[ $need_del_vpp -eq 0 ]] && linux_vpp_add=$vpp_size_add
+	linux_mem_left=$(($ddr_size - $npu_size_add - ${user_mem_size["npu"]} - ${user_mem_size["vpp"]} - $linux_vpp_add))
+	echo "Info: linux memory left: $(printf "0x%x" $linux_mem_left) [$(printf "%d MiB" "$(($linux_mem_left / $SIZE1M))")] (min $(printf "%d MiB" "$(($linux_mem_min / $SIZE1M))"))" >> $log_file_path
+	if [[ $linux_mem_left -lt $linux_mem_min ]]; then
+		echo "Error: npu+vpp leave only $(($linux_mem_left / $SIZE1M)) MiB for Linux, at least $(($linux_mem_min / $SIZE1M)) MiB required (npu ${user_mem_size["npu"]} vpp ${user_mem_size["vpp"]})" | tee -a $log_file_path
 		exit -1
 	fi
 fi
