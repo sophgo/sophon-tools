@@ -20,6 +20,30 @@ if [[ "${3:-}" == "debug" ]]; then
 	NEED_DEBUG=1
 fi
 
+# 编译期版本信息（MYS-2414）：统一构建容器内常常拿不到 .git（只挂子目录，
+# 或 worktree 的 gitdir 引用解析失败），Makefile 的 $(shell git ...) 会静默失败，
+# 编出的二进制打印 "version: (-)[]"。
+# 这里在还能拿到 git 时（宿主机或已挂主 git 目录的容器）先算好 export 给 make；
+# 拿不到则交给 Makefile 回退到 git_version（会带 -nogit 标记，不伪装成正常构建）。
+if [[ -z "${GIT_COMMIT_HASH:-}" ]]; then
+	_desc="$(git describe --tags 2>/dev/null)" || _desc=""
+	if [[ -z "${_desc}" ]]; then
+		_desc="$(git describe --tags --always 2>/dev/null)" || _desc=""
+	fi
+	_sha="$(git rev-parse HEAD 2>/dev/null)" || _sha=""
+	if [[ -n "${_desc}" && -n "${_sha}" ]]; then
+		GIT_COMMIT_HASH="${_desc}-${_sha}"
+	elif [[ -n "${_sha}" ]]; then
+		GIT_COMMIT_HASH="${_sha}"
+	fi
+	unset _desc _sha
+fi
+if [[ -z "${GIT_COMMIT_DATE:-}" ]]; then
+	GIT_COMMIT_DATE="$(git show -s --format=%ci HEAD 2>/dev/null)" || GIT_COMMIT_DATE=""
+fi
+export GIT_COMMIT_HASH GIT_COMMIT_DATE
+echo "==> 编译期版本: ${GIT_COMMIT_HASH:-<由 Makefile 回退 git_version>} [${GIT_COMMIT_DATE:-Unknown}]"
+
 mkdir -p output
 cp ${build_shell}/src/*.json ${build_shell}/output/
 

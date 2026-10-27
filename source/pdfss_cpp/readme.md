@@ -84,6 +84,18 @@ dfss的install功能可以方便地下载和安装软件包。
 * sw_64 linux gcc8.3(ubuntu20) static
 * darwin clang(macOS Xcode CLT) 静态库 zlib/mbedtls/libssh2 + 动态系统库
 
+### 编译期版本信息
+
+二进制启动首行会打印 `dfss cpp tool, version: (<git describe>-<sha>)[<commit 日期>]`。
+这两个值由 `src/Makefile` 在编译期通过 `-DGIT_COMMIT_HASH/-DGIT_COMMIT_DATE` 嵌入，取值优先级：
+
+1. 环境变量 `GIT_COMMIT_HASH` / `GIT_COMMIT_DATE` —— 构建脚本在宿主机算好传入（容器内通常没有 `.git`，这是容器构建唯一可靠的来源）
+2. 仓库内 git（开发者直接在仓库工作树里 `make`）
+3. `git_version` 文件 —— 兜底，值会带 `-nogit` 后缀，避免把退化构建伪装成正常构建
+
+三者都拿不到时 `make` 直接报错退出，不再静默编出 `version: (-)[]`。
+`bash release.sh` 与 `docker/scripts/build-dfss-pip.sh` 都会自动在宿主机计算并传入，无需手工设置。
+
 ### 发布方式
 
 使用当前目录的CPP源码编译出各个架构的运行程序，然后使用dfss_pip目录下的python工程将工具发布到pip上

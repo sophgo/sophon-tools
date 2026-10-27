@@ -31,6 +31,13 @@ SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 DOCKER_DIR="${SCRIPT_DIR}"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
+# 编译期版本信息（MYS-2414）：容器内常常拿不到 .git（worktree 引用解析失败 /
+# 只挂子目录），pdfss_cpp 的 Makefile 曾因此把版本编成空串，二进制打印
+# "version: (-)[]"。这里在宿主机（git 一定可用）先算好，随 docker run -e 传进去。
+# shellcheck source=docker/scripts/git-version.sh
+source "${DOCKER_DIR}/scripts/git-version.sh"
+read -r HOST_GIT_HASH HOST_GIT_DATE < <(git_version_info "${REPO_ROOT}")
+
 # 默认镜像: 优先带版本号 tag（docker/versions.env 的 IMAGE_TAG），未定义则回退 unified
 if [[ -z "${IMAGE:-}" ]]; then
   if [[ -f "${DOCKER_DIR}/versions.env" ]]; then
@@ -180,6 +187,8 @@ run_one() {
     "${git_mounts[@]}" \
     -w "/workspace/sophon-tools/source/${p}" \
     -e OUTPUT_DIR="/workspace/sophon-tools/output/${p}" \
+    -e GIT_COMMIT_HASH="${HOST_GIT_HASH}" \
+    -e GIT_COMMIT_DATE="${HOST_GIT_DATE}" \
     "${IMAGE}" bash -c "
       set -euo pipefail
       git config --global --add safe.directory '*' 2>/dev/null || true
