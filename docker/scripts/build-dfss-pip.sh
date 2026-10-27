@@ -25,6 +25,19 @@ if [[ -z "${IMAGE:-}" ]]; then
   fi
 fi
 PDFSS_SRC="${REPO_ROOT}/source/pdfss_cpp"
+
+# 编译期版本信息（MYS-2414）：本脚本只挂 source/pdfss_cpp 子目录进容器，
+# 容器内没有 .git，Makefile 的 $(shell git ...) 会静默失败，编出的二进制打印
+# "version: (-)[]"。在宿主机先算好，经 docker run -e 传入。
+# shellcheck source=docker/scripts/git-version.sh
+source "${SCRIPT_DIR}/git-version.sh"
+read -r HOST_GIT_HASH HOST_GIT_DATE < <(git_version_info "${REPO_ROOT}")
+if [[ -z "${HOST_GIT_HASH}" ]]; then
+  echo "ERROR: 无法确定版本信息（宿主机 git describe/rev-parse 均失败）。" >&2
+  exit 1
+fi
+echo "==> 编译期版本: ${HOST_GIT_HASH} [${HOST_GIT_DATE}]"
+
 SKIP_LIBS=0
 ARCHES=()
 
@@ -52,6 +65,8 @@ echo "==> 在镜像 ${IMAGE} 内编译 dfss-cpp 全部架构: ${ARCHES[*]}"
 docker run --rm \
   -v "${PDFSS_SRC}":/workspace/pdfss_cpp \
   -w /workspace/pdfss_cpp \
+  -e GIT_COMMIT_HASH="${HOST_GIT_HASH}" \
+  -e GIT_COMMIT_DATE="${HOST_GIT_DATE}" \
   "${IMAGE}" bash -c "
     set -e
     export PATH=\"/env/loongson-gnu-toolchain-8.3-x86_64-loongarch64-linux-gnu-rc1.1/bin:/usr/sw/swgcc830_cross_tools/usr/bin:\$PATH\"
