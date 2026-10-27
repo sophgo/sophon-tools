@@ -570,18 +570,24 @@ echo "Info: get max memory size ..." | tee -a $log_file_path
 # 必须给 Linux 留出的内存下限：max(1GiB, vmemmap + 512MiB)。
 # vmemmap 约 ddr/64（64G DDR 时约 1G），再加 512M 给 early 页表 / rootfs 解包 / init。
 # 32G 出厂默认布局余 1960M、64G 默认布局余 28328M，均远高于此下限，不受影响。
+# 注意：护栏只对 cv84x6 生效。bm1688 的 npu_size_add 取值未在真机标定过，
+# 直接套用可能在低容量 bm1688 上误拒现有配置，故不纳入本次范围。
 linux_mem_min=$((1024 * $size_1m))
-if [[ $runtime_info_target == "bm1688" || $runtime_info_target == "cv84x6" ]]; then
+if [[ $runtime_info_target == "cv84x6" ]]; then
 	linux_mem_vmemmap=$(($ddr_size / 64 + 512 * $size_1m))
 	[[ $linux_mem_vmemmap -gt $linux_mem_min ]] && linux_mem_min=$linux_mem_vmemmap
 fi
-if [[ $runtime_info_target == "bm1688" || $runtime_info_target == "cv84x6" ]]; then
+if [[ $runtime_info_target == "cv84x6" ]]; then
 	# npu+vpp 总量受 npu_size_add(底部 CMA+200M) 与 vpp_size_add(顶部 FREERTOS 预留) 共同约束，
 	# 还必须留出 linux_mem_min 给 Linux 运行 —— 否则内核会在 rootfs 解包阶段 OOM panic，
 	# 且 panic=0 不会自动重启，只能断电恢复（CV84X6 64GB 实机已踩过）。
 	echo "Info: min linux memory: $(printf "%d MiB" "$(($linux_mem_min / $SIZE1M))")" | tee -a $log_file_path
 	echo "Info: max npu+vpp size: $(printf "0x%x" $(($ddr_size - $npu_size_add - $vpp_size_add - $linux_mem_min))) [$(printf "%d MiB" "$(($(($ddr_size - $npu_size_add - $vpp_size_add - $linux_mem_min)) / $SIZE1M))")]" | tee -a $log_file_path
 	echo "Info: max npu size: $(printf "0x%x" $(($ddr_size - $npu_size_add - $linux_mem_min))) [$(printf "%d MiB" "$(($(($ddr_size - $npu_size_add - $linux_mem_min)) / $SIZE1M))")]" | tee -a $log_file_path
+elif [[ $runtime_info_target == "bm1688" ]]; then
+	# bm1688 不加 Linux 下限（见上），保持原有打印口径，确保 -p 与 -c 仍然一致
+	echo "Info: max npu+vpp size: $(printf "0x%x" $(($ddr_size - $npu_size_add - $vpp_size_add))) [$(printf "%d MiB" "$(($(($ddr_size - $npu_size_add - $vpp_size_add)) / $SIZE1M))")]" | tee -a $log_file_path
+	echo "Info: max npu size: $(printf "0x%x" $(($ddr_size - $npu_size_add))) [$(printf "%d MiB" "$(($(($ddr_size - $npu_size_add)) / $SIZE1M))")]" | tee -a $log_file_path
 elif [[ $runtime_info_target == "bm1684" ]]; then
 	echo "Info: max npu size: $(printf "0x%x" $(($ddr1_size - $npu_size_add))) [$(printf "%d MiB" "$(($(($ddr1_size - $npu_size_add)) / $SIZE1M))")]" | tee -a $log_file_path
 fi
@@ -810,7 +816,7 @@ fi
 #
 # 剩余给 Linux 的量（与内核 "Memory: X available" 实测吻合）：
 #   ddr_size - npu_size_add - npu - vpp - vpp_size_add
-if [[ $runtime_info_target == "bm1688" || $runtime_info_target == "cv84x6" ]]; then
+if [[ $runtime_info_target == "cv84x6" ]]; then
 	# vpp=0 时 vpp heap 被删除，顶部 FREERTOS 2M 不再被 dtb 预留，不计入占用。
 	linux_vpp_add=0
 	[[ $need_del_vpp -eq 0 ]] && linux_vpp_add=$vpp_size_add
