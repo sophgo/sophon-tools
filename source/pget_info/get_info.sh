@@ -1,6 +1,6 @@
 #!/bin/bash
 
-GET_INFO_VERSION="1.7.0"
+GET_INFO_VERSION="1.7.1"
 
 shopt -s compat31
 
@@ -241,11 +241,14 @@ function parse_bmtpu_scaler_info() {
 
 # [kernel_info 路径] -> "积压总数|最小空闲槽位"
 # 积压 = Σ(pushed_cnt - total done)，是 TSH 队列里还没被固件消费掉的 api 数；
-# free_slots 见底说明下发侧即将进入背压等待。任一 HWQ 缺字段就跳过该 HWQ。
+# free_slots 见底说明下发侧即将进入背压等待。任一 HWQ 缺字段就跳过该 HWQ ——
+# 故遇到新的 "--- HWQ Index: N ---" 必须先丢弃上一个 HWQ 遗留的 pushed_cnt，
+# 否则它的 pushed 会与下一个 HWQ 的 total done 配成一对，算出凭空的积压。
 function parse_bmtpu_kernel_info() {
     local f="${1:-}"
     [ -r "${f}" ] || return 0
     awk '
+        /^--- HWQ Index:/    { p = ""; next }
         /^[ \t]*free_slots:/  { fs = $2; if (minfs == "" || fs + 0 < minfs + 0) minfs = fs; next }
         /^[ \t]*pushed_cnt:/  { p = $2; next }
         /^[ \t]*total done:/  {
@@ -1233,9 +1236,9 @@ if [[ "${WORK_MODE}" == "SOC" ]]; then
 fi
 
 # TPU_RUNTIME —— 来自 /proc/bmtpu（仅 CV84X6）
-# 上面 TPU_USAGE 是内核采样出来的利用率百分比，反映"有多忙"；这一段补的是
-# "TPU 到底在不在正常工作"：固件版本、每核跑到了哪一步、下发队列有没有积压。
-# 两者互补：利用率 0% 既可能是真空闲，也可能是固件崩了/卡死，只有这段能区分。
+# 与后面 TPU_USAGE 互补：TPU_USAGE 是内核采样出来的利用率百分比，反映"有多忙"；
+# 这一段补的是"TPU 到底在不在正常工作"：固件版本、每核跑到了哪一步、下发队列有没有积压。
+# 利用率 0% 既可能是真空闲，也可能是固件崩了/卡死，只有这段能区分。
 # 输出条目不固定（4 核机型 4 条、异常时才出现的 key 不输出到空行），故单独成段。
 TPU_BMTPU_LINES=""
 if [[ "${WORK_MODE}" == "SOC" ]] && [[ "${CPU_MODEL}" == "cv84x6" ]]; then
