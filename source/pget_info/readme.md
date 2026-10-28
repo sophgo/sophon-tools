@@ -82,6 +82,57 @@ CPU_MODEL|cv84x6|
 VDDC_VOLTAGE(mV)|980|
 ```
 
+#### CV84X6 TPU 运行态采集说明
+
+CV84X6 的 `TPU_USAGE(%)` 是内核采样出的利用率，只说明"有多忙"，不说明"还活着没有"：
+利用率 0% 既可能是真空闲，也可能是 TPU 固件崩了、或某次 kernel 卡住不返回。
+`/proc/bmtpu/` 提供的就是后者，脚本在 `TPU_USAGE` 之后输出以下字段（仅 CV84X6）：
+
+| 字段 | 含义 | 来源 |
+| --- | --- | --- |
+| `TPU_FW_VERSION` | TPU 固件版本（多核同版本只输出一次；版本不一致时会全部列出，提示核间镜像不同） | `scaler_info` 每核 `FIRMWARE_VERSION` |
+| `TPU_FW_BUILD_TIME` | 每核固件编译时间，逗号分隔（各核本就是分别编译的镜像，正常就不同） | `scaler_info` 每核 `BUILD_TIME` |
+| `TPU_CORE_STATE` | 每核状态：`BUSY` / `IDLE` / `INIT` / `RUN` / `EXITED` / `CRASH<n>`（n 为信号号）/ `UNKNOWN` | `scaler_info` 的 `running_flag` + `using_flag` |
+| `TPU_TASK_RATE(tasks/s)` | 最近 1s 固件收到的任务数 | `scaler_info` 的 `recvmsg_cnt` 两次采样差值 |
+| `TPU_QUEUE_DEPTH` | 已下发但固件尚未消费的 api 数（Σ pushed − done） | `kernel_info` 各 HWQ |
+| `TPU_HWQ_FREE_MIN` | 8 个硬件队列里最小的空闲槽位；见底说明下发侧即将进入背压等待 | `kernel_info` 各 HWQ |
+
+状态判定要点：
+
+* `BUSY` 取自 `using_flag==0xa5a5`（固件正在处理自己负责的 packet），是**最权威的忙闲标志**；
+  `BUSY` 且 `TPU_TASK_RATE` 长时间为 `0.00` 是**卡死**特征，不是空闲。
+  实测（2026-10-28，10.42.0.242）：一次 `bmrt_test` 触发了已知的 kernel 挂起，
+  此时 4 核全为 `BUSY,BUSY,BUSY,BUSY`、rate `0.00`、queue depth 冻结不动，
+  而 `npu_usage` 仍报 100 —— 只看利用率无法分辨这种情况。
+* `EXITED`（`running_flag=0xAA55DEAD`）表示固件主循环意外退出，正常设备永不出现。
+* `CRASH<n>` 是固件崩溃处理函数把信号号写进 `running_flag` 的 bit16-23
+  （覆盖 magic 里的 `0x55`），`n` 为信号号，如 `CRASH11` = SIGSEGV。
+
+只读保证：脚本只 `cat` `scaler_info` 与 `kernel_info` 两个文件，不写任何
+`/proc/bmtpu` 节点。**绝不能读 `bmdi_api_info`** —— 该 proc_show 会走
+`bm1688_base_get_core_num()` → `otp_reg_read(bmdi, 0x2014)`，而 84x6 的 BAR 不覆盖
+`0x27100000`（dmesg: `bm_get_bar_offset invalid address = 0x27100000`），
+OTP 映射基址为 NULL，读一次就内核 Oops 一次（`Unable to handle kernel paging request
+at virtual address 0000000000002014`，实测复现两次）。`shmpacket` / `txpsys` /
+`wakeup_control` 需要先写入才输出，写会改全局调试状态，同样一律不碰。
+
+`GET_INFO_BMTPU_INTERVAL` 可覆盖速率采样窗口（默认 `1.0` 秒，单位秒）。
+窗口太短会在突发式推理的两批之间读出 0，容易被误判成 TPU 停了。
+
+``` bash
+root@cv84x6:~$ sudo bash get_info.sh | grep -E "^TPU_"
+TPU_MEM(MiB)|26320|
+TPU_MEM_USAGE(%)|86.00|
+TPU_CLK(Hz)|1000000000|
+TPU_USAGE(%)|0 0 0 0 0|
+TPU_FW_VERSION|fd3aca2|
+TPU_FW_BUILD_TIME|2026-08-14_00:23:55,2026-08-14_00:25:22,2026-08-14_00:26:40,2026-08-14_00:27:43|
+TPU_CORE_STATE|IDLE,IDLE,IDLE,IDLE|
+TPU_TASK_RATE(tasks/s)|0.00|
+TPU_QUEUE_DEPTH|0|
+TPU_HWQ_FREE_MIN|16|
+```
+
 #### 高度裁剪的系统环境
 
 1. 对于一些高度裁剪的系统，该脚本中大部分命令可能找不到。可以从本仓库的release页面下载最新的 staticBinTools_arm64 包，然后使用类似如下的方式进行调用
