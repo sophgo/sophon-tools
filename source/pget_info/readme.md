@@ -67,6 +67,21 @@ ls *get_info.log.gz | sort -n | xargs -I{} zcat {} 1>>/data/get_info.log
 
 1. get_info默认不会使用pmbus工具记录PMIC相关信息，如果需要，请确保除了get_info之外没有其他任何程序在操作PMIC，然后配置环境变量`GET_INFO_PMBUS_ENABLE=1`后运行get_info即可
 
+#### CV84X6 电压采集说明
+
+CV84X6（CV84X2）没有 bm1684 那类 pmbus 电源监控器件，但主芯片电压由 `cv84x2-dvfs-pmbus` 驱动通过 PMBus 控制 JWH63782 PMIC，因此 `VDDC_VOLTAGE(mV)` 可以采集到实时值：
+
+* **首选路径**：读 `/sys/devices/platform/cv84x2-dvfs/cpu_volt_mv`（驱动 probe 成功后存在，驱动内部已完成 PMBus 换算）。不依赖 `GET_INFO_PMBUS_ENABLE`。
+* **回退路径**：驱动未就绪（如 dtb 缺 `pmic-addr` 属性导致 probe 失败）时，按 `5036000.i2c` 控制器反查总线号，在 `0x00` / `0x20` 两个候选地址上按 `MFR_ID=0x5702` 探测，按 `V=(VID+49)×10` 换算。
+* **`VTPU_VOLTAGE(mV)` 恒为空**：该芯片 CPU 与 TPU 共用同一路供电（single rail, shared），page1 从未使能，物理上不存在独立的 TPU 电压，故不采集、也不用 CPU 值冒充。
+* **读不到时留空**：不填 0、不做估算，空值表示"该板不可测"。
+
+``` bash
+root@cv84x6:~$ sudo bash get_info.sh | grep -E "CPU_MODEL|VDDC_VOLTAGE"
+CPU_MODEL|cv84x6|
+VDDC_VOLTAGE(mV)|980|
+```
+
 #### 高度裁剪的系统环境
 
 1. 对于一些高度裁剪的系统，该脚本中大部分命令可能找不到。可以从本仓库的release页面下载最新的 staticBinTools_arm64 包，然后使用类似如下的方式进行调用

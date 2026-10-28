@@ -1,6 +1,6 @@
 #!/bin/bash
 
-GET_INFO_VERSION="1.6.0"
+GET_INFO_VERSION="1.6.1"
 
 shopt -s compat31
 
@@ -938,6 +938,20 @@ VDDC_VOLTAGE=""
 #   该固件不实现电源监控；cmd 0x00-0x7F 只读全扫描无其他连续变化寄存器。
 # - /sys/class/hwmon 为空，无 in/power 类传感器节点。
 # 整机形态（SE13 等）带电源监控 MCU 后可复用 pmbus/MCU 路径，届时再适配。
+#
+# CV84X6 补充（2026-10-28 双板实测）：CV84X6 不带 bm1684 那种 pmbus 电源监控器件，
+# 但主芯片电压由 cv84x2-dvfs-pmbus 驱动（platform driver，直连 PMBUS0 控制器
+# 5036000.i2c，绕过 i2c 子系统）通过 PMBus 控制 JWH63782 PMIC。驱动 probe 成功后
+# 会导出 cpu_volt_mv，直接读该属性即可拿到实时电压。
+# 关键约束（源码 + 真机双证）：
+# - 只有 page0(CPU) 这一路活轨；page1(TPU) 实测 VOUT_COMMAND/READ_VOUT 恒 0 且
+#   STATUS_WORD=0x0841 挂故障位，从未使能。驱动 volt_read_mv() 也硬编码 cpu_rail_page，
+#   tpu_rail_page 仅用于 info 打印。故 TPU 与 CPU 物理同轨，不存在独立的 TPU 电压，
+#   VTPU_VOLTAGE 保留空、不拿 CPU 值冒充。
+# - 该驱动在本板 dtb 缺 pmic-addr 属性时会 probe 失败（PMIC 实际在 0x00 而驱动回退
+#   硬编码 0x20），此时属性不存在。已额外提供 i2c 直读回退，见下方 CV84X6 分支。
+# - i2c 直读需自行换算：V(mV) = (VID+49) * step * GRS，本板 step=10mV、GRS=1.0；
+#   VOUT_COMMAND(0x21) 为设定值，READ_VOUT(0x8B) 为实测值（恒低 1~2 LSB 属正常）。
 if [[ "$GET_INFO_PMBUS_ENABLE" == "1" ]]; then
     if [[ "${WORK_MODE}" == "SOC" ]]; then
             if [[ "${CPU_MODEL}" == "bm1684x" ]] || [[ "${CPU_MODEL}" == "bm1684" ]]; then
@@ -954,6 +968,55 @@ if [[ "$GET_INFO_PMBUS_ENABLE" == "1" ]]; then
             fi
     fi
 fi
+
+# VDDC_VOLTAGE —— CV84X6 主芯片（CPU/TPU 同轨）实时电压
+# 两条路径按优先级尝试，前者为正常路径，后者兜住 dtb/驱动不匹配的设备：
+#   1) sysfs：驱动 probe 成功时 /sys/devices/platform/cv84x2-dvfs/cpu_volt_mv 可读，
+#      内容形如 "980 mV (pmic=JWH63782)"，驱动内部已完成 PMBus 换算，最准最省事。
+#   2) i2c 直读：驱动未就绪时回退。按控制器 5036000 反查总线号（dts 无 i2c aliases，
+#      总线号按 probe 顺序分配、不固定），PMIC 地址按 MFR_ID(0x99)=0x5702 在 0x00/0x20
+#      两个候选上探测（实测 SE13 板在 0x00，wevb 板在 0x20）。
+# 读不到就保持空，绝不填 0 或估算值 —— 空表示"该板不可测"，0 会被下游误当成真实读数。
+if [[ "${WORK_MODE}" == "SOC" ]] && [[ "${CPU_MODEL}" == "cv84x6" ]]; then
+    _cv_dvfs_dir="/sys/devices/platform/cv84x2-dvfs"
+    if [ -r "${_cv_dvfs_dir}/cpu_volt_mv" ]; then
+        _cv_mv=$(awk '{print $1}' "${_cv_dvfs_dir}/cpu_volt_mv" 2>/dev/null)
+        case "${_cv_mv}" in
+            ''|*[!0-9]*) _cv_mv="" ;;
+        esac
+        VDDC_VOLTAGE="${_cv_mv}"
+    fi
+    if [[ -z "${VDDC_VOLTAGE}" ]] && [[ "$(cmd_validate i2cget)" == "1" ]]; then
+        # 反查 PMBUS0（5036000.i2c）对应的 /dev/i2c-N
+        _cv_bus=""
+        for _cv_dev in /sys/class/i2c-dev/i2c-*; do
+            case "$(readlink -f "${_cv_dev}/device" 2>/dev/null)" in
+                *5036000*) _cv_bus="${_cv_dev##*-}"; break ;;
+            esac
+        done
+        if [[ -n "${_cv_bus}" ]]; then
+            for _cv_addr in 0x00 0x20; do
+                # -a：i2cget/i2cset 默认拒绝 0x08 以下地址，0x00 必须加 -a 才可访问
+                _cv_id=$(i2cget -a -f -y "${_cv_bus}" "${_cv_addr}" 0x99 w 2>/dev/null)
+                if [[ "${_cv_id}" == "0x5702" ]]; then
+                    # 确保读的是 page0（CPU rail），否则 READ_VOUT 取到的是别的 page
+                    i2cset -a -f -y "${_cv_bus}" "${_cv_addr}" 0x00 0x00 b 2>/dev/null
+                    _cv_vid=$(i2cget -a -f -y "${_cv_bus}" "${_cv_addr}" 0x8b w 2>/dev/null)
+                    case "${_cv_vid}" in
+                        0x*)
+                            # step=10mV、GRS=1.0（本芯片实测确定，见 BSP 笔记 §87.22）
+                            VDDC_VOLTAGE=$(( (${_cv_vid} + 49) * 10 ))
+                            ;;
+                    esac
+                    break
+                fi
+            done
+        fi
+        unset _cv_bus _cv_addr _cv_id _cv_vid
+    fi
+    unset _cv_dvfs_dir _cv_mv _cv_dev
+fi
+
 
 # V12_POWER
 V12_POWER=""
