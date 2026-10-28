@@ -249,6 +249,27 @@ cat > "$D3/kernel_info" <<'EOF'
 EOF
 expect_eq "积压夹具 depth|free_min" "175|0" "$(parse_bmtpu_kernel_info "$D3/kernel_info")"
 
+# 缺字段的 HWQ 不得与相邻 HWQ 串配：hwq1 只有 pushed_cnt（缺 total done），
+# hwq2 只有 total done。若实现不按 HWQ 边界清空 pushed，hwq1 的 999 会与 hwq2 的
+# done=1 配成一对，凭空算出 998 条积压（正确值应为 0）。
+# 注意夹具方向：用 pushed 远大于 done 才能暴露，反过来会被末尾的负数截断掩盖。
+# 驱动（84x6_debug.c）恒打印全字段，这是防御性回归，防止后人改坏边界处理。
+cat > "$D3/kernel_info" <<'EOF'
+--- HWQ Index: 0 ---
+  free_slots: 16
+  pushed_cnt: 100
+  total done: 100
+
+--- HWQ Index: 1 ---
+  free_slots: 2
+  pushed_cnt: 999
+
+--- HWQ Index: 2 ---
+  free_slots: 16
+  total done: 1
+EOF
+expect_eq "缺 total done 的 HWQ 不与下一个 HWQ 串配" "0|2" "$(parse_bmtpu_kernel_info "$D3/kernel_info")"
+
 echo "== 6. 速率：窗口内 recvmsg 增量必须反映到 tasks/s =="
 # 采样期间改写 scaler_info（每核 recvmsg +25，4 核共 +100），窗口 1.0s → 期望 100.00。
 # 这是唯一能确定性地测速率公式的办法：真机上负载是突发且不可控的。
