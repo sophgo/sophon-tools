@@ -1,6 +1,6 @@
 #!/bin/bash
 
-GET_INFO_VERSION="1.6.1"
+GET_INFO_VERSION="1.7.0"
 
 shopt -s compat31
 
@@ -117,6 +117,205 @@ function get_ion_usage()
         echo "$usage"
     else
         echo "0"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# /proc/bmtpu —— CV84X6（CV84X2）TPU 运行时状态
+#
+# /proc/bmtpu 由 libsophon 的 bmtpu 驱动在 84x6 的 chip_specific_init 里建
+# （driver/84x6/84x6_debug.c bmdev_test_proc_init / bmdev_scaler_log_init），
+# 只有 84x6、且无论 SOC 还是 PCIE 模式都会建。各文件性质（2026-10-28 于
+# 10.42.0.242 真机 + libsophon 0x4.15 源码逐项核实）：
+#
+#   scaler_info      0666  固件侧（C906 bmcpu）每核一份共享内存统计的只读快照：
+#                          固件版本/编译时间、running_flag（当前执行到哪一步）、
+#                          using_flag、recvmsg/procmsg 计数、当前 api 与 result。
+#                          这是唯一能反映 TPU 固件"活着还是死了"的接口。
+#   kernel_info      0444  内核侧 TSH 队列快照：8 个 HWQ 的 free_slots /
+#                          pushed_cnt / total done，以及 irq_handle_cnt /
+#                          irq_fallback_cnt。pushed-done 即积压深度。
+#   kernel_fifo      0444  最近 64 条 api 下发记录（环形缓冲），带 age/api/mode。
+#   bmdi_base_info   0664  驱动侧基本信息（libsophon git version / status / timeout）。
+#   bmdi_lib_info    0664  已加载的 TPU 算子库及 refcount。
+#   bmdi_api_info    0664  **禁止读取**：见下。
+#   shmpacket        0666  需先 `echo <addr>` 写入才输出，写操作会改全局调试状态。
+#   txpsys           0666  同上，还需按 coreID 触发寄存器 dump。
+#   wakeup_control   0666  能 start/stop 一个内核测试线程，绝不能碰。
+#
+# ⚠ bmdi_api_info 读一次就让内核 Oops 一次（本板实测两次，dmesg 有两条
+#   `Unable to handle kernel paging request at virtual address 0000000000002014`）：
+#   它的 proc_show 调 bm1688_base_get_core_num() → otp_reg_read(bmdi, 0x2014)，
+#   而 84x6 的 bm_reg_bm84x6.otp_base_addr = 0x27100000 并不在 platform BAR 覆盖
+#   范围内（dmesg: bm_get_bar_offset invalid address = 0x27100000），
+#   bm_reg_init_vaddr 因此把 otp_bar_vaddr 置成 NULL，ioread32 直接解引用空指针。
+#   崩溃发生在内核态，任何用户态工具都无法规避，只能不读。
+#
+# 本脚本只读上面标 0444/0666 的白名单文件，并且只用读、绝不写。
+
+# 单调时钟纳秒；不可用时返回空（速率段退化为 0，不臆造数值）
+function _bmtpu_now_ns() {
+    local t
+    t=$(date +%s%N 2>/dev/null)
+    case "${t}" in
+        ''|*[!0-9]*) echo "" ;;
+        *) echo "${t}" ;;
+    esac
+}
+
+# [running_flag 十六进制] [using_flag 十六进制] -> 单核状态词
+# running_flag 取值语义来自 bmcpu/app/bmcpu/{bmcpu.c,cv84x6_process.c}：
+#   0xAA550001            初始化完成，等第一条 tshfifo
+#   0xAA550013/14 等      msgfifo_process 里按 api 分支设的阶段标记
+#   0xAA550004|api<<8     本次 api 处理结束（低字节固定 0x04），回到轮询
+#   0xAA55DEAD            主循环意外退出（正常永不出现）
+#   崩溃：信号处理函数把信号号写进 bit16-23，覆盖掉 magic 里的 0x55
+# using_flag == 0xa5a5 表示该核正在处理自己负责的 packet，是最权威的忙闲标志
+function _bmtpu_decode_core_state() {
+    local rf using top sig low
+    rf=$(printf '%s' "${1:-}" | tr 'A-Z' 'a-z')
+    using=$(printf '%s' "${2:-}" | tr 'A-Z' 'a-z')
+    case "${rf}" in
+        ''|*[!0-9a-f]*) echo "UNKNOWN"; return ;;
+    esac
+    while [ ${#rf} -lt 8 ]; do rf="0${rf}"; done
+    rf=${rf: -8}
+    # 先判 DEAD：它 magic 完好（bit16-23 仍是 0x55），但低 16 位是 0xDEAD
+    if [ "${rf}" = "aa55dead" ]; then
+        echo "EXITED"
+        return
+    fi
+    top=${rf:0:2}     # bit24-31，magic 高位 0xAA
+    sig=${rf:2:2}     # bit16-23，正常是 0x55，崩溃后被信号号覆盖
+    low=${rf:6:2}     # bit0-7
+    if [ "${top}" != "aa" ]; then
+        echo "UNKNOWN"
+        return
+    fi
+    if [ "${sig}" != "55" ]; then
+        echo "CRASH$((16#${sig}))"
+        return
+    fi
+    if [ "${using}" = "a5a5" ]; then
+        echo "BUSY"
+        return
+    fi
+    case "${low}" in
+        04) echo "IDLE" ;;   # 上次 api 已处理完，在轮询 tshfifo
+        01) echo "INIT" ;;   # 固件起来了但还没等到第一条消息
+        *)  echo "RUN"  ;;   # 正在派发 api（瞬时态）
+    esac
+}
+
+# [scaler_info 路径] -> 每核一行 "核号|固件版本|编译时间|running_flag|using_flag|recvmsg|procmsg"
+# 字段缺失（核没起来 / 固件没填）就留空，不补 0。
+function parse_bmtpu_scaler_info() {
+    local f="${1:-}"
+    [ -r "${f}" ] || return 0
+    awk '
+        function emit() {
+            if (idx == "") return
+            gsub(/ /, "_", build)          # 值里不能出现空格，否则破坏 KEY|VALUE| 的行格式
+            printf "%s|%s|%s|%s|%s|%s|%s\n", idx, fw, build, rf, uf, recv, proc
+        }
+        /^Core [0-9]+:$/ {
+            emit()
+            idx = $2; sub(/:/, "", idx)
+            fw = ""; build = ""; rf = ""; uf = ""; recv = ""; proc = ""
+            next
+        }
+        /FIRMWARE_VERSION=/ {
+            v = $0; sub(/.*FIRMWARE_VERSION=/, "", v); gsub(/[ \t\r]/, "", v); fw = v; next
+        }
+        /^[ \t]*BUILD_TIME=/ {
+            v = $0; sub(/^[ \t]*BUILD_TIME=/, "", v)
+            gsub(/\r/, "", v); gsub(/^[ \t]+|[ \t]+$/, "", v); build = v; next
+        }
+        /^[ \t]*recvmsg_cnt:/ { recv = $2; next }
+        /^[ \t]*procmsg_cnt:/ { proc = $2; next }
+        /^[ \t]*running_flag:/ { rf = $2; next }
+        /^[ \t]*using_flag:/   { uf = $2; next }
+        END { emit() }
+    ' "${f}" 2>/dev/null
+}
+
+# [kernel_info 路径] -> "积压总数|最小空闲槽位"
+# 积压 = Σ(pushed_cnt - total done)，是 TSH 队列里还没被固件消费掉的 api 数；
+# free_slots 见底说明下发侧即将进入背压等待。任一 HWQ 缺字段就跳过该 HWQ。
+function parse_bmtpu_kernel_info() {
+    local f="${1:-}"
+    [ -r "${f}" ] || return 0
+    awk '
+        /^[ \t]*free_slots:/  { fs = $2; if (minfs == "" || fs + 0 < minfs + 0) minfs = fs; next }
+        /^[ \t]*pushed_cnt:/  { p = $2; next }
+        /^[ \t]*total done:/  {
+            if (p != "") { depth += (p + 0) - ($3 + 0); p = "" }
+            next
+        }
+        END {
+            if (minfs != "") {
+                if (depth < 0) depth = 0
+                printf "%d|%d\n", depth, minfs
+            }
+        }
+    ' "${f}" 2>/dev/null
+}
+
+# 汇总成 KEY|VALUE| 行。目录可用 GET_INFO_BMTPU_DIR 覆盖（测试用），
+# 采样窗口用 GET_INFO_BMTPU_INTERVAL 覆盖。
+#
+# 速率窗口默认 1.0s：LLM 推理单次 launch 约 90ms 且成批出现（真机 bmrt_test 实测），
+# 窗口太短会频繁落在两批之间的空档里读出 0，让人误判成 TPU 停了。1s 能覆盖约 10 次
+# launch，读数稳定；相对 get_info 自身的耗时（CPU 采样已占 0.5s）也可接受。
+function collect_bmtpu_metrics() {
+    local dir interval rows rows2 sum1 sum2 st line idx _f _b rf uf _r _p rate q t1 t2
+    dir="${GET_INFO_BMTPU_DIR:-/proc/bmtpu}"
+    interval="${GET_INFO_BMTPU_INTERVAL:-1.0}"
+
+    rows=$(parse_bmtpu_scaler_info "${dir}/scaler_info")
+    [ -n "${rows}" ] || return 0
+
+    # 固件版本：多核同版本只报一次；出现多个版本说明核间镜像不一致，必须全列出来
+    printf '%s\n' "${rows}" | awk -F'|' '
+        $2 != "" && !seen[$2]++ { s = (s == "" ? $2 : s "," $2) }
+        END { if (s != "") printf "TPU_FW_VERSION|%s|\n", s }'
+
+    # 编译时间：各核本就是分别编译的镜像，正常就不同，故逐核列出才可比对
+    printf '%s\n' "${rows}" | awk -F'|' '
+        $3 != "" { t = (t == "" ? $3 : t "," $3) }
+        END { if (t != "") printf "TPU_FW_BUILD_TIME|%s|\n", t }'
+
+    st=""
+    while IFS='|' read -r idx _f _b rf uf _r _p; do
+        [ -n "${idx}" ] || continue
+        st="${st:+${st},}$(_bmtpu_decode_core_state "${rf}" "${uf}")"
+    done <<< "${rows}"
+    if [ -n "${st}" ]; then
+        printf 'TPU_CORE_STATE|%s|\n' "${st}"
+    fi
+
+    # 任务速率：两次采样 recvmsg_cnt 求和做差。计数器是 u32 且固件重启会归零，
+    # 差值为负按 0 处理，不输出负数。用单调时钟实测窗口而非假定 sleep 精确到毫秒。
+    sum1=$(printf '%s\n' "${rows}" | awk -F'|' '{ s += $6 } END { printf "%d", s + 0 }')
+    t1=$(_bmtpu_now_ns)
+    sleep "${interval}"
+    t2=$(_bmtpu_now_ns)
+    rows2=$(parse_bmtpu_scaler_info "${dir}/scaler_info")
+    sum2=$(printf '%s\n' "${rows2}" | awk -F'|' '{ s += $6 } END { printf "%d", s + 0 }')
+    rate=$(awk -v a="${sum1}" -v b="${sum2}" -v t="${interval}" -v n1="${t1}" -v n2="${t2}" 'BEGIN {
+        # 时钟可用就用实测经过时间，否则退回 interval 标称值
+        t_real = (n1 != "" && n2 != "" && n2 > n1) ? (n2 - n1) / 1e9 : t + 0
+        if (t_real <= 0) { printf "0.00"; exit }
+        d = b - a
+        if (d < 0) d = 0
+        printf "%.2f", d / t_real
+    }')
+    printf 'TPU_TASK_RATE(tasks/s)|%s|\n' "${rate}"
+
+    q=$(parse_bmtpu_kernel_info "${dir}/kernel_info")
+    if [ -n "${q}" ]; then
+        printf 'TPU_QUEUE_DEPTH|%s|\n'      "${q%%|*}"
+        printf 'TPU_HWQ_FREE_MIN|%s|\n'     "${q##*|}"
     fi
 }
 
@@ -1033,6 +1232,20 @@ if [[ "${WORK_MODE}" == "SOC" ]]; then
         fi
 fi
 
+# TPU_RUNTIME —— 来自 /proc/bmtpu（仅 CV84X6）
+# 上面 TPU_USAGE 是内核采样出来的利用率百分比，反映"有多忙"；这一段补的是
+# "TPU 到底在不在正常工作"：固件版本、每核跑到了哪一步、下发队列有没有积压。
+# 两者互补：利用率 0% 既可能是真空闲，也可能是固件崩了/卡死，只有这段能区分。
+# 输出条目不固定（4 核机型 4 条、异常时才出现的 key 不输出到空行），故单独成段。
+TPU_BMTPU_LINES=""
+if [[ "${WORK_MODE}" == "SOC" ]] && [[ "${CPU_MODEL}" == "cv84x6" ]]; then
+    # /proc/bmtpu 及其下 0444/0666 文件非 root 也可读（实测 linaro 用户可读），
+    # 但驱动没起来时整个目录不存在 —— collect 内部判空后返回空，不报错。
+    if [ -d /proc/bmtpu ]; then
+        TPU_BMTPU_LINES=$(collect_bmtpu_metrics)
+    fi
+fi
+
 # TPU_USAGE
 TPU_USAGE=""
 if [[ "${WORK_MODE}" == "SOC" ]]; then
@@ -1284,6 +1497,10 @@ if [[ "${WORK_MODE}" == "SOC" ]]; then
     echo "VDDC_VOLTAGE(mV)|${VDDC_VOLTAGE}|"
     echo "V12_POWER(mW)|${V12_POWER}|"
     echo "TPU_USAGE(%)|${TPU_USAGE}|"
+    # CV84X6 才有（/proc/bmtpu）；其他芯片此处为空，不额外占行
+    if [ -n "${TPU_BMTPU_LINES}" ]; then
+        echo "${TPU_BMTPU_LINES}"
+    fi
     echo "BOARD_TYPE|${BOARD_TYPE}|"
     echo "MCU_VERSION|${MCU_VERSION}|"
     echo "KERNEL_VERSION|${KERNEL_VERSION}|"
