@@ -173,6 +173,16 @@ export SE_RAG_RERANK_KEY="sk-user-rerank-key"
   两者相同即显式禁用故障转移；`se-rag` CLI 默认即启用
 - 环境变量覆盖（改链路不必重新编译）：`SE_RAG_GATEWAY_URL` 改主网关，
   `SE_RAG_FALLBACK_URL` 改备网关——指向自有域名（绑定 Custom Domain 后）或置空=单跳止血
+- **明文 HTTP 兜底（保第二跳）**：阻断若按 TLS SNI 匹配，则明文请求根本没有 SNI 可匹配，
+  因而穿得过去。`*.workers.dev` 网关的 TLS 通道（443 与全部备用 HTTPS 端口）判定不可用后，
+  自动改走 `http://<host>:80` 再试一次。实测该通道返回合法 1024 维向量。
+  `SE_RAG_ALLOW_HTTP_FALLBACK=0` 可关闭。
+  > ⚠️ **安全权衡**：明文 HTTP 下内置 key 与查询文本在链路上不加密（内容仍受 TLS 之外
+  > 的传输路径保护，但**不具备机密性**）。内置 key 只是网关侧的临时凭证、真 key 留在
+  > 网关，泄露面有限；但若你的部署对传输机密性有硬要求，请置 `SE_RAG_ALLOW_HTTP_FALLBACK=0`，
+  > 此时 SNI 全端口阻断的环境会退化为降级 BM25。更彻底的方案仍是绑定 Custom Domain
+  > （见下）让 SNI 不再命中被封锁的模式。
+- 转移链总预算 `.BUDGET`：`SE_RAG_FAILOVER_BUDGET`（默认 18s = 明文兜底预留 12s + TLS 余量 6s）
 - 用户自备 key 不经网关，直达官方 SiliconFlow，无故障转移项
 
 ## 多知识库扩展

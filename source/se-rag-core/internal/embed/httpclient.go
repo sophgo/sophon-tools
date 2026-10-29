@@ -25,9 +25,10 @@ const maxAttempts = 6
 // CF 的 443 被 SNI 阻断后，6 次重试 + 退避让一次查询在降级到 BM25 前空等 65 秒
 // （静默黑洞形态下甚至撞满 query 的 120s 上限）。这里给整条转移链设硬上限，
 // 到点即认输、交由上层降级——降级答案快过沉默。
-// 正常路径实测：CF TLS 握手 1.5s、FC 0.07s，12s 足够覆盖跨两跳的一次抖动重试。
+// 正常路径实测：CF TLS 握手中位数 1.9s（最大 4.6s）、FC 0.07s。
+// 预算 18s = 明文 HTTP 兜底预留 12s + TLS 尝试余量 6s；若无兜底候选则 18s 全给 TLS。
 // SE_RAG_FAILOVER_BUDGET 可覆盖（Go duration 格式，如 30s）。
-var failoverBudget = 12 * time.Second
+var failoverBudget = 18 * time.Second
 
 func init() {
 	if v := os.Getenv("SE_RAG_FAILOVER_BUDGET"); v != "" {
@@ -39,9 +40,26 @@ func init() {
 
 // gatewayAltPorts Cloudflare 对同一 Worker 额外监听的 HTTPS 端口。
 // 443 上的 SNI 阻断未必覆盖这些端口：实测同一 Worker 在 2053/2083/2087/2096/8443
-// 均可正常返回向量。这是在被阻断主机上恢复第二跳、无需自有域名的现成手段。
+// 均可正常返回向量。但在按 SNI 匹配的深度阻断下（被测主机实测）所有 HTTPS 端口一律
+// RST，此时唯一还能走的通道是明文 HTTP（80）——见 gatewayHTTPFallbackPort。
 // 仅对 Cloudflare 域名有意义——fcapp.run 等其它网关没有这套端口，不能套用。
 var gatewayAltPorts = []string{"2053", "2083", "2087", "2096", "8443"}
+
+// gatewayHTTPFallbackPort 显式 HTTP 的最后兜底端口。
+// 阻断规则按 TLS SNI 匹配时，明文 HTTP 根本没有 SNI 可供匹配，因此能穿过去：
+// 被测主机实测 443 与全部 5 个备用 HTTPS 端口均 RST，而 80 端口返回 200 + 合法
+// 1024 维向量。这是「TLS 全端口被封」时仍然保住第二跳的唯一通道。
+const gatewayHTTPFallbackPort = "80"
+
+// httpFallbackReserve 为明文 HTTP 兜底预留的预算。
+// CF TLS 握手实测中位数 1.9s、最大 4.6s；配 2 次尝试 + 退避约需 10s 余量，
+// 取 14s 并与 failoverBudget 一起保持「总预算 20s」的量级。
+const httpFallbackReserve = 12 * time.Second
+
+// allowPlainHTTPFallback 是否允许在 TLS 全端口失效后改走明文 HTTP。
+// 默认开启：没有它，第二跳在 SNI 阻断下就是名义上的。可通过
+// SE_RAG_ALLOW_HTTP_FALLBACK=0 关闭（关闭后仅有条件信任的场景会退化为降级 BM25）。
+var allowPlainHTTPFallback = os.Getenv("SE_RAG_ALLOW_HTTP_FALLBACK") != "0"
 
 // supportsAltPorts 该 URL 是否属于可用 Cloudflare 备用端口的网关。
 func supportsAltPorts(raw string) bool {
@@ -153,6 +171,8 @@ func postJSONWithGateway(ctx context.Context, urls []string, key string, payload
 	// 端口降级：443 被阻断时，同一 Worker 在 Cloudflare 的备用 HTTPS 端口上往往仍可用。
 	// 按网关各自记账：每个网关最多降级一次，互不占用名额。
 	portDowngraded := map[string]bool{}
+	// plainHTTPTried 已对某个网关尝试过明文 HTTP 兜底（每网关一次）。
+	plainHTTPTried := map[string]bool{}
 	deadline := time.Now().Add(failoverBudget)
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
@@ -185,7 +205,16 @@ func postJSONWithGateway(ctx context.Context, urls []string, key string, payload
 		}
 		// 单次尝试也不能越过总预算：网关静默黑洞时一次 TLS 握手就要 10s，
 		// 仅靠循环顶部检查会让总耗时膨胀到预算的倍数（实测 20s 预算跑成 30s）。
-		attemptCtx, attemptCancel := context.WithDeadline(ctx, deadline)
+		attemptDeadline := deadline
+		// 给末尾的明文 HTTP 兜底预留时间：TLS 尝试可能把预算整段吃光（被测主机实测
+		// 12.3s 全花在这里），预留后才能保证兜底通道确实被走到。
+		// 注意必须对**每一次** TLS 尝试都生效，而不只是第一次：否则端口降级那一跳
+		// 会用掉全部余额，兜底仍然轮不到（实测正是如此）。
+		if allowPlainHTTPFallback && strings.HasPrefix(u, "https://") &&
+			supportsAltPorts(u) && hasHTTPFallbackCandidate(urls, plainHTTPTried) {
+			attemptDeadline = deadline.Add(-httpFallbackReserve)
+		}
+		attemptCtx, attemptCancel := context.WithDeadline(ctx, attemptDeadline)
 		req = req.WithContext(attemptCtx)
 		req.Header.Set("Authorization", "Bearer "+key)
 		req.Header.Set("Content-Type", "application/json")
@@ -194,19 +223,34 @@ func postJSONWithGateway(ctx context.Context, urls []string, key string, payload
 			attemptCancel()
 			noteTransportFailure(err)
 			lastErr = err
+			base := portDowngradeBase(u)
+			// 相对 TLS 通道而言，超时和被 RST 是同一件事：这条路走不通。
+			// 被测主机上 TLS 尝试是静默黑洞（不是 RST），若只对显式硬失败做降级，
+			// 预算会被一次尝试整段吃光，明文 HTTP 兜底永远轮不到。
+			tlsChannelDead := isHardFailure(err) ||
+				(isTimeoutErr(err) && supportsAltPorts(u))
 			// TLS 层被阻断 / 代理拒绝：重试同一地址必然失败，标记后跳过，
 			// 并把剩下的尝试预算留给下一个网关。
-			if isHardFailure(err) {
+			if tlsChannelDead {
 				breaker.markFail(u, time.Now())
 				hardFailed[u] = true
 				// 端口降级：换到 Cloudflare 备用 HTTPS 端口再试一次（每网关一次）。
 				// 只对 workers.dev 生效——其它网关没有这套备用端口。
-				base := portDowngradeBase(u)
 				if supportsAltPorts(u) && !portDowngraded[base] && len(gatewayAltPorts) > 0 {
 					if alt, ok := withAltPort(u, gatewayAltPorts[0]); ok {
 						portDowngraded[base] = true
 						delete(hardFailed, u)
 						urls = replaceURL(urls, u, alt)
+						continue
+					}
+				}
+				// 明文 HTTP 兜底：按 SNI 匹配的阻断对没有 SNI 的明文请求无效，
+				// 这是 TLS 全端口被封时保住第二跳的最后通道。
+				if allowPlainHTTPFallback && supportsAltPorts(u) && !plainHTTPTried[base] {
+					if plain, ok := toPlainHTTP(u, gatewayHTTPFallbackPort); ok {
+						plainHTTPTried[base] = true
+						delete(hardFailed, u)
+						urls = replaceURL(urls, u, plain)
 						continue
 					}
 				}
@@ -295,6 +339,28 @@ func replaceURL(urls []string, old, new string) []string {
 	return out
 }
 
+// hasHTTPFallbackCandidate 是否还有网关可以尝试明文 HTTP 兜底。
+func hasHTTPFallbackCandidate(urls []string, tried map[string]bool) bool {
+	for _, u := range urls {
+		if supportsAltPorts(u) && !tried[portDowngradeBase(u)] {
+			return true
+		}
+	}
+	return false
+}
+
+// toPlainHTTP 把 URL 换成明文 HTTP 的指定端口。
+// 仅用于 SNI 阻断下的最后兜底：明文请求不带 SNI，按 SNI 匹配的阻断拦不住它。
+func toPlainHTTP(raw, port string) (string, bool) {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return "", false
+	}
+	u.Scheme = "http"
+	u.Host = net.JoinHostPort(u.Hostname(), port)
+	return u.String(), true
+}
+
 // withAltPort 给 base URL 换上指定端口；URL 无法解析时返回 false。
 func withAltPort(raw, port string) (string, bool) {
 	u, err := url.Parse(raw)
@@ -314,6 +380,20 @@ func portDowngradeBase(raw string) string {
 		return raw
 	}
 	return u.Scheme + "://" + u.Hostname() + u.Path
+}
+
+// isTimeoutErr 判断是否为超时类错误（含 ctx deadline）。
+func isTimeoutErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	var ne net.Error
+	if errors.As(err, &ne) && ne.Timeout() {
+		return true
+	}
+	return errors.Is(err, context.DeadlineExceeded) ||
+		strings.Contains(err.Error(), "i/o timeout") ||
+		strings.Contains(err.Error(), "context deadline exceeded")
 }
 
 // isHardFailure 判断错误是否属于「重试同一地址必然同样失败」。
