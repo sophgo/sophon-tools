@@ -147,9 +147,19 @@ export SE_RAG_RERANK_KEY="sk-user-rerank-key"
 行为约定：
 
 - 同一 key / 同路径（`/v1/embeddings`、`/v1/rerank`）/ 同模型白名单，内置 key 零改动
-- 5xx / 429 / 连接错误（超时、DNS 失败）→ 有界重试（最多 6 次）并轮转至 CF 备网关；4xx 快速失败不转移
-- 备用 CF 网关的「IP 优先 + DoH 兜底」拨号依赖硬编码的 Cloudflare Anycast IP 与公共 DoH 服务器
-  （cf IP 段调整或 DoH 不可达时备路径失效；此时 FC 主网关走系统 DNS 不受此影响）
+- 5xx / 408 / 429 / 403 / 连接错误（超时、DNS 失败）→ 有界重试（最多 6 次）并轮转至 CF 备网关；
+  401 / 400 / 404 快速失败不转移（这类错误换任何网关都一样复现）
+- 403 参与转移的原因：网关侧欠费/配额耗尽、以及网关特有的上游拒绝都表现为 403，
+  不像 401/400 那样能断定「换网关也一样」
+- **熔断**：某网关失败后进入 60s 冷却，冷却期内后续请求直接跳过它（全部冷却时做一次半开探测）。
+  内置 key 限流把 build 压成串行（约 950 次调用），没有熔断时主网关持续故障会把 1 次超时代价放大到 950 次
+- 备用 CF 网关的拨号顺序为「硬编码 Anycast IP → DoH 实时解析」。两个硬编码 IP 只是起点：
+  若出现 TLS 层失败（TCP 可连但握手失败，正是 CF 调整 anycast 段后的形态），
+  静态 IP 会被标记可疑 10 分钟并改为 **DoH 优先**，避免反复命中坏 IP
+- DoH 服务器按各自 JSON API 路径查询（Cloudflare `/dns-query`、Google `/resolve`），
+  应答只采信 **Cloudflare 网段**内的地址——被污染的公共 DoH（实测阿里 223.5.5.5）对
+  `*.workers.dev` 返回伪造 IP，不加这层过滤会把伪造地址当作权威记录去拨号
+- `query` 输出新增 `gateway: <host>` 行，直接显示本次检索实际命中的网关，不需要再从外部推测
 - 故障转移链可配置：`Provider.BaseURL`（主）+ `Provider.FallbackBaseURL`（备，默认 CF 网关）；
   两者相同即显式禁用故障转移；`se-rag` CLI 默认即启用
 - 用户自备 key 不经网关，直达官方 SiliconFlow，无故障转移项

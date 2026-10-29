@@ -12,6 +12,7 @@ type siliconflowEmbedder struct {
 	model    string
 	dim      int
 	limiter  *EmbeddingLimiter
+	gw       gwRecorder
 }
 
 func newSiliconflowEmbedder(baseURLs []string, key, model string, dim int, useBuiltinKey bool) (Embedder, error) {
@@ -27,6 +28,9 @@ func newSiliconflowEmbedder(baseURLs []string, key, model string, dim int, useBu
 
 func (e *siliconflowEmbedder) Name() string { return "siliconflow." + e.model }
 func (e *siliconflowEmbedder) Dim() int     { return e.dim }
+
+// Gateway 返回最近一次实际服务本次进程的网关地址（可观测性：能看出当前走的是主网关还是备网关）。
+func (e *siliconflowEmbedder) Gateway() string { return e.gw.LastGateway() }
 
 type sfEmbedResp struct {
 	Data []struct {
@@ -48,9 +52,11 @@ func (e *siliconflowEmbedder) Embed(ctx context.Context, texts []string) ([][]fl
 func (e *siliconflowEmbedder) embedBatch(ctx context.Context, texts []string) ([][]float32, error) {
 	payload := map[string]any{"model": e.model, "input": texts}
 	var resp sfEmbedResp
-	if err := postJSON(ctx, joinPaths(e.baseURLs, "/embeddings"), e.apiKey, payload, &resp); err != nil {
+	served, err := postJSONWithGateway(ctx, joinPaths(e.baseURLs, "/embeddings"), e.apiKey, payload, &resp)
+	if err != nil {
 		return nil, err
 	}
+	e.gw.set(served)
 	out := make([][]float32, len(texts))
 	for _, d := range resp.Data {
 		if d.Index >= 0 && d.Index < len(out) {
@@ -71,6 +77,7 @@ type siliconflowReranker struct {
 	baseURLs []string
 	apiKey   string
 	model    string
+	gw       gwRecorder
 }
 
 func newSiliconflowReranker(baseURLs []string, key, model string) (Reranker, error) {
@@ -81,6 +88,9 @@ func newSiliconflowReranker(baseURLs []string, key, model string) (Reranker, err
 }
 
 func (r *siliconflowReranker) Name() string { return "siliconflow." + r.model }
+
+// Gateway 返回最近一次实际服务本次进程的网关地址。
+func (r *siliconflowReranker) Gateway() string { return r.gw.LastGateway() }
 
 type sfRerankResp struct {
 	Results []struct {
@@ -99,9 +109,11 @@ func (r *siliconflowReranker) Rerank(ctx context.Context, query string, docs []s
 	payload := map[string]any{"model": r.model, "query": query, "documents": docs, "top_n": topN}
 	var resp sfRerankResp
 	// 注：rerank 单次调用段数由调用方控制，内置 key 暂不作额外限流
-	if err := postJSON(ctx, joinPaths(r.baseURLs, "/rerank"), r.apiKey, payload, &resp); err != nil {
+	served, err := postJSONWithGateway(ctx, joinPaths(r.baseURLs, "/rerank"), r.apiKey, payload, &resp)
+	if err != nil {
 		return nil, err
 	}
+	r.gw.set(served)
 	order := make([]int, 0, len(resp.Results))
 	for _, rr := range resp.Results {
 		order = append(order, rr.Index)
