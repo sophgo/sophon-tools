@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -52,8 +53,8 @@ var gatewayAltPorts = []string{"2053", "2083", "2087", "2096", "8443"}
 const gatewayHTTPFallbackPort = "80"
 
 // httpFallbackReserve 为明文 HTTP 兜底预留的预算。
-// CF TLS 握手实测中位数 1.9s、最大 4.6s；配 2 次尝试 + 退避约需 10s 余量，
-// 取 14s 并与 failoverBudget 一起保持「总预算 20s」的量级。
+// CF TLS 握手实测中位数 1.9s（最大 4.6s）；443 + 一个备用端口两次尝试 + 退避约需 6s，
+// 留 12s 给兜底这一跳，合计与 failoverBudget 的 18s 对齐。
 const httpFallbackReserve = 12 * time.Second
 
 // allowPlainHTTPFallback 是否允许在 TLS 全端口失效后改走明文 HTTP。
@@ -105,13 +106,121 @@ func newGatewayAwareClient(base DialContext) *http.Client {
 }
 
 // gatewayBreaker 记录各网关的失败冷却截止时间，供 postJSON 跳过已知不可用的网关。
-// 只解决「同一进程内反复撞同一堵墙」，不跨进程（CLI 单次查询本来就是独立进程）。
+// 状态落盘（见 breakerStatePath）：支撑 agent 每次查询都是独立 CLI 进程，
+// 纯内存熔断对它们完全无效——实测每次查询都要重付一遍失效链路的代价。
 type gatewayBreaker struct {
 	mu    sync.Mutex
 	until map[string]time.Time
+	// prefer 按「网关身份」(gatewayKey = host+path) 记录上次成功服务的完整地址。
+	// 必须按 key 分开记：embeddings 与 rerank 是不同的 path，共用一个槽位会互相覆盖，
+	// 导致其中一个永远用不上粘滞（实测正是如此）。
+	prefer map[string]preferEntry
 }
 
-var breaker = &gatewayBreaker{until: map[string]time.Time{}}
+// preferEntry 一条粘滞记录：可用的完整地址 + 记录时间（用于过期）。
+type preferEntry struct {
+	URL string
+	At  time.Time
+}
+
+var breaker = newBreaker()
+
+func newBreaker() *gatewayBreaker {
+	until, prefer := loadBreakerState()
+	return &gatewayBreaker{until: until, prefer: prefer}
+}
+
+// preferTTL 「上次成功的网关」粘滞有效期。
+// 太短则每个进程都重新踩一遍失效链路；太长则网络恢复后仍被钉在慢路径上。
+const preferTTL = 10 * time.Minute
+
+// breakerStatePath 熔断状态文件路径。
+// 优先 $SE_RAG_STATE_DIR（便于容器内挂载/清理），否则用用户缓存目录；
+// 两者都不可得时返回空串，退化为纯内存熔断。
+func breakerStatePath() string {
+	if d := os.Getenv("SE_RAG_STATE_DIR"); d != "" {
+		return filepath.Join(d, "gateway-breaker.json")
+	}
+	d, err := os.UserCacheDir()
+	if err != nil || d == "" {
+		return ""
+	}
+	return filepath.Join(d, "se-rag", "gateway-breaker.json")
+}
+
+// loadBreakerState 读取上次进程留下的冷却记录；只保留尚未过期的条目。
+// 任何异常（文件缺失/损坏/无权限）都静默退化为空状态——熔断是优化，不该因它启动失败。
+func loadBreakerState() (map[string]time.Time, map[string]preferEntry) {
+	until := map[string]time.Time{}
+	prefer := map[string]preferEntry{}
+	p := breakerStatePath()
+	if p == "" {
+		return until, prefer
+	}
+	b, err := os.ReadFile(p)
+	if err != nil {
+		return until, prefer
+	}
+	var st struct {
+		Until  map[string]int64 `json:"until"`
+		Prefer map[string]struct {
+			URL string `json:"url"`
+			At  int64  `json:"at"`
+		} `json:"prefer"`
+	}
+	if err := json.Unmarshal(b, &st); err != nil {
+		return until, prefer
+	}
+	now := time.Now()
+	for u, ns := range st.Until {
+		t := time.Unix(0, ns)
+		if now.Before(t) && now.Sub(t) < time.Hour { // 兼顾时钟回拨：过期过久的直接丢
+			until[u] = t
+		}
+	}
+	for k, v := range st.Prefer {
+		at := time.Unix(0, v.At)
+		// 粘滞偏好也会过期：网络状况会变，不能让一次成功永久钉死路由。
+		if v.URL != "" && now.Sub(at) <= preferTTL {
+			prefer[k] = preferEntry{URL: v.URL, At: at}
+		}
+	}
+	return until, prefer
+}
+
+// saveBreakerState 原子写回冷却记录（临时文件 + rename），写失败静默忽略。
+func (b *gatewayBreaker) saveLocked() {
+	p := breakerStatePath()
+	if p == "" {
+		return
+	}
+	type pj struct {
+		URL string `json:"url"`
+		At  int64  `json:"at"`
+	}
+	raw := struct {
+		Until  map[string]int64 `json:"until"`
+		Prefer map[string]pj    `json:"prefer,omitempty"`
+	}{Until: make(map[string]int64, len(b.until)), Prefer: make(map[string]pj, len(b.prefer))}
+	for u, t := range b.until {
+		raw.Until[u] = t.UnixNano()
+	}
+	for k, v := range b.prefer {
+		raw.Prefer[k] = pj{URL: v.URL, At: v.At.UnixNano()}
+	}
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		return
+	}
+	tmp := p + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return
+	}
+	_ = os.Rename(tmp, p)
+}
 
 // open 判断 url 是否处于熔断冷却期。
 func (b *gatewayBreaker) open(url string, now time.Time) bool {
@@ -126,20 +235,115 @@ func (b *gatewayBreaker) markFail(url string, now time.Time) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.until[url] = now.Add(gatewayCooldown)
+	b.saveLocked()
 }
 
 // markOK 记录一次成功并解除冷却。
 func (b *gatewayBreaker) markOK(url string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	delete(b.until, url)
+	changed := false
+	if _, ok := b.until[url]; ok {
+		delete(b.until, url)
+		changed = true
+	}
+	// 记住这条能用的路径：下次进程直接从它开始，不必重付失效链路的代价。
+	k := gatewayKey(url)
+	if k != "" {
+		if cur, ok := b.prefer[k]; !ok || cur.URL != url {
+			b.prefer[k] = preferEntry{URL: url, At: time.Now()}
+			changed = true
+		}
+	}
+	if changed {
+		b.saveLocked()
+	}
 }
 
-// reset 清空全部冷却（全部网关都在冷却时的半开探测）。
+// orderByPreference 把上次成功的路径排到最前。
+// 优先精确匹配；否则按「hostname + path」定位同一网关并把该槽位**替换**为上次那条
+// 已验证可用的地址（如 https://cf/v1 → http://cf:80/v1）。
+// 关键：只替换、不追加——列表长度代表网关数量，追加一个新条目会凭空多一跳，
+// 既放大尝试次数也会让「有界重试」的边界失真。
+func orderByPreference(urls []string, prefer string) []string {
+	if prefer == "" || len(urls) == 0 {
+		return urls
+	}
+	for i, u := range urls {
+		if u == prefer {
+			if i == 0 {
+				return urls
+			}
+			out := make([]string, 0, len(urls))
+			out = append(out, urls[i])
+			out = append(out, urls[:i]...)
+			out = append(out, urls[i+1:]...)
+			return out
+		}
+	}
+	key := gatewayKey(prefer)
+	if key == "" {
+		return urls
+	}
+	// 只在 key 唯一时替换：同一 host+path 出现多次（如同一主机不同端口部署了
+	// 两个网关）说明 key 不足以区分身份，此时宁可不动，避免把请求粘错网关。
+	matches := 0
+	for _, u := range urls {
+		if gatewayKey(u) == key {
+			matches++
+		}
+	}
+	if matches != 1 {
+		return urls
+	}
+	for i, u := range urls {
+		if gatewayKey(u) == key {
+			out := make([]string, len(urls))
+			copy(out, urls)
+			out[i] = prefer
+			if i == 0 {
+				return out
+			}
+			out[0], out[i] = out[i], out[0]
+			return out
+		}
+	}
+	return urls
+}
+
+// gatewayKey 网关身份 = hostname + path（忽略 scheme 与端口）。
+// 端口降级/明文兜底只改这两项，因此同一个网关的不同通道会得到相同的 key。
+func gatewayKey(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Hostname() == "" {
+		return ""
+	}
+	return u.Hostname() + u.Path
+}
+
+// preferredFor 在候选网关中找出上次成功的那个，返回它的完整地址（含降级后的通道）；无则空串。
+// 注意必须遍历全部候选：偏好记录的 key 可能属于第 2 跳（CF），而 urls[0] 是第 1 跳（FC），
+// 只用 urls[0] 去查会永远查不到。
+func (b *gatewayBreaker) preferredFor(urls []string, now time.Time) string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, u := range urls {
+		e, ok := b.prefer[gatewayKey(u)]
+		if !ok || now.Sub(e.At) > preferTTL {
+			continue
+		}
+		return e.URL
+	}
+	return ""
+}
+
+// reset 清空全部状态（冷却 + 粘滞偏好），用于全冷却时的半开探测。
 func (b *gatewayBreaker) reset() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.until = map[string]time.Time{}
+	b.prefer = map[string]preferEntry{}
+	b.saveLocked()
 }
 
 // postJSON POST JSON 到 urls（有序网关列表，故障转移链），带 Bearer 鉴权。
@@ -163,6 +367,10 @@ func postJSONWithGateway(ctx context.Context, urls []string, key string, payload
 	if err != nil {
 		return "", err
 	}
+	// 粘滞：上次成功过的网关排到最前（跨进程有效），避免每次都先撞已知失效的跳。
+	// 排序不影响语义——所有网关最终都会被尝试，只是把最可能成功的放前面。
+	// 粘滞偏好按 endpoint 区分：embeddings 与 rerank 各自记住可用通道，互不覆盖。
+	urls = orderByPreference(urls, breaker.preferredFor(urls, time.Now()))
 	var lastErr error
 	forbidden := map[string]bool{}
 	// hardFailed 已确认「重试无意义」的网关：SNI/TLS 被阻断、或代理层拒绝。

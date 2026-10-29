@@ -26,6 +26,8 @@ func always500(url string, hits *atomic.Int64, fail int64) *httptest.Server {
 
 // 主网关 5xx 不可达 → 下一尝试轮转到 FC 网关并成功；两地址都被请求过。
 func TestPostJSONFailoverToSecondURL(t *testing.T) {
+	breaker.reset()
+	defer breaker.reset()
 	var cfHits, fcHits atomic.Int64
 	cf := always500("cf", &cfHits, -1)
 	defer cf.Close()
@@ -46,6 +48,8 @@ func TestPostJSONFailoverToSecondURL(t *testing.T) {
 
 // 连接层失败（非 HTTP 响应）同样触发轮转：首地址连接拒绝 → FC 成功。
 func TestPostJSONFailoverOnConnRefused(t *testing.T) {
+	breaker.reset()
+	defer breaker.reset()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"data":[{"index":0,"embedding":[1,0]}]}`))
@@ -60,6 +64,8 @@ func TestPostJSONFailoverOnConnRefused(t *testing.T) {
 
 // 两地址都 5xx → 有界失败（总尝试数 = maxAttempts，不无限挂起），报错指明多网关不可达。
 func TestPostJSONAllGatewaysFailBounded(t *testing.T) {
+	breaker.reset()
+	defer breaker.reset()
 	var hits atomic.Int64
 	s1 := always500("s1", &hits, -1)
 	defer s1.Close()
@@ -83,6 +89,8 @@ func TestPostJSONAllGatewaysFailBounded(t *testing.T) {
 
 // siliconflow embedder 全链故障转移：CF 5xx → FC 正常返回 embedding。
 func TestSiliconflowEmbedderFailover(t *testing.T) {
+	breaker.reset()
+	defer breaker.reset()
 	var cfHits atomic.Int64
 	cf := always500("cf", &cfHits, -1)
 	defer cf.Close()
@@ -110,6 +118,8 @@ func TestSiliconflowEmbedderFailover(t *testing.T) {
 
 // reranker 同样带故障转移：CF 5xx → FC 返回精排结果。
 func TestSiliconflowRerankerFailover(t *testing.T) {
+	breaker.reset()
+	defer breaker.reset()
 	var cfHits atomic.Int64
 	cf := always500("cf", &cfHits, -1)
 	defer cf.Close()
@@ -137,6 +147,8 @@ func TestSiliconflowRerankerFailover(t *testing.T) {
 
 // 4xx 快速失败不轮转：首网关 401 时不请求 FC（键/路径错误在任何网关都会复现）。
 func TestPostJSONNoFailoverOn4xx(t *testing.T) {
+	breaker.reset()
+	defer breaker.reset()
 	var cfHits, fcHits atomic.Int64
 	cf := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cfHits.Add(1)

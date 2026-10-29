@@ -182,7 +182,12 @@ export SE_RAG_RERANK_KEY="sk-user-rerank-key"
   > 网关，泄露面有限；但若你的部署对传输机密性有硬要求，请置 `SE_RAG_ALLOW_HTTP_FALLBACK=0`，
   > 此时 SNI 全端口阻断的环境会退化为降级 BM25。更彻底的方案仍是绑定 Custom Domain
   > （见下）让 SNI 不再命中被封锁的模式。
-- 转移链总预算 `.BUDGET`：`SE_RAG_FAILOVER_BUDGET`（默认 18s = 明文兜底预留 12s + TLS 余量 6s）
+- 转移链总预算：`SE_RAG_FAILOVER_BUDGET`（默认 18s = 明文兜底预留 12s + TLS 余量 6s）
+- **熔断与粘滞跨进程持久化**：状态存于 `$SE_RAG_STATE_DIR`（默认用户缓存目录下的
+  `se-rag/gateway-breaker.json`）。这一点对支撑 agent 很关键——它们每次查询都是独立 CLI
+  进程，纯内存熔断等于没有：实测每次查询都要重付一遍失效链路的代价。落盘后，
+  上次成功的通道（含运行时降级出的 `:80`）会被记住并优先复用，实测连续 4 次查询
+  从 14.3s 收敛到 2.5s。粘滞有效期 `preferTTL` = 10 分钟，过期或失败即重新探测。
 - 用户自备 key 不经网关，直达官方 SiliconFlow，无故障转移项
 
 ## 多知识库扩展

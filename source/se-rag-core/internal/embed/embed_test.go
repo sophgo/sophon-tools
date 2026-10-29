@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -14,6 +15,8 @@ import (
 
 // 限流：8 段文本按单次≤2 段拆 → 2+2+2+2 四批
 func TestLimiterSplitsBatchesOfTwo(t *testing.T) {
+	breaker.reset()
+	defer breaker.reset()
 	l := NewEmbeddingLimiter(1)
 	var sizes []int
 	_, err := l.Embed(context.Background(), []string{"a", "b", "c", "d", "e", "f", "g", "h"},
@@ -36,6 +39,8 @@ func TestLimiterSplitsBatchesOfTwo(t *testing.T) {
 
 // 内置 key 下，HTTP 服务端收到的每个 embedding 载荷段落数必须 ≤2
 func TestSiliconflowEmbedderBatchLeq2(t *testing.T) {
+	breaker.reset()
+	defer breaker.reset()
 	var maxPayload atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
@@ -76,6 +81,8 @@ func TestSiliconflowEmbedderBatchLeq2(t *testing.T) {
 
 // 服务端 500 → 重试成功
 func TestPostJSONRetries(t *testing.T) {
+	breaker.reset()
+	defer breaker.reset()
 	var n atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if n.Add(1) < 3 {
@@ -94,6 +101,8 @@ func TestPostJSONRetries(t *testing.T) {
 
 // 4xx 不重试
 func TestPostJSONNoRetryOn4xx(t *testing.T) {
+	breaker.reset()
+	defer breaker.reset()
 	var n atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		n.Add(1)
@@ -111,6 +120,8 @@ func TestPostJSONNoRetryOn4xx(t *testing.T) {
 }
 
 func TestSiliconflowEmbedder(t *testing.T) {
+	breaker.reset()
+	defer breaker.reset()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"data":[{"index":0,"embedding":[1,0]}]}`))
@@ -130,6 +141,8 @@ func TestSiliconflowEmbedder(t *testing.T) {
 }
 
 func TestSiliconflowReranker(t *testing.T) {
+	breaker.reset()
+	defer breaker.reset()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"results":[{"index":1,"relevance_score":0.9},{"index":0,"relevance_score":0.5}]}`))
@@ -146,6 +159,8 @@ func TestSiliconflowReranker(t *testing.T) {
 }
 
 func TestSophnetEmbedder(t *testing.T) {
+	breaker.reset()
+	defer breaker.reset()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"data":[{"index":0,"embedding":[0,1]}]}`))
@@ -165,6 +180,8 @@ var _ = json.Marshal
 
 // Transport 必须配置 ResponseHeaderTimeout / TLSHandshakeTimeout（网关吞连接时不会无限挂起）。
 func TestHTTPClientTimeouts(t *testing.T) {
+	breaker.reset()
+	defer breaker.reset()
 	tr, ok := httpClient.Transport.(*http.Transport)
 	if !ok {
 		t.Fatalf("httpClient.Transport = %T, want *http.Transport", httpClient.Transport)
@@ -179,6 +196,8 @@ func TestHTTPClientTimeouts(t *testing.T) {
 
 // 退避 sleep 感知 ctx：ctx 已取消时 postJSON 应立即返回，不走完 6 次指数退避。
 func TestPostJSONRetryRespectsContext(t *testing.T) {
+	breaker.reset()
+	defer breaker.reset()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	start := time.Now()
@@ -193,4 +212,18 @@ func TestPostJSONRetryRespectsContext(t *testing.T) {
 	if d := time.Since(start); d > 1*time.Second {
 		t.Errorf("postJSON with canceled ctx took %v, want immediate return", d)
 	}
+}
+
+// TestMain 让整个包的测试默认使用临时状态目录，避免污染真实用户缓存
+// （新增的熔断状态会落盘，测试若不隔离就会互相干扰、也会弄脏开发机）。
+func TestMain(m *testing.M) {
+	if os.Getenv("SE_RAG_STATE_DIR") == "" {
+		if d, err := os.MkdirTemp("", "se-rag-state-"); err == nil {
+			os.Setenv("SE_RAG_STATE_DIR", d)
+			code := m.Run()
+			os.RemoveAll(d)
+			os.Exit(code)
+		}
+	}
+	os.Exit(m.Run())
 }

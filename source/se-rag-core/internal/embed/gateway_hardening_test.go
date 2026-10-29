@@ -148,6 +148,8 @@ func TestIsCloudflareIP(t *testing.T) {
 // 403 必须触发转移：网关侧欠费/配额耗尽、以及网关特有的上游拒绝都表现为 403，
 // 当前主网关对非白名单模型即返回 403。而 403 不像 401/400 那样能断定「换网关也一样」。
 func TestPostJSONFailoverOn403(t *testing.T) {
+	breaker.reset()
+	defer breaker.reset()
 	var primaryHits, fallbackHits atomic.Int64
 	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		primaryHits.Add(1)
@@ -172,6 +174,8 @@ func TestPostJSONFailoverOn403(t *testing.T) {
 
 // 所有网关都 403 → 立刻失败，不做满 6 次无意义重试。
 func TestPostJSONAll403FailsFast(t *testing.T) {
+	breaker.reset()
+	defer breaker.reset()
 	var hits atomic.Int64
 	a := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
@@ -199,6 +203,8 @@ func TestPostJSONAll403FailsFast(t *testing.T) {
 
 // 401 仍然快速失败不转移（认证错误在任何网关都会复现）。
 func TestPostJSONNoFailoverOn401(t *testing.T) {
+	breaker.reset()
+	defer breaker.reset()
 	var fallbackHits atomic.Int64
 	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)

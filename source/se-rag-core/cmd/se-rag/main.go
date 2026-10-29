@@ -6,6 +6,12 @@ import (
 	"os"
 )
 
+// Version 构建版本，由 release.sh 通过 -ldflags -X 注入。
+// 用显式变量而非依赖 Go 自动的 vcs.revision：后者在「有未提交改动」时
+// 仍会写入上一个提交号并置 modified=true，容易被误读成「这个版本不包含新代码」
+// （实测报告就这样把 1.5.2 的改动判成了 1.5.1 的提交）。
+var Version = "dev"
+
 // processArgsRaw 提取子命令名（独立可测）
 func processArgsRaw(args []string) string {
 	if len(args) == 0 {
@@ -74,9 +80,15 @@ func printUsage() {
 	fmt.Println()
 	fmt.Println("不同知识库只需指定不同 -index-dir / --docs-dir，无需 product 维度。")
 	fmt.Println()
+	fmt.Printf("Version: %s\n", Version)
+	fmt.Println()
 	fmt.Println("Env:")
 	fmt.Println("  SE_RAG_EMBED_KEY / SE_RAG_RERANK_KEY   用户自备 key（放开内置限流）")
 	fmt.Println("  SE_RAG_FAKE_EMBED=1                    离线假 embedding（测试/离线验证）")
+	fmt.Println("  SE_RAG_FAILOVER_BUDGET=18s             网关故障转移总预算（Go duration）")
+	fmt.Println("  SE_RAG_ALLOW_HTTP_FALLBACK=0           禁用明文 HTTP 兜底（保传输机密性）")
+	fmt.Println("  SE_RAG_FALLBACK_URL / SE_RAG_GATEWAY_URL  覆盖备/主网关地址（空=单跳）")
+	fmt.Println("  SE_RAG_STATE_DIR=<dir>                 熔断与粘滞状态目录（默认用户缓存目录）")
 	fmt.Println("Flags（可写在问题文本之前或之后）:")
 	fmt.Println("  -offline                               query 专用：不联网，纯 BM25 检索（不外发查询内容）")
 	fmt.Println("  -builtin-key=false                     用用户 key；此时上面两个 env key 必填，缺失报错退出")

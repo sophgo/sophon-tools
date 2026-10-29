@@ -3,9 +3,13 @@ package embed
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -260,5 +264,117 @@ func TestTimeoutTriggersTLSChannelDeadOnlyForCF(t *testing.T) {
 	}
 	if isTimeoutErr(nil) {
 		t.Error("nil is not a timeout")
+	}
+}
+
+// ---- 熔断状态跨进程持久化 ----
+
+// CLI 每次查询都是新进程，纯内存熔断对支撑 agent 完全无效（实测每次都重付代价）。
+// 状态必须落盘，下一次进程启动时读到。
+func TestBreakerStateSurvivesProcess(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SE_RAG_STATE_DIR", dir)
+
+	// 第一个"进程"：标记失败
+	b1 := &gatewayBreaker{until: map[string]time.Time{}, prefer: map[string]preferEntry{}}
+	b1.markFail("https://gw.example/v1", time.Now())
+	if !b1.open("https://gw.example/v1", time.Now()) {
+		t.Fatal("in-process markFail did not take effect")
+	}
+
+	// 第二个"进程"：从磁盘重新加载
+	until, prefer := loadBreakerState()
+	b2 := &gatewayBreaker{until: until, prefer: prefer}
+	if !b2.open("https://gw.example/v1", time.Now()) {
+		t.Error("cooldown lost across process boundary")
+	}
+
+	// 成功则清除并落盘
+	b2.markOK("https://gw.example/v1")
+	u3, p3 := loadBreakerState()
+	b3 := &gatewayBreaker{until: u3, prefer: p3}
+	if b3.open("https://gw.example/v1", time.Now()) {
+		t.Error("markOK not persisted")
+	}
+}
+
+// 过期条目不应在加载时被恢复（否则一次故障会永久拉黑网关）。
+func TestBreakerStateDropsExpired(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SE_RAG_STATE_DIR", dir)
+	p := breakerStatePath()
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	past := time.Now().Add(-time.Minute).UnixNano()
+	body := `{"https://old.example/v1":` + strconv.FormatInt(past, 10) + `}`
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if until, _ := loadBreakerState(); len(until) != 0 {
+		t.Errorf("expired entries restored: %v", until)
+	}
+}
+
+// 状态文件损坏时必须静默退化为空状态，不能影响正常请求。
+func TestBreakerStateCorruptFileIgnored(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SE_RAG_STATE_DIR", dir)
+	p := breakerStatePath()
+	os.MkdirAll(filepath.Dir(p), 0o755)
+	os.WriteFile(p, []byte("not json{"), 0o644)
+	if until, _ := loadBreakerState(); len(until) != 0 {
+		t.Errorf("corrupt file should yield empty state, got %v", until)
+	}
+}
+
+// 粘滞偏好：上次成功的网关排到最前，跨进程保持。
+func TestOrderByPreference(t *testing.T) {
+	urls := []string{"https://a/v1", "https://b/v1", "https://c/v1"}
+	got := orderByPreference(urls, "https://b/v1")
+	want := []string{"https://b/v1", "https://a/v1", "https://c/v1"}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("orderByPreference = %v, want %v", got, want)
+	}
+	// 无偏好 / 偏好不在列表 / 已在首位 → 原样
+	if fmt.Sprint(orderByPreference(urls, "")) != fmt.Sprint(urls) {
+		t.Error("empty prefer should keep order")
+	}
+	if fmt.Sprint(orderByPreference(urls, "https://z/v1")) != fmt.Sprint(urls) {
+		t.Error("unknown prefer should keep order")
+	}
+	if fmt.Sprint(orderByPreference(urls, "https://a/v1")) != fmt.Sprint(urls) {
+		t.Error("first prefer should keep order")
+	}
+}
+
+// 成功一次后，下一次"进程"应直接命中同一网关，不再先撞失效的跳。
+func TestPreferencePersistsAcrossProcess(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SE_RAG_STATE_DIR", dir)
+
+	b1 := &gatewayBreaker{until: map[string]time.Time{}, prefer: map[string]preferEntry{}}
+	b1.markOK("https://cf:80/v1")
+
+	until, prefer := loadBreakerState()
+	b2 := &gatewayBreaker{until: until, prefer: prefer}
+	if got := b2.preferredFor([]string{"https://fc/v1", "https://cf/v1"}, time.Now()); got != "https://cf:80/v1" {
+		t.Errorf("preferred = %q, want cf:80 (lost across process)", got)
+	}
+	// 排序后应排首位
+	urls := orderByPreference([]string{"https://fc/v1", "https://cf/v1"}, b2.preferredFor([]string{"https://fc/v1", "https://cf/v1"}, time.Now()))
+	if urls[0] != "https://cf:80/v1" {
+		t.Errorf("preference not applied: %v", urls)
+	}
+}
+
+// 粘滞偏好会过期，不能把一次成功永久钉死。
+func TestPreferenceExpires(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SE_RAG_STATE_DIR", dir)
+	b := &gatewayBreaker{until: map[string]time.Time{}, prefer: map[string]preferEntry{}}
+	b.markOK("https://cf:80/v1")
+	if got := b.preferredFor([]string{"https://cf/v1"}, time.Now().Add(preferTTL+time.Second)); got != "" {
+		t.Errorf("preference should expire after %v, got %q", preferTTL, got)
 	}
 }
