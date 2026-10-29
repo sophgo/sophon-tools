@@ -10,6 +10,8 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -17,6 +19,47 @@ import (
 )
 
 const maxAttempts = 6
+
+// failoverBudget 单次 postJSON 跨全部网关、全部重试的总时限。
+// 重试的初衷是吸收瞬时抖动，不是等一条确定性失效的链路自愈。被测主机实测：
+// CF 的 443 被 SNI 阻断后，6 次重试 + 退避让一次查询在降级到 BM25 前空等 65 秒
+// （静默黑洞形态下甚至撞满 query 的 120s 上限）。这里给整条转移链设硬上限，
+// 到点即认输、交由上层降级——降级答案快过沉默。
+// 正常路径实测：CF TLS 握手 1.5s、FC 0.07s，12s 足够覆盖跨两跳的一次抖动重试。
+// SE_RAG_FAILOVER_BUDGET 可覆盖（Go duration 格式，如 30s）。
+var failoverBudget = 12 * time.Second
+
+func init() {
+	if v := os.Getenv("SE_RAG_FAILOVER_BUDGET"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			failoverBudget = d
+		}
+	}
+}
+
+// gatewayAltPorts Cloudflare 对同一 Worker 额外监听的 HTTPS 端口。
+// 443 上的 SNI 阻断未必覆盖这些端口：实测同一 Worker 在 2053/2083/2087/2096/8443
+// 均可正常返回向量。这是在被阻断主机上恢复第二跳、无需自有域名的现成手段。
+// 仅对 Cloudflare 域名有意义——fcapp.run 等其它网关没有这套端口，不能套用。
+var gatewayAltPorts = []string{"2053", "2083", "2087", "2096", "8443"}
+
+// supportsAltPorts 该 URL 是否属于可用 Cloudflare 备用端口的网关。
+func supportsAltPorts(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	h := u.Hostname()
+	for _, suffix := range altPortHostSuffixes {
+		if h == suffix || strings.HasSuffix(h, "."+suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+// altPortHostSuffixes 享有 Cloudflare 备用 HTTPS 端口的域名后缀（测试可注入）。
+var altPortHostSuffixes = []string{"workers.dev"}
 
 // gatewayCooldown 单个网关失败后的熔断时长。
 // 没有熔断时每次调用都从 urls[0] 重新开始，主网关持续故障就要每次重付一次超时代价：
@@ -81,19 +124,6 @@ func (b *gatewayBreaker) reset() {
 	b.until = map[string]time.Time{}
 }
 
-// pickURL 从 attempt 位置起轮转，跳过处于冷却期的网关。
-// 全部冷却时返回 ok=false，由调用方做半开探测。
-func pickURL(urls []string, attempt int, now time.Time) (string, bool) {
-	n := len(urls)
-	for k := 0; k < n; k++ {
-		u := urls[(attempt+k)%n]
-		if !breaker.open(u, now) {
-			return u, true
-		}
-	}
-	return "", false
-}
-
 // postJSON POST JSON 到 urls（有序网关列表，故障转移链），带 Bearer 鉴权。
 // 5xx/408/429/403/连接错误 → 指数退避重试（上限 maxAttempts 次），每次尝试轮转网关地址，
 // 并跳过处于熔断冷却期的网关（见 gatewayBreaker）；
@@ -117,16 +147,35 @@ func postJSONWithGateway(ctx context.Context, urls []string, key string, payload
 	}
 	var lastErr error
 	forbidden := map[string]bool{}
+	// hardFailed 已确认「重试无意义」的网关：SNI/TLS 被阻断、或代理层拒绝。
+	// 这类失败不是抖动，同一进程内再试必然同样失败，因此整条链直接跳过它。
+	hardFailed := map[string]bool{}
+	// 端口降级：443 被阻断时，同一 Worker 在 Cloudflare 的备用 HTTPS 端口上往往仍可用。
+	// 按网关各自记账：每个网关最多降级一次，互不占用名额。
+	portDowngraded := map[string]bool{}
+	deadline := time.Now().Add(failoverBudget)
+
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		select {
 		case <-ctx.Done():
 			return "", ctx.Err()
 		default:
 		}
+		// 总预算到点即认输：宁可立刻降级 BM25，也不让客户干等一分多钟。
+		if time.Now().After(deadline) {
+			if lastErr == nil {
+				lastErr = fmt.Errorf("failover budget %s exceeded", failoverBudget)
+			}
+			break
+		}
 		now := time.Now()
-		u, ok := pickURL(urls, attempt, now)
+		u, ok := pickURL(urls, attempt, now, hardFailed)
 		if !ok {
-			// 全部网关都在冷却：半开探测，清空后按配置顺序再试一轮。
+			// 全部网关要么在冷却、要么已被判定硬失败：没有可试的了。
+			if len(hardFailed) == len(urls) {
+				break
+			}
+			// 仅全部处于冷却：半开探测，清空后按配置顺序再试一轮。
 			breaker.reset()
 			u = urls[attempt%len(urls)]
 		}
@@ -134,30 +183,58 @@ func postJSONWithGateway(ctx context.Context, urls []string, key string, payload
 		if err != nil {
 			return "", err
 		}
+		// 单次尝试也不能越过总预算：网关静默黑洞时一次 TLS 握手就要 10s，
+		// 仅靠循环顶部检查会让总耗时膨胀到预算的倍数（实测 20s 预算跑成 30s）。
+		attemptCtx, attemptCancel := context.WithDeadline(ctx, deadline)
+		req = req.WithContext(attemptCtx)
 		req.Header.Set("Authorization", "Bearer "+key)
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := httpClient.Do(req)
 		if err != nil {
+			attemptCancel()
 			noteTransportFailure(err)
-			breaker.markFail(u, time.Now())
 			lastErr = err
+			// TLS 层被阻断 / 代理拒绝：重试同一地址必然失败，标记后跳过，
+			// 并把剩下的尝试预算留给下一个网关。
+			if isHardFailure(err) {
+				breaker.markFail(u, time.Now())
+				hardFailed[u] = true
+				// 端口降级：换到 Cloudflare 备用 HTTPS 端口再试一次（每网关一次）。
+				// 只对 workers.dev 生效——其它网关没有这套备用端口。
+				base := portDowngradeBase(u)
+				if supportsAltPorts(u) && !portDowngraded[base] && len(gatewayAltPorts) > 0 {
+					if alt, ok := withAltPort(u, gatewayAltPorts[0]); ok {
+						portDowngraded[base] = true
+						delete(hardFailed, u)
+						urls = replaceURL(urls, u, alt)
+						continue
+					}
+				}
+				continue
+			}
 			if !sleepCtx(ctx, backoff(attempt)) {
 				return "", ctx.Err()
 			}
 			continue
 		}
 		if resp.StatusCode == 200 {
-			defer resp.Body.Close()
 			breaker.markOK(u)
 			if out != nil {
-				if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+				err := json.NewDecoder(resp.Body).Decode(out)
+				resp.Body.Close()
+				attemptCancel()
+				if err != nil {
 					return "", err
 				}
+			} else {
+				resp.Body.Close()
+				attemptCancel()
 			}
 			return u, nil
 		}
 		body400, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		resp.Body.Close()
+		attemptCancel()
 		// 403 参与转移：网关侧欠费/配额耗尽、以及部分网关特有的上游拒绝都表现为 403，
 		// 它不像 401/400/404 那样能断定「换哪个网关都一样」。实测主网关对非白名单模型即返回 403。
 		retriable := resp.StatusCode == 408 || resp.StatusCode == 429 ||
@@ -187,6 +264,83 @@ func postJSONWithGateway(ctx context.Context, urls []string, key string, payload
 		return "", fmt.Errorf("all %d gateway(s) unreachable (tried %s...): %w", len(urls), urls[0], lastErr)
 	}
 	return "", fmt.Errorf("postJSON failed: %w", lastErr)
+}
+
+// pickURL 从 attempt 位置起轮转，跳过处于冷却期或已判定硬失败的网关。
+// 无可选网关时返回 ok=false，由调用方决定是否做半开探测。
+func pickURL(urls []string, attempt int, now time.Time, skip map[string]bool) (string, bool) {
+	n := len(urls)
+	for k := 0; k < n; k++ {
+		u := urls[(attempt+k)%n]
+		if skip[u] {
+			continue
+		}
+		if !breaker.open(u, now) {
+			return u, true
+		}
+	}
+	return "", false
+}
+
+// replaceURL 把 urls 中的 old 替换为 new（用于端口降级），保持顺序。
+func replaceURL(urls []string, old, new string) []string {
+	out := make([]string, len(urls))
+	for i, u := range urls {
+		if u == old {
+			out[i] = new
+		} else {
+			out[i] = u
+		}
+	}
+	return out
+}
+
+// withAltPort 给 base URL 换上指定端口；URL 无法解析时返回 false。
+func withAltPort(raw, port string) (string, bool) {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return "", false
+	}
+	host := u.Hostname()
+	u.Host = net.JoinHostPort(host, port)
+	return u.String(), true
+}
+
+// portDowngradeBase 取 URL 的 scheme+host（不含端口），作为端口降级的记账键。
+// 同一网关从 443 换成 2053 后键不变，因此只会降级一次。
+func portDowngradeBase(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	return u.Scheme + "://" + u.Hostname() + u.Path
+}
+
+// isHardFailure 判断错误是否属于「重试同一地址必然同样失败」。
+// 关键判据是 TLS 层的 RST/EOF：被测主机上 CF 的 443 对某个 SNI 定向阻断，
+// ClientHello 发出后立即 ECONNRESET，6 次重试全是空等（实测退化到 65 秒才降级）。
+// 代理拒绝（502 CONNECT）同理——继续试只是重复付代理往返。
+func isHardFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	if isTLSFailure(err) {
+		return true
+	}
+	msg := err.Error()
+	// 代理对 CONNECT 的拒绝
+	if strings.Contains(msg, "proxyconnect") || strings.Contains(msg, "Bad Gateway") {
+		return true
+	}
+	// ClientHello 之后被 RST / 连接被对端重置：TLS 定向阻断的典型表现
+	if strings.Contains(msg, "connection reset by peer") || strings.Contains(msg, "unexpected EOF") {
+		return true
+	}
+	// 端口不可达（换端口后拒绝连接）：再试同一目标没有意义
+	if strings.Contains(msg, "connection refused") {
+		return true
+	}
+	return false
 }
 
 // noteTransportFailure 在请求层观察到 TLS 失败时，标记硬编码网关 IP 可能已失效。

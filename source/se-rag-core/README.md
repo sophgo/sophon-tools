@@ -160,8 +160,19 @@ export SE_RAG_RERANK_KEY="sk-user-rerank-key"
   应答只采信 **Cloudflare 网段**内的地址——被污染的公共 DoH（实测阿里 223.5.5.5）对
   `*.workers.dev` 返回伪造 IP，不加这层过滤会把伪造地址当作权威记录去拨号
 - `query` 输出新增 `gateway: <host>` 行，直接显示本次检索实际命中的网关，不需要再从外部推测
+- **硬失败短路**：TLS RST/EOF、代理拒绝（`proxyconnect`/`502`）、连接被拒，都判定为
+  「重试同一地址必然同样失败」，整条链跳过该网关，不再反复空试。这类形态下重试毫无收益——
+  实测一次查询在降级前空等 65 秒（静默黑洞形态甚至撞满 query 的 120s 上限）
+- **转移总预算 12s**：`SE_RAG_FAILOVER_BUDGET` 可覆盖（如 `30s`）。到点即认输降级，
+  单次尝试也被同一 deadline 约束，不会因为一次 10s 级握手超时把总耗时撑到预算的倍数
+- **端口降级**：`443` 上按 SNI 定向阻断时，Cloudflare 对同一 Worker 还开放
+  `2053/2083/2087/2096/8443`（实测均可正常返回向量）。`*.workers.dev` 网关首次 TLS 硬失败后，
+  自动换到首个备用端口重试一次——**无需自有域名即可恢复第二跳**。其它网关（如 `fcapp.run`）
+  没有这套端口，不参与降级
 - 故障转移链可配置：`Provider.BaseURL`（主）+ `Provider.FallbackBaseURL`（备，默认 CF 网关）；
   两者相同即显式禁用故障转移；`se-rag` CLI 默认即启用
+- 环境变量覆盖（改链路不必重新编译）：`SE_RAG_GATEWAY_URL` 改主网关，
+  `SE_RAG_FALLBACK_URL` 改备网关——指向自有域名（绑定 Custom Domain 后）或置空=单跳止血
 - 用户自备 key 不经网关，直达官方 SiliconFlow，无故障转移项
 
 ## 多知识库扩展

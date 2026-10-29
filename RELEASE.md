@@ -17,7 +17,7 @@
 | --- | --- | --- |
 | bmssm | `source/pbmssm/build/version.sh` → `DEFAULT_VERSION` | 2.3.x |
 | sophliteos | `source/psophliteos/build/version.sh` → `DEFAULT_VERSION` | 2.2.x |
-| se-rag-core | `source/se-rag-core/release.sh` 默认 VERSION | 1.5.0 |
+| se-rag-core | `source/se-rag-core/release.sh` 默认 VERSION | 1.5.1 |
 | dfss（pip） | `source/pdfss_cpp/git_version` | v1.10.x，同步 PyPI |
 | bm_set_ip | `source/pbm_set_ip/bm_set_ip/.git_version` | 执行首行打印版本 |
 | ota_update | `source/pota_update/ota.sh` 内 `version: vX.Y.Z` | |

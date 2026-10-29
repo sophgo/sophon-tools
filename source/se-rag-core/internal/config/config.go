@@ -1,5 +1,7 @@
 package config
 
+import "os"
+
 // 默认内置 key 是自建 Cloudflare Worker 网关（se-rag-gateway）分发的 throwaway 网关 key，
 // 不落明文源码，采用 XOR(0x5A) 混淆字节存储，运行时解码。真硅基流动 key 只在网关侧持有，
 // 该内置 key 即使泄露也仅能调用白名单的两个模型、蹭免费额度，不暴露源站 key。
@@ -99,6 +101,11 @@ func (p Provider) EffectiveBaseURL() string {
 // EffectiveBaseURLs 依 key 归属决定上游地址有序列表（网关故障转移链）：
 // 内置 key → [BaseURL（默认阿里云 FC 网关），FallbackBaseURL（默认 CF Worker）]，FC 不可达
 // 时自动切换 CF；相同地址去重。用户自备 key → 官方 SiliconFlow 直达，不经网关、无故障转移项。
+//
+// SE_RAG_FALLBACK_URL 可覆盖备网关地址（空串=用默认，设为与主网关相同=显式单跳）。
+// 提供这个入口是因为存在「某出口对某个备网关确定性失效、而运维需要在不动代码的前提下
+// 决定留几跳」的场景——摘掉一跳属于运维决策，不该要求重新编译。
+// SE_RAG_GATEWAY_URL 同理覆盖主网关。
 func (p Provider) EffectiveBaseURLs() []string {
 	if p.APIKey != "" {
 		return []string{officialSiliconflowBaseURL}
@@ -107,11 +114,17 @@ func (p Provider) EffectiveBaseURLs() []string {
 	if primary == "" {
 		primary = GatewayFCBaseURL
 	}
+	if v, ok := os.LookupEnv("SE_RAG_GATEWAY_URL"); ok && v != "" {
+		primary = v
+	}
 	fallback := p.FallbackBaseURL
 	if fallback == "" {
 		fallback = GatewayBaseURL
 	}
-	if fallback == primary {
+	if v, ok := os.LookupEnv("SE_RAG_FALLBACK_URL"); ok {
+		fallback = v // 允许显式置空为单跳
+	}
+	if fallback == "" || fallback == primary {
 		return []string{primary}
 	}
 	return []string{primary, fallback}
