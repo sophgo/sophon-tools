@@ -115,6 +115,8 @@ type gatewayBreaker struct {
 	// 必须按 key 分开记：embeddings 与 rerank 是不同的 path，共用一个槽位会互相覆盖，
 	// 导致其中一个永远用不上粘滞（实测正是如此）。
 	prefer map[string]preferEntry
+	// stamp 本状态标记的生成时间。超过 markerTTL 后整份状态作废并重新生成。
+	stamp time.Time
 }
 
 // preferEntry 一条粘滞记录：可用的完整地址 + 记录时间（用于过期）。
@@ -125,9 +127,35 @@ type preferEntry struct {
 
 var breaker = newBreaker()
 
+// newBreaker 载入上次进程的状态；标记过期/缺失时在内存里重新生成一个。
+// 注意这里**不落盘**：进程启动只是读，没有产生新的路由判断。重新生成的 stamp
+// 会在下一次真正写状态时（markFail/markOK）一并落盘。做法上避免「仅启动就产生
+// 副作用」——否则测试、--help、离线查询都会凭空写出一个状态文件。
 func newBreaker() *gatewayBreaker {
-	until, prefer := loadBreakerState()
-	return &gatewayBreaker{until: until, prefer: prefer}
+	st, fresh := loadBreakerState()
+	b := &gatewayBreaker{until: st.until, prefer: st.prefer, stamp: st.stamp}
+	if !fresh {
+		// 标记缺失或已超过 markerTTL：上一轮的路由判断不再可信（网络状况、网关部署
+		// 都可能已变），整份作废并从此刻重新计时，而不是继续沿用昨天的结论。
+		b.until = map[string]time.Time{}
+		b.prefer = map[string]preferEntry{}
+		b.stamp = time.Now()
+	}
+	return b
+}
+
+// markerTTL 状态标记的有效期：超过 24 小时即重新生成。
+// 与单条记录的 TTL 是两层不同的东西——冷却 60s、粘滞 10min 管「条目」，
+// 这个管「整份状态文件」的新鲜度，兜住所有没写 TTL 的遗留字段和时钟异常。
+// SE_RAG_STATE_TTL 可覆盖（Go duration 格式）。
+var markerTTL = 24 * time.Hour
+
+func init() {
+	if v := os.Getenv("SE_RAG_STATE_TTL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			markerTTL = d
+		}
+	}
 }
 
 // preferTTL 「上次成功的网关」粘滞有效期。
@@ -148,44 +176,64 @@ func breakerStatePath() string {
 	return filepath.Join(d, "se-rag", "gateway-breaker.json")
 }
 
-// loadBreakerState 读取上次进程留下的冷却记录；只保留尚未过期的条目。
-// 任何异常（文件缺失/损坏/无权限）都静默退化为空状态——熔断是优化，不该因它启动失败。
-func loadBreakerState() (map[string]time.Time, map[string]preferEntry) {
-	until := map[string]time.Time{}
-	prefer := map[string]preferEntry{}
+// breakerState 一份落盘状态：冷却表 + 粘滞表 + 标记生成时间。
+type breakerState struct {
+	until  map[string]time.Time
+	prefer map[string]preferEntry
+	stamp  time.Time
+}
+
+// loadBreakerState 读取上次进程留下的状态。
+// 第二个返回值为 false 表示「标记缺失 / 损坏 / 已超过 markerTTL」，调用方应重新生成。
+// 任何异常都静默退化为空状态——熔断是优化，不该因它启动失败。
+func loadBreakerState() (breakerState, bool) {
+	st := breakerState{until: map[string]time.Time{}, prefer: map[string]preferEntry{}}
 	p := breakerStatePath()
 	if p == "" {
-		return until, prefer
+		return st, false
 	}
 	b, err := os.ReadFile(p)
 	if err != nil {
-		return until, prefer
+		return st, false
 	}
-	var st struct {
+	var raw struct {
 		Until  map[string]int64 `json:"until"`
 		Prefer map[string]struct {
 			URL string `json:"url"`
 			At  int64  `json:"at"`
 		} `json:"prefer"`
+		Stamp int64 `json:"stamp_ns"`
 	}
-	if err := json.Unmarshal(b, &st); err != nil {
-		return until, prefer
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return st, false
 	}
+
 	now := time.Now()
-	for u, ns := range st.Until {
+	// 标记新鲜度：没有 stamp（旧版文件）或已超过 markerTTL，一律视为过期。
+	// 同时防时钟回拨：stamp 落在未来太多（>1h）说明时钟被改过，也不可信。
+	if raw.Stamp <= 0 {
+		return st, false
+	}
+	stamp := time.Unix(0, raw.Stamp)
+	if now.Sub(stamp) > markerTTL || stamp.Sub(now) > time.Hour {
+		return st, false
+	}
+	st.stamp = stamp
+
+	for u, ns := range raw.Until {
 		t := time.Unix(0, ns)
 		if now.Before(t) && now.Sub(t) < time.Hour { // 兼顾时钟回拨：过期过久的直接丢
-			until[u] = t
+			st.until[u] = t
 		}
 	}
-	for k, v := range st.Prefer {
+	for k, v := range raw.Prefer {
 		at := time.Unix(0, v.At)
 		// 粘滞偏好也会过期：网络状况会变，不能让一次成功永久钉死路由。
 		if v.URL != "" && now.Sub(at) <= preferTTL {
-			prefer[k] = preferEntry{URL: v.URL, At: at}
+			st.prefer[k] = preferEntry{URL: v.URL, At: at}
 		}
 	}
-	return until, prefer
+	return st, true
 }
 
 // saveBreakerState 原子写回冷却记录（临时文件 + rename），写失败静默忽略。
@@ -198,10 +246,20 @@ func (b *gatewayBreaker) saveLocked() {
 		URL string `json:"url"`
 		At  int64  `json:"at"`
 	}
+	// stamp 缺失（零值）时补当前时间，保证文件自描述年龄。
+	stamp := b.stamp
+	if stamp.IsZero() {
+		stamp = time.Now()
+	}
 	raw := struct {
-		Until  map[string]int64 `json:"until"`
-		Prefer map[string]pj    `json:"prefer,omitempty"`
-	}{Until: make(map[string]int64, len(b.until)), Prefer: make(map[string]pj, len(b.prefer))}
+		Until   map[string]int64 `json:"until"`
+		Prefer  map[string]pj    `json:"prefer,omitempty"`
+		StampNs int64            `json:"stamp_ns"`
+	}{
+		Until:   make(map[string]int64, len(b.until)),
+		Prefer:  make(map[string]pj, len(b.prefer)),
+		StampNs: stamp.UnixNano(),
+	}
 	for u, t := range b.until {
 		raw.Until[u] = t.UnixNano()
 	}

@@ -283,16 +283,19 @@ func TestBreakerStateSurvivesProcess(t *testing.T) {
 	}
 
 	// 第二个"进程"：从磁盘重新加载
-	until, prefer := loadBreakerState()
-	b2 := &gatewayBreaker{until: until, prefer: prefer}
+	st, fresh := loadBreakerState()
+	if !fresh {
+		t.Fatal("state should still be fresh within 24h")
+	}
+	b2 := &gatewayBreaker{until: st.until, prefer: st.prefer, stamp: st.stamp}
 	if !b2.open("https://gw.example/v1", time.Now()) {
 		t.Error("cooldown lost across process boundary")
 	}
 
 	// 成功则清除并落盘
 	b2.markOK("https://gw.example/v1")
-	u3, p3 := loadBreakerState()
-	b3 := &gatewayBreaker{until: u3, prefer: p3}
+	st3, _ := loadBreakerState()
+	b3 := &gatewayBreaker{until: st3.until, prefer: st3.prefer, stamp: st3.stamp}
 	if b3.open("https://gw.example/v1", time.Now()) {
 		t.Error("markOK not persisted")
 	}
@@ -307,12 +310,13 @@ func TestBreakerStateDropsExpired(t *testing.T) {
 		t.Fatal(err)
 	}
 	past := time.Now().Add(-time.Minute).UnixNano()
-	body := `{"https://old.example/v1":` + strconv.FormatInt(past, 10) + `}`
+	body := `{"stamp_ns":` + strconv.FormatInt(time.Now().UnixNano(), 10) +
+		`,"until":{"https://old.example/v1":` + strconv.FormatInt(past, 10) + `}}`
 	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if until, _ := loadBreakerState(); len(until) != 0 {
-		t.Errorf("expired entries restored: %v", until)
+	if st, _ := loadBreakerState(); len(st.until) != 0 {
+		t.Errorf("expired entries restored: %v", st.until)
 	}
 }
 
@@ -323,8 +327,8 @@ func TestBreakerStateCorruptFileIgnored(t *testing.T) {
 	p := breakerStatePath()
 	os.MkdirAll(filepath.Dir(p), 0o755)
 	os.WriteFile(p, []byte("not json{"), 0o644)
-	if until, _ := loadBreakerState(); len(until) != 0 {
-		t.Errorf("corrupt file should yield empty state, got %v", until)
+	if st, fresh := loadBreakerState(); len(st.until) != 0 || fresh {
+		t.Errorf("corrupt file should yield empty+fresh=false, got %v %v", st.until, fresh)
 	}
 }
 
@@ -356,8 +360,8 @@ func TestPreferencePersistsAcrossProcess(t *testing.T) {
 	b1 := &gatewayBreaker{until: map[string]time.Time{}, prefer: map[string]preferEntry{}}
 	b1.markOK("https://cf:80/v1")
 
-	until, prefer := loadBreakerState()
-	b2 := &gatewayBreaker{until: until, prefer: prefer}
+	st, _ := loadBreakerState()
+	b2 := &gatewayBreaker{until: st.until, prefer: st.prefer, stamp: st.stamp}
 	if got := b2.preferredFor([]string{"https://fc/v1", "https://cf/v1"}, time.Now()); got != "https://cf:80/v1" {
 		t.Errorf("preferred = %q, want cf:80 (lost across process)", got)
 	}
@@ -376,5 +380,114 @@ func TestPreferenceExpires(t *testing.T) {
 	b.markOK("https://cf:80/v1")
 	if got := b.preferredFor([]string{"https://cf/v1"}, time.Now().Add(preferTTL+time.Second)); got != "" {
 		t.Errorf("preference should expire after %v, got %q", preferTTL, got)
+	}
+}
+
+// ---- 标记 24 小时刷新 ----
+
+// 标记未满 24h：沿用上次状态（冷却与粘滞都不丢）。
+func TestMarkerKeptWithin24h(t *testing.T) {
+	t.Setenv("SE_RAG_STATE_DIR", t.TempDir())
+
+	b1 := &gatewayBreaker{until: map[string]time.Time{}, prefer: map[string]preferEntry{}}
+	b1.markFail("https://gw.example/v1", time.Now())
+	b1.markOK("https://cf/v1")
+
+	st, fresh := loadBreakerState()
+	if !fresh {
+		t.Fatal("fresh state within 24h should be reused")
+	}
+	if len(st.until) == 0 {
+		t.Error("cooldown dropped within 24h")
+	}
+	if len(st.prefer) == 0 {
+		t.Error("preference dropped within 24h")
+	}
+	if age := time.Since(st.stamp); age > time.Minute {
+		t.Errorf("stamp not refreshed on write: age=%v", age)
+	}
+}
+
+// 标记超过 24h：整份作废，重新生成一个（旧网关结论不再可信）。
+func TestMarkerRefreshedAfter24h(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SE_RAG_STATE_DIR", dir)
+	p := breakerStatePath()
+	os.MkdirAll(filepath.Dir(p), 0o755)
+
+	// 造一份 25 小时前的标记，且带一条仍"未过期"的冷却记录
+	old := time.Now().Add(-25 * time.Hour)
+	future := time.Now().Add(30 * time.Minute).UnixNano()
+	body := `{"stamp_ns":` + strconv.FormatInt(old.UnixNano(), 10) +
+		`,"until":{"https://gw.example/v1":` + strconv.FormatInt(future, 10) + `}` +
+		`,"prefer":{"cf/v1":{"url":"http://cf:80/v1","at":` + strconv.FormatInt(old.UnixNano(), 10) + `}}}`
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, fresh := loadBreakerState(); fresh {
+		t.Fatal("marker older than 24h must be treated as stale")
+	}
+
+	// newBreaker 应重新生成：状态清空、stamp 变成"现在"、文件被重写
+	b := newBreaker()
+	if len(b.until) != 0 || len(b.prefer) != 0 {
+		t.Errorf("stale state not cleared: until=%v prefer=%v", b.until, b.prefer)
+	}
+	if b.stamp.IsZero() || time.Since(b.stamp) > time.Minute {
+		t.Errorf("stamp not regenerated: %v", b.stamp)
+	}
+	// 启动只读不写；触发一次真实写入后，重写的标记应带新的 stamp。
+	b.markOK("https://cf/v1")
+	st, fresh := loadBreakerState()
+	if !fresh {
+		t.Error("regenerated marker should be fresh")
+	}
+	if age := time.Since(st.stamp); age > time.Minute {
+		t.Errorf("regenerated stamp age = %v, want ~0", age)
+	}
+}
+
+// 旧版文件（无 stamp 字段）视为过期并重新生成——升级后不能让历史状态无限续命。
+func TestMarkerMissingStampTreatedAsStale(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SE_RAG_STATE_DIR", dir)
+	p := breakerStatePath()
+	os.MkdirAll(filepath.Dir(p), 0o755)
+	future := time.Now().Add(30 * time.Minute).UnixNano()
+	body := `{"until":{"https://gw.example/v1":` + strconv.FormatInt(future, 10) + `}}`
+	os.WriteFile(p, []byte(body), 0o644)
+
+	if _, fresh := loadBreakerState(); fresh {
+		t.Error("file without stamp must be stale")
+	}
+	if b := newBreaker(); len(b.until) != 0 {
+		t.Errorf("legacy state not cleared: %v", b.until)
+	}
+}
+
+// 时钟回拨到未来：标记时间显著"未来"时也不可信，重新生成。
+func TestMarkerFutureStampTreatedAsStale(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SE_RAG_STATE_DIR", dir)
+	p := breakerStatePath()
+	os.MkdirAll(filepath.Dir(p), 0o755)
+	future := time.Now().Add(5 * time.Hour).UnixNano()
+	body := `{"stamp_ns":` + strconv.FormatInt(future, 10) + `,"until":{}}`
+	os.WriteFile(p, []byte(body), 0o644)
+
+	if _, fresh := loadBreakerState(); fresh {
+		t.Error("far-future stamp must be treated as stale")
+	}
+}
+
+// markerTTL 可被环境变量覆盖。
+func TestMarkerTTLOverride(t *testing.T) {
+	old := markerTTL
+	t.Cleanup(func() { markerTTL = old })
+	if v := os.Getenv("SE_RAG_STATE_TTL"); v == "" {
+		if markerTTL != 24*time.Hour {
+			t.Errorf("default markerTTL = %v, want 24h", markerTTL)
+		}
 	}
 }

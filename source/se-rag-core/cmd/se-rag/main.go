@@ -89,6 +89,7 @@ func printUsage() {
 	fmt.Println("  SE_RAG_ALLOW_HTTP_FALLBACK=0           禁用明文 HTTP 兜底（保传输机密性）")
 	fmt.Println("  SE_RAG_FALLBACK_URL / SE_RAG_GATEWAY_URL  覆盖备/主网关地址（空=单跳）")
 	fmt.Println("  SE_RAG_STATE_DIR=<dir>                 熔断与粘滞状态目录（默认用户缓存目录）")
+	fmt.Println("  SE_RAG_STATE_TTL=24h                   状态标记有效期，超过即重新生成")
 	fmt.Println("Flags（可写在问题文本之前或之后）:")
 	fmt.Println("  -offline                               query 专用：不联网，纯 BM25 检索（不外发查询内容）")
 	fmt.Println("  -builtin-key=false                     用用户 key；此时上面两个 env key 必填，缺失报错退出")
