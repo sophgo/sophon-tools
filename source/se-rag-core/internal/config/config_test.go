@@ -124,3 +124,25 @@ func TestDefaultProductIsSE7(t *testing.T) {
 		t.Fatalf("expected default se7 product, got %+v", d.Products)
 	}
 }
+
+// SE_RAG_FALLBACK_URL 覆盖备网关：可指向自定义域名（解决 SNI 阻断的 A 方案），
+// 也可置空/置为与主网关相同来显式单跳（C 方案止血），都不必改代码。
+func TestEffectiveBaseURLsEnvOverride(t *testing.T) {
+	p := Provider{Type: "siliconflow", BaseURL: "https://primary.example/v1"}
+
+	t.Setenv("SE_RAG_FALLBACK_URL", "https://cf.example.com/v1")
+	if got := p.EffectiveBaseURLs(); len(got) != 2 || got[1] != "https://cf.example.com/v1" {
+		t.Errorf("fallback override = %v, want custom fallback", got)
+	}
+
+	// 置空 → 单跳（止血）
+	t.Setenv("SE_RAG_FALLBACK_URL", "")
+	if got := p.EffectiveBaseURLs(); len(got) != 1 {
+		t.Errorf("empty fallback = %v, want single hop", got)
+	}
+
+	t.Setenv("SE_RAG_GATEWAY_URL", "https://main2.example/v1")
+	if got := p.EffectiveBaseURLs(); len(got) != 1 || got[0] != "https://main2.example/v1" {
+		t.Errorf("primary override = %v, want main2", got)
+	}
+}

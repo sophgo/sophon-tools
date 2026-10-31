@@ -179,6 +179,8 @@ func TestDoHResolverParsesAnswers(t *testing.T) {
 				{"name": gatewayHost, "type": 1, "data": "172.67.134.151"},        // A
 				{"name": gatewayHost, "type": 28, "data": "2606:4700:4700::1111"}, // AAAA → 忽略
 				{"name": gatewayHost, "type": 1, "data": "bogus"},                 // 非法 → 忽略
+				{"name": gatewayHost, "type": 1, "data": "162.125.32.13"},         // 非 CF 段（伪造）→ 忽略
+				{"name": gatewayHost, "type": 1, "data": "202.160.130.66"},        // 非 CF 段（伪造）→ 忽略
 			},
 		})
 		w.Write(b)
@@ -186,7 +188,7 @@ func TestDoHResolverParsesAnswers(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	r := newDoHResolverWith((&net.Dialer{}).DialContext, []string{srv.URL})
+	r := newDoHResolverWith((&net.Dialer{}).DialContext, []dohEndpoint{{server: srv.URL, path: "/dns-query"}})
 	r.client = srv.Client()
 	ips, ok := r.resolve(context.Background(), gatewayHost)
 	if !ok {
@@ -212,7 +214,7 @@ func TestDoHResolverRcodeError(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	r := newDoHResolverWith((&net.Dialer{}).DialContext, []string{srv.URL})
+	r := newDoHResolverWith((&net.Dialer{}).DialContext, []dohEndpoint{{server: srv.URL, path: "/dns-query"}})
 	r.client = srv.Client()
 	if ips, ok := r.resolve(context.Background(), gatewayHost); ok {
 		t.Errorf("resolve with RCODE=3 = %v ok, want failure", ips)
@@ -232,7 +234,7 @@ func TestDoHResolverFailsOverServer(t *testing.T) {
 	defer good.Close()
 
 	r := newDoHResolverWith((&net.Dialer{}).DialContext,
-		[]string{bad.URL, good.URL})
+		[]dohEndpoint{{server: bad.URL, path: "/dns-query"}, {server: good.URL, path: "/dns-query"}})
 	r.client = &http.Client{}
 	ips, ok := r.resolve(context.Background(), gatewayHost)
 	if !ok || len(ips) != 1 || ips[0] != "104.21.6.72" {

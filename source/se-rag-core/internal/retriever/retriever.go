@@ -35,7 +35,14 @@ type SearchOutcome struct {
 	Results        []Result
 	Mode           string // "hybrid" | "bm25"
 	FallbackReason string
+	Gateway        string // 实际服务本次检索的网关地址（空 = 未联网/未成功）
 	TotalMS        int64
+}
+
+// gatewayNamer 由 embedder/reranker 实现，暴露最近一次实际命中的网关。
+// 用可选接口而非改动 Embedder 契约：sophnet 等供应商不经网关，无需实现。
+type gatewayNamer interface {
+	Gateway() string
 }
 
 type Retriever struct {
@@ -67,6 +74,7 @@ func (r *Retriever) Search(ctx context.Context, query string, product string, to
 				return r.bm25Fallback(loaded, query, topM, out, t0)
 			}
 			out.Results = r.hybrid(ctx, loaded, query, q, topM)
+			out.Gateway = embedderGateway(r.Embedder)
 			out.TotalMS = time.Since(t0).Milliseconds()
 			return out, nil
 		}
@@ -207,6 +215,17 @@ func CheckFingerprint(indexFp, wantFp string) error {
 	return nil
 }
 
+// shortGateway 把网关 base URL 压成 host，便于输出阅读。
+func shortGateway(u string) string {
+	if i := strings.Index(u, "://"); i >= 0 {
+		u = u[i+3:]
+	}
+	if i := strings.IndexAny(u, "/"); i >= 0 {
+		u = u[:i]
+	}
+	return u
+}
+
 // FormatMarkdown 将检索结果格式化为 Markdown（对齐 Python query.py 输出格式）。
 func FormatMarkdown(out *SearchOutcome) string {
 	var sb strings.Builder
@@ -222,10 +241,21 @@ func FormatMarkdown(out *SearchOutcome) string {
 	}
 	sb.WriteString("---\n")
 	fmt.Fprintf(&sb, "*%d results | mode=%s | total %dms*\n", len(out.Results), out.Mode, out.TotalMS)
+	if out.Gateway != "" {
+		fmt.Fprintf(&sb, "*gateway: %s*\n", shortGateway(out.Gateway))
+	}
 	if out.FallbackReason != "" {
 		fmt.Fprintf(&sb, "*fallback: %s*\n", out.FallbackReason)
 	}
 	return sb.String()
+}
+
+// embedderGateway 取 embedder 最近一次命中的网关（未实现则空串）。
+func embedderGateway(e embed.Embedder) string {
+	if g, ok := e.(gatewayNamer); ok {
+		return g.Gateway()
+	}
+	return ""
 }
 
 func min(a, b int) int {
