@@ -6,9 +6,11 @@ SE 系列知识库的 **Go RAG 检索核心**，替代现行 Python 栈（numpy 
 ## 特性
 
 - **混合检索**：向量语义检索（内存暴力内积，L2 归一化）+ BM25 关键词检索 → RRF 融合（k=60）→ Reranker 精排
-- **A/B 双路径**：
+- **A/B/C 三条路径**：
   - 路径 A（在线，主路径）：embedding 供应商向量化 → 向量 + BM25 → RRF → rerank
   - 路径 B（BM25 兜底）：无 key / 断网 / embedding 失败时自动降级为纯 BM25，保证开箱即用、离线可用
+  - 路径 C（离线索引）：`build -offline` 建出的纯 BM25 索引，查询**根本不构造 embedder**，
+    查询文本从不离开进程；用于含内部内容、不得外发的资料
 - **多知识库兼容**：不同知识库用不同 `-index-dir` / `--docs-dir` 即可，复用同一检索核心仅换目录
 - **供应商可切换**：siliconflow / sophnet 两族 embedding 与 reranker，可配置不写死
 - **内置默认 key（混淆内嵌）**：预置 siliconflow 免费 key，源码中以 XOR 混淆字节内嵌（不落明文）；模型固定 `BAAI/bge-m3`（embedding）与 `BAAI/bge-reranker-v2-m3`（rerank）；使用内置 key 时强制限流（并发≤1、单次≤2段落）；用户自备 key 放开
@@ -31,7 +33,7 @@ source/se-rag-core/
 │   ├── embed/           Embedding / Reranker provider 抽象 + siliconflow/sophnet + 限流 + 重试
 │   ├── fusion/          RRF 融合
 │   ├── docstore/        索引持久化 + 指纹元信息
-│   ├── retriever/       混合检索编排 + A/B 降级
+│   ├── retriever/       混合检索编排 + A/B 降级 + 多索引合并
 │   └── config/          产品/供应商配置
 ├── example/se7/docs/    示例文档库（se7）
 ├── go.mod / go.sum
@@ -56,8 +58,8 @@ GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o bin/se-rag-arm64 ./cmd/se-rag
 ### 统一 release.sh（对齐 sophon-tools M1 规范）
 
 ```bash
-bash release.sh all 1.0.0        # 同时产出 arm64 + amd64
-bash release.sh arm64 1.0.0      # 仅 arm64
+bash release.sh all 1.6.0        # 同时产出 arm64 + amd64
+bash release.sh arm64 1.6.0      # 仅 arm64
 # 产物目录（可用 OUTPUT_DIR 覆盖，默认 <repo>/output/se-rag-core/）
 ```
 
@@ -69,9 +71,29 @@ bash release.sh arm64 1.0.0      # 仅 arm64
 # 真实 embedding（内置 siliconflow key，带限流）
 ./bin/se-rag build --docs-dir example/se7/docs -index-dir ./rag-data
 
+# 纯 BM25 离线索引：不构造 embedder、不读 key、不联网（dim=0，search_mode=bm25）
+./bin/se-rag build -offline --docs-dir example/se7/docs -index-dir ./rag-data
+
 # 离线假 embedding（无网络验证全链路，SE_RAG_FAKE_EMBED 内部开关）
 SE_RAG_FAKE_EMBED=1 ./bin/se-rag build --docs-dir example/se7/docs -index-dir ./rag-data
 ```
+
+三种模式的差别（含取舍）：
+
+| | `build` | `build -offline` | `SE_RAG_FAKE_EMBED=1` |
+| --- | --- | --- | --- |
+| 构造 embedder | 是（走网络） | **否** | 是（fake，不发网络） |
+| 需要 key | 是 | **否** | 否 |
+| `dim` | 真实维度 | **0** | 2 |
+| `embedder_fingerprint` | `provider.model` | **`bm25`** | 真实 provider 名（伪装） |
+| `search_mode` | `hybrid` | **`bm25`** | `hybrid` |
+| 用途 | 生产混合检索 | 生产离线检索 | 仅链路验证 |
+
+`-offline` 与 `SE_RAG_FAKE_EMBED` **不是等价物**：fake 模式会把 dim=2 的假向量写进索引、指纹仍写真实
+provider 名，索引看起来"正常"但检索质量是空的；`-offline` 明确写 `dim=0 / fingerprint=bm25`，
+不含任何伪装成真实向量的数据。需要"不外发任何文本"的生产场景只能用前者。
+
+离线索引里空向量是**合法**的（本来就没有向量），但空 BM25 或缺 chunks 仍是不完整索引，会显式报错。
 
 > `build` 始终根据 docs **全量重建**索引（docs 是唯一真源）。切换供应商/模型后会带上新指纹重建，无需显式 force。
 
@@ -85,6 +107,8 @@ SE_RAG_FAKE_EMBED=1 ./bin/se-rag build --docs-dir example/se7/docs -index-dir ./
 ./bin/se-rag query -offline -index-dir ./rag-data "SE7 如何配置网络"
 
 # 路径 B 兜底会自动触发：无 key / 断网 / embedding 失败时降级为 BM25
+# 路径 C：索引本身是 bm25（build -offline 产出）→ 直接纯 BM25，不构造 embedder，
+#        结果末行 fallback: index is bm25-only（此时加不加 -offline 都不会联网）
 ```
 
 查询结果示例（每条头部 `源文件相对路径:行号区间`）：
@@ -106,6 +130,9 @@ SE_RAG_FAKE_EMBED=1 ./bin/se-rag build --docs-dir example/se7/docs -index-dir ./
 #   fingerprint OK: no rebuild needed
 # 指纹比对含 provider/model/维度：切换供应商或模型后输出 WARNING 并提示重建
 ```
+
+离线索引（`search_mode=bm25`）输出 `search mode : bm25`、`current fp : (none: bm25-only index has no
+embedding fingerprint)` 与 `bm25 index OK: no rebuild needed`，不会拿 `bm25@0` 去比对 `bge-m3@1024` 而误报。
 
 ## 供应商配置
 
@@ -207,6 +234,24 @@ mkdir -p docs/se8
 ./bin/se-rag query -index-dir ./rag-se8 -top-n 8 "se8 问题"
 ./bin/se-rag doctor -index-dir ./rag-se8
 ```
+
+多个知识库要一起检索时，`-index-dir` 可重复传入或用逗号分隔（合并规则见下一节）：
+
+```bash
+./bin/se-rag query -index-dir ./rag-se7 -index-dir ./rag-se8 "两代产品的网络配置差异"
+./bin/se-rag query -index-dir ./rag-se7,./rag-se8 "两代产品的网络配置差异"
+```
+
+### 多索引合并
+
+`query` 传多个 `-index-dir`（重复或逗号分隔）时合并检索：
+
+- 在线：每个索引先做常规 hybrid（向量 top20 + BM25 top20 → RRF）取前 20 条，
+  **此阶段不 rerank**；按各索引排名轮转截取合并候选（上限 40 条）→ 统一 **rerank 一次** → 取 top-n。
+- 离线（`-offline`、全部索引都是 `build -offline` 产出的 bm25-only，或 rerank 失败）：
+  按各索引内排名做 RRF（k=60）合并。
+- 任一目标索引缺失直接报错，不静默只查已有的那几个。
+- 单索引（只给一个 `-index-dir`，或一个都不给）的行为与输出格式与旧版逐字节一致。
 
 索引直接落盘到各自 `-index-dir/`（`meta.json` + `vectors.gob` + `bm25.gob` + `chunks.gob` +
 `.complete` 完成标记），各知识库互不影响，可并存。保存为原子写入：先写临时文件、移除旧

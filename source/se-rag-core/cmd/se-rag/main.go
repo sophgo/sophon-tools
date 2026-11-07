@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 )
 
 // Version 构建版本，由 release.sh 通过 -ldflags -X 注入。
@@ -36,6 +37,20 @@ func defaultDocsDir() string {
 		return d
 	}
 	return "./docs"
+}
+
+// multiFlag 可重复传入、也可逗号分隔的多值 flag（`-index-dir a -index-dir b,c`）。
+type multiFlag struct{ vals []string }
+
+func (m *multiFlag) String() string { return strings.Join(m.vals, ",") }
+
+func (m *multiFlag) Set(v string) error {
+	for _, p := range strings.Split(v, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			m.vals = append(m.vals, p)
+		}
+	}
+	return nil
 }
 
 // parseInterspersed 解析 flag，允许 flag 出现在位置参数之后。
@@ -74,8 +89,9 @@ func printUsage() {
 	fmt.Println("Usage: se-rag <build|query|doctor> [flags]")
 	fmt.Println()
 	fmt.Println("Commands:")
-	fmt.Println("  build  --docs-dir <dir> -index-dir <dir>")
+	fmt.Println("  build  --docs-dir <dir> -index-dir <dir> [-offline]")
 	fmt.Println("  query  -index-dir <dir> [-top-n N] [-offline] \"question\"")
+	fmt.Println("         -index-dir 可重复传入或用逗号分隔多个目录（多索引合并检索）")
 	fmt.Println("  doctor -index-dir <dir> [--docs-dir <dir>]")
 	fmt.Println()
 	fmt.Println("不同知识库只需指定不同 -index-dir / --docs-dir，无需 product 维度。")
@@ -91,7 +107,9 @@ func printUsage() {
 	fmt.Println("  SE_RAG_STATE_DIR=<dir>                 熔断与粘滞状态目录（默认用户缓存目录）")
 	fmt.Println("  SE_RAG_STATE_TTL=24h                   状态标记有效期，超过即重新生成")
 	fmt.Println("Flags（可写在问题文本之前或之后）:")
-	fmt.Println("  -offline                               query 专用：不联网，纯 BM25 检索（不外发查询内容）")
+	fmt.Println("  -offline                               build/query：纯 BM25，不联网、不要 key")
+	fmt.Println("                                           build -offline 建 bm25-only 索引（dim=0，无向量）")
+	fmt.Println("                                           query -offline 对该索引做纯 BM25 检索")
 	fmt.Println("  -builtin-key=false                     用用户 key；此时上面两个 env key 必填，缺失报错退出")
 }
 
@@ -117,6 +135,7 @@ func dispatch(args []string) int {
 		fs.StringVar(&rc.docsDir, "docs-dir", "", "docs dir (default <cwd>/docs)")
 		fs.StringVar(&rc.indexDir, "index-dir", defaultIndexDir(), "index dir")
 		fs.BoolVar(&rc.useBuiltin, "builtin-key", true, "use builtin key (limits concurrency)")
+		fs.BoolVar(&rc.offline, "offline", false, "offline: build BM25-only index, no embedder, no key, no network")
 		warnExtraArgs("build", parseInterspersed(fs, rest))
 		if rc.docsDir == "" {
 			rc.docsDir = defaultDocsDir()
@@ -129,7 +148,8 @@ func dispatch(args []string) int {
 
 	case "query":
 		fs := flag.NewFlagSet("query", flag.ExitOnError)
-		fs.StringVar(&rc.indexDir, "index-dir", defaultIndexDir(), "index dir")
+		var indexDirs multiFlag
+		fs.Var(&indexDirs, "index-dir", "index dir (repeatable or comma separated)")
 		fs.IntVar(&rc.topN, "top-n", 8, "top N results")
 		fs.BoolVar(&rc.useBuiltin, "builtin-key", true, "use builtin key")
 		fs.BoolVar(&rc.offline, "offline", false, "offline: BM25 only, no network")
@@ -138,6 +158,19 @@ func dispatch(args []string) int {
 		if len(pos) > 0 {
 			rc.query = pos[0]
 			warnExtraArgs("query", pos[1:])
+		}
+		// 路径模式：多个 -index-dir（重复或逗号分隔）走多索引合并；单个目录保持原有行为。
+		switch len(indexDirs.vals) {
+		case 0:
+			// 未指定：沿用默认索引目录（含 SE_RAG_INDEX）
+		case 1:
+			rc.indexDir = indexDirs.vals[0]
+		default:
+			if err := runQueryDirs(rc, indexDirs.vals); err != nil {
+				fmt.Fprintln(os.Stderr, "query:", err)
+				return 1
+			}
+			return 0
 		}
 		if err := runQuery(rc); err != nil {
 			fmt.Fprintln(os.Stderr, "query:", err)

@@ -29,6 +29,9 @@ type Result struct {
 	LineStart  int
 	LineEnd    int
 	Score      float64
+	// Entity 结果所属实体 id（多索引合并时标注）；单索引/路径模式为空。
+	// 为空时输出与旧版逐字节一致。
+	Entity string
 }
 
 type SearchOutcome struct {
@@ -61,6 +64,13 @@ func (r *Retriever) Search(ctx context.Context, query string, product string, to
 		return nil, fmt.Errorf("open index: %w", err)
 	}
 	out := &SearchOutcome{Mode: "hybrid"}
+
+	// 纯 BM25 索引（build -offline 产出）没有向量可比：即使用户配了 embedder，
+	// 也不构造查询向量、不 rerank——否则会把查询文本发出去，违背离线索引的约定。
+	if loaded.Meta.BM25Only() {
+		out.FallbackReason = "index is bm25-only (built with build -offline)"
+		return r.bm25Fallback(loaded, query, topM, out, t0)
+	}
 
 	// ---- 在线路径 A：embedding + 向量混合 ----
 	if r.Embedder != nil {
@@ -227,10 +237,15 @@ func shortGateway(u string) string {
 }
 
 // FormatMarkdown 将检索结果格式化为 Markdown（对齐 Python query.py 输出格式）。
+// 结果带实体标注（多索引合并）时在行尾追加 `[实体id]`；为空时输出与旧版逐字节一致。
 func FormatMarkdown(out *SearchOutcome) string {
 	var sb strings.Builder
 	for i, r := range out.Results {
-		fmt.Fprintf(&sb, "### %d [%.3f] `%s:%d-%d`\n", i+1, r.Score, r.SourceFile, r.LineStart, r.LineEnd)
+		fmt.Fprintf(&sb, "### %d [%.3f] `%s:%d-%d`", i+1, r.Score, r.SourceFile, r.LineStart, r.LineEnd)
+		if r.Entity != "" {
+			fmt.Fprintf(&sb, " [%s]", r.Entity)
+		}
+		sb.WriteString("\n")
 		text := r.Text
 		rs := []rune(text)
 		if len(rs) > 500 {

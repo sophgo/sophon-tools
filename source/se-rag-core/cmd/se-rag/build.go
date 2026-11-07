@@ -28,9 +28,11 @@ type runCtx struct {
 	topN       int
 	query      string
 	useBuiltin bool
-	offline    bool // query 专用：不联网，纯 BM25
-	embedF     func(config.Provider) (embed.Embedder, error)
-	rerankF    func(config.Provider) (embed.Reranker, error)
+	// offline = build 建纯 BM25 索引（不初始化 embedder、不读 key、不联网），
+	// query 走纯 BM25 检索。两条命令语义一致：全程不外发任何文本。
+	offline bool
+	embedF  func(config.Provider) (embed.Embedder, error)
+	rerankF func(config.Provider) (embed.Reranker, error)
 }
 
 // applyUserKeys 按 -builtin-key 语义设置供应商 key：
@@ -112,6 +114,11 @@ func runBuild(rc runCtx) error {
 	if rc.product == "" {
 		rc.product = metaProductLabel
 	}
+	// 离线构建：不碰 key、不构造 embedder、不联网。
+	// 先判 offline，避免 -builtin-key=false 的 key 校验在离线路径上误报。
+	if rc.offline {
+		return runBuildOffline(rc)
+	}
 	// 先校验 key 配置（-builtin-key=false 缺 env key 属配置错误，优先报出）
 	cfg := config.DefaultConfig()
 	p := cfg.Products[0]
@@ -126,26 +133,9 @@ func runBuild(rc runCtx) error {
 		return fmt.Errorf("index-dir is empty")
 	}
 
-	ch := chunker.NewDefaultChunker()
-	chunkMap, err := ch.ChunkDirectory(rc.docsDir)
+	allChunks, docsText, orders, docsHash, err := chunkDocs(rc.docsDir)
 	if err != nil {
-		return fmt.Errorf("chunk docs: %w", err)
-	}
-	// docs 内容指纹：写入 meta，供 doctor/query 发现「docs 变了但索引没重建」。
-	// 直接复用本处 chunkMap 的键集，保证参与哈希的文件与实际分块的文件完全一致。
-	docsHash := chunker.HashDocs(rc.docsDir, chunkMap)
-	var allChunks []chunker.Chunk
-	var orders []string
-	var docsText []string
-	for _, file := range sortedKeys(chunkMap) {
-		for _, c := range chunkMap[file] {
-			allChunks = append(allChunks, c)
-			orders = append(orders, c.ChunkID)
-			docsText = append(docsText, c.Text)
-		}
-	}
-	if len(allChunks) == 0 {
-		return fmt.Errorf("no chunks from %s", rc.docsDir)
+		return err
 	}
 
 	// embed
@@ -214,14 +204,83 @@ func runBuild(rc runCtx) error {
 		BuildVersion:        "1.0",
 		ChunkStrategy:       chunker.StrategyVersion,
 		DocsHash:            docsHash,
+		SearchMode:          docstore.SearchModeHybrid,
 	}
 	store := &docstore.Store{IndexDir: rc.indexDir}
 	if err := store.SaveIndex(rc.product, meta, vecs, vecIDs, bmi, allChunks); err != nil {
 		return err
 	}
-	fmt.Printf("index saved: label=%s chunks=%d dim=%d embed=%s -> %s\n",
-		rc.product, len(allChunks), dim, emb.Name(), store.IndexPath())
+	fmt.Printf("index saved: label=%s chunks=%d dim=%d search_mode=%s embed=%s -> %s\n",
+		rc.product, len(allChunks), dim, meta.SearchMode, emb.Name(), store.IndexPath())
 	return nil
+}
+
+// runBuildOffline 建纯 BM25 索引：chunk + BM25 落盘，向量索引为空（Dim=0）。
+//
+// 与 SE_RAG_FAKE_EMBED 的区别：fake 模式仍然"假装"做了 embedding（假向量入库、
+// 指纹仍是真实 provider 名），只能用于链路验证；这里根本不构造 embedder，
+// meta 明确写 search_mode=bm25、dim=0、fingerprint=bm25，不含任何伪装成真实
+// 向量的数据。AS71X 资料含"仅限内部"内容，建索引与查询全程不外发文本。
+func runBuildOffline(rc runCtx) error {
+	if rc.docsDir == "" {
+		return fmt.Errorf("docs-dir is empty")
+	}
+	if rc.indexDir == "" {
+		return fmt.Errorf("index-dir is empty")
+	}
+	// 离线构建不读 key：显式点出冲突配置，避免用户以为 -builtin-key=false 生效了
+	if !rc.useBuiltin {
+		fmt.Fprintln(os.Stderr, "note: build -offline ignores -builtin-key (offline index needs no key)")
+	}
+
+	allChunks, docsText, orders, docsHash, err := chunkDocs(rc.docsDir)
+	if err != nil {
+		return err
+	}
+	bmi := bm25.Build(docsText, orders)
+
+	meta := docstore.Meta{
+		Product:             rc.product,
+		EmbedderFingerprint: docstore.FpBM25Only,
+		Dim:                 0,
+		Model:               "",
+		ChunkCount:          len(allChunks),
+		BuildVersion:        "1.0",
+		ChunkStrategy:       chunker.StrategyVersion,
+		DocsHash:            docsHash,
+		SearchMode:          docstore.SearchModeBM25,
+	}
+	store := &docstore.Store{IndexDir: rc.indexDir}
+	// vecs/vecIDs 为空：向量索引落盘为 Dim=0 的空索引，不写占位向量
+	if err := store.SaveIndex(rc.product, meta, nil, nil, bmi, allChunks); err != nil {
+		return err
+	}
+	fmt.Printf("index saved: label=%s chunks=%d dim=0 search_mode=%s (offline: bm25 only, no embedding) -> %s\n",
+		rc.product, len(allChunks), meta.SearchMode, store.IndexPath())
+	return nil
+}
+
+// chunkDocs 按 heading 策略把 docs 目录切成块，返回块列表与对齐的
+// chunkID / 正文切片，以及 docs 内容指纹（写入 meta，供 doctor/query 发现
+// 「docs 变了但索引没重建」；复用本处 chunkMap 的键集，保证参与哈希的文件与
+// 实际分块的文件完全一致）。docs 是唯一真源，build 始终全量重建。
+func chunkDocs(docsDir string) (all []chunker.Chunk, texts, ids []string, docsHash string, err error) {
+	ch := chunker.NewDefaultChunker()
+	chunkMap, err := ch.ChunkDirectory(docsDir)
+	if err != nil {
+		return nil, nil, nil, "", fmt.Errorf("chunk docs: %w", err)
+	}
+	for _, file := range sortedKeys(chunkMap) {
+		for _, c := range chunkMap[file] {
+			all = append(all, c)
+			ids = append(ids, c.ChunkID)
+			texts = append(texts, c.Text)
+		}
+	}
+	if len(all) == 0 {
+		return nil, nil, nil, "", fmt.Errorf("no chunks from %s", docsDir)
+	}
+	return all, texts, ids, chunker.HashDocs(docsDir, chunkMap), nil
 }
 
 func providerName(t string) string {
