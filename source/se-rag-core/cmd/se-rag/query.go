@@ -48,7 +48,15 @@ func runQuery(rc runCtx) error {
 	}
 	warnStaleIndex(rc.indexDir, rc.product, rc.docsDir)
 	if rc.offline {
-		return runQueryOffline(rc)
+		return runQueryOffline(rc, "offline mode (-offline)")
+	}
+	// 索引本身是纯 BM25（`build -offline` 产出）时，在线 query 无法构造向量检索：
+	// 自动转纯 BM25 并在结果末行注明原因，不去请求 embedding、不要求 key、
+	// 也不产生 "vector dim mismatch" 这类无意义报错。SE 在线索引不受影响。
+	if meta, merr := (&docstore.Store{IndexDir: rc.indexDir}).ReadMeta(rc.product); merr == nil && meta.BM25Only() {
+		fmt.Fprintf(os.Stderr, "note: index at %s is bm25-only (built with -offline); query falls back to pure BM25, no text is sent out\n",
+			rc.indexDir)
+		return runQueryOffline(rc, "index is bm25-only (built with build -offline)")
 	}
 	// 先校验 key 配置（-builtin-key=false 缺 env key 属配置错误，优先报出）
 	cfg := config.DefaultConfig()
@@ -82,9 +90,9 @@ func runQuery(rc runCtx) error {
 }
 
 // runQueryOffline 纯 BM25 检索：不构造 embedder / reranker，不发起任何网络请求，
-// 因此也不校验 key。输出末行 mode=bm25，fallback 原因标明是主动离线。
+// 因此也不校验 key。输出末行 mode=bm25，fallback 注明是主动离线还是索引只能 BM25。
 // 索引过期提示由调用方 runQuery 统一发出，此处不再重复。
-func runQueryOffline(rc runCtx) error {
+func runQueryOffline(rc runCtx, reason string) error {
 	if rc.query == "" {
 		return fmt.Errorf("empty query")
 	}
@@ -95,7 +103,7 @@ func runQueryOffline(rc runCtx) error {
 	if err != nil {
 		return err
 	}
-	out.FallbackReason = "offline mode (-offline)"
+	out.FallbackReason = reason
 	fmt.Print(retriever.FormatMarkdown(out))
 	return nil
 }
