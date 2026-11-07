@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -12,12 +11,12 @@ import (
 	"se-rag-core/internal/config"
 	"se-rag-core/internal/docstore"
 	"se-rag-core/internal/embed"
+	"se-rag-core/internal/registry"
 	"se-rag-core/internal/retriever"
 )
 
-// 多索引检索的端到端验证（路径模式：`query -index-dir a -index-dir b,c`）。
-// 用注入的计数假 provider 跑 runMultiSourceQuery，避免依赖 SE_RAG_FAKE_EMBED
-// 那个不计次的假 reranker。
+// 多索引 query 的端到端验证（用 runMultiSourceQuery 直接注入计数假 provider，
+// 避免依赖 SE_RAG_FAKE_EMBED 的假 reranker —— 那个不计次）。
 
 // countingReranker 计数假 reranker：保持原顺序，记录调用次数。
 type countingReranker struct {
@@ -46,86 +45,54 @@ func (c *countingReranker) count() int {
 	return c.calls
 }
 
-// twoIndexes 建两个知识库索引（a / b），返回索引目录。
-// offline=false 时用注入的 2 维 fake provider 建（不联网）。
-func twoIndexes(t *testing.T, dir string, offline bool) (string, string) {
+// twoHybridIndexes 在夹具注册表上建两个 fake-embedding 索引（se9 / bm1688），返回检索源。
+func twoHybridIndexes(t *testing.T, dir string) ([]retriever.Source, *registry.Registry) {
 	t.Helper()
-	docsA := filepath.Join(dir, "docsA")
-	docsB := filepath.Join(dir, "docsB")
-	files := map[string]string{
-		filepath.Join(docsA, "a.md"): "# A\n\n## I2C\n\nI2C0 复用 GPIO3/GPIO4，默认 100kHz。\n",
-		filepath.Join(docsB, "b.md"): "# B\n\n## I2C\n\ntpu-mlir 编译模型时指定 --chip。\n",
+	reg, err := loadRegistry(loadTestRegistry(t, dir))
+	if err != nil {
+		t.Fatal(err)
 	}
-	for p, body := range files {
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	idxA, idxB := filepath.Join(dir, "idxA"), filepath.Join(dir, "idxB")
-	for _, c := range []struct{ docs, idx string }{{docsA, idxA}, {docsB, idxB}} {
+	srcs := make([]retriever.Source, 0, 2)
+	for _, id := range []string{"se9", "bm1688"} {
+		e, _ := reg.ByID(id)
+		idx := reg.IndexPath(e)
 		captureStdout(t, func() {
 			if err := runBuild(runCtx{
-				docsDir: c.docs, indexDir: c.idx, product: metaProductLabel,
-				offline: offline, useBuiltin: true,
-				embedF: func(config.Provider) (embed.Embedder, error) {
-					if offline {
-						t.Fatal("build -offline must not construct an embedder")
-					}
-					return embed.NewFakeEmbedder(2), nil
-				},
-				rerankF: func(config.Provider) (embed.Reranker, error) { return embed.NewFakeReranker(), nil },
+				docsDir:    reg.DocsPath(e),
+				indexDir:   idx,
+				product:    id,
+				offline:    false,
+				useBuiltin: true,
+				embedF:     func(config.Provider) (embed.Embedder, error) { return embed.NewFakeEmbedder(2), nil },
+				rerankF:    func(config.Provider) (embed.Reranker, error) { return embed.NewFakeReranker(), nil },
 			}); err != nil {
-				t.Fatalf("build %s: %v", c.docs, err)
+				t.Fatalf("build %s: %v", id, err)
 			}
 		})
-	}
-	return idxA, idxB
-}
-
-// 路径模式的多 -index-dir：支持重复传入与逗号分隔，合并两个索引的结果。
-func TestQueryMultiIndexDirsPathMode(t *testing.T) {
-	dir := t.TempDir()
-	idxA, idxB := twoIndexes(t, dir, true)
-
-	for _, args := range [][]string{
-		{"query", "-offline", "-index-dir", idxA, "-index-dir", idxB, "I2C"},
-		{"query", "-offline", "-index-dir", idxA + "," + idxB, "I2C"},
-	} {
-		out := captureStdout(t, func() {
-			if rc := dispatch(args); rc != 0 {
-				t.Fatalf("dispatch %v rc=%d", args, rc)
-			}
+		srcs = append(srcs, retriever.Source{
+			Label:      id,
+			Store:      &docstore.Store{IndexDir: idx},
+			Product:    id,
+			PathPrefix: func(src string) string { return reg.ChunkPath(e, src) },
 		})
-		if !strings.Contains(out, "`a.md:") || !strings.Contains(out, "`b.md:") {
-			t.Errorf("dispatch %v should merge both indexes:\n%s", args, out)
-		}
-		// 路径模式没有实体信息，不得出现 ` [实体id]` 标注
-		if regexp.MustCompile(`(?m)^### .*\] ` + "`[^`]+`" + ` \[[a-z]`).MatchString(out) {
-			t.Errorf("path mode must not tag entity ids:\n%s", out)
-		}
 	}
+	return srcs, reg
 }
 
-// 多索引在线 query：合并结果、rerank 只调用一次。
+// 多索引在线 query：合并结果、标注实体、rerank 只调用一次。
 func TestMultiIndexQueryReranksOnce(t *testing.T) {
-	dir := t.TempDir()
-	idxA, idxB := twoIndexes(t, dir, false)
+	dir := testRegistryDir(t)
+	srcs, _ := twoHybridIndexes(t, dir)
 
 	rr := &countingReranker{}
 	out := captureStdout(t, func() {
 		if err := runMultiSourceQuery(runCtx{
-			query:      "I2C",
+			query:      "I2C 怎么接",
 			topN:       5,
 			useBuiltin: true,
 			embedF:     func(config.Provider) (embed.Embedder, error) { return embed.NewFakeEmbedder(2), nil },
 			rerankF:    func(config.Provider) (embed.Reranker, error) { return rr, nil },
-		}, []retriever.Source{
-			{Store: &docstore.Store{IndexDir: idxA}, Product: metaProductLabel},
-			{Store: &docstore.Store{IndexDir: idxB}, Product: metaProductLabel},
-		}, nil); err != nil {
+		}, srcs, nil); err != nil {
 			t.Fatalf("multi query: %v", err)
 		}
 	})
@@ -136,7 +103,7 @@ func TestMultiIndexQueryReranksOnce(t *testing.T) {
 	if !strings.Contains(out, "mode=hybrid") {
 		t.Errorf("expected mode=hybrid:\n%s", out)
 	}
-	for _, want := range []string{"`a.md:", "`b.md:"} {
+	for _, want := range []string{"[se9]", "[bm1688]", "`docs/products/se9/", "`docs/chips/bm1688/"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("merged output missing %q:\n%s", want, out)
 		}
@@ -148,12 +115,24 @@ func TestMultiIndexQueryOfflineRRF(t *testing.T) {
 	t.Setenv("SE_RAG_EMBED_KEY", "")
 	t.Setenv("SE_RAG_RERANK_KEY", "")
 	t.Setenv("SE_RAG_FAKE_EMBED", "")
-	dir := t.TempDir()
-	idxA, idxB := twoIndexes(t, dir, true)
+	dir := testRegistryDir(t)
+	buildAllOffline(t, dir)
+	reg, err := loadRegistry(loadTestRegistry(t, dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var srcs []retriever.Source
+	for _, id := range []string{"se9", "bm1688"} {
+		e, _ := reg.ByID(id)
+		srcs = append(srcs, retriever.Source{
+			Label: id, Store: &docstore.Store{IndexDir: reg.IndexPath(e)}, Product: id,
+			PathPrefix: func(src string) string { return reg.ChunkPath(e, src) },
+		})
+	}
 
 	out := captureStdout(t, func() {
 		if err := runMultiSourceQuery(runCtx{
-			query: "I2C 配置",
+			query: "tpu-mlir 编译模型",
 			topN:  5,
 			// 离线：这两个工厂一旦被调用就让测试失败
 			offline: true,
@@ -165,27 +144,61 @@ func TestMultiIndexQueryOfflineRRF(t *testing.T) {
 				t.Fatal("offline multi query must not construct a reranker")
 				return nil, nil
 			},
-		}, []retriever.Source{
-			{Store: &docstore.Store{IndexDir: idxA}, Product: metaProductLabel},
-			{Store: &docstore.Store{IndexDir: idxB}, Product: metaProductLabel},
-		}, nil); err != nil {
+		}, srcs, nil); err != nil {
 			t.Fatalf("offline multi query: %v", err)
 		}
 	})
 	if !strings.Contains(out, "mode=bm25") {
 		t.Errorf("offline multi query should report mode=bm25:\n%s", out)
 	}
+	if !strings.Contains(out, "[bm1688]") {
+		t.Errorf("offline merged result should be tagged:\n%s", out)
+	}
 	if !strings.Contains(out, "offline mode") {
 		t.Errorf("fallback should state the offline mode:\n%s", out)
 	}
 }
 
-// 用法里要能看出 -offline 对 build 同样生效、-index-dir 可重复。
-func TestUsageListsOfflineAndMultiIndex(t *testing.T) {
-	out := captureStdout(t, printUsage)
-	for _, want := range []string{"build", "query", "doctor", "build -offline", "可重复"} {
+// --help 列出新命令并以 0 退出。
+func TestHelpListsNewCommands(t *testing.T) {
+	rc := dispatch([]string{"--help"})
+	if rc != 0 {
+		t.Errorf("--help rc=%d, want 0", rc)
+	}
+	out := captureStdout(t, func() { dispatch([]string{"-h"}) })
+	for _, want := range []string{"list", "resolve", "build", "query", "doctor", "-registry", "-entity", "-with-related"} {
 		if !strings.Contains(out, want) {
-			t.Errorf("usage output missing %q:\n%s", want, out)
+			t.Errorf("help output missing %q:\n%s", want, out)
 		}
+	}
+}
+
+// build -entity 逗号分隔：按顺序逐个建，meta.product 写各自实体 id。
+func TestBuildEntitiesCommaSeparated(t *testing.T) {
+	dir := testRegistryDir(t)
+	var rc int
+	captureStdout(t, func() {
+		rc = dispatch([]string{"build", "-registry", loadTestRegistry(t, dir), "-entity", "se9,bm1688", "-offline"})
+	})
+	if rc != 0 {
+		t.Fatalf("build -entity se9,bm1688 rc=%d", rc)
+	}
+	reg, err := loadRegistry(loadTestRegistry(t, dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"se9", "bm1688"} {
+		e, _ := reg.ByID(id)
+		meta, err := (&docstore.Store{IndexDir: reg.IndexPath(e)}).ReadMeta(id)
+		if err != nil {
+			t.Fatalf("%s: %v", id, err)
+		}
+		if meta.Product != id {
+			t.Errorf("%s: meta.product = %q, want %q", id, meta.Product, id)
+		}
+	}
+	// se7 不在目标里，不该被建
+	if _, err := os.Stat(filepath.Join(dir, "indexes", "product-se7", "meta.json")); err == nil {
+		t.Error("se7 should not be built when only se9,bm1688 are requested")
 	}
 }

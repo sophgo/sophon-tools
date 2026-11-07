@@ -1,0 +1,57 @@
+{
+  "schema_version": 3,
+  "entities": [
+    {
+      "id": "se7",
+      "type": "product",
+      "name": "SE7 微服务器",
+      "status": "ready",
+      "aliases": ["SE7", "SE7 32-BP1"],
+      "modules": ["sm7"],
+      "docs_dir": "se7/docs",
+      "index_dir": "../output/example-index/se7",
+      "scope": "SE7 微服务器的使用、配置与排障",
+      "boundaries": ["只回答 SoC 模式，不回答 PCIe 板卡模式"],
+      "query_hints": ["优先命令、文件、报错原文"]
+    },
+    {
+      "id": "sm7",
+      "type": "module",
+      "name": "SM7 算力模组",
+      "status": "placeholder",
+      "aliases": ["SM7"],
+      "chips": ["bm1684x"],
+      "docs_dir": null,
+      "index_dir": null,
+      "scope": "SE7 使用的 SM7 模组（示例未提供模组资料）",
+      "boundaries": [],
+      "query_hints": []
+    },
+    {
+      "id": "bm1684x",
+      "type": "chip",
+      "name": "BM1684X",
+      "status": "placeholder",
+      "aliases": ["BM1684X"],
+      "sdk": "sophonsdk",
+      "docs_dir": null,
+      "index_dir": null,
+      "scope": "BM1684X 芯片（示例未提供芯片资料）",
+      "boundaries": [],
+      "query_hints": []
+    },
+    {
+      "id": "sophonsdk",
+      "type": "sdk",
+      "name": "SOPHONSDK",
+      "status": "placeholder",
+      "aliases": ["sophonsdk", "BM1684 SDK"],
+      "versions": [],
+      "docs_dir": null,
+      "index_dir": null,
+      "scope": "BM1684 / BM1684X 的 SOPHONSDK 文档（示例未提供版本）",
+      "boundaries": [],
+      "query_hints": []
+    }
+  ]
+}

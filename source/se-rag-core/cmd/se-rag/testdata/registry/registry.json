@@ -1,0 +1,205 @@
+{
+  "schema_version": 3,
+  "shared_sources": [
+    {
+      "name": "sophon-demo",
+      "url": "https://github.com/sophgo/sophon-demo",
+      "purpose": "CV 算法与 LLM 模型 demo，两个系列共用"
+    }
+  ],
+  "entities": [
+    {
+      "id": "se9",
+      "type": "product",
+      "name": "SE9 微服务器",
+      "status": "ready",
+      "aliases": ["SE9"],
+      "modules": ["sm9-16", "sm9-8"],
+      "specs": [
+        {
+          "name": "SE9 16",
+          "aliases": ["SE9 16", "16路", "SE9 16-BP1-11"],
+          "modules": ["sm9-16"]
+        },
+        {
+          "name": "SE9 8",
+          "aliases": ["SE9 8", "8路", "SE9 8-BP1-17"],
+          "modules": ["sm9-8"]
+        }
+      ],
+      "docs_dir": "docs/products/se9",
+      "index_dir": "indexes/product-se9",
+      "scope": "SE9 微服务器的使用、配置与排障",
+      "boundaries": ["只回答 SoC 模式，不回答 PCIe 板卡模式"],
+      "query_hints": ["优先命令、文件、报错原文"]
+    },
+    {
+      "id": "se7",
+      "type": "product",
+      "name": "SE7 微服务器",
+      "status": "ready",
+      "aliases": ["SE7", "SE7 32-BP1"],
+      "modules": ["sm7"],
+      "docs_dir": "docs/products/se7",
+      "index_dir": "indexes/product-se7",
+      "scope": "SE7 微服务器的使用、配置与排障",
+      "boundaries": [],
+      "query_hints": []
+    },
+    {
+      "id": "sm9-16",
+      "type": "module",
+      "name": "SM9 16 算力模组",
+      "status": "placeholder",
+      "aliases": ["SM9 16"],
+      "chips": ["bm1688"],
+      "docs_dir": null,
+      "index_dir": null,
+      "scope": "SE9 16 路使用的 SM9 16 模组",
+      "boundaries": [],
+      "query_hints": []
+    },
+    {
+      "id": "sm9-8",
+      "type": "module",
+      "name": "SM9 8 算力模组",
+      "status": "placeholder",
+      "aliases": ["SM9 8"],
+      "chips": ["cv186ah"],
+      "docs_dir": null,
+      "index_dir": null,
+      "scope": "SE9 8 路使用的 SM9 8 模组",
+      "boundaries": [],
+      "query_hints": []
+    },
+    {
+      "id": "sm7",
+      "type": "module",
+      "name": "SM7 算力模组",
+      "status": "ready",
+      "aliases": ["SM7"],
+      "chips": ["bm1684x"],
+      "docs_dir": "docs/modules/sm7",
+      "index_dir": "indexes/module-sm7",
+      "scope": "SE7 使用的 SM7 模组：供电与连接器",
+      "boundaries": ["不回答整机面板与安装步骤"],
+      "query_hints": ["优先连接器位号"]
+    },
+    {
+      "id": "sophonsdk",
+      "type": "sdk",
+      "name": "SOPHONSDK",
+      "status": "ready",
+      "aliases": ["sophonsdk", "BM1684 SDK", "SophonSDK"],
+      "versions": [
+        {
+          "version": "v23.09 LTS SP5",
+          "slug": "v23.09",
+          "release_date": "2025-09-16",
+          "docs_dir": "docs/sdks/sophonsdk/v23.09",
+          "index_dir": "indexes/sdk-sophonsdk-v23.09"
+        }
+      ],
+      "sources": {
+        "repos": [
+          {
+            "name": "libsophon",
+            "url": "https://github.com/sophgo/libsophon",
+            "purpose": "BSP 与驱动源码"
+          }
+        ],
+        "notes": ["v2.3 之前没有公开的 manifest 清单"]
+      },
+      "docs_dir": null,
+      "index_dir": null,
+      "scope": "BM1684 / BM1684X 的 SOPHONSDK 文档",
+      "boundaries": ["PCIe 板卡模式下的 SDK 用法不在本技能范围"],
+      "query_hints": ["优先命令与报错原文"]
+    },
+    {
+      "id": "sophonsdk-edge",
+      "type": "sdk",
+      "name": "SOPHONSDK Edge",
+      "status": "ready",
+      "aliases": ["sophonsdk-edge", "SophonSDK Edge", "边侧 SDK"],
+      "versions": [
+        {
+          "version": "v2.3",
+          "slug": "v2.3",
+          "release_date": "2026-10-12",
+          "docs_dir": "docs/sdks/sophonsdk-edge/v2.3",
+          "index_dir": "indexes/sdk-sophonsdk-edge-v2.3"
+        },
+        {
+          "version": "v2.2",
+          "slug": "v2.2",
+          "release_date": "2026-06-22",
+          "docs_dir": "docs/sdks/sophonsdk-edge/v2.2",
+          "index_dir": "indexes/sdk-sophonsdk-edge-v2.2"
+        }
+      ],
+      "docs_dir": null,
+      "index_dir": null,
+      "scope": "BM1688 / CV186AH / CV84X6 的边侧 SDK 文档",
+      "boundaries": ["v2.3 起才支持 CV84X6"],
+      "query_hints": ["优先命令与报错原文"]
+    },
+    {
+      "id": "bm1688",
+      "type": "chip",
+      "name": "BM1688",
+      "status": "ready",
+      "aliases": ["BM1688"],
+      "chips": null,
+      "sdk": "sophonsdk-edge",
+      "docs_dir": "docs/chips/bm1688",
+      "index_dir": "indexes/chip-bm1688",
+      "scope": "BM1688 芯片的 SDK 与多媒体接口",
+      "boundaries": [],
+      "query_hints": ["模型编译优先看 tpu-mlir"]
+    },
+    {
+      "id": "bm1684x",
+      "type": "chip",
+      "name": "BM1684X",
+      "status": "ready",
+      "aliases": ["BM1684X"],
+      "chips": null,
+      "sdk": "sophonsdk",
+      "docs_dir": "docs/chips/bm1684x",
+      "index_dir": "indexes/chip-bm1684x",
+      "scope": "BM1684X 芯片规格",
+      "boundaries": [],
+      "query_hints": []
+    },
+    {
+      "id": "cv186ah",
+      "type": "chip",
+      "name": "CV186AH",
+      "status": "placeholder",
+      "aliases": ["CV186AH"],
+      "chips": null,
+      "sdk": "sophonsdk-edge",
+      "docs_dir": null,
+      "index_dir": null,
+      "scope": "CV186AH 与 BM1688 共用 SDK",
+      "boundaries": ["无 CV186AH 独立资料时不得套用 BM1688 芯片规格数值"],
+      "query_hints": []
+    },
+    {
+      "id": "cv84x6",
+      "type": "chip",
+      "name": "CV84X6",
+      "status": "placeholder",
+      "aliases": ["CV84X6"],
+      "chips": null,
+      "sdk": "sophonsdk-edge",
+      "sdk_since": "v2.3",
+      "docs_dir": null,
+      "index_dir": null,
+      "scope": "CV84X6 边侧芯片",
+      "boundaries": [],
+      "query_hints": []
+    }
+  ]
+}
