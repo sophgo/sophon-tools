@@ -10,6 +10,7 @@ import (
 	"se-rag-core/internal/docstore"
 	"se-rag-core/internal/embed"
 	"se-rag-core/internal/fusion"
+	"se-rag-core/internal/titlematch"
 	"se-rag-core/internal/vector"
 )
 
@@ -49,6 +50,14 @@ type MultiRetriever struct {
 	Sources  []Source
 	Embedder embed.Embedder
 	Reranker embed.Reranker
+	// Filter 检索期块过滤（`-doc-type`）；nil 表示不过滤。每个源按自己的 PathPrefix
+	// 还原成展示路径后再判断类型。
+	Filter *ChunkFilter
+}
+
+// sourceFilter 该源适用的过滤器：把源路径经 PathPrefix 还原成展示路径后判类型。
+func (m *MultiRetriever) sourceFilter(i int) *ChunkFilter {
+	return m.Filter.ForPathPrefix(m.Sources[i].PathPrefix)
 }
 
 // Search 跨索引检索。任一目标索引缺失或损坏都直接报错，不静默退化为"只查有的那几个"。
@@ -128,9 +137,10 @@ type candidate struct {
 func (m *MultiRetriever) hybridCandidates(loaded []*docstore.Loaded, query string, q []float32, out *SearchOutcome) ([]candidate, bool) {
 	perSource := make([][]candidate, len(loaded))
 	for i, l := range loaded {
+		f := m.sourceFilter(i)
 		if l.Meta.BM25Only() {
 			// 离线索引没有向量：该源按纯 BM25 排名参与轮转（不构造查询向量）。
-			perSource[i] = bm25Candidates(i, l, query, multiPerIndex)
+			perSource[i] = bm25Candidates(i, l, query, candidateK(multiPerIndex, f, l), f, multiPerIndex)
 			continue
 		}
 		dim := 0
@@ -141,11 +151,12 @@ func (m *MultiRetriever) hybridCandidates(loaded []*docstore.Loaded, query strin
 			out.FallbackReason = fmt.Sprintf("vector dim mismatch at %s: query=%d index=%d", m.Sources[i].name(), len(q), dim)
 			return nil, false
 		}
-		var bmRes []fusion.Ranked
-		if l.BM25 != nil { // 防御：BM25 缺失（不应发生，Open 已校验）时退化为纯向量融合
-			bmRes = toRankedBM25(l.BM25.Search(query, bm25TopK))
-		}
-		fused := fusion.RRF(toRankedVec(l.Vector.Search(q, vectorTopK)), bmRes, rrfK)
+		fused := fusion.RRFWeighted([]fusion.Path{
+			{Ranked: toRankedVec(searchVector(l, q, candidateK(vectorTopK, f, l), f)), Weight: 1},
+			{Ranked: toRankedBM25(searchBM25(l, query, candidateK(bm25TopK, f, l), f)), Weight: 1},
+			titlePath(l, query, f),
+		}, rrfK)
+
 		if len(fused) > multiPerIndex {
 			fused = fused[:multiPerIndex]
 		}
@@ -170,12 +181,22 @@ func (m *MultiRetriever) rrfMerge(loaded []*docstore.Loaded, query string, topM 
 	srcOf := map[string]int{}
 	var order []string // 首次出现顺序，作同分的稳定次序
 	for i, l := range loaded {
-		for rank, r := range bm25Ranked(l, query, bm25TopK) {
+		f := m.sourceFilter(i)
+		for rank, r := range bm25Ranked(l, query, candidateK(bm25TopK, f, l), f) {
 			if _, seen := score[r.ChunkID]; !seen {
 				order = append(order, r.ChunkID)
 				srcOf[r.ChunkID] = i
 			}
 			score[r.ChunkID] += 1 / float64(rrfK+rank+1)
+		}
+		// 第三路：标识符—标题精确匹配，权重 2（与在线路径的 RRF 一致）。
+		// 每个索引内部各自合成，因此这里的累加只发生在同一块上——块不会跨索引重复。
+		for rank, h := range titleHits(l, query, f) {
+			if _, seen := score[h.ChunkID]; !seen {
+				order = append(order, h.ChunkID)
+				srcOf[h.ChunkID] = i
+			}
+			score[h.ChunkID] += titlematch.Weight / float64(rrfK+rank+1)
 		}
 	}
 	sort.SliceStable(order, func(a, b int) bool {
@@ -258,6 +279,8 @@ func (m *MultiRetriever) makeResult(src int, c chunker.Chunk, score float64) Res
 		LineEnd:    c.LineEnd,
 		Score:      score,
 		Entity:     m.Sources[src].Label,
+		Version:    c.Version,
+		DocType:    m.sourceFilter(src).ChunkDocType(c),
 	}
 }
 
@@ -285,11 +308,8 @@ func roundRobin(perSource [][]candidate, limit int) []candidate {
 }
 
 // bm25Candidates 单个索引的纯 BM25 候选（离线源参与轮转时用）。
-func bm25Candidates(src int, l *docstore.Loaded, query string, limit int) []candidate {
-	if l.BM25 == nil {
-		return nil
-	}
-	res := l.BM25.Search(query, limit)
+func bm25Candidates(src int, l *docstore.Loaded, query string, prefetch int, f *ChunkFilter, limit int) []candidate {
+	res := searchBM25(l, query, prefetch, f)
 	out := make([]candidate, 0, len(res))
 	for rank, r := range res {
 		if rank >= limit {
@@ -305,11 +325,11 @@ func bm25Candidates(src int, l *docstore.Loaded, query string, limit int) []cand
 }
 
 // bm25Ranked 单个索引的 BM25 排名（BM25 缺失时为空，防御损坏索引）。
-func bm25Ranked(l *docstore.Loaded, query string, topK int) []fusion.Ranked {
+func bm25Ranked(l *docstore.Loaded, query string, topK int, f *ChunkFilter) []fusion.Ranked {
 	if l.BM25 == nil {
 		return nil
 	}
-	return toRankedBM25(l.BM25.Search(query, topK))
+	return toRankedBM25(searchBM25(l, query, topK, f))
 }
 
 func allBM25Only(loaded []*docstore.Loaded) bool {

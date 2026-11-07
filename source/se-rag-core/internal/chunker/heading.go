@@ -99,6 +99,30 @@ func (c *MarkdownChunker) chunkByHeadings(text, sourceFile string) []Chunk {
 	return out
 }
 
+// SelfHeadings 返回分块正文里的标题行文字（不含 `#` 前缀，围栏代码块内的不算）。
+//
+// heading-v3 会在块首加一行 `【祖先 › 祖先】`，它不是标题行，因此不会被这里取到——
+// "分块自身标题"按设计就不含祖先路径。一个块可能包含多条标题行：heading-v3 会把
+// 相邻的短小节打包进同一块（如 6.1 build_fsbl + 6.2 build_kernel），被问到的那节
+// 未必是块里第一条标题，所以调用方必须看全部标题行而不是只看第一条。
+func SelfHeadings(text string) []string {
+	var out []string
+	fence := false
+	for _, l := range strings.Split(text, "\n") {
+		if fenceRe.MatchString(l) {
+			fence = !fence
+			continue
+		}
+		if fence {
+			continue
+		}
+		if m := headingRe.FindStringSubmatch(l); m != nil {
+			out = append(out, m[2])
+		}
+	}
+	return out
+}
+
 // IsFAQFile 判断是否是问答类文档：文件名以 -faq.md 结尾（不区分大小写），如 10-media-faq.md。
 // 问答文档的每个小节（一个问答）无论多短都独立成块；其他文档（手册 / README）的相邻小节会被打包。
 func IsFAQFile(sourceFile string) bool {

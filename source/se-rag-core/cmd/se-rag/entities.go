@@ -19,19 +19,23 @@ func runQueryDirs(base runCtx, dirs []string) error {
 	if base.query == "" {
 		return fmt.Errorf("empty query")
 	}
+	filter, err := docTypeFilter(base.docTypes)
+	if err != nil {
+		return err
+	}
 	srcs := make([]retriever.Source, 0, len(dirs))
 	for _, d := range dirs {
 		srcs = append(srcs, retriever.Source{Store: &docstore.Store{IndexDir: d}, Product: base.product})
 	}
-	return runMultiSourceQuery(base, srcs)
+	return runMultiSourceQuery(base, srcs, filter)
 }
 
-// runMultiSourceQuery 多索引合并检索。
-func runMultiSourceQuery(rc runCtx, srcs []retriever.Source) error {
+// runMultiSourceQuery 多索引合并检索。filter 为 nil 时不过滤。
+func runMultiSourceQuery(rc runCtx, srcs []retriever.Source, filter *retriever.ChunkFilter) error {
 	rc.ensureFactories()
 	rc.applyFakeMode()
 
-	m := &retriever.MultiRetriever{Sources: srcs}
+	m := &retriever.MultiRetriever{Sources: srcs, Filter: filter}
 	fallback := ""
 	switch {
 	case rc.offline:
