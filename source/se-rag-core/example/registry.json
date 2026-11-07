@@ -9,7 +9,7 @@
       "aliases": ["SE7", "SE7 32-BP1"],
       "modules": ["sm7"],
       "docs_dir": "se7/docs",
-      "index_dir": "../output/example-index/se7",
+      "index_dir": "../../../output/se-rag-core-example-index/se7",
       "scope": "SE7 微服务器的使用、配置与排障",
       "boundaries": ["只回答 SoC 模式，不回答 PCIe 板卡模式"],
       "query_hints": ["优先命令、文件、报错原文"]

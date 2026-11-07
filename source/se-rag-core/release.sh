@@ -10,7 +10,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ARCH="${1:-all}"
-VERSION="${2:-1.8.0}"
+VERSION="${2:-1.8.1}"
 OUTPUT_DIR="${OUTPUT_DIR:-$REPO_ROOT/output/se-rag-core}"
 
 mkdir -p "$OUTPUT_DIR"

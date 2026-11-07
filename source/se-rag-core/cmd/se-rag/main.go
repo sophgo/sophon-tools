@@ -284,7 +284,7 @@ func dispatchQuery(rest []string) int {
 	entity := fs.String("entity", "", "entity id(s), comma separated (specs are attributes, not entities)")
 	all := fs.Bool("all", false, "all ready entities from the registry (every sdk version)")
 	fs.BoolVar(&rc.withRelated, "with-related", false, "expand related entities (product → modules → chips → sdk versions → toolkits)")
-	fs.StringVar(&rc.docTypes, "doc-type", "", "filter results by doc type (registry mode only): "+strings.Join(registry.DocTypes, ","))
+	fs.StringVar(&rc.docTypes, "doc-type", "", "filter results by doc type (frontmatter doc_type first, then path): "+strings.Join(registry.DocTypes, ","))
 	sdkVersion := fs.String("sdk-version", "", "sdk version: latest|all|<slug>")
 	pos := parseInterspersed(fs, rest)
 	if len(pos) > 0 {
@@ -313,6 +313,16 @@ func dispatchQuery(rest []string) int {
 			return 1
 		}
 		return 0
+	}
+
+	// 路径模式不支持注册表专属参数：显式报错，避免被静默忽略而误以为生效。
+	if rc.withRelated {
+		fmt.Fprintln(os.Stderr, "query: -with-related only works in registry mode (-entity or -all)")
+		return 1
+	}
+	if strings.TrimSpace(*sdkVersion) != "" {
+		fmt.Fprintln(os.Stderr, "query: -sdk-version only works in registry mode (-entity or -all)")
+		return 1
 	}
 
 	// 路径模式：多个 -index-dir（重复或逗号分隔）走多索引合并；单个目录保持原有行为。
