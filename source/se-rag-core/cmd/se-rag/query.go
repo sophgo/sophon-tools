@@ -48,7 +48,7 @@ func runQuery(rc runCtx) error {
 	}
 	warnStaleIndex(rc.indexDir, rc.product, rc.docsDir)
 	// -doc-type 的取值先校验：非法值不该等到构造完 embedder 才报错。
-	filter, err := docTypeFilter(rc.docTypes)
+	filter, err := pathDocTypeFilter(rc.docTypes)
 	if err != nil {
 		return err
 	}
@@ -101,7 +101,7 @@ func runQueryOffline(rc runCtx, reason string) error {
 	if rc.query == "" {
 		return fmt.Errorf("empty query")
 	}
-	filter, err := docTypeFilter(rc.docTypes)
+	filter, err := pathDocTypeFilter(rc.docTypes)
 	if err != nil {
 		return err
 	}

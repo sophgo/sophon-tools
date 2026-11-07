@@ -6,12 +6,14 @@ SE 系列知识库的 **Go RAG 检索核心**，替代现行 Python 栈（numpy 
 ## 特性
 
 - **混合检索**：向量语义检索（内存暴力内积，L2 归一化）+ BM25 关键词检索 → RRF 融合（k=60）→ Reranker 精排
+- **标识符—标题精确匹配提权**：查询里含标识符（寄存器名 / 函数名 / 命令名，如 `rtc_ctrl_status1`、`build_kernel`）时，**以该标识符命名的那一节**作为第三路（权重 2）参与 RRF，压过只在正文里提到它的概览表；无标识符的查询结果与旧版逐字节一致（见「标识符—标题精确匹配提权」）
+- **注册表驱动**：`registry.json` 是实体（产品 / 模组 / 芯片）的唯一真源——按实体建索引、按别名解析问题、
+  跨实体合并检索（见「注册表与多索引检索」）；旧路径模式 `--docs-dir` / `-index-dir` 保持兼容
 - **A/B/C 三条路径**：
   - 路径 A（在线，主路径）：embedding 供应商向量化 → 向量 + BM25 → RRF → rerank
   - 路径 B（BM25 兜底）：无 key / 断网 / embedding 失败时自动降级为纯 BM25，保证开箱即用、离线可用
   - 路径 C（离线索引）：`build -offline` 建出的纯 BM25 索引，查询**根本不构造 embedder**，
     查询文本从不离开进程；用于含内部内容、不得外发的资料
-- **标识符—标题精确匹配提权**：查询里含标识符（寄存器名 / 函数名 / 命令名，如 `rtc_ctrl_status1`、`build_kernel`）时，**以该标识符命名的那一节**作为第三路（权重 2）参与 RRF，压过只在正文里提到它的概览表；无标识符的查询结果与旧版逐字节一致（见「标识符—标题精确匹配提权」）
 - **多知识库兼容**：不同知识库用不同 `-index-dir` / `--docs-dir` 即可，复用同一检索核心仅换目录
 - **供应商可切换**：siliconflow / sophnet 两族 embedding 与 reranker，可配置不写死
 - **内置默认 key（混淆内嵌）**：预置 siliconflow 免费 key，源码中以 XOR 混淆字节内嵌（不落明文）；模型固定 `BAAI/bge-m3`（embedding）与 `BAAI/bge-reranker-v2-m3`（rerank）；使用内置 key 时强制限流（并发≤1、单次≤2段落）；用户自备 key 放开
@@ -26,8 +28,9 @@ SE 系列知识库的 **Go RAG 检索核心**，替代现行 Python 栈（numpy 
 
 ```
 source/se-rag-core/
-├── cmd/se-rag/          CLI（build / query / doctor）
+├── cmd/se-rag/          CLI（list / resolve / build / query / doctor）
 ├── internal/
+│   ├── registry/        registry.json 读取与校验（实体、别名解析、关联展开）
 │   ├── chunker/         Markdown 分块（按标题切块；`*-faq.md` 一问一块，手册类相邻小节打包；见「分块策略」）
 │   ├── vector/          暴力内积向量索引 + L2 归一化 + gob 持久化
 │   ├── bm25/            BM25Okapi + 中英分词（中文 2-gram）+ 倒排 + gob 持久化
@@ -39,6 +42,8 @@ source/se-rag-core/
 │   ├── retriever/       混合检索编排 + A/B 降级 + 多索引合并
 │   └── config/          产品/供应商配置
 ├── example/se7/docs/    示例文档库（se7）
+├── example/registry.json 示例注册表（复用 example/se7，演示注册表模式）
+├── cmd/se-rag/testdata/ 测试夹具（夹具 registry.json + golden 输出）
 ├── go.mod / go.sum
 └── release.sh           统一构建接口（arm64 / amd64 / all）
 ```
@@ -61,8 +66,8 @@ GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o bin/se-rag-arm64 ./cmd/se-rag
 ### 统一 release.sh（对齐 sophon-tools M1 规范）
 
 ```bash
-bash release.sh all 1.7.0        # 同时产出 arm64 + amd64
-bash release.sh arm64 1.7.0      # 仅 arm64
+bash release.sh all 1.8.0        # 同时产出 arm64 + amd64
+bash release.sh arm64 1.8.0      # 仅 arm64
 # 产物目录（可用 OUTPUT_DIR 覆盖，默认 <repo>/output/se-rag-core/）
 ```
 
@@ -109,10 +114,6 @@ provider 名，索引看起来"正常"但检索质量是空的；`-offline` 明�
 # 离线检索：不联网、不要求 key，纯 BM25（不外发查询内容；mode=bm25）
 ./bin/se-rag query -offline -index-dir ./rag-data "SE7 如何配置网络"
 
-# 按文档类型过滤（路径模式可用；类型取文档 frontmatter 的 doc_type，
-# 缺失时取文档相对 --docs-dir 的第一层子目录名，根目录文件为 overview）
-./bin/se-rag query -offline -index-dir ./rag-data -doc-type datasheet,sdk "内存带宽"
-
 # 路径 B 兜底会自动触发：无 key / 断网 / embedding 失败时降级为 BM25
 # 路径 C：索引本身是 bm25（build -offline 产出）→ 直接纯 BM25，不构造 embedder，
 #        结果末行 fallback: index is bm25-only（此时加不加 -offline 都不会联网）
@@ -140,6 +141,18 @@ provider 名，索引看起来"正常"但检索质量是空的；`-offline` 明�
 
 离线索引（`search_mode=bm25`）输出 `search mode : bm25`、`current fp : (none: bm25-only index has no
 embedding fingerprint)` 与 `bm25 index OK: no rebuild needed`，不会拿 `bm25@0` 去比对 `bge-m3@1024` 而误报。
+
+### 4. 注册表模式（示例）
+
+`example/registry.json` 复用 `example/se7`，可直接试：
+
+```bash
+cd example
+../bin/se-rag list                        # 列出实体与索引状态
+../bin/se-rag build -all -offline         # 按实体建索引（示例里只有 se7 是 ready）
+../bin/se-rag query -entity se7 -offline "网络怎么配"
+../bin/se-rag resolve "SE7 32-BP1 的 I2C"  # 别名最长匹配
+```
 
 ## 供应商配置
 
@@ -230,6 +243,157 @@ export SE_RAG_RERANK_KEY="sk-user-rerank-key"
   因此 `--help`、离线查询、以及仅启动进程都不会凭空创建状态文件。
 - 用户自备 key 不经网关，直达官方 SiliconFlow，无故障转移项
 
+## 注册表与多索引检索
+
+技能根目录的 `registry.json` 是实体（产品 / 模组 / 芯片）的唯一真源：别名、文档目录、索引目录、
+关联关系、边界都在这里。CLI 通过 `-registry`（默认 `./registry.json`）读取它，注册表里的路径
+一律相对 `registry.json` 所在目录。
+
+schema version 3 的关系是**四层**：`product.modules → module.chips → chip.sdk →
+sdk.versions`。产品不再直接挂芯片；芯片通过 `chip.sdk` 指向 sdk 实体，`chip.sdk_since`
+标注该芯片从哪个 SDK 版本起被支持。SDK 的文档与索引挂在**版本**上（每个版本一套索引），
+所以 sdk 实体自身是 `placeholder`。
+
+SE9 的 16 路 / 8 路是**规格**（`product.specs`）而不是独立实体：SE9 是一个实体，
+两种路数只是规格不同，所以规格没有 id，不进入实体命名空间，`-entity` 也不接受规格名。
+版本同理：`versions[].slug` 是定位键，不是实体 id，也不能单独当 `-entity` 用
+（要写 `<sdk-id>@<slug>`）。
+
+```bash
+# 列出实体与索引状态（规格缩进列在产品下，标注共用的索引）
+./bin/se-rag list                       # 人类可读
+./bin/se-rag list -json                 # 结构化输出
+
+# 从自然语言里解析实体（别名最长匹配；大小写、空格、连字符、下划线不敏感）
+./bin/se-rag resolve "SE9 8-BP1-17 怎么装 sail"
+#   se9 product ready alias="SE9 8-BP1-17" spec="SE9 8" chips=cv186ah related=bm1688 skipped=sm9-16,sm9-8,cv186ah
+./bin/se-rag resolve "SM9 16"
+#   sm9-16 module placeholder alias="SM9 16" related=bm1688 skipped=sm9-16 used_by=se9
+./bin/se-rag resolve "use 7 days"       # 词边界：不命中 SE7（见下）
+
+# 按实体建索引（-all 覆盖全部 ready 实体 + sdk 的全部版本；placeholder 没有资料，不参与）
+./bin/se-rag build -entity se9
+./bin/se-rag build -entity se9,bm1688 -offline
+./bin/se-rag build -all
+# 规格不是实体：-entity se9-8 / "SE9 8" 会报 unknown entity，提示改用 -entity se9
+
+# sdk 默认只建/查最新版本；-sdk-version 可指定 slug 或 all，也可写 <sdk>@<slug>
+./bin/se-rag build -entity sophonsdk-edge                   # 最新版本
+./bin/se-rag build -entity sophonsdk-edge -sdk-version all   # 全部版本
+./bin/se-rag build -entity sophonsdk-edge@v2.2               # 指定版本
+
+# 按实体检索；-with-related 展开关联（产品 → 模组 → 芯片 → sdk 版本）
+./bin/se-rag query -entity se9 -with-related "I2C 怎么接"
+./bin/se-rag query -entity se9 -with-related -doc-type sdk "sophon-sail 安装"
+./bin/se-rag query -entity sophonsdk-edge -sdk-version v2.2 "sophon-sail"
+./bin/se-rag query -all -top-n 10 "OTA 升级"
+
+# 逐实体体检
+./bin/se-rag doctor -all
+```
+
+### 关联展开（-with-related）
+
+按"产品 → 模组 → 芯片 → sdk → sdk 版本"遍历（产品最后再加 toolkits），去重保序。
+**规格不影响检索目标**：
+
+- **placeholder 参与遍历，但不进入检索目标。** 例如 `sm9-8`（模组，placeholder）→
+  `cv186ah`（芯片，placeholder）→ `sophonsdk-edge`（sdk，placeholder，因为索引在版本上）：
+  链一路走到底，检索目标是同系列 SDK 的版本（如 `sophonsdk-edge@v2.3`），
+  跳过的实体照常提示。
+- **sdk 默认只取最新版本**（按 `versions[].release_date` 排序，不看版本号大小）。
+  `-sdk-version <slug>` 指定版本，`all` 取全部版本。
+- **`chip.sdk_since`**：所选版本早于该芯片支持的起始版本时跳过并提示
+  （如 `cv84x6` 标了 `sdk_since: v2.3`，查 `all` 时只保留 v2.3 及以后）。
+- 产品按 `product.modules` 展开全部模组——SE9 的两种规格最终都落到同一对索引
+  （`se9` + `bm1688`），所以问 `SE9 8-BP1-17` 与问 `SE9` 的检索范围完全相同。
+- 只命中产品（只说 `SE9`）时额外列出规格对照：
+  `note: se9 specs: SE9 16 (sm9-16 → bm1688) | SE9 8 (sm9-8 → cv186ah); ask which one if the answer depends on chip`
+- 命中模组（`SM9 16`）：模组 → 芯片 → sdk 版本，**不反向展开到产品**；
+  `resolve` 输出里另给 `used_by=`，列出使用该模组的产品，供 Agent 参考。
+- 命中规格别名（`SE9 8-BP1-17`、`SE9 16`）时实体仍是 `se9`，另附
+  `spec="SE9 8" chips=cv186ah`，供 Agent 判断芯片级数值该用哪颗芯片。
+- 命中 sdk 或带 sdk 的芯片时，`resolve` 一并给出版本列表并标出本次检索目标
+  （`search targets: sophonsdk-edge@v2.3`）。
+
+### SE_RAG_DATA_DIR：索引改落点
+
+设置 `SE_RAG_DATA_DIR=<目录>` 后，所有实体的索引（含 sdk 各版本）改落到
+`<目录>/<index_dir 的末级目录名>`；文档目录不动。用于技能目录只读、或多个 agent 共享
+一份只读技能副本的场景。`list` / `doctor` / `build` 输出都会显示实际落点
+（`list -json` 里是 `index_at` 与 `versions[].index_at`）。
+
+### 别名的词边界
+
+别名匹配在归一化后的文本上进行（转小写、去掉空格 / `-` / `_`），但命中位置会映射回原文，
+要求原文中命中片段的前后字符都不是 ASCII 字母或数字——中文、标点、空格与文本首尾都算边界。
+
+没有这一步时，`use 7 days` 去空格后会变成 `use7days`，其中的 `se7` 就会误命中 SE7；
+`case8` 同理会误命中 SE8。加上词边界后：
+
+| 输入 | 结果 |
+| --- | --- |
+| `SE9 16-BP1-11 怎么装` | 命中完整型号别名（解析到 se9，规格 `SE9 16`） |
+| `SE916 规格` | 命中规格别名 `SE9 16`（解析到 se9） |
+| `SE9的I2C` | 命中 `se9`（中文算边界） |
+| `use 7 days` | 不命中 |
+| `case8` | 不命中 |
+
+### -doc-type 过滤
+
+按块的**源路径**推断文档类型，不改文档内容、不改索引格式——同一份索引既能全量检索，
+也能只检索某几类文档。文档写了 frontmatter `doc_type` 时**以文档自述为准**，缺失时才看路径。
+
+两种模式都可用，但推断基准不同：
+
+| 模式 | 源路径基准 | 推断规则 |
+| --- | --- | --- |
+| 注册表模式（`-entity` / `-all`） | 技能根相对路径 | `docs/<layer>/<entity>/<doc_type>/…`；`00-introduce.md` → `overview`、`image-catalog.md` → `image`；`docs/modules/<id>/**` → `module`、`docs/sdks/<sdk>/<slug>/**` → `sdk` |
+| 路径模式（`-index-dir`） | 相对 `--docs-dir` 的路径 | 第一层子目录名是合法类型即为该类型；根目录文件 → `overview`；`_meta/`、`assets/` 与不认识的第一层目录 → `other` |
+
+注册表模式的完整映射（示例）：
+
+| 路径 | doc_type |
+| --- | --- |
+| `docs/products/<id>/manuals/**` | `manual` |
+| `docs/products/<id>/tools/**` | `tools` |
+| `docs/products/<id>/*.md` | `faq` |
+| `docs/chips/<id>/sdk/**` | `sdk` |
+| `docs/chips/<id>/datasheet/**` | `datasheet` |
+| `docs/modules/<id>/**` | `module` |
+| 其余 | `other` |
+
+```bash
+# 注册表模式：结果行在实体标注后追加 doc_type
+./bin/se-rag query -entity bm1688 -doc-type datasheet,sdk "内存带宽"
+# ### 1 [0.033] `docs/chips/bm1688/datasheet/spec.md:3-6` [bm1688/datasheet]
+
+# 路径模式：结果行在路径后追加 doc_type
+./bin/se-rag query -offline -index-dir ./rag-data -doc-type datasheet,sdk "内存带宽"
+# ### 1 [0.033] `datasheet/spec.md:3-6` [datasheet]
+```
+
+过滤发生在融合（RRF）之前：带过滤时每个索引先放大预取深度再按类型筛，避免被排除的块
+占掉候选名额。**不带 `-doc-type` 时输出逐字节不变**，`[实体id]` 标注规则也照旧。
+
+**单索引行为不变**：目标是单个实体（没带 `-with-related`，或展开后仍只有一个）时，检索流程与输出
+格式与路径模式逐字节一致（`cmd/se-rag/testdata/golden/` 里保存了改动前的 golden 输出做回归）。
+旧命令 `build --docs-dir` / `query -index-dir` / `doctor -index-dir` 全部保留。
+
+**多索引合并**（`-with-related`、`-entity a,b`、`-all`，或路径模式传多个 `-index-dir`）：
+
+- 在线：每个索引先做常规 hybrid（向量 top20 + BM25 top20 + 标题精确匹配 → 加权 RRF）取前 20 条，
+  **此阶段不 rerank**；按各索引排名轮转截取合并候选（上限 40 条）→ 统一 **rerank 一次** → 取 top-n。
+- 离线（`-offline`、全部索引都是 `build -offline` 产出的 bm25-only，或 rerank 失败）：
+  按各索引内排名做 RRF（k=60）合并；有标识符时叠加标题精确匹配这一路（权重 2）。
+- 三路融合始终在**每个索引内部**先完成，再做跨索引合并。
+- 结果每条标注 `[实体id]`，路径改为相对技能根目录（如 `docs/chips/bm1688/sdk/tpu-mlir.md:3-7`）；
+  用了 `-doc-type` 时标注再追加 `/doc_type`（如 `[bm1688/datasheet]`）；路径模式没有实体信息，
+  沿用原格式。
+- 任一目标索引缺失直接报错，并给出对应的 `se-rag build -entity <id>` 命令，不静默只查已有的那几个。
+
+实体模式建的索引，`meta.json` 的 `product` 字段写实体 id；路径模式仍写 `default`。
+
 ## 标识符—标题精确匹配提权
 
 查一个寄存器名时，BM25 与向量都会把**寄存器概览表**排到前面：表里同类寄存器名成行出现，
@@ -254,34 +418,15 @@ export SE_RAG_RERANK_KEY="sk-user-rerank-key"
 各模式行为一致：在线 hybrid、离线 BM25、`-doc-type` 过滤、多索引（每个索引内部先三路融合再合并）
 都走同一套。rerank 仍在其后执行；rerank 若把命中块压下去，以 rerank 结果为准，不再干预。
 
-**没有标识符的查询第三路为空**（零个名次），融合结果与旧版逐字节一致。分数列在有提权时是
-加权 RRF 值，与纯 BM25 的分数不可直接比大小。
+**没有标识符的查询第三路为空**（零个名次），融合结果与旧版逐字节一致——`cmd/se-rag/testdata/golden/`
+的 golden 回归锁住这一点。分数列在有提权时是加权 RRF 值，与纯 BM25 的分数不可直接比大小。
 
 ```bash
 # 第一名是以该寄存器命名的字段表，而不是概览表
-./bin/se-rag query -offline "rtc_ctrl_status1"
+./bin/se-rag query -entity bm1688 -offline "rtc_ctrl_status1"
 # 命令名同样生效
-./bin/se-rag query -offline "build_kernel 报错"
+./bin/se-rag query -entity cv84x6 -offline "build_kernel 报错"
 ```
-
-### -doc-type 过滤
-
-按块的**源路径**推断文档类型，不改文档内容、不改索引格式——同一份索引既能全量检索，
-也能只检索某几类文档。文档写了 frontmatter `doc_type` 时**以文档自述为准**，缺失时才看路径。
-
-| 路径（相对 `--docs-dir`） | doc_type |
-| --- | --- |
-| `<子目录>/…`，子目录名是合法类型 | 该类型（`spec` / `manual` / `faq` / `tools` / `datasheet` / `sdk` / `module`） |
-| 根目录文件（无子目录） | `overview` |
-| `_meta/`、`assets/`、不认识的第一层目录 | `other` |
-
-```bash
-./bin/se-rag query -index-dir ./rag-data -doc-type datasheet,sdk "内存带宽"
-# 结果行在路径后追加类型标注：### 1 [0.033] `datasheet/spec.md:3-6` [datasheet]
-```
-
-过滤发生在融合（RRF）之前：带过滤时先放大预取深度再按类型筛，避免被排除的块
-占掉候选名额。**不带 `-doc-type` 时输出逐字节不变**。
 
 ## 多知识库扩展
 
@@ -295,23 +440,15 @@ mkdir -p docs/se8
 ./bin/se-rag doctor -index-dir ./rag-se8
 ```
 
-多个知识库要一起检索时，`-index-dir` 可重复传入或用逗号分隔（合并规则见下一节）：
+多个知识库要一起检索时，`-index-dir` 可重复传入或用逗号分隔（合并规则见上一节）：
 
 ```bash
 ./bin/se-rag query -index-dir ./rag-se7 -index-dir ./rag-se8 "两代产品的网络配置差异"
 ./bin/se-rag query -index-dir ./rag-se7,./rag-se8 "两代产品的网络配置差异"
 ```
 
-### 多索引合并
-
-`query` 传多个 `-index-dir`（重复或逗号分隔）时合并检索：
-
-- 在线：每个索引先做常规 hybrid（向量 top20 + BM25 top20 → RRF）取前 20 条，
-  **此阶段不 rerank**；按各索引排名轮转截取合并候选（上限 40 条）→ 统一 **rerank 一次** → 取 top-n。
-- 离线（`-offline`、全部索引都是 `build -offline` 产出的 bm25-only，或 rerank 失败）：
-  按各索引内排名做 RRF（k=60）合并。
-- 任一目标索引缺失直接报错，不静默只查已有的那几个。
-- 单索引（只给一个 `-index-dir`，或一个都不给）的行为与输出格式与旧版逐字节一致。
+如果这些知识库已经在 `registry.json` 里登记为实体，改用 `-entity` / `-all` 更省事——
+目录、别名和关联关系都由注册表提供，不用每次手写路径。
 
 索引直接落盘到各自 `-index-dir/`（`meta.json` + `vectors.gob` + `bm25.gob` + `chunks.gob` +
 `.complete` 完成标记），各知识库互不影响，可并存。保存为原子写入：先写临时文件、移除旧
@@ -357,3 +494,9 @@ FAQ 提升最大：旧分块把几个短问答合并进同一块，向量检索�
 
 `se-rag query -index-dir <dir> -top-n N "<问题>"` 输出紧凑 Markdown，
 每条结果头部标注 `源文件相对路径:行号区间`，格式与 Python 版 `query.py` 一致（来源文件:行号、相关性分数、文本摘要、耗时）。skill 层可直接用 subprocess 调用。
+
+注册表模式同一个命令换成 `-entity <id> [-with-related]`：单实体输出格式不变（逐字节一致），
+多实体合并时结果行尾多一个 `[实体id]` 标注、路径改为相对技能根目录。
+
+`se-rag list -json` / `se-rag resolve -json "<文本>"` 输出结构化 JSON，便于 skill 层按实体路由，
+不必自己解析人类可读表格。

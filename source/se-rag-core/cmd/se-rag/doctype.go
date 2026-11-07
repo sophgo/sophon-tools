@@ -43,9 +43,13 @@ func isDocType(s string) bool {
 	return false
 }
 
-// docTypeFilter 把 `-doc-type` 的取值转成检索期块过滤（路径模式：按源路径的第一层
+// pathDocTypeFilter 把 `-doc-type` 的取值转成检索期块过滤（路径模式：按源路径的第一层
 // 子目录推断类型）。空串返回 nil（不过滤，输出与旧版逐字节一致）。
-func docTypeFilter(spec string) (*retriever.ChunkFilter, error) {
+//
+// 注册表模式用 registry_cmd.go 的 docTypeFilter：两者的源路径基准不同（注册表模式是
+// 技能根相对路径 `docs/<layer>/<entity>/…`，路径模式是相对 --docs-dir 的
+// `<doc_type>/…`），所以推断规则各一套；取值表与校验共用本文件的 docTypes。
+func pathDocTypeFilter(spec string) (*retriever.ChunkFilter, error) {
 	types := splitDocTypes(spec)
 	if len(types) == 0 {
 		return nil, nil

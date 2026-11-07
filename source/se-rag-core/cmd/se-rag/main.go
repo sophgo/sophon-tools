@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"se-rag-core/internal/registry"
 )
 
 // Version 构建版本，由 release.sh 通过 -ldflags -X 注入。
@@ -86,19 +88,28 @@ func warnExtraArgs(cmd string, extra []string) {
 }
 
 func printUsage() {
-	fmt.Println("Usage: se-rag <build|query|doctor> [flags]")
+	fmt.Println("Usage: se-rag <list|resolve|build|query|doctor> [flags]")
 	fmt.Println()
-	fmt.Println("Commands:")
+	fmt.Println("注册表模式（-registry 默认 ./registry.json）：")
+	fmt.Println("  list    [-registry f] [-json]")
+	fmt.Println("  resolve [-registry f] [-json] [-sdk-version v] \"文本\"")
+	fmt.Println("  build   -entity a[,b] | -all [-offline] [-sdk-version v]")
+	fmt.Println("  query   -entity a[,b] | -all [-with-related] [-doc-type t[,t]] [-top-n N] [-offline] [-sdk-version v] \"问题\"")
+	fmt.Println("  doctor  -entity a[,b] | -all [-sdk-version v]")
+	fmt.Println("  -entity 接受实体 id（产品/模组/芯片/sdk/工具）、<sdk>@<slug>，或 sdk id（按 -sdk-version 选版本）")
+	fmt.Println("          规格（如 SE9 8）不是实体，用 -entity se9")
+	fmt.Println("  -sdk-version  latest（默认，只查最新版本）| all（全部版本）| <slug>（指定版本）")
+	fmt.Println()
+	fmt.Println("路径模式（旧用法，继续可用）：")
 	fmt.Println("  build  --docs-dir <dir> -index-dir <dir> [-offline]")
 	fmt.Println("  query  -index-dir <dir> [-top-n N] [-offline] [-doc-type t[,t]] \"question\"")
 	fmt.Println("         -index-dir 可重复传入或用逗号分隔多个目录（多索引合并检索）")
 	fmt.Println("  doctor -index-dir <dir> [--docs-dir <dir>]")
 	fmt.Println()
-	fmt.Println("不同知识库只需指定不同 -index-dir / --docs-dir，无需 product 维度。")
-	fmt.Println()
 	fmt.Printf("Version: %s\n", Version)
 	fmt.Println()
 	fmt.Println("Env:")
+	fmt.Println("  SE_RAG_DATA_DIR=<dir>                  索引改落到 <dir>/<index_dir 末级名>（技能目录只读/多 agent 共享时用）")
 	fmt.Println("  SE_RAG_EMBED_KEY / SE_RAG_RERANK_KEY   用户自备 key（放开内置限流）")
 	fmt.Println("  SE_RAG_FAKE_EMBED=1                    离线假 embedding（测试/离线验证）")
 	fmt.Println("  SE_RAG_FAILOVER_BUDGET=18s             网关故障转移总预算（Go duration）")
@@ -107,15 +118,25 @@ func printUsage() {
 	fmt.Println("  SE_RAG_STATE_DIR=<dir>                 熔断与粘滞状态目录（默认用户缓存目录）")
 	fmt.Println("  SE_RAG_STATE_TTL=24h                   状态标记有效期，超过即重新生成")
 	fmt.Println("Flags（可写在问题文本之前或之后）:")
+	fmt.Println("  -registry <f>                          注册表路径（默认 ./registry.json）")
+	fmt.Println("  -entity a[,b] / -all                   目标实体（注册表模式）")
+	fmt.Println("  -sdk-version latest|all|<slug>         sdk 的版本选择（默认 latest）")
+	fmt.Println("  -with-related                          query 时展开关联实体（产品 → 模组 → 芯片 → sdk 版本 → toolkits）")
+	fmt.Println("  -doc-type t[,t]                        query 时按块的文档类型过滤：" + strings.Join(registry.DocTypes, ","))
+	fmt.Println("                                           类型取文档 frontmatter 的 doc_type，缺失时按路径推断：")
+	fmt.Println("                                           注册表模式看技能根相对路径，路径模式看相对 --docs-dir 的")
+	fmt.Println("                                           第一层子目录名，根目录文件为 overview")
 	fmt.Println("  -offline                               build/query：纯 BM25，不联网、不要 key")
 	fmt.Println("                                           build -offline 建 bm25-only 索引（dim=0，无向量）")
 	fmt.Println("                                           query -offline 对该索引做纯 BM25 检索")
-	fmt.Println("  -doc-type t[,t]                        query：按文档类型过滤（" + strings.Join(docTypes, ",") + "）")
-	fmt.Println("                                           类型取文档 frontmatter 的 doc_type，缺失时取文档相对")
-	fmt.Println("                                           --docs-dir 的第一层子目录名；根目录文件为 overview")
 	fmt.Println("  -builtin-key=false                     用用户 key；此时上面两个 env key 必填，缺失报错退出")
 }
 
+// dispatch 解析子命令并执行。返回值即进程退出码。
+//
+// 注册表模式与路径模式共存：
+//   - build/query/doctor 出现 -entity 或 -all 时走注册表，否则沿用旧的路径模式；
+//   - list/resolve 只有注册表模式，-registry 缺文件即报错。
 func dispatch(args []string) int {
 	if len(args) == 0 {
 		printUsage()
@@ -123,7 +144,34 @@ func dispatch(args []string) int {
 	}
 	sub := args[0]
 	rest := args[1:]
-	rc := runCtx{
+
+	// --help / -h：打印用法并以 0 退出（与"没有子命令"的 1 区分开）。
+	switch sub {
+	case "-h", "--help", "help":
+		printUsage()
+		return 0
+	}
+
+	switch sub {
+	case "list":
+		return dispatchList(rest)
+	case "resolve":
+		return dispatchResolve(rest)
+	case "build":
+		return dispatchBuild(rest)
+	case "query":
+		return dispatchQuery(rest)
+	case "doctor":
+		return dispatchDoctor(rest)
+	default:
+		printUsage()
+		return 1
+	}
+}
+
+// newRunCtx 默认运行上下文（路径模式的既有缺省值）。
+func newRunCtx() runCtx {
+	return runCtx{
 		product:    metaProductLabel,
 		indexDir:   defaultIndexDir(),
 		topN:       8,
@@ -131,63 +179,190 @@ func dispatch(args []string) int {
 		embedF:     realEmbed,
 		rerankF:    realRerank,
 	}
+}
 
-	switch sub {
-	case "build":
-		fs := flag.NewFlagSet("build", flag.ExitOnError)
-		fs.StringVar(&rc.docsDir, "docs-dir", "", "docs dir (default <cwd>/docs)")
-		fs.StringVar(&rc.indexDir, "index-dir", defaultIndexDir(), "index dir")
-		fs.BoolVar(&rc.useBuiltin, "builtin-key", true, "use builtin key (limits concurrency)")
-		fs.BoolVar(&rc.offline, "offline", false, "offline: build BM25-only index, no embedder, no key, no network")
-		warnExtraArgs("build", parseInterspersed(fs, rest))
-		if rc.docsDir == "" {
-			rc.docsDir = defaultDocsDir()
+func dispatchList(rest []string) int {
+	fs := flag.NewFlagSet("list", flag.ExitOnError)
+	regPath := fs.String("registry", defaultRegistryPath, "registry file")
+	asJSON := fs.Bool("json", false, "output JSON")
+	warnExtraArgs("list", parseInterspersed(fs, rest))
+	reg, err := loadRegistry(*regPath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "list:", err)
+		return 1
+	}
+	if err := runList(reg, *asJSON); err != nil {
+		fmt.Fprintln(os.Stderr, "list:", err)
+		return 1
+	}
+	return 0
+}
+
+func dispatchResolve(rest []string) int {
+	fs := flag.NewFlagSet("resolve", flag.ExitOnError)
+	regPath := fs.String("registry", defaultRegistryPath, "registry file")
+	asJSON := fs.Bool("json", false, "output JSON")
+	sdkVersion := fs.String("sdk-version", "", "sdk version: latest|all|<slug>")
+	pos := parseInterspersed(fs, rest)
+	text := ""
+	if len(pos) > 0 {
+		text = pos[0]
+		warnExtraArgs("resolve", pos[1:])
+	}
+	sdkReq, err := registry.ParseSDKVersion(*sdkVersion)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "resolve:", err)
+		return 1
+	}
+	reg, err := loadRegistry(*regPath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "resolve:", err)
+		return 1
+	}
+	if err := runResolveWith(reg, text, *asJSON, sdkReq); err != nil {
+		fmt.Fprintln(os.Stderr, "resolve:", err)
+		return 1
+	}
+	return 0
+}
+
+func dispatchBuild(rest []string) int {
+	rc := newRunCtx()
+	fs := flag.NewFlagSet("build", flag.ExitOnError)
+	fs.StringVar(&rc.docsDir, "docs-dir", "", "docs dir (default <cwd>/docs)")
+	fs.StringVar(&rc.indexDir, "index-dir", defaultIndexDir(), "index dir")
+	fs.BoolVar(&rc.useBuiltin, "builtin-key", true, "use builtin key (limits concurrency)")
+	fs.BoolVar(&rc.offline, "offline", false, "offline: build BM25-only index, no embedder, no key, no network")
+	regPath := fs.String("registry", defaultRegistryPath, "registry file")
+	entity := fs.String("entity", "", "entity id(s), comma separated; <sdk>@<slug> for one sdk version")
+	all := fs.Bool("all", false, "all ready entities from the registry (every sdk version)")
+	sdkVersion := fs.String("sdk-version", "", "sdk version: latest|all|<slug>")
+	warnExtraArgs("build", parseInterspersed(fs, rest))
+
+	if strings.TrimSpace(*entity) != "" || *all {
+		sdkReq, err := registry.ParseSDKVersion(*sdkVersion)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "build:", err)
+			return 1
 		}
-		if err := runBuild(rc); err != nil {
+		reg, err := loadRegistry(*regPath)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "build:", err)
+			return 1
+		}
+		ts, err := targetEntities(reg, *entity, *all, sdkReq)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "build:", err)
+			return 1
+		}
+		if err := runBuildEntities(rc, reg, ts); err != nil {
 			fmt.Fprintln(os.Stderr, "build:", err)
 			return 1
 		}
 		return 0
+	}
+	if rc.docsDir == "" {
+		rc.docsDir = defaultDocsDir()
+	}
+	if err := runBuild(rc); err != nil {
+		fmt.Fprintln(os.Stderr, "build:", err)
+		return 1
+	}
+	return 0
+}
 
-	case "query":
-		fs := flag.NewFlagSet("query", flag.ExitOnError)
-		var indexDirs multiFlag
-		fs.Var(&indexDirs, "index-dir", "index dir (repeatable or comma separated)")
-		fs.IntVar(&rc.topN, "top-n", 8, "top N results")
-		fs.BoolVar(&rc.useBuiltin, "builtin-key", true, "use builtin key")
-		fs.BoolVar(&rc.offline, "offline", false, "offline: BM25 only, no network")
-		fs.StringVar(&rc.docsDir, "docs-dir", "", "docs dir (optional; when set, warn if the index was built from different docs)")
-		fs.StringVar(&rc.docTypes, "doc-type", "", "filter results by doc type: "+strings.Join(docTypes, ","))
-		pos := parseInterspersed(fs, rest)
-		if len(pos) > 0 {
-			rc.query = pos[0]
-			warnExtraArgs("query", pos[1:])
+func dispatchQuery(rest []string) int {
+	rc := newRunCtx()
+	fs := flag.NewFlagSet("query", flag.ExitOnError)
+	var indexDirs multiFlag
+	fs.Var(&indexDirs, "index-dir", "index dir (repeatable or comma separated)")
+	fs.IntVar(&rc.topN, "top-n", 8, "top N results")
+	fs.BoolVar(&rc.useBuiltin, "builtin-key", true, "use builtin key")
+	fs.BoolVar(&rc.offline, "offline", false, "offline: BM25 only, no network")
+	fs.StringVar(&rc.docsDir, "docs-dir", "", "docs dir (optional; when set, warn if the index was built from different docs)")
+	regPath := fs.String("registry", defaultRegistryPath, "registry file")
+	entity := fs.String("entity", "", "entity id(s), comma separated (specs are attributes, not entities)")
+	all := fs.Bool("all", false, "all ready entities from the registry (every sdk version)")
+	fs.BoolVar(&rc.withRelated, "with-related", false, "expand related entities (product → modules → chips → sdk versions → toolkits)")
+	fs.StringVar(&rc.docTypes, "doc-type", "", "filter results by doc type (registry mode only): "+strings.Join(registry.DocTypes, ","))
+	sdkVersion := fs.String("sdk-version", "", "sdk version: latest|all|<slug>")
+	pos := parseInterspersed(fs, rest)
+	if len(pos) > 0 {
+		rc.query = pos[0]
+		warnExtraArgs("query", pos[1:])
+	}
+
+	if strings.TrimSpace(*entity) != "" || *all {
+		sdkReq, err := registry.ParseSDKVersion(*sdkVersion)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "query:", err)
+			return 1
 		}
-		// 路径模式：多个 -index-dir（重复或逗号分隔）走多索引合并；单个目录保持原有行为。
-		switch len(indexDirs.vals) {
-		case 0:
-			// 未指定：沿用默认索引目录（含 SE_RAG_INDEX）
-		case 1:
-			rc.indexDir = indexDirs.vals[0]
-		default:
-			if err := runQueryDirs(rc, indexDirs.vals); err != nil {
-				fmt.Fprintln(os.Stderr, "query:", err)
-				return 1
-			}
-			return 0
+		reg, err := loadRegistry(*regPath)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "query:", err)
+			return 1
 		}
-		if err := runQuery(rc); err != nil {
+		ts, err := targetEntities(reg, *entity, *all, sdkReq)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "query:", err)
+			return 1
+		}
+		if err := runQueryEntities(rc, reg, ts, *entity, sdkReq); err != nil {
 			fmt.Fprintln(os.Stderr, "query:", err)
 			return 1
 		}
 		return 0
+	}
 
-	case "doctor":
-		fs := flag.NewFlagSet("doctor", flag.ExitOnError)
-		fs.StringVar(&rc.indexDir, "index-dir", defaultIndexDir(), "index dir")
-		fs.StringVar(&rc.docsDir, "docs-dir", "", "docs dir (optional; when set, index is also checked against docs content)")
-		warnExtraArgs("doctor", parseInterspersed(fs, rest))
-		fatal, err := runDoctor(rc)
+	// 路径模式：多个 -index-dir（重复或逗号分隔）走多索引合并；单个目录保持原有行为。
+	switch len(indexDirs.vals) {
+	case 0:
+		// 未指定：沿用默认索引目录（含 SE_RAG_INDEX）
+	case 1:
+		rc.indexDir = indexDirs.vals[0]
+	default:
+		if err := runQueryDirs(rc, indexDirs.vals); err != nil {
+			fmt.Fprintln(os.Stderr, "query:", err)
+			return 1
+		}
+		return 0
+	}
+	if err := runQuery(rc); err != nil {
+		fmt.Fprintln(os.Stderr, "query:", err)
+		return 1
+	}
+	return 0
+}
+
+func dispatchDoctor(rest []string) int {
+	rc := newRunCtx()
+	fs := flag.NewFlagSet("doctor", flag.ExitOnError)
+	fs.StringVar(&rc.indexDir, "index-dir", defaultIndexDir(), "index dir")
+	fs.StringVar(&rc.docsDir, "docs-dir", "", "docs dir (optional; when set, index is also checked against docs content)")
+	regPath := fs.String("registry", defaultRegistryPath, "registry file")
+	entity := fs.String("entity", "", "entity id(s), comma separated")
+	all := fs.Bool("all", false, "all ready entities from the registry (every sdk version)")
+	sdkVersion := fs.String("sdk-version", "", "sdk version: latest|all|<slug>")
+	warnExtraArgs("doctor", parseInterspersed(fs, rest))
+
+	if strings.TrimSpace(*entity) != "" || *all {
+		sdkReq, err := registry.ParseSDKVersion(*sdkVersion)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "doctor:", err)
+			return 1
+		}
+		reg, err := loadRegistry(*regPath)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "doctor:", err)
+			return 1
+		}
+		ts, err := targetEntities(reg, *entity, *all, sdkReq)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "doctor:", err)
+			return 1
+		}
+		fatal, err := runDoctorEntities(rc, reg, ts)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "doctor:", err)
 			return 1
@@ -196,11 +371,17 @@ func dispatch(args []string) int {
 			return 1
 		}
 		return 0
+	}
 
-	default:
-		printUsage()
+	fatal, err := runDoctor(rc)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "doctor:", err)
 		return 1
 	}
+	if fatal {
+		return 1
+	}
+	return 0
 }
 
 func main() {
