@@ -255,7 +255,9 @@ func buildResults(loaded *docstore.Loaded, order []string, scoreFor map[string]f
 			LineStart:  c.LineStart,
 			LineEnd:    c.LineEnd,
 			Score:      scoreFor[id],
-			DocType:    f.ChunkDocType(c),
+			// 单索引只在 -doc-type 生效时标注类型：不带过滤时输出必须与旧版逐字节一致，
+			// 即使文档 frontmatter 自述了 doc_type（多索引结果另有 [实体/doc_type 版本] 标注规则）。
+			DocType: chunkDocTypeIfFiltering(f, c),
 		})
 	}
 	return out

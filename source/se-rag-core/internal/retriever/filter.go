@@ -36,6 +36,14 @@ func (f *ChunkFilter) ChunkDocType(c chunker.Chunk) string {
 	return f.TypeOf(c.SourceFile)
 }
 
+// chunkDocTypeIfFiltering 单索引结果的类型标注：只有过滤器生效时才返回 doc_type，否则为空。
+func chunkDocTypeIfFiltering(f *ChunkFilter, c chunker.Chunk) string {
+	if !f.Active() {
+		return ""
+	}
+	return f.ChunkDocType(c)
+}
+
 // Active 是否有实际的过滤条件。
 func (f *ChunkFilter) Active() bool { return f != nil && len(f.Allowed) > 0 }
 
