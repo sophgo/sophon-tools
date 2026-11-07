@@ -125,7 +125,7 @@ func TestMultiIndexQueryReranksOnce(t *testing.T) {
 		}, []retriever.Source{
 			{Store: &docstore.Store{IndexDir: idxA}, Product: metaProductLabel},
 			{Store: &docstore.Store{IndexDir: idxB}, Product: metaProductLabel},
-		}); err != nil {
+		}, nil); err != nil {
 			t.Fatalf("multi query: %v", err)
 		}
 	})
@@ -168,7 +168,7 @@ func TestMultiIndexQueryOfflineRRF(t *testing.T) {
 		}, []retriever.Source{
 			{Store: &docstore.Store{IndexDir: idxA}, Product: metaProductLabel},
 			{Store: &docstore.Store{IndexDir: idxB}, Product: metaProductLabel},
-		}); err != nil {
+		}, nil); err != nil {
 			t.Fatalf("offline multi query: %v", err)
 		}
 	})

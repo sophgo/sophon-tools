@@ -11,6 +11,7 @@ SE 系列知识库的 **Go RAG 检索核心**，替代现行 Python 栈（numpy 
   - 路径 B（BM25 兜底）：无 key / 断网 / embedding 失败时自动降级为纯 BM25，保证开箱即用、离线可用
   - 路径 C（离线索引）：`build -offline` 建出的纯 BM25 索引，查询**根本不构造 embedder**，
     查询文本从不离开进程；用于含内部内容、不得外发的资料
+- **标识符—标题精确匹配提权**：查询里含标识符（寄存器名 / 函数名 / 命令名，如 `rtc_ctrl_status1`、`build_kernel`）时，**以该标识符命名的那一节**作为第三路（权重 2）参与 RRF，压过只在正文里提到它的概览表；无标识符的查询结果与旧版逐字节一致（见「标识符—标题精确匹配提权」）
 - **多知识库兼容**：不同知识库用不同 `-index-dir` / `--docs-dir` 即可，复用同一检索核心仅换目录
 - **供应商可切换**：siliconflow / sophnet 两族 embedding 与 reranker，可配置不写死
 - **内置默认 key（混淆内嵌）**：预置 siliconflow 免费 key，源码中以 XOR 混淆字节内嵌（不落明文）；模型固定 `BAAI/bge-m3`（embedding）与 `BAAI/bge-reranker-v2-m3`（rerank）；使用内置 key 时强制限流（并发≤1、单次≤2段落）；用户自备 key 放开
@@ -31,7 +32,9 @@ source/se-rag-core/
 │   ├── vector/          暴力内积向量索引 + L2 归一化 + gob 持久化
 │   ├── bm25/            BM25Okapi + 中英分词（中文 2-gram）+ 倒排 + gob 持久化
 │   ├── embed/           Embedding / Reranker provider 抽象 + siliconflow/sophnet + 限流 + 重试
-│   ├── fusion/          RRF 融合
+│   ├── fusion/          RRF 融合（支持多路加权）
+│   ├── ident/           标识符提取（含下划线、去下划线后 ≥4 字符）
+│   ├── titlematch/      标识符—分块标题精确匹配（第三路排名）
 │   ├── docstore/        索引持久化 + 指纹元信息
 │   ├── retriever/       混合检索编排 + A/B 降级 + 多索引合并
 │   └── config/          产品/供应商配置
@@ -58,8 +61,8 @@ GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o bin/se-rag-arm64 ./cmd/se-rag
 ### 统一 release.sh（对齐 sophon-tools M1 规范）
 
 ```bash
-bash release.sh all 1.6.0        # 同时产出 arm64 + amd64
-bash release.sh arm64 1.6.0      # 仅 arm64
+bash release.sh all 1.7.0        # 同时产出 arm64 + amd64
+bash release.sh arm64 1.7.0      # 仅 arm64
 # 产物目录（可用 OUTPUT_DIR 覆盖，默认 <repo>/output/se-rag-core/）
 ```
 
@@ -105,6 +108,10 @@ provider 名，索引看起来"正常"但检索质量是空的；`-offline` 明�
 
 # 离线检索：不联网、不要求 key，纯 BM25（不外发查询内容；mode=bm25）
 ./bin/se-rag query -offline -index-dir ./rag-data "SE7 如何配置网络"
+
+# 按文档类型过滤（路径模式可用；类型取文档 frontmatter 的 doc_type，
+# 缺失时取文档相对 --docs-dir 的第一层子目录名，根目录文件为 overview）
+./bin/se-rag query -offline -index-dir ./rag-data -doc-type datasheet,sdk "内存带宽"
 
 # 路径 B 兜底会自动触发：无 key / 断网 / embedding 失败时降级为 BM25
 # 路径 C：索引本身是 bm25（build -offline 产出）→ 直接纯 BM25，不构造 embedder，
@@ -222,6 +229,59 @@ export SE_RAG_RERANK_KEY="sk-user-rerank-key"
   注意进程启动只读不写：只有真正产生路由判断（成功/失败）时才落盘，
   因此 `--help`、离线查询、以及仅启动进程都不会凭空创建状态文件。
 - 用户自备 key 不经网关，直达官方 SiliconFlow，无故障转移项
+
+## 标识符—标题精确匹配提权
+
+查一个寄存器名时，BM25 与向量都会把**寄存器概览表**排到前面：表里同类寄存器名成行出现，
+内容相似度天然高于只有一张字段表的那个小节。结果是查 `rtc_ctrl_status1` 拿到概览表，
+真正的字段表 `#### rtc_ctrl_status1（Offset 0x010）` 排不进前三。
+
+标题命中是比内容相似度更强的意图信号——用户写下标识符，要看的就是以它命名的那一节。
+因此融合时加入**第三路**排名：
+
+1. **标识符提取**（`internal/ident`）：查询里满足「含 `_`，且去掉 `_` 后长度 ≥ 4」的
+   ASCII token，大小写不敏感。`rtc_ctrl_status1`、`build_kernel`、`WDT_STAT` 是；
+   `I2C`、`1080p`、中文、`sophon-sail`（连字符不是下划线）都不是。
+2. **分块自身标题**（`chunker.SelfHeadings`）：取块正文里的标题行（`#`~`####`，围栏代码块内不算），
+   **不含** heading-v3 加的 `【祖先 › 祖先】` 前缀。从标题里按同一套规则取标识符：
+   `#### WDT_STAT（Offset 0x010）` → `wdt_stat`；`### 6.2 build_kernel（…）` → `build_kernel`。
+   一个块可能打包多个小节（`6.1 build_fsbl` + `6.2 build_kernel` 同块），所以看**全部**标题行，
+   而不是只看第一条。**全部在查询期从块文本推导，不改索引格式，已有索引不需重建。**
+3. **排序与权重**（`internal/titlematch`、`fusion.RRFWeighted`）：命中块按「命中标识符个数降序 →
+   标题越短越靠前 → 原块序」排序，最多 20 个候选；**即使它不在向量 / BM25 的 top20 里也加入候选**。
+   这一路 RRF 权重为 **2**（其余两路为 1），`k=60`。
+
+各模式行为一致：在线 hybrid、离线 BM25、`-doc-type` 过滤、多索引（每个索引内部先三路融合再合并）
+都走同一套。rerank 仍在其后执行；rerank 若把命中块压下去，以 rerank 结果为准，不再干预。
+
+**没有标识符的查询第三路为空**（零个名次），融合结果与旧版逐字节一致。分数列在有提权时是
+加权 RRF 值，与纯 BM25 的分数不可直接比大小。
+
+```bash
+# 第一名是以该寄存器命名的字段表，而不是概览表
+./bin/se-rag query -offline "rtc_ctrl_status1"
+# 命令名同样生效
+./bin/se-rag query -offline "build_kernel 报错"
+```
+
+### -doc-type 过滤
+
+按块的**源路径**推断文档类型，不改文档内容、不改索引格式——同一份索引既能全量检索，
+也能只检索某几类文档。文档写了 frontmatter `doc_type` 时**以文档自述为准**，缺失时才看路径。
+
+| 路径（相对 `--docs-dir`） | doc_type |
+| --- | --- |
+| `<子目录>/…`，子目录名是合法类型 | 该类型（`spec` / `manual` / `faq` / `tools` / `datasheet` / `sdk` / `module`） |
+| 根目录文件（无子目录） | `overview` |
+| `_meta/`、`assets/`、不认识的第一层目录 | `other` |
+
+```bash
+./bin/se-rag query -index-dir ./rag-data -doc-type datasheet,sdk "内存带宽"
+# 结果行在路径后追加类型标注：### 1 [0.033] `datasheet/spec.md:3-6` [datasheet]
+```
+
+过滤发生在融合（RRF）之前：带过滤时先放大预取深度再按类型筛，避免被排除的块
+占掉候选名额。**不带 `-doc-type` 时输出逐字节不变**。
 
 ## 多知识库扩展
 

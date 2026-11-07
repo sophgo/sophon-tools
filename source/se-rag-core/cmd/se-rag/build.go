@@ -31,8 +31,10 @@ type runCtx struct {
 	// offline = build 建纯 BM25 索引（不初始化 embedder、不读 key、不联网），
 	// query 走纯 BM25 检索。两条命令语义一致：全程不外发任何文本。
 	offline bool
-	embedF  func(config.Provider) (embed.Embedder, error)
-	rerankF func(config.Provider) (embed.Reranker, error)
+	// docTypes `-doc-type` 的取值（逗号分隔，如 datasheet,sdk）；空串表示不过滤。
+	docTypes string
+	embedF   func(config.Provider) (embed.Embedder, error)
+	rerankF  func(config.Provider) (embed.Reranker, error)
 }
 
 // applyUserKeys 按 -builtin-key 语义设置供应商 key：

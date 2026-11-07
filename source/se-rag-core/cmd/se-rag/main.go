@@ -90,7 +90,7 @@ func printUsage() {
 	fmt.Println()
 	fmt.Println("Commands:")
 	fmt.Println("  build  --docs-dir <dir> -index-dir <dir> [-offline]")
-	fmt.Println("  query  -index-dir <dir> [-top-n N] [-offline] \"question\"")
+	fmt.Println("  query  -index-dir <dir> [-top-n N] [-offline] [-doc-type t[,t]] \"question\"")
 	fmt.Println("         -index-dir 可重复传入或用逗号分隔多个目录（多索引合并检索）")
 	fmt.Println("  doctor -index-dir <dir> [--docs-dir <dir>]")
 	fmt.Println()
@@ -110,6 +110,9 @@ func printUsage() {
 	fmt.Println("  -offline                               build/query：纯 BM25，不联网、不要 key")
 	fmt.Println("                                           build -offline 建 bm25-only 索引（dim=0，无向量）")
 	fmt.Println("                                           query -offline 对该索引做纯 BM25 检索")
+	fmt.Println("  -doc-type t[,t]                        query：按文档类型过滤（" + strings.Join(docTypes, ",") + "）")
+	fmt.Println("                                           类型取文档 frontmatter 的 doc_type，缺失时取文档相对")
+	fmt.Println("                                           --docs-dir 的第一层子目录名；根目录文件为 overview")
 	fmt.Println("  -builtin-key=false                     用用户 key；此时上面两个 env key 必填，缺失报错退出")
 }
 
@@ -154,6 +157,7 @@ func dispatch(args []string) int {
 		fs.BoolVar(&rc.useBuiltin, "builtin-key", true, "use builtin key")
 		fs.BoolVar(&rc.offline, "offline", false, "offline: BM25 only, no network")
 		fs.StringVar(&rc.docsDir, "docs-dir", "", "docs dir (optional; when set, warn if the index was built from different docs)")
+		fs.StringVar(&rc.docTypes, "doc-type", "", "filter results by doc type: "+strings.Join(docTypes, ","))
 		pos := parseInterspersed(fs, rest)
 		if len(pos) > 0 {
 			rc.query = pos[0]

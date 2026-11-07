@@ -47,6 +47,11 @@ func runQuery(rc runCtx) error {
 		rc.product = metaProductLabel
 	}
 	warnStaleIndex(rc.indexDir, rc.product, rc.docsDir)
+	// -doc-type 的取值先校验：非法值不该等到构造完 embedder 才报错。
+	filter, err := docTypeFilter(rc.docTypes)
+	if err != nil {
+		return err
+	}
 	if rc.offline {
 		return runQueryOffline(rc, "offline mode (-offline)")
 	}
@@ -78,7 +83,7 @@ func runQuery(rc runCtx) error {
 		rr = ret
 	}
 
-	r := &retriever.Retriever{Store: &docstore.Store{IndexDir: rc.indexDir}, Embedder: emb, Reranker: rr}
+	r := &retriever.Retriever{Store: &docstore.Store{IndexDir: rc.indexDir}, Embedder: emb, Reranker: rr, Filter: filter}
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 	out, err := r.Search(ctx, rc.query, rc.product, rc.topN)
@@ -96,7 +101,11 @@ func runQueryOffline(rc runCtx, reason string) error {
 	if rc.query == "" {
 		return fmt.Errorf("empty query")
 	}
-	r := &retriever.Retriever{Store: &docstore.Store{IndexDir: rc.indexDir}}
+	filter, err := docTypeFilter(rc.docTypes)
+	if err != nil {
+		return err
+	}
+	r := &retriever.Retriever{Store: &docstore.Store{IndexDir: rc.indexDir}, Filter: filter}
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 	out, err := r.Search(ctx, rc.query, rc.product, rc.topN)

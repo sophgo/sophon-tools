@@ -17,6 +17,11 @@ type Chunk struct {
 	LineStart  int
 	LineEnd    int
 	ChunkIndex int
+	// DocType 文档自述的 doc_type（frontmatter 里的 doc_type 字段）。
+	// 为空表示该文档没有写 frontmatter，调用方按路径推断。
+	DocType string
+	// Version 文档自述的版本（frontmatter 的 version）；null 或缺失为空串。
+	Version string
 }
 
 // MarkdownChunker 对齐 Python 分块策略：
@@ -93,14 +98,28 @@ func (c *MarkdownChunker) chunkPlain(text, sourceFile string) []Chunk {
 	return out
 }
 
-// ChunkDirectory 递归收集 *.md，跳过 SEARCH_INDEX.md
+// skipDir 文档库里不参与索引的目录（相对 docs 根的任意层级）。
+//
+//	_meta/  元数据：source-manifest.json、image-catalog.json、coverage-report.md。
+//	        这三份文档描述的是"资料怎么来的"，不是知识本身；把它们切进索引会让
+//	        "规格 覆盖"这类查询召回覆盖报告（修复前 se13 实测第 7、8 名都是它）。
+//	assets/ 只有图片，没有 .md；这里一并跳过，省掉无谓的目录遍历。
+var skipDir = map[string]bool{"_meta": true, "assets": true}
+
+// ChunkDirectory 递归收集 *.md，跳过 SEARCH_INDEX.md 与 _meta/、assets/。
 func (c *MarkdownChunker) ChunkDirectory(docsDir string) (map[string][]Chunk, error) {
 	result := map[string][]Chunk{}
 	err := filepath.Walk(docsDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		if info.IsDir() || filepath.Ext(path) != ".md" || filepath.Base(path) == "SEARCH_INDEX.md" {
+		if info.IsDir() {
+			if path != docsDir && skipDir[info.Name()] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if filepath.Ext(path) != ".md" || filepath.Base(path) == "SEARCH_INDEX.md" {
 			return nil
 		}
 		text, err := os.ReadFile(path)
@@ -109,6 +128,7 @@ func (c *MarkdownChunker) ChunkDirectory(docsDir string) (map[string][]Chunk, er
 		}
 		rel, _ := filepath.Rel(docsDir, path)
 		chs := c.ChunkFile(string(text), filepath.ToSlash(rel))
+		applyDocType(chs, string(text))
 		if len(chs) > 0 {
 			result[rel] = chs
 		}
@@ -492,4 +512,54 @@ func indexOfFrom(s, sub string, from int) int {
 		return -1
 	}
 	return from + idx
+}
+
+// applyDocType 给一个文件的全部块填上文档自述的 doc_type 与 version。
+//
+// 放在这里而不是逐块解析：两者都是文档级属性，同一文件的块只读一次 frontmatter。
+func applyDocType(chs []Chunk, content string) {
+	dt := FrontmatterDocType(content)
+	ver := FrontmatterVersion(content)
+	if dt == "" && ver == "" {
+		return
+	}
+	for i := range chs {
+		if dt != "" {
+			chs[i].DocType = dt
+		}
+		chs[i].Version = ver
+	}
+}
+
+// FrontmatterDocType 从文档 frontmatter 里取 doc_type（缺失或为 null 返回空串）。
+//
+// 只认统一骨架的必填字段，不做完整 YAML 解析：本仓库的 frontmatter 由脚本生成，
+// 形如 `doc_type: spec` 的简单标量。
+func FrontmatterDocType(content string) string { return frontmatterScalar(content, "doc_type") }
+
+// FrontmatterVersion 从文档 frontmatter 里取 version；null 或缺失返回空串。
+func FrontmatterVersion(content string) string { return frontmatterScalar(content, "version") }
+
+// frontmatterScalar 取 frontmatter 里某个键的标量值（null/缺失/空 → 空串）。
+func frontmatterScalar(content, key string) string {
+	lines := strings.Split(content, "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
+		return ""
+	}
+	prefix := key + ":"
+	for _, line := range lines[1:] {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "---" {
+			return ""
+		}
+		if !strings.HasPrefix(trimmed, prefix) {
+			continue
+		}
+		value := strings.TrimSpace(strings.TrimPrefix(trimmed, prefix))
+		if value == "" || value == "null" || value == "~" {
+			return ""
+		}
+		return strings.Trim(value, `"'`)
+	}
+	return ""
 }
