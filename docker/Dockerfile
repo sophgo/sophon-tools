@@ -74,7 +74,15 @@ SHELL ["/bin/bash", "-c"]
 # pdfss_cpp 8 架构: aarch64/armel/riscv64 + mingw-w64(windows amd64/i686)
 # Rust/Go 静态: musl 工具链在 PATH(由 pbmssm 的 fetch-musl-toolchain.sh 识别复用)
 # pqt 系列: qtbase5-dev(Qt 5.12.8, 20.04 仓库) + libgl1-mesa-dev + fuse + patchelf(AppImage)
-# xorg-dev: pqt_batch_deployment 自 v2.0.0 起为 Go+Fyne，Linux 端 CGO 需要 X11/GL 头文件
+# pqt_batch_deployment 自 v2.0.0 起为 Go+Fyne，其 glfw 依赖在 Linux 上默认同时编
+# X11 与 Wayland 两个后端，需要两套头文件：
+#   - X11: libx11/xrandr/xinerama/xi/xcursor/xxf86vm-dev
+#     不能只写 xorg-dev 元包——在 --no-install-recommends 下它的多数组件会被跳过，
+#     镜像里最终只装了 libx11-dev，Xrandr/Xcursor/Xxf86vm 缺失导致编译/链接失败。
+#   - Wayland: 20.04 的 libwayland 仅 1.18，glfw v3.4 生成的协议头用了 1.20+ 的
+#     WL_MARSHAL_FLAG_DESTROY，装了 libwayland-dev 反而编不过。
+# 因此只补 X11 头，并由 pqt_batch_deployment/release.sh 以 `-tags x11` 显式只编
+# X11 后端（Wayland 会话下经 XWayland 仍可运行）。
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential gcc g++ make cmake pkg-config \
         gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
@@ -84,6 +92,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         dpkg dpkg-dev fakeroot \
         qtbase5-dev qttools5-dev-tools \
         libgl1-mesa-dev libglib2.0-0 xorg-dev libxkbcommon-dev \
+        libx11-dev libxrandr-dev libxinerama-dev libxi-dev libxcursor-dev libxxf86vm-dev \
         ca-certificates curl wget git \
         zip unzip p7zip-full patchelf \
         python3 python3-pip python3-dev \

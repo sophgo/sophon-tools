@@ -61,9 +61,16 @@ export GOPROXY="${GOPROXY:-https://goproxy.cn,direct}"
 export GOSUMDB="${GOSUMDB:-sum.golang.google.cn}"
 export GOFLAGS="${GOFLAGS:-}"
 
+# Linux 桌面版构建标签：glfw 默认同时编 X11 + Wayland 两个后端。统一构建镜像基于
+# ubuntu 20.04，其 libwayland 仅 1.18，缺 glfw v3.4 生成协议头所需的
+# WL_MARSHAL_FLAG_DESTROY（1.20+ 才有），Wayland 后端在那里编不过；显式 -tags x11
+# 只编 X11 后端。Wayland 会话下程序经 XWayland 仍可正常运行。
+# 非 Linux（windows 交叉）构建不需要该标签。
+LINUX_GUI_TAGS="x11"
+
 # 先跑测试：构建失败或测试不过都不出包
 echo "==> go test ..."
-if ! go test ./... 2>&1 | tail -20; then
+if ! go test -tags "${LINUX_GUI_TAGS}" ./... 2>&1 | tail -20; then
   echo "ERROR: 测试未通过，终止出包" >&2
   exit 1
 fi
@@ -71,7 +78,7 @@ fi
 build_linux() {
   local out="$OUTPUT_DIR/qt_batch_deployment_V${VERSION}_linux_amd64"
   echo "==> 构建 Linux 单文件 ..."
-  if ! CGO_ENABLED=1 go build -trimpath -ldflags "-s -w" -o "$out" . ; then
+  if ! CGO_ENABLED=1 go build -tags "${LINUX_GUI_TAGS}" -trimpath -ldflags "-s -w" -o "$out" . ; then
     echo "ERROR: Linux 构建失败" >&2
     return 1
   fi
