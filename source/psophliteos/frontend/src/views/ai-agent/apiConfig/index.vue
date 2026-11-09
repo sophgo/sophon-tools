@@ -236,8 +236,10 @@
   async function init() {
     const cfg = await getAgentConfig();
     if (cfg) {
-      form.llmApiBase = cfg.llmApiBase || SOPHNET_API_BASE;
-      form.llmApiBaseType = inferApiBaseType(cfg.llmApiBase || '');
+      // 空地址视为未配置：回落到出厂默认（Sophnet），避免被判成「自定义但地址空」
+      const apiBase = cfg.llmApiBase || SOPHNET_API_BASE;
+      form.llmApiBase = apiBase;
+      form.llmApiBaseType = inferApiBaseType(apiBase);
       form.llmModel = cfg.llmModel || '';
       form.llmEnabled = cfg.llmEnabled !== false;
       form.llmHasKey = !!cfg.llmHasKey;
