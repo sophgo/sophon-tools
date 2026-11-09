@@ -82,6 +82,8 @@ func (migrationMarker) TableName() string { return "llmproxy_migration" }
 
 // migrateDefaultModelOnce 一次性把「仍是旧出厂默认」的模型名换成新默认值。
 // 已有 marker 则直接返回（用户之后即使把模型名改回旧值也不再被覆盖）。
+// UPDATE 与 marker 写在同一事务里：要么都成功，要么都回滚，不会出现
+// 「改写了但没记 marker → 下次启动再改一遍」而覆盖用户重新选择的情况。
 func migrateDefaultModelOnce(db *gorm.DB) {
 	const name = "default_llm_model_2_4_0"
 	if !db.Dialect().HasColumn("llm_proxy_config", "llm_model") {
@@ -95,16 +97,35 @@ func migrateDefaultModelOnce(db *gorm.DB) {
 		}
 	}
 	var m migrationMarker
-	if err := db.First(&m, "name = ?", name).Error; err == nil {
+	err := db.First(&m, "name = ?", name).Error
+	if err == nil {
 		return // 已执行
 	}
-	if err := db.Exec("UPDATE llm_proxy_config SET llm_model = ? WHERE llm_model = ?",
+	if !gorm.IsRecordNotFoundError(err) {
+		// 读 marker 出错（非"不存在"）时无法判断是否已执行：跳过，
+		// 避免误判成未执行而重复改写用户后来重选的模型名。
+		logger.Warn("llmproxy migrate: read marker %s failed, skip default model upgrade: %v", name, err)
+		return
+	}
+
+	tx := db.Begin()
+	if tx.Error != nil {
+		logger.Warn("llmproxy migrate: begin tx failed, skip default model upgrade: %v", tx.Error)
+		return
+	}
+	if err := tx.Exec("UPDATE llm_proxy_config SET llm_model = ? WHERE llm_model = ?",
 		DefaultLLMModel, LegacyDefaultLLMModel).Error; err != nil {
+		tx.Rollback()
 		logger.Warn("llmproxy migrate default model %s -> %s failed: %v",
 			LegacyDefaultLLMModel, DefaultLLMModel, err)
 		return
 	}
-	if err := db.Create(&migrationMarker{Name: name, AppliedAt: time.Now().Format(time.RFC3339)}).Error; err != nil {
-		logger.Warn("llmproxy migrate: record marker %s failed: %v", name, err)
+	if err := tx.Create(&migrationMarker{Name: name, AppliedAt: time.Now().Format(time.RFC3339)}).Error; err != nil {
+		tx.Rollback()
+		logger.Warn("llmproxy migrate: record marker %s failed (rewrite rolled back): %v", name, err)
+		return
+	}
+	if err := tx.Commit().Error; err != nil {
+		logger.Warn("llmproxy migrate: commit default model upgrade failed: %v", err)
 	}
 }

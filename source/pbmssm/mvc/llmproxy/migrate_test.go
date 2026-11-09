@@ -105,3 +105,29 @@ func TestMigrateSkipsWhenNoTable(t *testing.T) {
 	Migrate(db) // 不应 panic
 	Migrate(nil)
 }
+
+// TestMigrateDefaultModelFreshInstall 全新安装（库里还没有记录）也应写下 marker：
+// 之后用户把模型名改成旧默认值，重启不得被再改写一次。
+func TestMigrateDefaultModelFreshInstall(t *testing.T) {
+	db := setupMigrateDB(t) // 空表
+	defer db.Close()
+
+	Migrate(db)
+	var m migrationMarker
+	if err := db.First(&m, "name = ?", "default_llm_model_2_4_0").Error; err != nil {
+		t.Fatalf("marker not written on fresh install: %v", err)
+	}
+
+	// 用户主动选了旧型号
+	if err := db.Save(&Config{ID: 1, LLMModel: LegacyDefaultLLMModel}).Error; err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	Migrate(db)
+	var got Config
+	if err := db.First(&got, 1).Error; err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if got.LLMModel != LegacyDefaultLLMModel {
+		t.Errorf("fresh-install path clobbered user choice: %q", got.LLMModel)
+	}
+}

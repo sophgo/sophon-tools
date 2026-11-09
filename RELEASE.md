@@ -15,7 +15,7 @@
 
 | 工具 | 版本权威定义位置 | 说明 |
 | --- | --- | --- |
-| bmssm | `source/pbmssm/build/version.sh` → `DEFAULT_VERSION` | 2.3.x |
+| bmssm | `source/pbmssm/build/version.sh` → `DEFAULT_VERSION` | 2.4.x |
 | sophliteos | `source/psophliteos/build/version.sh` → `DEFAULT_VERSION` | 2.2.x |
 | se-rag-core | `source/se-rag-core/release.sh` 默认 VERSION | 1.8.1 |
 | dfss（pip） | `source/pdfss_cpp/git_version` | v1.10.x，同步 PyPI |
