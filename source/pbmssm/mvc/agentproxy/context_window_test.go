@@ -14,7 +14,7 @@ func TestRewriteContextWindow(t *testing.T) {
 name        = "sophnet"
 kind        = "openai"
 base_url    = "http://127.0.0.1:18080/v1"
-model       = "DeepSeek-V4-Flash-0731"
+model       = "DeepSeek-V4.1-Flash-1017"
 api_key_env = "DEEPSEEK_API_KEY"
 reasoning_protocol = "openai"
 context_window = 200000
@@ -40,7 +40,7 @@ context_window = 200000
 			t.Errorf("%s: rewrote to %q, want context_window = %d (%s)", c.name, out, c.want, c.toWhom)
 		}
 		// provider 其余字段保持不变
-		if !strings.Contains(string(out), `model       = "DeepSeek-V4-Flash-0731"`) {
+		if !strings.Contains(string(out), `model       = "DeepSeek-V4.1-Flash-1017"`) {
 			t.Errorf("%s: provider model field was clobbered", c.name)
 		}
 	}

@@ -37,3 +37,17 @@
   ```
   `-ldflags "-s -w"` 去除符号与 DWARF debug 段，产物 38M（未 strip 版约 52M）。
 - 部署后 `reasonix version` 显示 `git_commit: fa64f632`（v1.25.0 基线）。
+
+## 出厂运行配置（随 deb 打包）
+
+本目录同时是 bmssm deb 里 reasonix 运行主目录（`/data/sophon/reasonix-home`）的资源源，
+由 `build/build-deb-bmssm.sh` 复制进去：
+
+| 本目录 | deb 内路径 | 说明 |
+| --- | --- | --- |
+| `prompts/system.md` | `prompts/system.md` | Agent 系统提示词（通用技术支持助手） |
+| `config.toml` | `.reasonix/config.toml` | Reasonix 运行配置（上游指向本机 18080 转发、默认模型、上下文窗口等） |
+
+**不预载任何 skill**：bmssm 只出一个不带知识库的 deb 变体（`bmssm_<版本>_<架构>.deb`）。
+旧版本 `_seskill` 变体已移除，升级时 `build/deb/postinst` 会清理设备上遗留的
+`skills/se-series-knowledge-base` 与 `bin/se-rag`，避免残留文件继续占用磁盘。

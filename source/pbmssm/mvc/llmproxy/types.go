@@ -45,6 +45,13 @@ type Config struct {
 // TableName 指定表名。
 func (Config) TableName() string { return "llm_proxy_config" }
 
+// DefaultLLMModel 是 LLM 默认模型名的唯一权威定义（默认配置、保存兜底共用）。
+const DefaultLLMModel = "DeepSeek-V4.1-Flash-1017"
+
+// LegacyDefaultLLMModel 是上一代出厂默认模型名，仅用于升级迁移识别
+// 「用户没改过、仍是旧默认值」的记录（见 Migrate）。
+const LegacyDefaultLLMModel = "DeepSeek-V4-Flash-0731"
+
 // DefaultConfig 返回默认配置（sophnet 上游：LLM=deepseek，VLM=qwen3-vl-plus）。
 // ApiBase 为 OpenAI 兼容 base（转发时直接拼 /chat/completions）。
 // LLMOverride/VLMOverride 默认开启「覆盖下游请求」：新装转发一律用默认模型名。
@@ -54,7 +61,7 @@ func DefaultConfig() Config {
 	return Config{
 		ID:          1,
 		LLMApiBase:  "https://www.sophnet.com/api/open-apis/v1",
-		LLMModel:    "DeepSeek-V4-Flash-0731",
+		LLMModel:    DefaultLLMModel,
 		LLMEnabled:  false,
 		LLMOverride: true,
 		VLMApiBase:  "https://www.sophnet.com/api/open-apis/v1",

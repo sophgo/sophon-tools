@@ -80,7 +80,7 @@ func (s *Service) SaveConfig(req SaveRequest) (Config, error) {
 		ID:          1,
 		LLMApiBase:  nonEmpty(req.LLMApiBase, cur.LLMApiBase, "https://www.sophnet.com/api/open-apis/v1"),
 		LLMApiKey:   nonEmpty(req.LLMApiKey, cur.LLMApiKey, ""),
-		LLMModel:    nonEmpty(req.LLMModel, cur.LLMModel, "DeepSeek-V4-Flash-0731"),
+		LLMModel:    nonEmpty(req.LLMModel, cur.LLMModel, DefaultLLMModel),
 		LLMEnabled:  enabled(req.LLMEnabled, cur.LLMEnabled),
 		LLMOverride: enabled(req.LLMOverride, cur.LLMOverride),
 		VLMApiBase:  nonEmpty(req.VLMApiBase, cur.VLMApiBase, "https://www.sophnet.com/api/open-apis/v1"),

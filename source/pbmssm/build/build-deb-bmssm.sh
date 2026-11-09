@@ -9,13 +9,10 @@
 #               agentproxy.binaryPath 指向它（出厂即带 AI Agent 后端）。
 #               省略则只打 bmssm（Reasonix 需后续单独部署）。
 #
-# 产物（两个变体，均内嵌 bmssm；REASONIX_BIN 提供时均内嵌 reasonix）：
-#   release/bmssm_${VERSION}_${ARCH}_noskill.deb   出厂默认：Reasonix（默认配置，无 SE 系列 skill）
-#                                                    + 通用 SE 系列 agent 提示词（不体现具体型号）
-#   release/bmssm_${VERSION}_${ARCH}_seskill.deb   带 SE 系列 skill：预载 se-series-knowledge-base
-#                                                    多型号知识库（SE7/SE8/SE9）+ SE 系列 agent 提示词
-#                                                    + se-rag 检索二进制 + 对应 Reasonix 配置
-# SE 系列资源来源：build/se-series-skill/（SKILL.md + docs + 提示词 + 两套 reasonix 配置；向量索引不预置，设备上按需构建）
+# 产物（单一变体，内嵌 bmssm；REASONIX_BIN 提供时一并内嵌 reasonix）：
+#   release/bmssm_${VERSION}_${ARCH}.deb   出厂默认：Reasonix（默认配置，不预载任何 skill）
+#                                          + 通用 agent 提示词（不体现具体型号）
+# 提示词与 Reasonix 配置来源：build/reasonix/（prompts/system.md + config.toml）。
 set -e
 
 cd "$(dirname "$0")/.."
@@ -32,59 +29,12 @@ else
   bash build/build-bmssm.sh "$VERSION"
 fi
 
-# 构建 se-rag 检索核心二进制（仅 seskill 变体需要；x86/arm64 均静态）
-SE_RAG_BIN=""
-if [ -d ../se-rag-core ]; then
-  SE_RAG_DIR="$(cd ../se-rag-core && pwd)"
-  mkdir -p /tmp/se-rag-build
-  (cd "$SE_RAG_DIR" && GOOS=linux GOARCH="$ARCH" CGO_ENABLED=0 go build -trimpath -o "/tmp/se-rag-build/se-rag" ./cmd/se-rag)
-  SE_RAG_BIN="/tmp/se-rag-build/se-rag"
-  echo "✓ 已构建 se-rag ($ARCH): $SE_RAG_BIN"
-fi
+RX_SRC="$(cd build/reasonix && pwd)"   # Reasonix 提示词 / 配置资源
 
-SE_SRC="$(cd build/se-series-skill && pwd)"   # SE 系列 skill/提示词等资源
-
-# ---- 出包时预建向量索引 ------------------------------------------------------
-# 索引与架构无关（gob 编码，见 se-rag-core/internal/docstore），因此用宿主 se-rag
-# 二进制在构建机上生成一次，两套 deb 变体共用。
-# 失败不阻断打包：SKILL.md「第 0 步」仍支持设备端按需构建，只是首次检索需联网跑几分钟。
-# SE_RAG_SKIP_INDEX_BUILD=1 可显式跳过（离线环境 / 只想快速出包）。
-SE_INDEX_DIR=""
-if [ -d ../se-rag-core ] && [ "${SE_RAG_SKIP_INDEX_BUILD:-0}" != "1" ]; then
-  echo "==> 出包时构建 SE 系列向量索引（se7/se8/se9，需联网调用 embedding 网关）"
-  BUILD_SE_RAG_HOST=""
-  mkdir -p /tmp/se-rag-host
-  if (cd ../se-rag-core && CGO_ENABLED=0 go build -trimpath -o /tmp/se-rag-host/se-rag ./cmd/se-rag); then
-    BUILD_SE_RAG_HOST="/tmp/se-rag-host/se-rag"
-  else
-    echo "  WARN: 宿主 se-rag 构建失败，跳过索引预建" >&2
-  fi
-  if [ -n "$BUILD_SE_RAG_HOST" ]; then
-    SE_INDEX_DIR="/tmp/se-rag-host/index"
-    rm -rf "$SE_INDEX_DIR"
-    for p in se7 se8 se9; do
-      if [ ! -d "$SE_SRC/docs/$p" ]; then
-        echo "  WARN: docs/$p 不存在，跳过" >&2
-        continue
-      fi
-      echo "  -> build index: $p"
-      if ! "$BUILD_SE_RAG_HOST" build \
-             --docs-dir "$SE_SRC/docs/$p" \
-             -index-dir "$SE_INDEX_DIR/data_$p" >/tmp/se-rag-host/build-$p.log 2>&1; then
-        echo "  WARN: $p 索引构建失败（详见 /tmp/se-rag-host/build-$p.log），该产品将不带索引" >&2
-      fi
-    done
-    if [ ! -d "$SE_INDEX_DIR" ]; then SE_INDEX_DIR=""; fi
-  fi
-elif [ "${SE_RAG_SKIP_INDEX_BUILD:-0}" = "1" ]; then
-  echo "==> SE_RAG_SKIP_INDEX_BUILD=1：跳过索引预建（设备端首次检索将按 SKILL.md 第 0 步构建）"
-fi
-
-# assemble_deb <suffix> <with_seskill: 1|0>
+# assemble_deb
 assemble_deb() {
-  local suffix="$1" with_seskill="$2"
   local DEBROOT="build/deb/bmssm-root"
-  local OUT="release/bmssm_${VERSION}_${ARCH}${suffix}.deb"
+  local OUT="release/bmssm_${VERSION}_${ARCH}.deb"
 
   rm -rf "$DEBROOT"
   mkdir -p "$DEBROOT/DEBIAN" \
@@ -124,9 +74,9 @@ assemble_deb() {
     if [ -n "$REASONIX_BIN" ]; then RX_BEFORE_MB=$(( $(stat -c%s "$DEBROOT/opt/sophon/reasonix/bin/reasonix") / 1024 / 1024 )); fi
     if strip_reasonix; then
       RX_AFTER_MB=$(( $(stat -c%s "$DEBROOT/opt/sophon/reasonix/bin/reasonix") / 1024 / 1024 ))
-      echo "  ✓ [$suffix] reasonix strip: ${RX_BEFORE_MB}MB → ${RX_AFTER_MB}MB"
+      echo "  ✓ reasonix strip: ${RX_BEFORE_MB}MB → ${RX_AFTER_MB}MB"
     else
-      echo "  WARN: [$suffix] reasonix strip 未执行（无可用 strip 工具），保留原样" >&2
+      echo "  WARN: reasonix strip 未执行（无可用 strip 工具），保留原样" >&2
     fi
     sed -i \
       -e 's|^  enabled: false.*|  enabled: true|' \
@@ -136,51 +86,12 @@ assemble_deb() {
 
   # Reasonix 运行主目录（reasionix HOME=/data/sophon/reasonix-home）
   local RXM="$DEBROOT/data/sophon/reasonix-home"
-  mkdir -p "$RXM/.reasonix"
+  mkdir -p "$RXM/.reasonix" "$RXM/prompts"
 
-  if [ "$with_seskill" = "1" ]; then
-    if [ -z "$SE_RAG_BIN" ]; then
-      echo "ERROR: [_seskill] 变体需要 se-rag 二进制（source/se-rag-core 缺失或构建失败），中止" >&2
-      rm -rf "$DEBROOT"
-      exit 1
-    fi
-    # ===== seskill 变体：预载 SE 系列多型号 skill + agent 提示词 + se-rag =====
-    # 1) se-rag 检索二进制
-    mkdir -p "$RXM/bin"
-    cp "$SE_RAG_BIN" "$RXM/bin/se-rag"
-    chmod 0755 "$RXM/bin/se-rag"
-    # 2) se-series-knowledge-base skill（SKILL.md + docs/se7,se8,se9 + 预建向量索引）。
-    #    索引在出包时就地构建（见下方 build_indexes），随 deb 分发；设备端只需在
-    #    docs 变化或索引缺失时才重建，避免出厂即联网跑 3-10 分钟的构建。
-    local SK="$RXM/skills/se-series-knowledge-base"
-    mkdir -p "$SK/rag"
-    cp "$SE_SRC/SKILL.md" "$SK/SKILL.md"
-    cp -r "$SE_SRC/docs/." "$SK/docs/"
-    # 预建索引进 deb（失败不阻断打包：SKILL.md 第 0 步仍可让用户在设备上按需构建）
-    if [ -d "$SE_INDEX_DIR" ]; then
-      for p in se7 se8 se9; do
-        if [ -f "$SE_INDEX_DIR/data_$p/.complete" ]; then
-          mkdir -p "$SK/rag/data_$p"
-          cp -a "$SE_INDEX_DIR/data_$p/." "$SK/rag/data_$p/"
-        fi
-      done
-      echo "  ✓ [$suffix] 已预置向量索引（出包时构建）"
-    else
-      echo "  WARN: [$suffix] 未预置向量索引（出包时未构建成功），设备端首次检索需按 SKILL.md 第 0 步构建" >&2
-    fi
-    # 3) SE 系列 agent 提示词（多型号版）
-    mkdir -p "$RXM/prompts"
-    cp "$SE_SRC/prompts/system.seskill.md" "$RXM/prompts/system.md"
-    # 4) SE 系列 Reasonix 配置（引用 skill + system_prompt_file）
-    cp "$SE_SRC/reasonix/config.toml" "$RXM/.reasonix/config.toml"
-    echo "  ✓ [$suffix] 已预载 SE 系列 skill（SE7/SE8/SE9）+ agent 提示词 + se-rag"
-  else
-    # ===== 默认（noskill）变体：Reasonix 默认配置，无 SE 系列 skill；带通用提示词 =====
-    mkdir -p "$RXM/prompts"
-    cp "$SE_SRC/prompts/system.noskill.md" "$RXM/prompts/system.md"
-    cp "$SE_SRC/reasonix/config.noskill.toml" "$RXM/.reasonix/config.toml"
-    echo "  ✓ [$suffix] 默认配置（无 SE 系列 skill，通用提示词）"
-  fi
+  # 出厂默认配置：不预载任何 skill，带通用 agent 提示词
+  cp "$RX_SRC/prompts/system.md" "$RXM/prompts/system.md"
+  cp "$RX_SRC/config.toml" "$RXM/.reasonix/config.toml"
+  echo "  ✓ 默认配置（不预载 skill，通用提示词）"
 
   # DEBIAN 控制文件
   sed -e "s/@VERSION@/$VERSION/" -e "s/@ARCH@/$ARCH/" \
@@ -213,8 +124,7 @@ assemble_deb() {
 }
 
 mkdir -p release
-assemble_deb "_noskill" 0
-assemble_deb "_seskill" 1
+assemble_deb
 
 echo
 echo "=== 产物 ==="
