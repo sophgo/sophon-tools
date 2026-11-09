@@ -33,6 +33,9 @@ type runCtx struct {
 	offline bool
 	// withRelated 注册表模式下 query 是否展开关联实体（产品 → 模组 → 芯片 → sdk → toolkits）；路径模式下传入即报错。
 	withRelated bool
+	// noToolkits 关闭"查询产品时默认带入该产品关联的 toolkit"。只影响默认带入：
+	// -with-related 仍会把 toolkits 展开进来（那是显式要求）。路径模式下传入即报错。
+	noToolkits bool
 	// docTypes `-doc-type` 的取值（逗号分隔，如 datasheet,sdk）；空串表示不过滤。
 	// 两种模式都可用：注册表模式按实体目录推断，路径模式按 --docs-dir 下第一层子目录推断（frontmatter 优先）。
 	docTypes string

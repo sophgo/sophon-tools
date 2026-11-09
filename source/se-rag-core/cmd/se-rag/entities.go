@@ -73,27 +73,55 @@ func declaredIndexDir(reg *registry.Registry, t target) string {
 // 目标为单个实体（没带 -with-related 或展开后仍只有一个）且不带 -doc-type：
 // 沿用 runQuery 的完整流程与输出格式——检索流程和输出与旧版逐字节一致，
 // 这是本卡对单索引的硬约束。
-// 目标为多个（-with-related 展开出关联实体/版本，或 -entity a,b / -all），
-// 或带了 -doc-type（需要按块过滤 + 标注类型）：走合并检索，每条结果标注 [目标]，
-// 路径改为相对技能根目录。
+// 目标为多个（-with-related 展开出关联实体/版本，或 -entity a,b / -all，
+// 或产品默认带入了 toolkit），或带了 -doc-type（需要按块过滤 + 标注类型）：
+// 走合并检索，每条结果标注 [目标]，路径改为相对技能根目录。
+//
+// **产品默认带入 toolkit**：`-entity` 里直接写的产品，其 `toolkits` 自动加入检索目标
+// （`-no-toolkits` 关闭）。这些"经产品带入"的 toolkit 源按块 frontmatter 的
+// `applies_products` 过滤；用户直接点名 toolkit 时不过滤。
 func runQueryEntities(base runCtx, reg *registry.Registry, ts []target, entityFlag string,
 	sdkReq registry.SDKVersionRequest) error {
 	if base.query == "" {
 		return fmt.Errorf("empty query")
 	}
+	products := explicitProducts(reg, entityFlag)
 	targets, err := expandRelated(reg, entityFlag, ts, base.withRelated, sdkReq)
 	if err != nil {
 		return err
+	}
+	// 直接点名的目标（-with-related 展开前）：它们不做产品过滤。
+	direct := directTargets(ts)
+	// 经产品带入的 toolkit：placeholder/非 toolkit 的引用跳过并说明。
+	linked, skipped := productToolkits(reg, products)
+	if msg := registry.FormatSkips(skipped); msg != "" {
+		fmt.Fprintf(os.Stderr, "note: %s\n", msg)
+	}
+	if !base.noToolkits {
+		targets, _ = withProductToolkits(reg, targets, linked)
+	}
+	// 带进来的 toolkit（默认带入或 -with-related 带入）都要提示，并按产品过滤。
+	var present []string
+	for _, tk := range linked {
+		if !direct[tk] && containsTarget(targets, tk) {
+			present = append(present, tk)
+		}
+	}
+	if len(present) > 0 {
+		// -no-toolkits 只关掉默认带入：toolkit 是 -with-related 带回来的，
+		// 或本来就已经关闭默认带入时，都不要再提这个开关。
+		canDisable := !base.noToolkits && !base.withRelated
+		fmt.Fprintf(os.Stderr, "note: %s\n", toolkitsNote(present, products, canDisable))
 	}
 	filter, err := docTypeFilter(base.docTypes)
 	if err != nil {
 		return err
 	}
-	srcs, err := entitySources(reg, targets)
+	srcs, err := entitySources(reg, targets, productSetOf(products), direct)
 	if err != nil {
 		return err
 	}
-	if len(srcs) == 1 && filter == nil {
+	if len(srcs) == 1 && filter == nil && srcs[0].Products == nil {
 		rc := base
 		rc.product = srcs[0].Label
 		rc.indexDir = srcs[0].Store.IndexDir
@@ -101,6 +129,16 @@ func runQueryEntities(base runCtx, reg *registry.Registry, ts []target, entityFl
 		return runQuery(rc)
 	}
 	return runMultiSourceQuery(base, srcs, filter)
+}
+
+// containsTarget 目标列表里是否已有该 id（不含版本目标，toolkit 没有版本）。
+func containsTarget(ts []target, id string) bool {
+	for _, t := range ts {
+		if t.Ver == nil && t.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 // runMultiSourceQuery 多索引合并检索（注册表模式，也是 -doc-type 的路径）。
@@ -193,6 +231,11 @@ func runDoctorEntities(base runCtx, reg *registry.Registry, ts []target) (fatal 
 			fatal = true
 			continue
 		}
+		// toolkit 额外报一行「索引里有多少块带了 applies_products」：产品查询依赖它过滤，
+		// 0 说明索引是旧版建的（或这批文档都还没标注），需要重建/补 frontmatter。
+		if isToolkit(reg, t) {
+			reportAppliesProducts(rc.indexDir, rc.product)
+		}
 		if need {
 			fatal = true
 		}
@@ -210,4 +253,36 @@ func allBM25Only(srcs []retriever.Source) bool {
 		}
 	}
 	return true
+}
+
+// isToolkit 该目标是否是 toolkit 实体（版本目标不是）。
+func isToolkit(reg *registry.Registry, t target) bool {
+	if t.Ver != nil {
+		return false
+	}
+	e, ok := reg.ByID(t.ID)
+	return ok && e.Type == registry.TypeToolkit
+}
+
+// reportAppliesProducts 打印索引里带 applies_products 的块数。
+//
+// 产品查询靠它过滤 toolkit 文档：0 表示索引是旧版建的（或文档都还没标注），
+// 此时查产品会看到全部 toolkit 文档，需要重建索引或补 frontmatter。
+// 读索引失败只提示一行——索引缺失/损坏已由 runDoctor 报过，这里不重复报错。
+func reportAppliesProducts(indexDir, product string) {
+	loaded, err := (&docstore.Store{IndexDir: indexDir}).Open(product)
+	if err != nil {
+		return
+	}
+	declared := 0
+	for _, c := range loaded.Chunks {
+		if c.AppliesProductsDeclared {
+			declared++
+		}
+	}
+	line := fmt.Sprintf("applies_products: %d/%d chunks declared", declared, len(loaded.Chunks))
+	if declared == 0 {
+		line += " (rebuild the index after the docs declare it: product queries include all toolkit docs)"
+	}
+	fmt.Println(line)
 }

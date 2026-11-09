@@ -9,6 +9,9 @@ SE 系列知识库的 **Go RAG 检索核心**，替代现行 Python 栈（numpy 
 - **标识符—标题精确匹配提权**：查询里含标识符（寄存器名 / 函数名 / 命令名，如 `rtc_ctrl_status1`、`build_kernel`）时，**以该标识符命名的那一节**作为第三路（权重 2）参与 RRF，压过只在正文里提到它的概览表；无标识符的查询结果与旧版逐字节一致（见「标识符—标题精确匹配提权」）
 - **注册表驱动**：`registry.json` 是实体（产品 / 模组 / 芯片）的唯一真源——按实体建索引、按别名解析问题、
   跨实体合并检索（见「注册表与多索引检索」）；旧路径模式 `--docs-dir` / `-index-dir` 保持兼容
+- **查产品自动带上随箱工具**：`-entity se9` 会把 SE9 关联的 `sophon-tools` / `sophon-demo` 一并检索，
+  并按 toolkit 文档 frontmatter 的 `applies_products` 只保留适用 SE9 的工具与例程
+  （`-no-toolkits` 关闭；见「产品默认带入 toolkit」）
 - **A/B/C 三条路径**：
   - 路径 A（在线，主路径）：embedding 供应商向量化 → 向量 + BM25 → RRF → rerank
   - 路径 B（BM25 兜底）：无 key / 断网 / embedding 失败时自动降级为纯 BM25，保证开箱即用、离线可用
@@ -66,8 +69,8 @@ GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o bin/se-rag-arm64 ./cmd/se-rag
 ### 统一 release.sh（对齐 sophon-tools M1 规范）
 
 ```bash
-bash release.sh all 1.8.0        # 同时产出 arm64 + amd64
-bash release.sh arm64 1.8.0      # 仅 arm64
+bash release.sh all 1.9.0        # 同时产出 arm64 + amd64
+bash release.sh arm64 1.9.0      # 仅 arm64
 # 产物目录（可用 OUTPUT_DIR 覆盖，默认 <repo>/output/se-rag-core/）
 ```
 
@@ -283,7 +286,10 @@ SE9 的 16 路 / 8 路是**规格**（`product.specs`）而不是独立实体：
 ./bin/se-rag build -entity sophonsdk-edge@v2.2               # 指定版本
 
 # 按实体检索；-with-related 展开关联（产品 → 模组 → 芯片 → sdk 版本）
+# 产品默认带入它关联的 toolkit（见「产品默认带入 toolkit」），-no-toolkits 可关闭
 ./bin/se-rag query -entity se9 -with-related "I2C 怎么接"
+./bin/se-rag query -entity se9 -top-n 8 "yolo26 支持 模型"
+./bin/se-rag query -entity se9 -no-toolkits "yolo26 支持 模型"
 ./bin/se-rag query -entity se9 -with-related -doc-type sdk "sophon-sail 安装"
 ./bin/se-rag query -entity sophonsdk-edge -sdk-version v2.2 "sophon-sail"
 ./bin/se-rag query -all -top-n 10 "OTA 升级"
@@ -315,6 +321,40 @@ SE9 的 16 路 / 8 路是**规格**（`product.specs`）而不是独立实体：
   `spec="SE9 8" chips=cv186ah`，供 Agent 判断芯片级数值该用哪颗芯片。
 - 命中 sdk 或带 sdk 的芯片时，`resolve` 一并给出版本列表并标出本次检索目标
   （`search targets: sophonsdk-edge@v2.3`）。
+
+### 产品默认带入 toolkit（1.9.0）
+
+查产品时不必再单独查随箱工具：`-entity` 里**直接写出**的产品，其 `toolkits`
+（如 SE9 的 `sophon-tools` / `sophon-demo`）自动加入检索目标，并且**只保留适用于该产品的
+工具与例程文档**。
+
+```bash
+./bin/se-rag query -entity se9 -top-n 8 "yolo26 支持 模型"
+# stderr: note: toolkits included: sophon-tools, sophon-demo (filtered by applies_products ∋ se9; -no-toolkits to disable)
+./bin/se-rag query -entity se9 -no-toolkits "yolo26 支持 模型"   # 关掉默认带入
+```
+
+过滤依据是 toolkit 文档 frontmatter 的 `applies_products`，三态语义必须分清：
+
+| frontmatter | 含义 | 查产品时 |
+| --- | --- | --- |
+| 字段缺失 | 不限产品（通用指南、README） | 保留 |
+| `applies_products: [se7, se9]` | 只对这些产品有效 | 与本次显式 product 有交集才保留 |
+| `applies_products: []` | 哪个产品都不适用 | 丢弃（与"缺失"语义相反） |
+
+规则细节：
+
+- **只有显式写的 product 触发带入**：芯片、模组、sdk 与 `-all` 都不触发（`-all` 本来就把
+  toolkit 当直接目标）。
+- **用户直接写 `-entity sophon-demo` 时不过滤**：同一份索引既能整体看，也能按产品看。
+  同一个 toolkit 既被直接指定、又被产品带入时，按直接指定处理。
+- **`-with-related` 的其余展开不变**（产品 → 模组 → 芯片 → sdk 版本仍需显式加）；
+  它带进来的 toolkit 同样按产品过滤，`-no-toolkits` 不管这一路。
+- 过滤发生在**候选阶段**（融合前的预取），与 `-doc-type` 组合时两个条件都要满足，
+  不会等 top-n 截断后再过滤。
+- 索引里没有 `applies_products`（旧版索引）时按"字段缺失"处理，不报错；`doctor` 对
+  toolkit 多打一行 `applies_products: N/M chunks declared`，0 说明该重建索引或补 frontmatter。
+- 显式目标里不含 product 时（如只查 `bm1688`、`sophonsdk-edge`）输出与 1.8.1 逐字节一致。
 
 ### SE_RAG_DATA_DIR：索引改落点
 
@@ -376,13 +416,15 @@ SE9 的 16 路 / 8 路是**规格**（`product.specs`）而不是独立实体：
 过滤发生在融合（RRF）之前：带过滤时每个索引先放大预取深度再按类型筛，避免被排除的块
 占掉候选名额。**不带 `-doc-type` 时输出逐字节不变**——单索引结果只在 `-doc-type` 生效时才追加类型标注，
 即使文档 frontmatter 自述了 `doc_type` 也一样（1.8.1 修正）；多索引结果的 `[实体id/doc_type 版本]` 标注规则照旧。
-`-with-related`、`-sdk-version` 只在注册表模式（`-entity` / `-all`）下有效，路径模式下传入会直接报错。
+`-with-related`、`-sdk-version`、`-no-toolkits` 只在注册表模式（`-entity` / `-all`）下有效，
+路径模式下传入会直接报错。
 
 **单索引行为不变**：目标是单个实体（没带 `-with-related`，或展开后仍只有一个）时，检索流程与输出
 格式与路径模式逐字节一致（`cmd/se-rag/testdata/golden/` 里保存了改动前的 golden 输出做回归）。
 旧命令 `build --docs-dir` / `query -index-dir` / `doctor -index-dir` 全部保留。
 
-**多索引合并**（`-with-related`、`-entity a,b`、`-all`，或路径模式传多个 `-index-dir`）：
+**多索引合并**（`-with-related`、`-entity a,b`、`-all`、产品默认带入的 toolkit，
+或路径模式传多个 `-index-dir`）：
 
 - 在线：每个索引先做常规 hybrid（向量 top20 + BM25 top20 + 标题精确匹配 → 加权 RRF）取前 20 条，
   **此阶段不 rerank**；按各索引排名轮转截取合并候选（上限 40 条）→ 统一 **rerank 一次** → 取 top-n。

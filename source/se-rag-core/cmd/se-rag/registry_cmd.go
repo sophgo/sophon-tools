@@ -321,7 +321,13 @@ func containsString(xs []string, s string) bool {
 // entitySources 把检索目标转成多索引检索源，并检查每个索引都存在。
 // 缺失时报错并给出对应的 build 命令——不静默跳过没建的索引，否则用户会以为
 // 查询范围覆盖了全部目标实体。
-func entitySources(reg *registry.Registry, ts []target) ([]retriever.Source, error) {
+//
+// productSet 非空时，**经产品带入的 toolkit** 源要按 applies_products 过滤块：
+// direct 里登记的是"用户直接写进 -entity 的目标"，它们一律不过滤（同一份索引
+// 既能按产品看，也能整体看）。productSet 为空（本次没有显式 product）时
+// 所有源都不带产品过滤，输出与 1.8.1 逐字节一致。
+func entitySources(reg *registry.Registry, ts []target, productSet map[string]bool,
+	direct map[string]bool) ([]retriever.Source, error) {
 	srcs := make([]retriever.Source, 0, len(ts))
 	var missing []string
 	for _, t := range ts {
@@ -335,6 +341,7 @@ func entitySources(reg *registry.Registry, ts []target) ([]retriever.Source, err
 			Store:      &docstore.Store{IndexDir: dir},
 			Product:    label,
 			PathPrefix: func(src string) string { return t.ChunkPath(reg, src) },
+			Products:   productFilterFor(reg, t, productSet, direct),
 		})
 		if _, err := os.Stat(filepath.Join(dir, "meta.json")); err != nil {
 			missing = append(missing, fmt.Sprintf("  %s: no index at %s\n    -> se-rag build -entity %s", label, dir, label))
@@ -344,6 +351,136 @@ func entitySources(reg *registry.Registry, ts []target) ([]retriever.Source, err
 		return nil, fmt.Errorf("index missing for %d of %d targets:\n%s", len(missing), len(ts), strings.Join(missing, "\n"))
 	}
 	return srcs, nil
+}
+
+// productFilterFor 该目标是否要按产品过滤块：只有"toolkit 且不是用户直接点名的"才过滤。
+// 返回 nil 表示该源不做产品过滤。
+func productFilterFor(reg *registry.Registry, t target, productSet map[string]bool,
+	direct map[string]bool) map[string]bool {
+	if len(productSet) == 0 || direct[t.Label()] || t.Ver != nil {
+		return nil
+	}
+	e, ok := reg.ByID(t.ID)
+	if !ok || e.Type != registry.TypeToolkit {
+		return nil
+	}
+	return productSet
+}
+
+// explicitProducts 本次 `-entity` 里**直接写出**的产品 id（保序去重）。
+//
+// 只有 `-entity` 直接写的产品会带出 toolkit：芯片、模组、sdk 与 `-all` 都不触发。
+// `-all` 本来就把全部 ready 实体（含 toolkit 自身）当直接目标，不需要再"带入"，
+// 也不该被产品过滤掉一半。
+func explicitProducts(reg *registry.Registry, entityFlag string) []string {
+	var out []string
+	for _, id := range registry.SplitIDs(entityFlag) {
+		// `<sdk-id>@<slug>` 是版本目标，不是实体 id。
+		if _, _, ok := splitVersionRef(id); ok {
+			continue
+		}
+		e, ok := reg.ByID(id)
+		if !ok || e.Type != registry.TypeProduct {
+			continue
+		}
+		if !containsString(out, e.ID) {
+			out = append(out, e.ID)
+		}
+	}
+	return out
+}
+
+// productToolkits 这些产品引用的 toolkit（保序去重），分成可检索的与被跳过的两类。
+//
+// 只有 status=ready 的 toolkit 才是检索目标：placeholder 按定义没有文档目录，把它塞进
+// 目标只会让查询报"索引缺失"。引用不存在或指向非 toolkit 的条目由注册表校验负责报错，
+// 这里按跳过处理，不让查询因坏数据崩掉（也不会空指针）。
+func productToolkits(reg *registry.Registry, products []string) (ready []string, skipped []registry.Skip) {
+	seen := map[string]bool{}
+	for _, pid := range products {
+		e, ok := reg.ByID(pid)
+		if !ok {
+			continue
+		}
+		for _, tk := range e.Toolkits {
+			if seen[tk] {
+				continue
+			}
+			seen[tk] = true
+			te, ok := reg.ByID(tk)
+			if !ok {
+				skipped = append(skipped, registry.Skip{ID: tk, Reason: "unknown entity in product.toolkits"})
+				continue
+			}
+			if te.Type != registry.TypeToolkit {
+				skipped = append(skipped, registry.Skip{ID: tk, Reason: "not a toolkit entity"})
+				continue
+			}
+			if te.Status != registry.StatusReady {
+				skipped = append(skipped, registry.Skip{ID: tk,
+					Reason: fmt.Sprintf("status=%s: no docs_dir/index_dir, nothing to search", te.Status)})
+				continue
+			}
+			ready = append(ready, tk)
+		}
+	}
+	return ready, skipped
+}
+
+// withProductToolkits 把产品带入的 toolkit 追加到检索目标末尾（去重保序），
+// 返回追加过的 toolkit id 列表（用于 stderr 提示）。
+//
+// 已经在目标里的 toolkit 不再追加：那说明用户直接写了它，或 `-with-related` 已经带进来了。
+func withProductToolkits(reg *registry.Registry, targets []target, toolkits []string) ([]target, []string) {
+	have := make(map[string]bool, len(targets))
+	for _, t := range targets {
+		have[t.Label()] = true
+	}
+	var added []string
+	for _, tk := range toolkits {
+		if have[tk] {
+			continue
+		}
+		have[tk] = true
+		targets = append(targets, target{ID: tk})
+		added = append(added, tk)
+	}
+	return targets, added
+}
+
+// productSetOf 把产品 id 列表转成检索期过滤用的集合（空列表返回 nil）。
+func productSetOf(products []string) map[string]bool {
+	if len(products) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(products))
+	for _, p := range products {
+		out[p] = true
+	}
+	return out
+}
+
+// directTargets 用户直接点名的目标（label → true）：toolkits 展开前后的差集就是
+// "经产品带入"的那部分，它们才按 applies_products 过滤。
+func directTargets(ts []target) map[string]bool {
+	out := make(map[string]bool, len(ts))
+	for _, t := range ts {
+		out[t.Label()] = true
+	}
+	return out
+}
+
+// toolkitsNote 经产品带入 toolkit 时打到 stderr 的一行说明。
+// 写明"按哪个产品过滤"和怎么关掉，否则用户会以为 toolkit 文档被漏掉了。
+// canDisable=false（toolkit 是 -with-related 带进来的）时不提 -no-toolkits：
+// 那个开关只管默认带入。
+func toolkitsNote(toolkits, products []string, canDisable bool) string {
+	note := fmt.Sprintf("toolkits included: %s (filtered by applies_products ∋ %s",
+		strings.Join(toolkits, ", "), strings.Join(products, ","))
+	if canDisable {
+		note += "; -no-toolkits to disable"
+	}
+	return note + ")"
 }
 
 // docTypeFilter 把 -doc-type 的取值转成检索期过滤器（路径按技能根相对路径推断）。

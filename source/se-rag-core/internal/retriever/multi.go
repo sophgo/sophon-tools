@@ -33,6 +33,10 @@ type Source struct {
 	// PathPrefix 把块记录的 SourceFile 改写成展示路径（实体模式下是相对技能根目录的
 	// 路径，如 docs/products/se9/xxx.md）；为 nil 时原样输出。
 	PathPrefix func(src string) string
+	// Products 该源的块级产品过滤（键是产品 id）；nil 表示该源不做产品过滤。
+	// 只有"经产品带入的 toolkit"源才有值：同一份 toolkit 索引，查 SE9 时只看适用
+	// SE9 的文档，用户直接 -entity sophon-demo 时全看。
+	Products map[string]bool
 }
 
 func (s Source) name() string {
@@ -55,9 +59,11 @@ type MultiRetriever struct {
 	Filter *ChunkFilter
 }
 
-// sourceFilter 该源适用的过滤器：把源路径经 PathPrefix 还原成展示路径后判类型。
+// sourceFilter 该源适用的过滤器：把源路径经 PathPrefix 还原成展示路径后判类型，
+// 并叠加该源自己的产品过滤（Source.Products）。
 func (m *MultiRetriever) sourceFilter(i int) *ChunkFilter {
-	return m.Filter.ForPathPrefix(m.Sources[i].PathPrefix)
+	f := m.Filter.ForPathPrefix(m.Sources[i].PathPrefix)
+	return f.WithProducts(m.Sources[i].Products)
 }
 
 // Search 跨索引检索。任一目标索引缺失或损坏都直接报错，不静默退化为"只查有的那几个"。
