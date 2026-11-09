@@ -59,4 +59,15 @@ func Migrate(db *gorm.DB) {
 	migrateCol("api_key", "llm_api_key")
 	migrateCol("target_model", "llm_model")
 	migrateCol("enabled", "llm_enabled")
+
+	// 默认模型名换代（MYS-2726）：旧版把 LegacyDefaultLLMModel 作为出厂默认写进库，
+	// 而 LLMOverride 默认开启（转发时强制用库里的模型名），用户若没手动改过，
+	// 升级后会一直沿用旧模型名。仅在「值仍等于旧默认值」时改写，用户自选过的模型名不动。
+	if db.Dialect().HasColumn("llm_proxy_config", "llm_model") {
+		if err := db.Exec("UPDATE llm_proxy_config SET llm_model = ? WHERE llm_model = ?",
+			DefaultLLMModel, LegacyDefaultLLMModel).Error; err != nil {
+			logger.Warn("llmproxy migrate default model %s -> %s failed: %v",
+				LegacyDefaultLLMModel, DefaultLLMModel, err)
+		}
+	}
 }

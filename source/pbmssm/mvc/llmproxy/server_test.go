@@ -48,7 +48,7 @@ func TestServiceLLMAndVLMConfig(t *testing.T) {
 	if cfg.LLMApiBase != "https://www.sophnet.com/api/open-apis/v1" {
 		t.Errorf("default llmApiBase = %q", cfg.LLMApiBase)
 	}
-	if cfg.LLMModel != "DeepSeek-V4-Flash-0731" {
+	if cfg.LLMModel != "DeepSeek-V4.1-Flash-1017" {
 		t.Errorf("default llmModel = %q", cfg.LLMModel)
 	}
 	if cfg.VLMModel != "qwen3-vl-plus" {

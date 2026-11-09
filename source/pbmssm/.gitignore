@@ -5,6 +5,8 @@ bmssm-arm64
 *.db
 *.out
 build/version.txt
+# musl 交叉工具链缓存（fetch-musl-toolchain.sh 下载解压处，约 300MB，不入库）
+build/toolchain/
 # 构建产物
 /bmssm
 /bmssm-arm64

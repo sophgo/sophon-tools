@@ -75,7 +75,7 @@ Release 页面保持精简，**仅含子包版本清单表**：
 | 工具 | 发布方式 |
 | --- | --- |
 | dfss | **仅发布 pip 包**（`dfss-<ver>-py2.py3-none-any.whl`）；不发布各平台二进制与 sdist。同时上传 PyPI（见 5.4），两处同步最新 |
-| bmssm / sophliteos | arm64 deb（前者含 `_seskill`/`_noskill` 双变体） |
+| bmssm / sophliteos | arm64 deb（bmssm 单一变体，不预载 skill） |
 | pqt_batch_deployment | **单二进制**：linux 可执行文件 + windows exe（Go+Fyne，v2.0.0 起） |
 | pqt_memory_edit | linux AppImage + windows exe |
 | pbmsec | deb（all 双架构） |

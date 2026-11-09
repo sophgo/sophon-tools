@@ -3,7 +3,9 @@
     <!-- ============ 区域一：Agent Proxy 配置 ============ -->
     <a-card :bordered="false" title="Agent Proxy 配置" class="mb-4">
       <a-form :label-col="{ span: 5 }" :wrapper-col="{ span: 16 }" class="max-w-2xl">
+        <!-- Sophnet 推广横幅：仅 Sophnet 模式下展示（自定义 OpenAI API 模式无关） -->
         <a
+          v-if="form.llmApiBaseType === 'sophnet'"
           href="https://sophnet.com/"
           target="_blank"
           rel="noopener"
@@ -17,6 +19,65 @@
           </div>
         </a>
         <a-form-item
+          label="上游类型"
+          tooltip="Sophnet：使用算能官方云端（预设地址，只需填 key）。自定义 OpenAI API：填入任意 OpenAI 兼容服务的 Base URL（本地推理服务、第三方云厂商等）。"
+        >
+          <a-radio-group
+            v-model:value="form.llmApiBaseType"
+            button-style="solid"
+            @change="onApiBaseTypeChange($event)"
+          >
+            <a-radio-button value="sophnet">Sophnet</a-radio-button>
+            <a-radio-button value="custom">自定义 OpenAI API</a-radio-button>
+          </a-radio-group>
+        </a-form-item>
+        <a-form-item
+          label="API Base URL"
+          :required="form.llmApiBaseType === 'custom'"
+          :tooltip="
+            form.llmApiBaseType === 'custom'
+              ? 'OpenAI 兼容服务的 base 地址，转发时自动拼接 /chat/completions。例如 http://192.168.1.10:8000/v1'
+              : ''
+          "
+        >
+          <!-- Sophnet 地址固定；自定义模式放开为可输入的 OpenAI 兼容 base -->
+          <a-input
+            v-if="form.llmApiBaseType === 'custom'"
+            v-model:value="form.llmApiBase"
+            style="width: 100%"
+            placeholder="http://192.168.1.10:8000/v1"
+            allow-clear
+          />
+          <a-input v-else :value="SOPHNET_API_BASE" style="width: 100%" disabled />
+        </a-form-item>
+        <a-form-item label="API Key">
+          <a-input-password
+            v-model:value="form.llmApiKey"
+            :placeholder="form.llmHasKey ? '已配置（留空保持不变）' : '请输入上游 API Key'"
+            autocomplete="new-password"
+          />
+          <!-- key 为空时提示获取方式：Sophnet 去官网申请，自定义服务按服务方要求填写 -->
+          <div v-if="!form.llmHasKey" class="mt-1 text-xs text-amber-600">
+            <template v-if="form.llmApiBaseType === 'custom'">
+              目前 key 为空，请填写所接入 OpenAI 兼容服务的 API Key（服务端不校验时可留空）
+            </template>
+            <template v-else>目前 key 为空，请点击上方 sophnet 链接获取 key</template>
+          </div>
+        </a-form-item>
+        <a-form-item label="默认模型名称">
+          <a-input
+            v-model:value="form.llmModel"
+            style="width: 100%"
+            placeholder="DeepSeek-V4.1-Flash-1017"
+          />
+          <div class="mt-1 text-xs text-gray-400">
+            转发时统一使用该模型名；自定义上游请填其实际支持的模型名。
+            <template v-if="form.llmApiBaseType === 'custom'">
+              非 Sophnet 上游按小上下文（20K）运行，长文档场景请留意截断。
+            </template>
+          </div>
+        </a-form-item>
+        <a-form-item
           label="启用 LLM 转发"
           tooltip="控制 llm-proxy 转发服务：开启后保存并启动 18080 转发服务（Reasonix 经此访问上游 LLM）；关闭则停用转发。"
         >
@@ -26,32 +87,6 @@
               {{ form.llmEnabled ? '已启用' : '未启用' }}
             </a-tag>
           </div>
-        </a-form-item>
-        <a-form-item label="API Base URL">
-          <a-select
-            v-model:value="form.llmApiBaseType"
-            style="width: 100%"
-            :options="apiBaseOptions"
-            @change="onApiBaseChange($event)"
-          />
-        </a-form-item>
-        <a-form-item label="API Key">
-          <a-input-password
-            v-model:value="form.llmApiKey"
-            :placeholder="form.llmHasKey ? '已配置（留空保持不变）' : '请输入上游 API Key'"
-            autocomplete="new-password"
-          />
-          <!-- 需求：key 为空（新环境/未配置）时提示去 sophnet 获取，而非静默占位 -->
-          <div v-if="!form.llmHasKey" class="mt-1 text-xs text-amber-600">
-            目前 key 为空，请点击上方 sophnet 链接获取 key
-          </div>
-        </a-form-item>
-        <a-form-item label="默认模型名称">
-          <a-input
-            v-model:value="form.llmModel"
-            style="width: 100%"
-            placeholder="DeepSeek-V4-Flash-0731"
-          />
         </a-form-item>
       </a-form>
 
@@ -109,16 +144,7 @@
 <script lang="ts" setup>
   // @ts-nocheck
   import { reactive, ref, computed, onMounted } from 'vue';
-  import {
-    Card,
-    Form,
-    Input,
-    Button,
-    Switch,
-    Alert,
-    Tag,
-    message,
-  } from 'ant-design-vue';
+  import { Card, Form, Input, Button, Switch, Alert, Tag, Radio, message } from 'ant-design-vue';
   import {
     getAgentConfig,
     saveAgentConfig,
@@ -138,6 +164,8 @@
   const ASwitch = Switch;
   const AAlert = Alert;
   const ATag = Tag;
+  const ARadioGroup = Radio.Group;
+  const ARadioButton = Radio.Button;
 
   const saving = ref(false);
   const testing = ref(false);
@@ -176,17 +204,9 @@
     await refreshService();
   }
 
-  // API Base URL 预设
+  // 上游类型：Sophnet（官方云端，地址固定）/ 自定义 OpenAI API（地址自填）。
   const SOPHNET_API_BASE = 'https://www.sophnet.com/api/open-apis/v1';
-  const LOCAL_API_BASE = 'http://127.0.0.1:8000/v1';
-  const apiBaseOptions = [
-    { label: 'Sophnet', value: 'sophnet' },
-    { label: '本地模型', value: 'local' },
-  ];
-  const apiBaseByType: Record<string, string> = {
-    sophnet: SOPHNET_API_BASE,
-    local: LOCAL_API_BASE,
-  };
+  const DEFAULT_LLM_MODEL = 'DeepSeek-V4.1-Flash-1017';
 
   const form = reactive({
     llmApiBase: '',
@@ -197,19 +217,20 @@
     llmHasKey: false,
   });
 
-  // 根据已存 apiBase 推断类型（匹配预设则对应类型，否则兜底 sophnet）
+  // 根据已存 apiBase 推断上游类型：等于 Sophnet 地址才算 sophnet，其余一律视为
+  // 自定义 OpenAI API（含旧版写死的本地 127.0.0.1:8000 与任意第三方兼容服务）。
   function inferApiBaseType(apiBase: string): string {
-    for (const [type, url] of Object.entries(apiBaseByType)) {
-      if (apiBase && apiBase === url) {
-        return type;
-      }
-    }
-    return 'sophnet';
+    return apiBase && apiBase === SOPHNET_API_BASE ? 'sophnet' : 'custom';
   }
 
-  // 下拉切换：自动填充对应 URL（sophnet 固定，不允许自定义）
-  function onApiBaseChange(type: string) {
-    form.llmApiBase = apiBaseByType[type] || SOPHNET_API_BASE;
+  // 类型切换：切到 Sophnet 时地址归位固定值；切到自定义时清空，交给用户填。
+  function onApiBaseTypeChange(type: string | { target: { value: string } }) {
+    const val = typeof type === 'string' ? type : type?.target?.value;
+    if (val === 'sophnet') {
+      form.llmApiBase = SOPHNET_API_BASE;
+    } else if (form.llmApiBase === SOPHNET_API_BASE) {
+      form.llmApiBase = '';
+    }
   }
 
   async function init() {
@@ -223,14 +244,34 @@
     }
   }
 
+  // 提交前校验：自定义上游必须填 Base URL。
+  function resolveApiBase(): string | null {
+    const base = form.llmApiBase.trim();
+    if (form.llmApiBaseType === 'sophnet') {
+      return SOPHNET_API_BASE;
+    }
+    if (!base) {
+      message.warning('请填写自定义 OpenAI API 的 Base URL');
+      return null;
+    }
+    return base;
+  }
+
   // llm-proxy 转发服务开关：切换即保存并立即生效（启动/停用 18080 转发服务）。
   // Reasonix 依赖该转发链路访问上游 LLM；关闭后上游转发停用、对话不可用。
   async function onEnabledChange(checked: boolean) {
+    const apiBase = form.llmApiBaseType === 'sophnet' ? SOPHNET_API_BASE : form.llmApiBase.trim();
+    // 关闭转发不需要上游地址；开启时必须先有地址（自定义模式可能尚未填写）。
+    if (checked && !apiBase) {
+      message.warning('请填写自定义 OpenAI API 的 Base URL');
+      form.llmEnabled = false;
+      return;
+    }
     saving.value = true;
     const res = await saveAgentConfig({
-      llmApiBase: form.llmApiBase.trim() || SOPHNET_API_BASE,
+      llmApiBase: apiBase,
       llmApiKey: form.llmApiKey,
-      llmModel: form.llmModel.trim() || 'DeepSeek-V4-Flash-0731',
+      llmModel: form.llmModel.trim() || DEFAULT_LLM_MODEL,
       llmEnabled: checked,
     });
     saving.value = false;
@@ -244,15 +285,13 @@
   }
 
   async function handleSave() {
-    if (!form.llmApiBase.trim()) {
-      message.warning('请配置 API Base URL');
-      return;
-    }
+    const apiBase = resolveApiBase();
+    if (!apiBase) return;
     saving.value = true;
     const res = await saveAgentConfig({
-      llmApiBase: form.llmApiBase.trim(),
+      llmApiBase: apiBase,
       llmApiKey: form.llmApiKey,
-      llmModel: form.llmModel.trim() || 'DeepSeek-V4-Flash-0731',
+      llmModel: form.llmModel.trim() || DEFAULT_LLM_MODEL,
       llmEnabled: form.llmEnabled,
     });
     saving.value = false;
