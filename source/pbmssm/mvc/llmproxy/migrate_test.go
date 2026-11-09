@@ -67,6 +67,33 @@ func TestMigrateDefaultModelUpgrade(t *testing.T) {
 	}
 }
 
+// TestMigrateDefaultModelRunsOnlyOnce 迁移只跑一次：用户升级后主动把模型名选回旧值，
+// 后续重启不得再被改回（否则 LLMOverride 生效下会持续用错模型且无从察觉）。
+func TestMigrateDefaultModelRunsOnlyOnce(t *testing.T) {
+	db := setupMigrateDB(t)
+	defer db.Close()
+
+	if err := db.Save(&Config{ID: 1, LLMModel: LegacyDefaultLLMModel}).Error; err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	Migrate(db) // 首次升级：旧值 → 新值
+
+	// 用户改回旧值（模拟 UI 上重新选择同一型号）
+	if err := db.Model(&Config{}).Where("id = ?", 1).
+		Update("llm_model", LegacyDefaultLLMModel).Error; err != nil {
+		t.Fatalf("user reselect: %v", err)
+	}
+
+	Migrate(db) // 再次启动
+	var got Config
+	if err := db.First(&got, 1).Error; err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if got.LLMModel != LegacyDefaultLLMModel {
+		t.Errorf("second run clobbered user reselection: got %q, want %q", got.LLMModel, LegacyDefaultLLMModel)
+	}
+}
+
 // TestMigrateSkipsWhenNoTable 表不存在时（首装、AutoMigrate 尚未建表）直接返回，
 // 不 panic 也不报错。
 func TestMigrateSkipsWhenNoTable(t *testing.T) {

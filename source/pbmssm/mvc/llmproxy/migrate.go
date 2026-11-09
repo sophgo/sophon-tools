@@ -1,6 +1,8 @@
 package llmproxy
 
 import (
+	"time"
+
 	"github.com/jinzhu/gorm"
 
 	"bmssm/logger"
@@ -62,12 +64,47 @@ func Migrate(db *gorm.DB) {
 
 	// 默认模型名换代（MYS-2726）：旧版把 LegacyDefaultLLMModel 作为出厂默认写进库，
 	// 而 LLMOverride 默认开启（转发时强制用库里的模型名），用户若没手动改过，
-	// 升级后会一直沿用旧模型名。仅在「值仍等于旧默认值」时改写，用户自选过的模型名不动。
-	if db.Dialect().HasColumn("llm_proxy_config", "llm_model") {
-		if err := db.Exec("UPDATE llm_proxy_config SET llm_model = ? WHERE llm_model = ?",
-			DefaultLLMModel, LegacyDefaultLLMModel).Error; err != nil {
-			logger.Warn("llmproxy migrate default model %s -> %s failed: %v",
-				LegacyDefaultLLMModel, DefaultLLMModel, err)
+	// 升级后会一直沿用旧模型名。
+	//
+	// 只跑一次（marker 表记录）：若每次启动都按值匹配改写，用户升级后刻意把模型名
+	// 选回旧值会被下次重启悄悄改回，且 OvenOverride 生效下请求持续打到不存在的模型。
+	migrateDefaultModelOnce(db)
+}
+
+// migrationMarker 记录已执行的一次性迁移（name 主键）。
+type migrationMarker struct {
+	Name      string `gorm:"column:name;primary_key"`
+	AppliedAt string `gorm:"column:applied_at"`
+}
+
+// TableName 指定表名。
+func (migrationMarker) TableName() string { return "llmproxy_migration" }
+
+// migrateDefaultModelOnce 一次性把「仍是旧出厂默认」的模型名换成新默认值。
+// 已有 marker 则直接返回（用户之后即使把模型名改回旧值也不再被覆盖）。
+func migrateDefaultModelOnce(db *gorm.DB) {
+	const name = "default_llm_model_2_4_0"
+	if !db.Dialect().HasColumn("llm_proxy_config", "llm_model") {
+		return
+	}
+	if !db.HasTable(&migrationMarker{}) {
+		if err := db.CreateTable(&migrationMarker{}).Error; err != nil {
+			// 建不了 marker 表就不做改写：宁可这次不升级模型名，也不能变成每次启动都改
+			logger.Warn("llmproxy migrate: create marker table failed, skip default model upgrade: %v", err)
+			return
 		}
+	}
+	var m migrationMarker
+	if err := db.First(&m, "name = ?", name).Error; err == nil {
+		return // 已执行
+	}
+	if err := db.Exec("UPDATE llm_proxy_config SET llm_model = ? WHERE llm_model = ?",
+		DefaultLLMModel, LegacyDefaultLLMModel).Error; err != nil {
+		logger.Warn("llmproxy migrate default model %s -> %s failed: %v",
+			LegacyDefaultLLMModel, DefaultLLMModel, err)
+		return
+	}
+	if err := db.Create(&migrationMarker{Name: name, AppliedAt: time.Now().Format(time.RFC3339)}).Error; err != nil {
+		logger.Warn("llmproxy migrate: record marker %s failed: %v", name, err)
 	}
 }

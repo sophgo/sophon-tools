@@ -217,6 +217,18 @@
     llmHasKey: false,
   });
 
+  // 配置是否已成功从服务端读取。false 时表单还是初值（Sophnet + 空模型名），
+  // 此时保存会把默认值写进库、覆盖用户已存配置，故必须拦住（见 assertLoaded）。
+  const cfgLoaded = ref(false);
+
+  // 保存/切换开关前的加载态守卫。读取失败时 getAgentConfig 返回 null，
+  // 表单静默停在默认态；直接提交会拿 Sophnet 地址与默认模型覆盖真实配置。
+  function assertLoaded(): boolean {
+    if (cfgLoaded.value) return true;
+    message.warning('配置尚未读取成功，请刷新页面后重试');
+    return false;
+  }
+
   // 根据已存 apiBase 推断上游类型：等于 Sophnet 地址才算 sophnet，其余一律视为
   // 自定义 OpenAI API（含旧版写死的本地 127.0.0.1:8000 与任意第三方兼容服务）。
   function inferApiBaseType(apiBase: string): string {
@@ -243,6 +255,9 @@
       form.llmModel = cfg.llmModel || '';
       form.llmEnabled = cfg.llmEnabled !== false;
       form.llmHasKey = !!cfg.llmHasKey;
+      cfgLoaded.value = true;
+    } else {
+      message.error('读取 Agent 配置失败，请刷新页面后重试');
     }
   }
 
@@ -262,6 +277,10 @@
   // llm-proxy 转发服务开关：切换即保存并立即生效（启动/停用 18080 转发服务）。
   // Reasonix 依赖该转发链路访问上游 LLM；关闭后上游转发停用、对话不可用。
   async function onEnabledChange(checked: boolean) {
+    if (!assertLoaded()) {
+      form.llmEnabled = !checked; // 回滚开关，避免界面与实际状态不一致
+      return;
+    }
     const apiBase = form.llmApiBaseType === 'sophnet' ? SOPHNET_API_BASE : form.llmApiBase.trim();
     // 关闭转发不需要上游地址；开启时必须先有地址（自定义模式可能尚未填写）。
     if (checked && !apiBase) {
@@ -287,6 +306,7 @@
   }
 
   async function handleSave() {
+    if (!assertLoaded()) return;
     const apiBase = resolveApiBase();
     if (!apiBase) return;
     saving.value = true;

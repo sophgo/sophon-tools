@@ -13,18 +13,21 @@ chmod 0700 /var/lib/bmssm
 
 # 清理旧版预载的 SE 系列知识库 skill 残留（新版本只出不带 skill 的包）：
 # 老包把知识库放进 reasonix HOME，升级后这些文件不再被新包追踪，会一直占着
-# ~40MB 磁盘并对 Agent 产生"仍有知识库"的误导。仅删本产品自有目录，不碰
+# ~60MB 磁盘并对 Agent 产生"仍有知识库"的误导。仅删本产品自有目录，不碰
 # 用户在 reasonix-home 下自建的其他内容。
+# 清理失败不阻断 dpkg configure：残留只是占盘，不该让包停在 half-configured。
 RXM_HOME=/data/sophon/reasonix-home
 if [ -d "$RXM_HOME/skills/se-series-knowledge-base" ]; then
     echo "postinst: removing stale SE skill from $RXM_HOME/skills" >&2
-    rm -rf "$RXM_HOME/skills/se-series-knowledge-base"
+    rm -rf "$RXM_HOME/skills/se-series-knowledge-base" \
+        || echo "WARN: 删除 $RXM_HOME/skills/se-series-knowledge-base 失败（可手动清理）" >&2
     rmdir "$RXM_HOME/skills" 2>/dev/null || true
 fi
 # 旧包附带的 se-rag 检索二进制（仅 skill 变体使用）
 if [ -f "$RXM_HOME/bin/se-rag" ]; then
     echo "postinst: removing stale se-rag binary $RXM_HOME/bin/se-rag" >&2
-    rm -f "$RXM_HOME/bin/se-rag"
+    rm -f "$RXM_HOME/bin/se-rag" \
+        || echo "WARN: 删除 $RXM_HOME/bin/se-rag 失败（可手动清理）" >&2
     rmdir "$RXM_HOME/bin" 2>/dev/null || true
 fi
 
