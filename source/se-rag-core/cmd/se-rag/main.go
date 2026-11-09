@@ -94,7 +94,7 @@ func printUsage() {
 	fmt.Println("  list    [-registry f] [-json]")
 	fmt.Println("  resolve [-registry f] [-json] [-sdk-version v] \"文本\"")
 	fmt.Println("  build   -entity a[,b] | -all [-offline] [-sdk-version v]")
-	fmt.Println("  query   -entity a[,b] | -all [-with-related] [-doc-type t[,t]] [-top-n N] [-offline] [-sdk-version v] \"问题\"")
+	fmt.Println("  query   -entity a[,b] | -all [-with-related] [-no-toolkits] [-doc-type t[,t]] [-top-n N] [-offline] [-sdk-version v] \"问题\"")
 	fmt.Println("  doctor  -entity a[,b] | -all [-sdk-version v]")
 	fmt.Println("  -entity 接受实体 id（产品/模组/芯片/sdk/工具）、<sdk>@<slug>，或 sdk id（按 -sdk-version 选版本）")
 	fmt.Println("          规格（如 SE9 8）不是实体，用 -entity se9")
@@ -122,6 +122,9 @@ func printUsage() {
 	fmt.Println("  -entity a[,b] / -all                   目标实体（注册表模式）")
 	fmt.Println("  -sdk-version latest|all|<slug>         sdk 的版本选择（默认 latest）")
 	fmt.Println("  -with-related                          query 时展开关联实体（产品 → 模组 → 芯片 → sdk 版本 → toolkits）")
+	fmt.Println("  -no-toolkits                           关闭「查询产品时默认带入该产品的 toolkits」")
+	fmt.Println("                                          默认：-entity 里直接写的产品，其 toolkits 一并检索，也只保留适用该产品的文档")
+	fmt.Println("                                          （文档 frontmatter 的 applies_products；字段缺失=不限产品，[] = 哪个产品都不适用）")
 	fmt.Println("  -doc-type t[,t]                        query 时按块的文档类型过滤：" + strings.Join(registry.DocTypes, ","))
 	fmt.Println("                                           类型取文档 frontmatter 的 doc_type，缺失时按路径推断：")
 	fmt.Println("                                           注册表模式看技能根相对路径，路径模式看相对 --docs-dir 的")
@@ -284,6 +287,7 @@ func dispatchQuery(rest []string) int {
 	entity := fs.String("entity", "", "entity id(s), comma separated (specs are attributes, not entities)")
 	all := fs.Bool("all", false, "all ready entities from the registry (every sdk version)")
 	fs.BoolVar(&rc.withRelated, "with-related", false, "expand related entities (product → modules → chips → sdk versions → toolkits)")
+	fs.BoolVar(&rc.noToolkits, "no-toolkits", false, "do not auto-include the toolkits linked from the products named in -entity")
 	fs.StringVar(&rc.docTypes, "doc-type", "", "filter results by doc type (frontmatter doc_type first, then path): "+strings.Join(registry.DocTypes, ","))
 	sdkVersion := fs.String("sdk-version", "", "sdk version: latest|all|<slug>")
 	pos := parseInterspersed(fs, rest)
@@ -318,6 +322,10 @@ func dispatchQuery(rest []string) int {
 	// 路径模式不支持注册表专属参数：显式报错，避免被静默忽略而误以为生效。
 	if rc.withRelated {
 		fmt.Fprintln(os.Stderr, "query: -with-related only works in registry mode (-entity or -all)")
+		return 1
+	}
+	if rc.noToolkits {
+		fmt.Fprintln(os.Stderr, "query: -no-toolkits only works in registry mode (-entity or -all)")
 		return 1
 	}
 	if strings.TrimSpace(*sdkVersion) != "" {

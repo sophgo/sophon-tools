@@ -22,6 +22,14 @@ type Chunk struct {
 	DocType string
 	// Version 文档自述的版本（frontmatter 的 version）；null 或缺失为空串。
 	Version string
+	// AppliesProducts 文档自述的产品适用范围（frontmatter 的 applies_products，小写）。
+	// 三态由 AppliesProductsDeclared 区分，见 FrontmatterAppliesProducts。
+	AppliesProducts []string
+	// AppliesProductsDeclared 文档是否显式声明了 applies_products。
+	// 不复用"列表是否为空"来区分：字段缺失（不限产品）与显式 `[]`（任何产品都不适用）
+	// 语义相反，必须能分辨；而 gob 对 nil 切片与空切片不保证往返后可区分。
+	// 旧索引没有这个字段，解码后为 false，即按"缺失"处理（不限产品）。
+	AppliesProductsDeclared bool
 }
 
 // MarkdownChunker 对齐 Python 分块策略：
@@ -514,13 +522,14 @@ func indexOfFrom(s, sub string, from int) int {
 	return from + idx
 }
 
-// applyDocType 给一个文件的全部块填上文档自述的 doc_type 与 version。
+// applyDocType 给一个文件的全部块填上文档自述的 doc_type、version 与 applies_products。
 //
-// 放在这里而不是逐块解析：两者都是文档级属性，同一文件的块只读一次 frontmatter。
+// 放在这里而不是逐块解析：三者都是文档级属性，同一文件的块只读一次 frontmatter。
 func applyDocType(chs []Chunk, content string) {
 	dt := FrontmatterDocType(content)
 	ver := FrontmatterVersion(content)
-	if dt == "" && ver == "" {
+	ap, apDeclared := FrontmatterAppliesProducts(content)
+	if dt == "" && ver == "" && !apDeclared {
 		return
 	}
 	for i := range chs {
@@ -528,6 +537,8 @@ func applyDocType(chs []Chunk, content string) {
 			chs[i].DocType = dt
 		}
 		chs[i].Version = ver
+		chs[i].AppliesProducts = ap
+		chs[i].AppliesProductsDeclared = apDeclared
 	}
 }
 
@@ -539,6 +550,88 @@ func FrontmatterDocType(content string) string { return frontmatterScalar(conten
 
 // FrontmatterVersion 从文档 frontmatter 里取 version；null 或缺失返回空串。
 func FrontmatterVersion(content string) string { return frontmatterScalar(content, "version") }
+
+// FrontmatterAppliesProducts 从文档 frontmatter 里取 applies_products（toolkit 文档的
+// 产品适用范围）。第二个返回值表示"字段是否显式声明"，因此三种情况可区分：
+//
+//	字段缺失 / null / `~` → (nil, false)      不限产品
+//	`applies_products: []` → ([], true)       不适用于任何产品
+//	非空列表               → ([se7 se9], true)
+//
+// 同时接受 YAML 块列表与行内 flow 列表（`applies_products: [se7, se9]`）——
+// 两者在本仓库的 frontmatter 里都出现过。取值统一转小写，产品 id 都是小写。
+//
+// 与 doc_type / version 一样不做完整 YAML 解析：本仓库的 frontmatter 由脚本生成。
+func FrontmatterAppliesProducts(content string) ([]string, bool) {
+	lines := strings.Split(content, "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
+		return nil, false
+	}
+	const key = "applies_products"
+	for i := 1; i < len(lines); i++ {
+		trimmed := strings.TrimSpace(lines[i])
+		if trimmed == "---" {
+			return nil, false
+		}
+		if !strings.HasPrefix(trimmed, key+":") {
+			continue
+		}
+		inline := strings.TrimSpace(strings.TrimPrefix(trimmed, key+":"))
+		switch {
+		case inline == "" || inline == "null" || inline == "~":
+			// 空值：可能是块列表，也可能是 YAML 的 null。逐行收集 `- item`，
+			// 一条都没有就按"未声明"处理（与 null 一致）。
+			items := frontmatterBlockList(lines[i+1:])
+			if len(items) == 0 {
+				return nil, false
+			}
+			return items, true
+		case strings.HasPrefix(inline, "[") && strings.HasSuffix(inline, "]"):
+			return splitFlowList(inline), true
+		default:
+			return splitFlowList("[" + inline + "]"), true
+		}
+	}
+	return nil, false
+}
+
+// frontmatterBlockList 从 frontmatter 后续行里收集 `- item` 形式的块列表项，
+// 遇到非列表行或结束标记即停止。
+func frontmatterBlockList(lines []string) []string {
+	var out []string
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "---" {
+			break
+		}
+		if !strings.HasPrefix(trimmed, "- ") && trimmed != "-" {
+			break
+		}
+		item := strings.TrimSpace(strings.TrimPrefix(trimmed, "-"))
+		item = strings.Trim(item, `"'`)
+		if item == "" {
+			continue
+		}
+		out = append(out, strings.ToLower(item))
+	}
+	return out
+}
+
+// splitFlowList 拆分 `[a, b]` 形式（调用方保证带方括号），返回小写去空的取值。
+// 空列表返回非 nil 的空切片：调用方据此区分"显式空"与"未声明"。
+func splitFlowList(s string) []string {
+	body := strings.TrimSuffix(strings.TrimPrefix(s, "["), "]")
+	out := make([]string, 0, 4)
+	for _, p := range strings.Split(body, ",") {
+		p = strings.TrimSpace(p)
+		p = strings.Trim(p, `"'`)
+		if p == "" {
+			continue
+		}
+		out = append(out, strings.ToLower(p))
+	}
+	return out
+}
 
 // frontmatterScalar 取 frontmatter 里某个键的标量值（null/缺失/空 → 空串）。
 func frontmatterScalar(content, key string) string {
