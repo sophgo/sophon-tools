@@ -383,6 +383,15 @@ void SftpConn::close() {
   }
 }
 
+// 调整已打开连接的收发超时。探测、测速、下载三个阶段对同一个连接用不同的
+// 上界，因此这里允许在不重连的前提下改超时：socket 的收发超时和 libssh2 的
+// 会话超时都跟着改，否则 libssh2 内部的阻塞读会无视 socket 层超时。
+void SftpConn::set_io_timeout(int timeout_ms) {
+  if (timeout_ms <= 0) timeout_ms = 1;
+  if (session_ != nullptr) libssh2_session_set_timeout(session_, (long)timeout_ms);
+  if (sock_ != kInvalidSocketLong) config_socket_timeout((socket_t)sock_, timeout_ms);
+}
+
 bool SftpConn::open(const ServerInfo& server, int timeout_ms, std::string* err,
                     bool handshake_only) {
   close();
@@ -462,13 +471,25 @@ bool SftpConn::open(const ServerInfo& server, int timeout_ms, std::string* err,
   }
 
   // ---- 3. SSH 会话与握手 ----
+  // timeout_ms 是整段 open() 的总预算，不是每一跳各自的预算：握手耗时后，
+  // 认证与 sftp_init 只能共用剩余时间。否则「连接 5s + 握手 5s + 认证 5s」
+  // 会让 probe_timeout 名不副实（验收要求探测时间有上界）。
   session_ = libssh2_session_init();
   if (session_ == nullptr) {
     if (err) *err = "libssh2_session_init failed";
     close();
     return false;
   }
-  libssh2_session_set_timeout(session_, (long)timeout_ms);
+  auto remaining_ms = [&]() -> int {
+    int64_t left = std::chrono::duration_cast<std::chrono::milliseconds>(
+                       deadline - std::chrono::steady_clock::now())
+                       .count();
+    if (left <= 0) left = 1;  // 不传 0/负数：libssh2 会当成无限等待
+    return (int)left;
+  };
+  libssh2_session_set_timeout(session_, (long)remaining_ms());
+  // socket 层超时同样收敛到剩余预算：libssh2 内部有部分读会直接落到 socket 上
+  config_socket_timeout((socket_t)sock_, remaining_ms());
   libssh2_session_flag(session_, LIBSSH2_FLAG_COMPRESS, 1);
   libssh2_session_method_pref(session_, LIBSSH2_METHOD_COMP_CS, "zlib,none");
   libssh2_session_method_pref(session_, LIBSSH2_METHOD_COMP_SC, "zlib,none");
@@ -497,6 +518,8 @@ bool SftpConn::open(const ServerInfo& server, int timeout_ms, std::string* err,
         banner_s);
   }
 
+  libssh2_session_set_timeout(session_, (long)remaining_ms());
+  config_socket_timeout((socket_t)sock_, remaining_ms());
   rc = libssh2_userauth_password(session_, server.user.c_str(),
                                  server.pass.c_str());
   if (rc != 0) {
@@ -509,6 +532,8 @@ bool SftpConn::open(const ServerInfo& server, int timeout_ms, std::string* err,
   if (comp != nullptr) log_info("Compression algorithm: %s", comp);
 
   // ---- 5. SFTP 子系统 ----
+  libssh2_session_set_timeout(session_, (long)remaining_ms());
+  config_socket_timeout((socket_t)sock_, remaining_ms());
   sftp_ = libssh2_sftp_init(session_);
   if (sftp_ == nullptr) {
     if (err) *err = "sftp_init failed: " + std::to_string(libssh2_session_last_errno(session_));

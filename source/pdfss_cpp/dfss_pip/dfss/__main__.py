@@ -166,6 +166,11 @@ if __name__ == '__main__':
     parser.add_argument('--upflag', help='flag of need upload file, need upfile')
     parser.add_argument('--upfile', help='need to upload file, need upflag')
     parser.add_argument('--connect_timeout', help='sftp session timeout in seconds')
+    parser.add_argument('--probe_timeout', help='per-server probe timeout in seconds')
+    parser.add_argument('--no_resume', action='store_true',
+                        help='ignore existing .dfss.part/.dfss.meta and download from 0')
+    parser.add_argument('--probe', action='store_true',
+                        help='probe all servers (connectivity + speed) and print the ranking table')
     parser.add_argument('--debug', action='store_true', help='open debug info print mode')
     parser.add_argument('--no_json', action='store_true', help='do not use json config')
     parser.add_argument('--force_server', help='force specify a server link')

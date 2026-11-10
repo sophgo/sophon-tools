@@ -39,6 +39,11 @@ class SftpConn {
   // 按逆序释放 sftp / session / socket，可重复调用。
   void close();
 
+  // 调整已打开连接的收发超时（socket SO_RCVTIMEO/SO_SNDTIMEO + libssh2 会话
+  // 超时）。探测阶段用 probe_timeout 给握手设上界，测速时缩到剩余预算，
+  // 真正下载前再放宽到 connect_timeout，因此需要在不重连的前提下改这个值。
+  void set_io_timeout(int timeout_ms);
+
   bool is_open() const { return session_ != nullptr; }
 
   LIBSSH2_SESSION* session() const { return session_; }
