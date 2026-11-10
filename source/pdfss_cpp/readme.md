@@ -2,6 +2,10 @@
 
 ## 使用方式
 
+dfss 只通过 SFTP 传输文件，不再提供 HTTP 下载能力。连接、握手、认证与
+`sftp_init` 由统一的 RAII 连接层（`src/sftp_conn.h`）负责，任一环节失败
+都会让本次下载返回失败，不会再出现「所有服务器都不可达却报成功」的情况。
+
 ### dfss url
 
 使用 --url=open@sophgo.com:/文件路径 可以从open账户中下载指定文件
@@ -30,6 +34,23 @@ dfss的install功能可以方便地下载和安装软件包。
 
 1. 使用 --list 可以列出当前已经配置的服务器链路
 2. 使用 --force_server ID 可以强制dfss从某个ID的服务器链路下载文件
+
+### 超时设置
+
+`--connect_timeout=<秒>` 设置 SFTP 会话超时（TCP 连接、SSH 握手、认证与
+后续收发共用这个上限），默认值来自 `dfss-config.json` 的 `connect_timeout`
+（60 秒）。该值不再与 HTTP 相关。
+
+### 配置文件
+
+程序启动时读取可执行文件同目录的 `dfss-config.json`；文件缺失、JSON 语法
+错误或字段缺失都不会导致崩溃：缺失字段取默认值，整份文件解析失败时打印
+warn 并回退到内置服务器列表。
+
+### 主机名支持
+
+`host` 字段既可以是 IPv4/IPv6 字面量，也可以是主机名。主机名字面量按
+`/etc/hosts` → DNS 的顺序解析（静态二进制不依赖目标机的 glibc NSS 模块）。
 
 ## 编译方式
 
