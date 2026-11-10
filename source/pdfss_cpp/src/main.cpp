@@ -324,6 +324,16 @@ static void probe_speed(ProbeEntry* entry) {
   entry->speed_tested = true;
   entry->speed = 0.0;
   if (!entry->conn) return;
+  // 只做握手的条目（HDK 列表没有账号）没有 sftp 子系统，不能测速。
+  // 不判空就调 libssh2_sftp_open 只是碰巧被 libssh2 内部的空指针检查兜住，
+  // 属于未定义行为；这类服务器保持「未测速」，表格里 speed 列显示 '-'，
+  // 排名按 latency 排。
+  if (entry->conn->sftp() == nullptr) {
+    entry->speed_tested = false;
+    log_debug("[%s:%d] handshake-only connection, skip speed test",
+              entry->server.host.c_str(), entry->server.port);
+    return;
+  }
   const std::string host = entry->server.host;
   log_info("speed test server %s:%d ...", host.c_str(), entry->server.port);
   // 测速阶段的读写上界收紧到 2s；测速结束（或失败）后由下载路径改回
@@ -577,14 +587,22 @@ static std::string json_escape(const std::string& in) {
 }
 
 static bool write_meta(const std::string& meta_path, const ResumeMeta& meta) {
-  char head[128];
-  snprintf(head, sizeof(head),
-           "{\"v\":1,\"remote_path\":\"%s\",\"size\":%llu,\"mtime\":%lld}",
-           json_escape(meta.remote_path).c_str(),
-           (unsigned long long)meta.size, meta.mtime);
+  // 必须用可变长拼接，不能 snprintf 进定长缓冲区：模型文件的 remote_path 可长
+  // 达 129 字符（/.dfss_flags 里 88 条目有 37 条超过 68 字符），定长缓冲会截断
+  // 出非法 JSON，下次 read_meta 解析失败就退化成从 0 重下——而需要续传的恰恰
+  // 是这些 20GB 级的大模型文件。
+  std::string body;
+  body.reserve(meta.remote_path.size() + 96);
+  body += "{\"v\":1,\"remote_path\":\"";
+  body += json_escape(meta.remote_path);
+  body += "\",\"size\":";
+  body += std::to_string((unsigned long long)meta.size);
+  body += ",\"mtime\":";
+  body += std::to_string(meta.mtime);
+  body += "}";
   std::ofstream out(meta_path, std::ios::binary | std::ios::trunc);
   if (!out.is_open()) return false;
-  out << head;
+  out << body;
   out.flush();
   return out.good();
 }
@@ -966,6 +984,8 @@ static bool download_with_failover(const std::string& remote_path) {
 }
 
 // --dflag：先从候选服务器取索引（内存，不续传），再按候选顺序下载目标文件。
+// 取到索引的那台服务器把连接交接出来，继续用它下载目标文件，不再二次握手
+// （与「首选直接复用探测连接」保持一致）。
 static bool download_dflag(const std::string& dflag) {
   for (int round = 1; round <= kMaxRounds; ++round) {
     if (g_interrupted) break;
@@ -975,7 +995,10 @@ static bool download_dflag(const std::string& dflag) {
     // ---- 取索引 ----
     std::string json_buf;
     bool got_index = false;
-    for (auto& entry : candidates) {
+    std::unique_ptr<SftpConn> index_conn;  // 取到索引的那个连接，稍后复用
+    size_t index_entry = 0;
+    for (size_t i = 0; i < candidates.size(); ++i) {
+      ProbeEntry& entry = candidates[i];
       if (!entry.ok) continue;
       std::string err;
       std::unique_ptr<SftpConn> conn = acquire_conn(entry, &err);
@@ -986,6 +1009,8 @@ static bool download_dflag(const std::string& dflag) {
       }
       if (download_to_buffer(*conn, "/.dfss_flags", &json_buf)) {
         got_index = true;
+        index_entry = i;
+        index_conn = std::move(conn);
         break;
       }
       conn->close();
@@ -1013,17 +1038,23 @@ static bool download_dflag(const std::string& dflag) {
       return false;
     }
 
-    // ---- 下载目标文件 ----
-    for (auto& entry : candidates) {
+    // ---- 下载目标文件：先试刚取过索引的那台（连接已在手），再按排名试其余 ----
+    for (size_t i = 0; i < candidates.size(); ++i) {
+      ProbeEntry& entry = candidates[i];
       if (!entry.ok) continue;
       if (g_interrupted) break;
-      std::string err;
-      std::unique_ptr<SftpConn> conn = acquire_conn(entry, &err);
-      if (!conn) {
-        log_warn("connect %s:%d for download failed: %s, switching to next "
-                 "server",
-                 entry.server.host.c_str(), entry.server.port, err.c_str());
-        continue;
+      std::unique_ptr<SftpConn> conn;
+      if (i == index_entry && index_conn) {
+        conn = std::move(index_conn);  // 复用，不再握手
+      } else {
+        std::string err;
+        conn = acquire_conn(entry, &err);
+        if (!conn) {
+          log_warn("connect %s:%d for download failed: %s, switching to next "
+                   "server",
+                   entry.server.host.c_str(), entry.server.port, err.c_str());
+          continue;
+        }
       }
       log_info("downloading %s from %s:%d", file_path.c_str(),
                entry.server.host.c_str(), entry.server.port);

@@ -494,8 +494,99 @@ case_concurrent_smoke() {
   return 0
 }
 
-echo "== dfss stage2 e2e (probe / resume / failover) =="
-echo "binary: ${BIN}"
+# 11. 长路径续传：dflag 指向的 remote_path 长 125 字符（/.dfss_flags 里 88 条目
+#     中 37 条超过 68 字符，最长 129）。meta 必须完整写出并能被解析，否则续传
+#     退化成从 0 重下——受影响的是 20GB 级的大模型文件。
+#
+#     只下载几秒就中断，不下载完整个文件（约 20GB），用例结束删除 part/meta。
+LONG_PATH_FLAG="cv84x6_llm_qwen3.6-35b-a3b-128k"
+case_long_path_resume() {
+  local dir="${WORK_ROOT}/longpath"
+  prepare_dir "${dir}"
+  pushd "${dir}" >/dev/null || return 1
+
+  # 先从 /.dfss_flags 取到该 flag 的 filepath 作为比对基准
+  ./dfss-cpp --url=open@sophgo.com:/.dfss_flags >idxfetch.log 2>&1
+  if [[ ! -f "${dir}/.dfss_flags" ]]; then
+    popd >/dev/null
+    echo "FAIL: cannot fetch /.dfss_flags"
+    return 1
+  fi
+  local expected_path
+  expected_path="$(python3 - "${dir}/.dfss_flags" "${LONG_PATH_FLAG}" <<'PY'
+import json, sys
+data = json.load(open(sys.argv[1]))
+entry = data.get(sys.argv[2])
+print(entry["filepath"] if entry and "filepath" in entry else "")
+PY
+)"
+  if [[ -z "${expected_path}" ]]; then
+    echo "FAIL: flag ${LONG_PATH_FLAG} not present in /.dfss_flags"
+    popd >/dev/null
+    return 1
+  fi
+  echo "remote filepath len=${#expected_path}"
+  rm -f "${dir}/.dfss_flags"
+
+  # 第一次：下载 8 秒后中断（不下载完整个 ~20GB 文件）
+  timeout -s INT 8 ./dfss-cpp --dflag="${LONG_PATH_FLAG}" >dl1.log 2>&1
+  local rc1=$?
+  local meta part
+  meta="$(find "${dir}" -maxdepth 1 -name '*.dfss.meta' | head -1)"
+  part="$(find "${dir}" -maxdepth 1 -name '*.dfss.part' | head -1)"
+  if [[ -z "${meta}" || -z "${part}" ]]; then
+    echo "FAIL: no part/meta after interrupt (exit=${rc1})"
+    rm -f "${dir}"/*.dfss.part "${dir}"/*.dfss.meta
+    popd >/dev/null
+    return 1
+  fi
+  local meta_size part_size
+  meta_size="$(stat -c %s "${meta}")"
+  part_size="$(stat -c %s "${part}")"
+  echo "meta_bytes=${meta_size} part_bytes=${part_size} exit1=${rc1}"
+
+  # meta 必须能被 JSON 解析，且 remote_path 与索引里的完全一致
+  local parsed_path
+  parsed_path="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["remote_path"])' "${meta}" 2>/dev/null)"
+  if [[ -z "${parsed_path}" ]]; then
+    echo "FAIL: meta is not valid JSON (truncated?)"
+    echo "     meta head: $(head -c 200 "${meta}")"
+    rm -f "${dir}"/*.dfss.part "${dir}"/*.dfss.meta
+    popd >/dev/null
+    return 1
+  fi
+  echo "meta remote_path len=${#parsed_path}"
+  if [[ "${parsed_path}" != "${expected_path}" ]]; then
+    echo "FAIL: meta remote_path != index filepath"
+    echo "     meta:     ${parsed_path}"
+    echo "     expected: ${expected_path}"
+    rm -f "${dir}"/*.dfss.part "${dir}"/*.dfss.meta
+    popd >/dev/null
+    return 1
+  fi
+
+  # 第二次：再下 8 秒并中断，日志必须出现 resume from <off> 且 off > 0
+  timeout -s INT 8 ./dfss-cpp --dflag="${LONG_PATH_FLAG}" >dl2.log 2>&1
+  local rc2=$?
+  local off
+  off="$(grep -o 'resume from [0-9]*' "${dir}/dl2.log" | head -1 | awk '{print $3}')"
+  local restarted
+  restarted="$(grep -c 'restart from 0' "${dir}/dl2.log")"
+  local part_size2
+  part_size2="$(stat -c %s "${part}" 2>/dev/null || echo 0)"
+  echo "second run exit=${rc2} resume_off=${off:-<none>} restarted=${restarted} part_bytes=${part_size2}"
+
+  # 收尾：这个文件约 20GB，绝不留在工作目录里
+  rm -f "${dir}"/*.dfss.part "${dir}"/*.dfss.meta "${dir}"/*.bmodel
+  popd >/dev/null
+
+  [[ ${part_size} -gt 0 ]] || { echo "FAIL: part empty after first interrupt"; return 1; }
+  [[ -n "${off}" && "${off}" -gt 0 ]] || { echo "FAIL: no 'resume from <off>' with off>0"; return 1; }
+  [[ ${restarted} -eq 0 ]] || { echo "FAIL: log says restart from 0, meta was rejected"; return 1; }
+  return 0
+}
+
+echo "== dfss stage2 e2e (probe / resume / failover) =="echo "binary: ${BIN}"
 echo "config: ${BASE_CONFIG}"
 echo "work:   ${WORK_ROOT}"
 echo
@@ -514,6 +605,7 @@ run_case "probe time bound (3 blackholes)" case_probe_time_bound
 run_case "all servers unreachable" case_all_unreachable
 run_case "speed test failure keeps server" case_speed_failure_keeps_server
 run_case "--probe table" case_probe_table
+run_case "long-path dflag resume (125-char path)" case_long_path_resume
 run_case "8-process concurrency smoke" case_concurrent_smoke
 
 echo
