@@ -1,6 +1,6 @@
 #!/bin/bash
 
-GET_INFO_VERSION="1.7.1"
+GET_INFO_VERSION="1.7.2"
 
 shopt -s compat31
 
@@ -978,6 +978,31 @@ if [[ "${WORK_MODE}" == "SOC" ]]; then
     fi
 fi
 
+# CV84X6（CV84X2）TPU 频率 → Hz；取不到时输出空（不填 0 冒充读数）。
+#
+# 两个来源在真机上并不一致，且单位不同：
+#   * sysfs /sys/devices/platform/cv84x2-dvfs/tpu_freq_mhz —— DVFS 驱动上报的
+#     当前运行频率，单位 MHz。这是唯一"就是频率"的来源，因此优先。
+#   * debugfs /sys/kernel/debug/clk/clk_tpu_ip/clk_rate —— 单位 Hz，但它报的是
+#     TPU 时钟域的分频前基准，只有真实运行频率的一半。2026-11 真机对照：
+#     debugfs 1000000000 ↔ sysfs 2000（MHz），二者正好差 2 倍。取它时必须 ×2
+#     校正，否则输出的就是"真实频率的一半"（这正是此前的缺陷）。
+#   * debugfs 在服务账号下通常不可读（只作 sysfs 缺失时的兜底）。
+function get_tpu_clk_cv84x6() {
+    local mhz hz
+    mhz=$(cat /sys/devices/platform/cv84x2-dvfs/tpu_freq_mhz 2>/dev/null | tr -d '\0\r\n ')
+    case "${mhz}" in
+        ''|*[!0-9]*)
+            hz=$(cat /sys/kernel/debug/clk/clk_tpu_ip/clk_rate 2>/dev/null | tr -d '\0\r\n ')
+            case "${hz}" in
+                ''|*[!0-9]*) echo "" ;;
+                *) echo $(( hz * 2 )) ;;
+            esac
+            ;;
+        *) echo $(( mhz * 1000000 )) ;;
+    esac
+}
+
 # CLKs
 CPU_CLK=""
 TPU_CLK=""
@@ -985,11 +1010,13 @@ VPU_CLK=""
 if [[ "${WORK_MODE}" == "SOC" ]]; then
     if [[ "${CPU_MODEL}" == "cv84x6" ]]; then
         # CV84X6 时钟（drivers/clk/cvitek/clk-cv84x6.c）：
-        #   CPU 为 Cortex-A55 → clk_ap_ca55；TPU → clk_tpu_ip；
-        #   VPU 无独立 PLL，编解码走 clk_ve_axi（AXI 总线时钟，语义与 bm1688 的 clk_cam0pll PLL 不同，不 ÷2）
+        #   CPU 为 Cortex-A55 → clk_ap_ca55；VPU 无独立 PLL，编解码走 clk_ve_axi
+        #   （AXI 总线时钟，语义与 bm1688 的 clk_cam0pll PLL 不同，不 ÷2）
         CPU_CLK=$(cat /sys/kernel/debug/clk/clk_ap_ca55/clk_rate 2>/dev/null| tr -d '\0')
-        TPU_CLK=$(cat /sys/kernel/debug/clk/clk_tpu_ip/clk_rate 2>/dev/null| tr -d '\0')
         VPU_CLK=$(cat /sys/kernel/debug/clk/clk_ve_axi/clk_rate 2>/dev/null| tr -d '\0')
+
+        # TPU 频率见 get_tpu_clk_cv84x6（两来源单位不同，单独成函数便于回归测试）
+        TPU_CLK=$(get_tpu_clk_cv84x6)
     elif [[ "${SOC_FAMILY}" == "cv" ]]; then
         CPU_CLK=$(cat /sys/kernel/debug/clk/clk_a53pll/clk_rate 2>/dev/null| tr -d '\0')
         TPU_CLK=$(cat /sys/kernel/debug/clk/clk_tpll/clk_rate 2>/dev/null| tr -d '\0')

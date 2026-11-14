@@ -123,7 +123,7 @@ at virtual address 0000000000002014`，实测复现两次）。`shmpacket` / `tx
 root@cv84x6:~$ sudo bash get_info.sh | grep -E "^TPU_"
 TPU_MEM(MiB)|26320|
 TPU_MEM_USAGE(%)|86.00|
-TPU_CLK(Hz)|1000000000|
+TPU_CLK(Hz)|2000000000|
 TPU_USAGE(%)|0 0 0 0 0|
 TPU_FW_VERSION|fd3aca2|
 TPU_FW_BUILD_TIME|2026-08-14_00:23:55,2026-08-14_00:25:22,2026-08-14_00:26:40,2026-08-14_00:27:43|
@@ -132,6 +132,21 @@ TPU_TASK_RATE(tasks/s)|0.00|
 TPU_QUEUE_DEPTH|0|
 TPU_HWQ_FREE_MIN|16|
 ```
+
+#### CV84X6 的 TPU_CLK 来源
+
+CV84X6（CV84X2）上 TPU 频率有两个来源，它们在真机上**不一致且单位不同**：
+
+| 来源 | 单位 | 实测 | 说明 |
+| --- | --- | --- | --- |
+| `/sys/devices/platform/cv84x2-dvfs/tpu_freq_mhz` | MHz | 2000 | DVFS 驱动上报的当前运行频率，服务账号可读。**首选** |
+| `/sys/kernel/debug/clk/clk_tpu_ip/clk_rate` | Hz | 1000000000 | TPU 时钟域的分频前基准，**只有真实频率的一半**；通常仅 root 可读 |
+
+脚本优先读 sysfs；sysfs 缺失或非法（老内核、DVFS 未 probe）时才回退 debugfs，并
+**×2 校正**后输出。所以 `TPU_CLK(Hz)` 在 2.0GHz 档位应显示 `2000000000`——若你看到
+`1000000000`，说明读到的是未校正的 debugfs 值，那是缺陷而非降频。
+
+回归测试：`bash source/pget_info/tests/check_tpu_clk_cv84x6.sh`（无需开发板）。
 
 #### 高度裁剪的系统环境
 

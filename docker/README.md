@@ -14,7 +14,12 @@
 ——换取构建期零镜像切换、一键全量。v1.1.0 起去掉 Linaro GCC 6.3（改用系统 apt aarch64
 工具链），较 v1.0.0（~10.1GB）省约 1.2GB。
 
-导出的归档 `sophon-tools-build-unified-v1.2.1.tar.zst` 约 **2.9GB**（zstd，8.55GiB → 2.92GiB）。
+> 注意 `docker images` 的 `SIZE` 列是**各层解压后大小之和**，同一份内容被多层叠加时会重复计算，
+> 因此它既不等于镜像实际磁盘占用，也不等于导出归档的大小。要判断下载/上传量看归档大小
+> （见下），要判断本机占用用 `docker system df -v`。
+
+导出的归档 `sophon-tools-build-unified-v1.2.1.tar.zst` 约 **3.4GiB**（3,639,467,938 B，
+zstd 压缩；v1.2.0 为 3.1GB）。上传 dfss 后必须核对字节数或 sha256，不要以「约 X GB」估算。
 
 **镜像版本**：镜像 tag 由 `docker/versions.env` 的 `IMAGE_TAG` 控制（默认 `unified-v1.2.1`），
 `release.sh` / `build-all.sh` 默认使用 `sophon-tools-build:${IMAGE_TAG}`。发布到 dfss 服务器后，
