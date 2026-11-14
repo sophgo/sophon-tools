@@ -15,7 +15,7 @@
 			"host": "172.24.12.75",
 			"port": 32022,
 			"user": "open",
-			"pass": "open",
+			"pass": "2rDZTzMgsewQz4fmPaVi",
 			"only_open" : true
 		},
 		{
@@ -31,7 +31,7 @@
 			"host": "106.38.208.114",
 			"port": 32022,
 			"user": "open",
-			"pass": "open",
+			"pass": "2rDZTzMgsewQz4fmPaVi",
 			"only_open" : false
 		},
 		{
@@ -39,7 +39,7 @@
 			"host": "103.68.183.114",
 			"port": 32022,
 			"user": "open",
-			"pass": "open",
+			"pass": "2rDZTzMgsewQz4fmPaVi",
 			"only_open" : false
 		}
 	],

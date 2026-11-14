@@ -106,10 +106,10 @@ void Lk_mux(bool lock, void*) {
 // 内置服务器列表：没有配置文件，或配置文件损坏时使用
 static const std::vector<struct ServerInfo> kDefaultSdkServers = {
     {0, "172.26.175.10", 32022, "oponIn", "oponIn", false, false, 0.0},
-    {1, "172.24.12.75", 32022, "open", "open", true, false, 0.0},
+    {1, "172.24.12.75", 32022, "open", "2rDZTzMgsewQz4fmPaVi", true, false, 0.0},
     {3, "172.26.166.163", 32022, "oponIn", "oponIn", false, false, 0.0},
-    {4, "106.38.208.114", 32022, "open", "open", false, false, 0.0},
-    {5, "103.68.183.114", 32022, "open", "open", false, false, 0.0},
+    {4, "106.38.208.114", 32022, "open", "2rDZTzMgsewQz4fmPaVi", false, false, 0.0},
+    {5, "103.68.183.114", 32022, "open", "2rDZTzMgsewQz4fmPaVi", false, false, 0.0},
 };
 
 static const std::vector<struct ServerInfo> kDefaultHdkServers = {

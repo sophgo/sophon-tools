@@ -94,7 +94,7 @@ write_single_config() {
 	"connect_timeout": 60,
 	"probe_timeout": ${probe_timeout},
 	"sdk": [
-		{ "id": 4, "host": "${host}", "port": ${port}, "user": "open", "pass": "open", "only_open": false }
+		{ "id": 4, "host": "${host}", "port": ${port}, "user": "open", "pass": "2rDZTzMgsewQz4fmPaVi", "only_open": false }
 	],
 	"hdk": []
 }
@@ -302,8 +302,8 @@ case_cross_server_resume() {
 	"connect_timeout": 60,
 	"probe_timeout": 5,
 	"sdk": [
-		{ "id": 90, "host": "127.0.0.1", "port": ${port}, "user": "open", "pass": "open", "only_open": false },
-		{ "id": 4, "host": "${SLOW_HOST}", "port": ${SLOW_PORT}, "user": "open", "pass": "open", "only_open": false }
+		{ "id": 90, "host": "127.0.0.1", "port": ${port}, "user": "open", "pass": "2rDZTzMgsewQz4fmPaVi", "only_open": false },
+		{ "id": 4, "host": "${SLOW_HOST}", "port": ${SLOW_PORT}, "user": "open", "pass": "2rDZTzMgsewQz4fmPaVi", "only_open": false }
 	],
 	"hdk": []
 }
@@ -341,10 +341,10 @@ case_probe_time_bound() {
 	"connect_timeout": 60,
 	"probe_timeout": 3,
 	"sdk": [
-		{ "id": 91, "host": "10.255.255.1", "port": 32022, "user": "open", "pass": "open", "only_open": false },
-		{ "id": 92, "host": "10.255.255.2", "port": 32022, "user": "open", "pass": "open", "only_open": false },
-		{ "id": 93, "host": "10.255.255.3", "port": 32022, "user": "open", "pass": "open", "only_open": false },
-		{ "id": 3, "host": "${FAST_HOST}", "port": 32022, "user": "open", "pass": "open", "only_open": false }
+		{ "id": 91, "host": "10.255.255.1", "port": 32022, "user": "open", "pass": "2rDZTzMgsewQz4fmPaVi", "only_open": false },
+		{ "id": 92, "host": "10.255.255.2", "port": 32022, "user": "open", "pass": "2rDZTzMgsewQz4fmPaVi", "only_open": false },
+		{ "id": 93, "host": "10.255.255.3", "port": 32022, "user": "open", "pass": "2rDZTzMgsewQz4fmPaVi", "only_open": false },
+		{ "id": 3, "host": "${FAST_HOST}", "port": 32022, "user": "open", "pass": "2rDZTzMgsewQz4fmPaVi", "only_open": false }
 	],
 	"hdk": []
 }
@@ -380,8 +380,8 @@ case_all_unreachable() {
 	"connect_timeout": 60,
 	"probe_timeout": 3,
 	"sdk": [
-		{ "id": 91, "host": "10.255.255.1", "port": 32022, "user": "open", "pass": "open", "only_open": false },
-		{ "id": 92, "host": "10.255.255.2", "port": 32022, "user": "open", "pass": "open", "only_open": false }
+		{ "id": 91, "host": "10.255.255.1", "port": 32022, "user": "open", "pass": "2rDZTzMgsewQz4fmPaVi", "only_open": false },
+		{ "id": 92, "host": "10.255.255.2", "port": 32022, "user": "open", "pass": "2rDZTzMgsewQz4fmPaVi", "only_open": false }
 	],
 	"hdk": []
 }
