@@ -143,7 +143,7 @@ case_blackhole() {
 {
 	"connect_timeout": 3,
 	"sdk": [
-		{ "id": 99, "host": "10.255.255.1", "port": 32022, "user": "open", "pass": "open", "only_open": false }
+		{ "id": 99, "host": "10.255.255.1", "port": 32022, "user": "open", "pass": "2rDZTzMgsewQz4fmPaVi", "only_open": false }
 	],
 	"hdk": []
 }
@@ -187,7 +187,7 @@ case_hostname() {
 {
 	"connect_timeout": 3,
 	"sdk": [
-		{ "id": 99, "host": "localhost", "port": 39999, "user": "open", "pass": "open", "only_open": false }
+		{ "id": 99, "host": "localhost", "port": 39999, "user": "open", "pass": "2rDZTzMgsewQz4fmPaVi", "only_open": false }
 	],
 	"hdk": []
 }
@@ -209,7 +209,7 @@ case_config_missing_key() {
   cat >"${dir}/dfss-config.json" <<'JSON'
 {
 	"sdk": [
-		{ "id": 4, "host": "106.38.208.114", "port": 32022, "user": "open", "pass": "open", "only_open": false }
+		{ "id": 4, "host": "106.38.208.114", "port": 32022, "user": "open", "pass": "2rDZTzMgsewQz4fmPaVi", "only_open": false }
 	],
 	"hdk": []
 }
