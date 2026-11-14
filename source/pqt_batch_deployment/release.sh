@@ -68,9 +68,18 @@ export GOFLAGS="${GOFLAGS:-}"
 # 非 Linux（windows 交叉）构建不需要该标签。
 LINUX_GUI_TAGS="x11"
 
+# 测试用的构建标签：必须按 ARCH 选，不能无条件用 LINUX_GUI_TAGS。
+# headless 与 windows 两路都只编 headless 代码（CGO_ENABLED=0 / 交叉编 PE），
+# 二者都不需要任何 X11 头；若无条件带 x11，则在没有图形开发库的环境里
+# （例如只装了 Go 的构建机）测试闸门会先挂在 X11/Xcursor.h 上，连包都出不来。
+case "${ARCH}" in
+  headless|windows|win) TEST_TAGS="headless" ;;
+  *)                    TEST_TAGS="${LINUX_GUI_TAGS}" ;;
+esac
+
 # 先跑测试：构建失败或测试不过都不出包
-echo "==> go test ..."
-if ! go test -tags "${LINUX_GUI_TAGS}" ./... 2>&1 | tail -20; then
+echo "==> go test (tags: ${TEST_TAGS}) ..."
+if ! go test -tags "${TEST_TAGS}" ./... 2>&1 | tail -20; then
   echo "ERROR: 测试未通过，终止出包" >&2
   exit 1
 fi

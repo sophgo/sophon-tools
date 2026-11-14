@@ -173,7 +173,7 @@ file qbd_headless     # statically linked
 ldd  qbd_headless     # not a dynamic executable
 ```
 
-对比：桌面版 `ldd` 里有 `libX11`/`libGL`/`libwayland-client` 等 7 个图形库。
+对比：桌面版 `ldd` 里有多项图形库（`libX11`/`libGL`/`libxcb` 等，实测清单见 `.deps.txt`）。
 这就是为什么无图形栈机器必须用 headless 产物——桌面版在那里连加载都过不去。
 
 桌面版也无法交叉编译到 arm64（宿主没有 aarch64 图形工具链，`runtime/cgo` 直接报

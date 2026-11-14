@@ -13,7 +13,7 @@
 | `..._linux_amd64` | 桌面版，动态链接 X11/GL | 有桌面环境的机器：Fyne GUI + `--web` 都可用 |
 | `..._linux_amd64_headless` | **静态链接，零图形依赖**，8MB | **无图形栈的服务器**：无参数即启动 Web UI |
 
-> 为什么必须分两种：Fyne 的 Linux 产物动态链接 `libX11`/`libGL`/`libwayland`，
+> 为什么必须分两种：Fyne 的 Linux 产物动态链接 `libX11`/`libGL` 等图形库，
 > 在没有图形栈的服务器上**加载器直接报缺 so**，不是"看不到窗口"而是起不来。
 > headless 版用 `-tags headless` 完全不编译 Fyne 代码，`CGO_ENABLED=0` 静态链接，
 > 所以能在纯命令行服务器上直接跑。

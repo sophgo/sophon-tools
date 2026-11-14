@@ -76,12 +76,13 @@ SHELL ["/bin/bash", "-c"]
 # pqt 系列: qtbase5-dev(Qt 5.12.8, 20.04 仓库) + libgl1-mesa-dev + fuse + patchelf(AppImage)
 # pqt_batch_deployment 自 v2.0.0 起为 Go+Fyne，其 glfw 依赖在 Linux 上默认同时编
 # X11 与 Wayland 两个后端，需要两套头文件：
-#   - X11: libx11/xrandr/xinerama/xi/xcursor/xxf86vm-dev
-#     不能只写 xorg-dev 元包——在 --no-install-recommends 下它的多数组件会被跳过，
-#     镜像里最终只装了 libx11-dev，Xrandr/Xcursor/Xxf86vm 缺失导致编译/链接失败。
+#   - X11: 由 xorg-dev 元包提供（libx11/libxrandr/libxinerama/libxi/libxcursor/
+#     libxxf86vm 全在它的 Depends 里，--no-install-recommends 只跳过 Recommends，
+#     不影响 Depends）。注意：apt 依赖一旦变更就必须 bump versions.env 的 IMAGE_TAG
+#     并重建镜像，否则 tag 会一直指向旧镜像——v1.2.0 就是漏了这一步（见 versions.env）。
 #   - Wayland: 20.04 的 libwayland 仅 1.18，glfw v3.4 生成的协议头用了 1.20+ 的
 #     WL_MARSHAL_FLAG_DESTROY，装了 libwayland-dev 反而编不过。
-# 因此只补 X11 头，并由 pqt_batch_deployment/release.sh 以 `-tags x11` 显式只编
+# 因此不装 Wayland 头，改由 pqt_batch_deployment/release.sh 以 `-tags x11` 显式只编
 # X11 后端（Wayland 会话下经 XWayland 仍可运行）。
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential gcc g++ make cmake pkg-config \
@@ -92,7 +93,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         dpkg dpkg-dev fakeroot \
         qtbase5-dev qttools5-dev-tools \
         libgl1-mesa-dev libglib2.0-0 xorg-dev libxkbcommon-dev \
-        libx11-dev libxrandr-dev libxinerama-dev libxi-dev libxcursor-dev libxxf86vm-dev \
         ca-certificates curl wget git \
         zip unzip p7zip-full patchelf \
         python3 python3-pip python3-dev \

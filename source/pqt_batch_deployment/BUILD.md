@@ -79,8 +79,13 @@ qt_batch_deployment_V<ver>_linux_amd64.deps.txt        # 桌面版动态依赖�
 
 | 构建 | 命令 | 说明 |
 | --- | --- | --- |
-| 桌面版 | `CGO_ENABLED=1 go build` | 链接 X11/GL，提供 Fyne GUI，也能 `--web` |
+| 桌面版 | `CGO_ENABLED=1 go build -tags x11` | 链接 X11/GL，提供 Fyne GUI，也能 `--web` |
 | headless | `CGO_ENABLED=0 go build -tags headless` | **不编译任何 Fyne 代码**，静态链接，零图形依赖 |
+
+桌面版的 `-tags x11` 不能省：glfw v3.4 默认同时编 X11 与 Wayland 两个后端，而统一构建
+镜像的 20.04 基座里 libwayland 仅 1.18、缺 glfw 生成协议头所需的 `WL_MARSHAL_FLAG_DESTROY`，
+不带该标签会直接失败在 `wayland-client-core.h`。只编 X11 后端后，Wayland 会话下经 XWayland
+仍可正常运行。`release.sh` 的 `LINUX_GUI_TAGS` 就是这个值。
 
 `-tags headless` 会排除 `gui.go`/`theme.go`/`cell.go`/`dialogs.go`/`resources_gui.go`
 （这几个文件带 `//go:build !headless`），因此产物不链接任何图形库。
@@ -101,10 +106,13 @@ bash release.sh linux      # 桌面版 + headless
 **Linux**：单个可执行文件、免安装，但**不是纯静态**。Fyne 必须链接系统图形栈：
 
 ```
-libX11 libXcursor libXrandr libXinerama libXi libxkbcommon
-libwayland-client libwayland-cursor libwayland-egl
-libGL libGLX libGLdispatch libxcb libffi libm libresolv libc
+libGL libGLX libGLdispatch libX11 libxcb libXau libXdmcp
+libbsd libm libresolv libdl libpthread libc
 ```
+
+（以上为 `-tags x11` 构建后 `.deps.txt` 的实测清单，共 13 项；不含 `libwayland*`、
+`libxkbcommon`，因为只编了 X11 后端。头文件依赖与运行期动态库依赖不是一回事：
+编译期仍需要 `xorg-dev` 提供的 Xcursor/Xrandr/Xinerama/Xi 头文件。）
 
 这是 Linux GUI 程序的固有约束，已与需求方确认接受
 （`release.sh` 同时产出 `.deps.txt` 以便发布说明如实交代）。
