@@ -142,9 +142,13 @@ const (
 	cpuClkPathBm1684 = "/sys/kernel/debug/clk/clk_div_a53_1/clk_rate"
 	cpuClkPathBm1688 = "/sys/kernel/debug/clk/clk_a53pll/clk_rate"
 	cpuClkPathCv84x6 = "/sys/kernel/debug/clk/clk_ap_ca55/clk_rate"
+
+	// CV84X2 的 TPU 实时运行频率（DVFS 驱动上报，单位 MHz）。debugfs 的
+	// clk_tpu_ip 报的是分频前基准，只有真实值的一半，不能直接当频率用。
+	tpuFreqSysfsCv84x6 = "/sys/devices/platform/cv84x2-dvfs/tpu_freq_mhz"
 )
 
-// TPUFrequencyClk 读取 TPU 时钟频率 (Hz → MHz)。
+// TPUFrequencyClk 读取 TPU 时钟频率（Hz → MHz）。
 // 对齐 pget_info TPU_CLK。CV84X2 时钟名为 clk_tpu_ip。
 func (c *Collector) TPUFrequencyClk() int64 {
 	chip := c.ChipType()
@@ -155,11 +159,29 @@ func (c *Collector) TPUFrequencyClk() int64 {
 	case "bm1688", "cv186ah":
 		path = tpuClkPathBm1688
 	case "cv84x6":
-		path = tpuClkPathCv84x6
+		return c.tpuFrequencyCv84x6()
 	default:
 		return 0
 	}
 	return c.readClkRate(path)
+}
+
+// tpuFrequencyCv84x6 返回 CV84X2 的 TPU 频率（MHz）。
+//
+// 两个来源在真机上不一致且单位不同：
+//   - sysfs tpu_freq_mhz：DVFS 上报的当前运行频率，单位 MHz，服务账号可读。首选。
+//   - debugfs clk_tpu_ip/clk_rate：单位 Hz，是 TPU 时钟域的分频前基准，只有真实
+//     运行频率的一半（真机对照：debugfs 1000000000 ↔ sysfs 2000 MHz）。
+//
+// 因此 debugfs 仅作兜底，且必须 ×2 校正后再返回；两者都取不到返回 0。
+func (c *Collector) tpuFrequencyCv84x6() int64 {
+	if mhz, ok := c.readSysfsMHz(tpuFreqSysfsCv84x6); ok {
+		return mhz
+	}
+	if hz, ok := c.readSysfsHz(tpuClkPathCv84x6); ok {
+		return hz / 1000000 * 2 // Hz → MHz，再按实测倍率校正
+	}
+	return 0
 }
 
 // VPUFrequency 读取 VPU 时钟频率 (Hz → MHz)。
@@ -206,15 +228,39 @@ func (c *Collector) CPUFrequencyClk() int64 {
 }
 
 func (c *Collector) readClkRate(path string) int64 {
+	hz, ok := c.readSysfsHz(path)
+	if !ok {
+		return 0
+	}
+	return hz / 1000000 // Hz → MHz
+}
+
+// readSysfsHz 读一个以 Hz 为单位、只含整数的节点；读不到或非整数时 ok=false。
+// 与 readClkRate 的区别是保留 Hz 原值，供需要先换算倍率再折算 MHz 的场景使用
+// （如 CV84X2 的 clk_tpu_ip 需 ×2 校正）。
+func (c *Collector) readSysfsHz(path string) (int64, bool) {
 	s := c.readStr(path)
 	if s == "" {
-		return 0
+		return 0, false
 	}
 	v, err := strconv.ParseInt(s, 10, 64)
-	if err != nil {
-		return 0
+	if err != nil || v <= 0 {
+		return 0, false
 	}
-	return v / 1000000 // Hz → MHz
+	return v, true
+}
+
+// readSysfsMHz 读一个已经是 MHz 的节点（如 cv84x2-dvfs/tpu_freq_mhz）。
+func (c *Collector) readSysfsMHz(path string) (int64, bool) {
+	s := c.readStr(path)
+	if s == "" {
+		return 0, false
+	}
+	v, err := strconv.ParseInt(s, 10, 64)
+	if err != nil || v <= 0 {
+		return 0, false
+	}
+	return v, true
 }
 
 // parseInts 从 regexp submatch 结果中提取 group 1 的整数值。
