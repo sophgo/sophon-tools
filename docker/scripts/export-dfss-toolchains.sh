@@ -34,8 +34,10 @@ SW64_ARCHIVE="${OUT_DIR}/swgcc830_cross_tools.tar.zst"
 LOONG_ARCHIVE="${OUT_DIR}/loongarch64-cross-tools.tar.zst"
 
 # 区分容器 / 镜像两种来源: 容器用 docker exec, 镜像用 docker run（避免镜像名误入 docker exec 报误导错误）
+# 注意: docker inspect 对「镜像」同样返回 0（它接受镜像引用），所以不能用它判容器；
+# 必须用 docker container inspect 才会在只给镜像名时失败。
 RUN_MODE=""
-if docker inspect "${CONTAINER}" >/dev/null 2>&1; then
+if docker container inspect "${CONTAINER}" >/dev/null 2>&1; then
   RUN_MODE="container"
 elif docker image inspect "${CONTAINER}" >/dev/null 2>&1; then
   RUN_MODE="image"

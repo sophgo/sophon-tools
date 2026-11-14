@@ -74,7 +74,16 @@ SHELL ["/bin/bash", "-c"]
 # pdfss_cpp 8 架构: aarch64/armel/riscv64 + mingw-w64(windows amd64/i686)
 # Rust/Go 静态: musl 工具链在 PATH(由 pbmssm 的 fetch-musl-toolchain.sh 识别复用)
 # pqt 系列: qtbase5-dev(Qt 5.12.8, 20.04 仓库) + libgl1-mesa-dev + fuse + patchelf(AppImage)
-# xorg-dev: pqt_batch_deployment 自 v2.0.0 起为 Go+Fyne，Linux 端 CGO 需要 X11/GL 头文件
+# pqt_batch_deployment 自 v2.0.0 起为 Go+Fyne，其 glfw 依赖在 Linux 上默认同时编
+# X11 与 Wayland 两个后端，需要两套头文件：
+#   - X11: 由 xorg-dev 元包提供（libx11/libxrandr/libxinerama/libxi/libxcursor/
+#     libxxf86vm 全在它的 Depends 里，--no-install-recommends 只跳过 Recommends，
+#     不影响 Depends）。注意：apt 依赖一旦变更就必须 bump versions.env 的 IMAGE_TAG
+#     并重建镜像，否则 tag 会一直指向旧镜像——v1.2.0 就是漏了这一步（见 versions.env）。
+#   - Wayland: 20.04 的 libwayland 仅 1.18，glfw v3.4 生成的协议头用了 1.20+ 的
+#     WL_MARSHAL_FLAG_DESTROY，装了 libwayland-dev 反而编不过。
+# 因此不装 Wayland 头，改由 pqt_batch_deployment/release.sh 以 `-tags x11` 显式只编
+# X11 后端（Wayland 会话下经 XWayland 仍可运行）。
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential gcc g++ make cmake pkg-config \
         gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
