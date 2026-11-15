@@ -60,5 +60,30 @@ PASS（4 客户端 / 32s / 峰值 10 / 零残留 / 无 race）
 
 - `build/sse-smoke/main.go` — 冒烟工具（server / client 两种模式）
 - `build/sse-smoke.sh` — 驱动脚本（构建、编排、采样、判定）
-- `build/verify-deb-isolated.sh` — 在 aarch64 测试机上用私有 mount namespace 隔离验证
-  deb 产物（旧升级接口拒绝、SSE 回收、服务目录不被改动；不安装、不重启、不写真实 /data）
+- `build/verify-deb-isolated.sh` — 在测试机上隔离验证 deb 产物（旧升级接口拒绝、SSE 回收、
+  服务目录不被改动；不安装、不重启、不写真实 `/data`）
+
+## 隔离验收脚本的防护（`build/verify-deb-isolated.sh`）
+
+首次验收时该脚本有一个**真实事故**：`unshare -m` 的包装层没有生效，bind mount 落到了
+宿主的真实挂载表上（覆盖了 `/opt/sophon/sophliteos/config`、`/var/log/sophliteos`、
+`/var/lib/sophliteos/db`、`/var/lib/bmssm`、`/data`），事后才发现并 umount 恢复。
+**"出错后再卸载恢复"不是隔离**，因此脚本已改为事前隔离 + 逐项核验：
+
+1. **工作目录**：`mktemp -d /tmp/mys2885-verify-XXXXXXXX` 创建专属目录；退出时只删
+   这一个带固定前缀的目录（前缀不匹配则拒绝清理）。不再对用户可控的 `WORKDIR` 直接 `rm -rf`。
+2. **宿主路径只读**：所有 bind 目标（含 `/var/lib/sophliteos`、`/var/lib/bmssm`）必须
+   已存在且是目录，否则**直接 fail-closed 退出**；namespace 内**绝不在宿主路径上
+   `mkdir`**（改为 bind `/var/lib/sophliteos` 整目录，其下 db 也落在临时目录里）。
+3. **dependent 工具 fail-closed**：`dpkg-deb/unshare/mount/findmnt/ip/ss/curl/python3/
+   sha256sum/md5sum` 与 `pyjwt` 逐个检查，root 也检查。
+4. **私有 mount + network namespace**：`unshare -m -n --propagation private`。
+   network namespace 自带独立回环，因此不与设备上 `:8080`/`:18080` 的任何既有服务冲突。
+5. **动态端口 + PID 归属核验**：端口在 namespace 内动态选取，启动后用 `ss -ltnpH`
+   核验「该端口的监听者 PID == 本次启动的 PID」，杜绝"新进程没起来、curl 验到旧进程"。
+6. **功能性隔离自检**：每个 bind 完成后，往挂载后的目标路径写一个随机哨兵文件，
+   确认它出现在本次临时目录里 —— 不再比较 `findmnt` 源字符串（overlay/tmpfs 表示法
+   因机器而异，容易误判）。
+7. **事后核验**：比对运行前后宿主的 `ip addr`/`ip route` 指纹与 `/proc/self/mountinfo`
+   挂载表，任一不同即 FAIL，并检查挂载表中不得出现本脚本的临时挂载。
+

@@ -35,6 +35,14 @@ var (
 	ssoMu    sync.RWMutex
 	ssoUser  string // 当前活跃会话用户名；空表示无在线会话（SSO 未启用）
 	ssoToken string // 当前活跃会话 token（用于 logout 匹配 + 踢人比对）
+	// ssoGen 会话代次：每次会话实质变更（登录换人/换 token、logout 清空）自增。
+	// SSE 订阅绑定订阅当时的代次（ssoClient.gen），会话变更时只终止"代次已过期"的
+	// 连接 —— 这样"终止通知"针对的是被替换掉的那一代会话，而不是"当前 token 桶"，
+	// 因此不会误踢窗口期内重新登录、恰好复用同一 token 的新连接（MYS-2885 review）。
+	ssoGen uint64
+	// ssoAfterPublish 测试注入点：在"新会话已发布、终止通知未发出"且仍持 ssoMu 写锁的
+	// 那一刻被调用。生产恒为 nil。仅用于断言该窗口内不可能插入并发订阅/会话变更。
+	ssoAfterPublish func(newGen uint64)
 )
 
 // --- SSE 推送：被踢的旧会话主动通知 ----------------------------------------
@@ -44,6 +52,10 @@ var (
 //
 // 连接生命周期（MYS-2885）：
 //   - 客户端句柄由 ssoClientMu 统一保护，ssoConnTotal 记录**真实连接数**（不是 token 桶数）；
+//   - 每个订阅记录订阅时的会话代次（ssoClient.gen）；会话变更时只终止"代次已过期"的连接，
+//     而不是按 token 桶无差别清理 —— 见 ssoApplySessionChange；
+//   - **会话变更与终止通知在同一把 ssoMu 写锁内完成**，不存在"发布新会话 → 再通知旧会话"
+//     的窗口，因此不会出现旧登录的延迟通知误踢窗口期内重新登录的同 token 连接；
 //   - SESSION_OFFLINE 是终止事件：写出后服务端主动结束该流并回收名额；
 //   - 写失败/缓冲满同样结束流，不再让失效连接长期占用名额；
 //   - 会话校验与订阅在同一临界区（ssoMu）内完成，杜绝"校验用旧会话、订阅在切换之后"
@@ -51,6 +63,7 @@ var (
 type ssoClient struct {
 	ch   chan string
 	once sync.Once
+	gen  uint64 // 订阅时的会话代次；代次过期即应收到 SESSION_OFFLINE
 }
 
 // send 非阻塞投递事件；缓冲满返回 false（调用方应据此终止该连接）。
@@ -87,33 +100,6 @@ func ssoConnCount() int {
 	return ssoConnTotal
 }
 
-// ssoNotify 向指定 token 的所有 SSE 客户端推送一个终止事件（非阻塞）。
-// 无法投递（缓冲满）的客户端直接摘除并关闭，由 handler 退出后回收连接名额。
-func ssoNotify(token, event string) {
-	if token == "" {
-		return
-	}
-	ssoClientMu.Lock()
-	set := ssoClients[token]
-	var dead []*ssoClient
-	for c := range set {
-		if !c.send(event) {
-			dead = append(dead, c)
-			continue
-		}
-		atomic.AddInt64(&ssoOfflineTotal, 1)
-	}
-	for _, c := range dead {
-		delete(set, c)
-		ssoConnTotal--
-		c.close()
-	}
-	if len(set) == 0 {
-		delete(ssoClients, token)
-	}
-	ssoClientMu.Unlock()
-}
-
 // SSOActive 返回当前在线用户名。ok=false 表示无在线会话。
 func SSOActive() (username string, ok bool) {
 	ssoMu.RLock()
@@ -128,37 +114,80 @@ func SSOActiveToken() (token string, ok bool) {
 	return ssoToken, ssoToken != ""
 }
 
-// SSORegister 注册会话为活跃会话（踢掉之前的会话）。
-// 捕获旧 token 并通过 SSE 主动通知旧端（不用等旧端下次请求才发现 401）。
+// ssoApplySessionChange 原子地完成"发布新会话 + 终止被替换会话的 SSE 订阅"。
+// 调用方必须已持 ssoMu 写锁：会话状态更新与终止通知在同一临界区内，
+// 中间不存在任何可被其它 register/logout/握手插入的窗口。
+//
+// 只终止 gen < newGen 的连接（即被本次变更替换掉的那一代会话的订阅），
+// 而不是按 token 桶清理：若窗口期内有连接以新代次订阅（例如 A→B→A 重新登录后
+// 同 token 的新连接），它们不属于被替换的会话，必须保留。
+// 事件按 client.ch 投递给对应连接，因此"哪个 token 的通知"由连接自身所属代次决定。
+func ssoApplySessionChange(username, token string, clear bool) {
+	ssoGen++
+	newGen := ssoGen
+	if clear {
+		ssoUser, ssoToken = "", ""
+	} else {
+		ssoUser, ssoToken = username, token
+	}
+
+	// 测试注入点：位于"新会话已发布、终止通知尚未发出"这一刻，用于断言
+	// 此刻不可能有并发订阅插入（调用方仍持 ssoMu 写锁 → 订阅侧的 RLock 会阻塞）。
+	// 生产为 nil，无任何开销；它不是"把通知挪出锁外"，而是把这段窗口暴露给测试。
+	if ssoAfterPublish != nil {
+		ssoAfterPublish(newGen)
+	}
+
+	ssoClientMu.Lock()
+	defer ssoClientMu.Unlock()
+	for tok, set := range ssoClients {
+		var expired []*ssoClient
+		for c := range set {
+			if c.gen < newGen {
+				expired = append(expired, c)
+			}
+		}
+		if len(expired) == 0 {
+			continue
+		}
+		// 先投递终止事件（非阻塞），再统一摘除并关闭：被替换会话的每条连接都会
+		// 收到 SESSION_OFFLINE 后读到通道关闭，handler 写出事件即结束。
+		for _, c := range expired {
+			if c.send(sseEventSessionOffline) {
+				atomic.AddInt64(&ssoOfflineTotal, 1)
+			}
+			delete(set, c)
+			ssoConnTotal--
+			c.close()
+		}
+		if len(set) == 0 {
+			delete(ssoClients, tok)
+		}
+	}
+}
+
+// SSORegister 注册会话为活跃会话（踢掉之前的会话），并原子地通知被替换会话的 SSE 订阅者。
 //
 // 幂等保护（MYS-2885）：同一 (username, token) 重复注册视为同一会话的重连/刷新，
 // 不重新踢自己 —— 否则前端每次重连都会把当前有效会话的 SSE 长连接踢掉，
-// 形成"自踢-重连"抖动。会话实质变化（换人或换 token）才通知旧会话下线。
+// 形成"自踢-重连"抖动。会话实质变化（换人或换 token）才推进代次并通知旧会话下线。
 func SSORegister(username, token string) {
 	ssoMu.Lock()
-	oldToken := ssoToken
-	sameSession := token != "" && token == ssoToken && username == ssoUser
-	ssoUser = username
-	ssoToken = token
-	ssoMu.Unlock()
-	if sameSession {
+	defer ssoMu.Unlock()
+	if token != "" && token == ssoToken && username == ssoUser {
 		return
 	}
-	ssoNotify(oldToken, "SESSION_OFFLINE")
+	ssoApplySessionChange(username, token, false)
 }
 
-// SSOLogout 若 token 匹配活跃会话则清除，并通知该 token 的 SSE 客户端。
+// SSOLogout 若 token 匹配活跃会话则清除，并原子地通知该会话的 SSE 客户端。
 func SSOLogout(token string) {
 	ssoMu.Lock()
-	matched := token != "" && ssoToken == token
-	if matched {
-		ssoUser = ""
-		ssoToken = ""
+	defer ssoMu.Unlock()
+	if token == "" || ssoToken != token {
+		return
 	}
-	ssoMu.Unlock()
-	if matched {
-		ssoNotify(token, "SESSION_OFFLINE")
-	}
+	ssoApplySessionChange("", "", true)
 }
 
 // --- 一次性票据：URL 无法携带 Authorization 头的传输（<a download>、WebSocket） ---
@@ -351,14 +380,16 @@ func sseRegisterClient(token, ip string) (cl *ssoClient, status int) {
 		ssoMu.RUnlock()
 		return nil, http.StatusTooManyRequests
 	}
-	// 持 ssoMu 读锁期间 register 无法切换会话，订阅到的是"校验时那个会话"的订阅表。
+	// 持 ssoMu 读锁期间 register 无法切换会话，订阅到的是"校验时那个会话"的订阅表，
+	// 并且代次也取自同一临界区：该连接明确属于当前（尚未被替换的）这一代会话。
+	gen := ssoGen
 	ssoClientMu.Lock()
 	if ssoConnTotal >= sseMaxClientsGlobal || len(ssoClients[token]) >= sseMaxClientsPerToken {
 		ssoClientMu.Unlock()
 		ssoMu.RUnlock()
 		return nil, http.StatusTooManyRequests
 	}
-	cl = &ssoClient{ch: make(chan string, 4)}
+	cl = &ssoClient{ch: make(chan string, 4), gen: gen}
 	if ssoClients[token] == nil {
 		ssoClients[token] = map[*ssoClient]struct{}{}
 	}
