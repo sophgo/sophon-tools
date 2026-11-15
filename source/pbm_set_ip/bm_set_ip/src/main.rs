@@ -1,11 +1,15 @@
 use lexopt;
 use serde_yaml;
 use serde_yaml::{Mapping, Value};
+use std::collections::HashMap;
 use std::env;
 use std::fs;
+use std::io;
 use std::io::Write;
+use std::path::Path;
 use std::process::exit;
 use std::process::Command;
+use std::process::Stdio;
 
 // ============ 数据结构 ============
 
@@ -677,59 +681,6 @@ enum NetManager {
     Unknown,
 }
 
-fn main() {
-    // 版本信息固定为执行首行（MYS-809 发版规范：可执行文件首行即版本号）。
-    // GIT_TAG_COMMIT 由 build.rs 注入（release.sh 传 BM_SET_IP_GIT_VERSION，回退
-    // .git_version 文件），见 build.rs。
-    println!("bm_set_ip version: {}", env!("GIT_TAG_COMMIT"));
-
-    let cfg = match Config::parse() {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("Error: {}", e);
-            print_usage();
-            exit(1);
-        }
-    };
-
-    if cfg.dry_run {
-        print_analyzed_config(&cfg);
-        return;
-    }
-
-    if !is_root() {
-        let exe = env::current_exe().unwrap();
-        let argv: Vec<String> = env::args().skip(1).collect();
-        let status = Command::new("sudo")
-            .arg(exe)
-            .args(&argv)
-            .status()
-            .expect("failed to execute sudo");
-        exit(status.code().unwrap_or(1));
-    }
-
-    let net_manager = detect_net_manager();
-    match net_manager {
-        NetManager::Netplan => {
-            println!("[INFO] Using netplan for network configuration");
-            configure_with_netplan(&cfg);
-        }
-        NetManager::NetworkManager => {
-            println!("[INFO] Using NetworkManager (nmcli) for network configuration");
-            configure_with_nmcli(&cfg);
-        }
-        NetManager::SystemdNetworkd => {
-            println!("[INFO] Using systemd-networkd for network configuration");
-            configure_with_networkd(&cfg);
-        }
-        NetManager::Unknown => {
-            eprintln!("[ERROR] Could not detect a supported network manager!");
-            eprintln!("[INFO] Trying to configure IP manually using ip command");
-            configure_with_ip(&cfg);
-        }
-    }
-}
-
 // ============ dry-run 输出 ============
 
 fn print_analyzed_config(cfg: &Config) {
@@ -777,8 +728,155 @@ fn print_analyzed_config(cfg: &Config) {
     }
     println!("## bm_set_ip dry-run config end");
 }
+// ============ 外部命令 / 文件系统访问（可注入，便于 stateful fake 测试）============
 
-// ============ 通用辅助 ============
+/// 一条外部命令的执行结果。ok=false 表示命令不可用、非零退出或等待失败。
+#[derive(Debug, Clone, Default)]
+struct Out {
+    ok: bool,
+    stdout: String,
+    stderr: String,
+}
+
+impl Out {
+    #[cfg(test)] // 仅测试 fake 需要构造成功输出
+    fn ok_with(stdout: impl Into<String>) -> Self {
+        Out {
+            ok: true,
+            stdout: stdout.into(),
+            stderr: String::new(),
+        }
+    }
+
+    fn fail_with(stderr: impl Into<String>) -> Self {
+        Out {
+            ok: false,
+            stdout: String::new(),
+            stderr: stderr.into(),
+        }
+    }
+
+    /// 失败详情（优先 stderr，其次 stdout），拼进错误消息
+    fn detail(&self) -> String {
+        let e = self.stderr.trim();
+        let o = self.stdout.trim();
+        let s = if !e.is_empty() { e } else { o };
+        if s.is_empty() {
+            String::new()
+        } else {
+            format!(": {}", s)
+        }
+    }
+}
+
+/// 后端依赖的外部能力。生产实现直接调真实命令/文件；测试注入 stateful fake，
+/// 使 NM / ip / DNS / 快照逻辑能在不触碰宿主网络的前提下被断言。
+trait Env {
+    fn which(&mut self, program: &str) -> bool;
+    fn run(&mut self, program: &str, args: &[&str]) -> Out;
+    /// 带 stdin 的执行：一次性写入全部输入并等待退出（不留下未回收子进程）
+    fn run_stdin(&mut self, program: &str, args: &[&str], input: &str) -> Out;
+    fn read(&mut self, path: &str) -> io::Result<String>;
+    fn exists(&mut self, path: &str) -> bool;
+    fn write(&mut self, path: &str, content: &str) -> io::Result<()>;
+    fn remove(&mut self, path: &str) -> io::Result<()>;
+    fn list_files(&mut self, dir: &str) -> Vec<String>;
+    /// 面向用户的提示。成功文案只允许出现在成功路径上。
+    fn say(&mut self, msg: &str);
+}
+
+/// 生产实现：真实命令 + 真实文件系统
+struct OsEnv;
+
+impl OsEnv {
+    fn new() -> Self {
+        OsEnv
+    }
+}
+
+impl Env for OsEnv {
+    fn which(&mut self, program: &str) -> bool {
+        is_command_exists(program)
+    }
+
+    fn run(&mut self, program: &str, args: &[&str]) -> Out {
+        match Command::new(program).args(args).output() {
+            Ok(o) => Out {
+                ok: o.status.success(),
+                stdout: String::from_utf8_lossy(&o.stdout).into_owned(),
+                stderr: String::from_utf8_lossy(&o.stderr).into_owned(),
+            },
+            Err(e) => Out::fail_with(format!("could not execute {}: {}", program, e)),
+        }
+    }
+
+    fn run_stdin(&mut self, program: &str, args: &[&str], input: &str) -> Out {
+        let mut child = match Command::new(program)
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+        {
+            Ok(c) => c,
+            Err(e) => return Out::fail_with(format!("could not execute {}: {}", program, e)),
+        };
+        // 写完立刻关闭 stdin（drop），子进程才能读到 EOF
+        if let Some(mut si) = child.stdin.take() {
+            if let Err(e) = si.write_all(input.as_bytes()) {
+                let _ = child.wait();
+                return Out::fail_with(format!("failed to write stdin of {}: {}", program, e));
+            }
+        }
+        match child.wait_with_output() {
+            Ok(o) => Out {
+                ok: o.status.success(),
+                stdout: String::from_utf8_lossy(&o.stdout).into_owned(),
+                stderr: String::from_utf8_lossy(&o.stderr).into_owned(),
+            },
+            Err(e) => Out::fail_with(format!("failed to wait for {}: {}", program, e)),
+        }
+    }
+
+    fn read(&mut self, path: &str) -> io::Result<String> {
+        fs::read_to_string(path)
+    }
+
+    fn exists(&mut self, path: &str) -> bool {
+        Path::new(path).exists()
+    }
+
+    fn write(&mut self, path: &str, content: &str) -> io::Result<()> {
+        fs::write(path, content)
+    }
+
+    fn remove(&mut self, path: &str) -> io::Result<()> {
+        match fs::remove_file(path) {
+            Ok(()) => Ok(()),
+            // 目标本来就不存在（例如新建文件写入前就失败）：视为已达成“撤销新文件”
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e),
+        }
+    }
+
+    fn list_files(&mut self, dir: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        if let Ok(entries) = fs::read_dir(dir) {
+            for e in entries.flatten() {
+                if let Some(name) = e.file_name().to_str() {
+                    out.push(name.to_string());
+                }
+            }
+        }
+        out
+    }
+
+    fn say(&mut self, msg: &str) {
+        println!("{}", msg);
+    }
+}
+
+/// 通用辅助 ================================================================
 
 fn is_command_exists(cmd: &str) -> bool {
     if let Some(paths) = std::env::var_os("PATH") {
@@ -791,11 +889,26 @@ fn is_command_exists(cmd: &str) -> bool {
     false
 }
 
-fn extra_default_routes(current_dev: &str) -> Vec<String> {
+/// 执行命令并在失败时返回带上下文的错误（关键命令一律走这里，禁止吞掉失败）
+fn run_checked(env: &mut dyn Env, program: &str, args: &[&str]) -> Result<(), String> {
+    let out = env.run(program, args);
+    if out.ok {
+        Ok(())
+    } else {
+        Err(format!(
+            "`{} {}` failed{}",
+            program,
+            args.join(" "),
+            out.detail()
+        ))
+    }
+}
+
+fn extra_default_routes(env: &mut dyn Env, current_dev: &str) -> Vec<String> {
     let mut others = Vec::new();
-    if let Ok(output) = Command::new("ip").args(["route", "show", "default"]).output() {
-        let routes = String::from_utf8_lossy(&output.stdout);
-        for line in routes.lines() {
+    let out = env.run("ip", &["route", "show", "default"]);
+    if out.ok {
+        for line in out.stdout.lines() {
             if line.starts_with("default ") && !line.contains(&format!("dev {}", current_dev)) {
                 others.push(line.to_string());
             }
@@ -804,39 +917,45 @@ fn extra_default_routes(current_dev: &str) -> Vec<String> {
     others
 }
 
-fn warn_extra_routes(current_dev: &str) {
-    let extra = extra_default_routes(current_dev);
+/// 多默认网关告警（纯提示，不影响退出码：配置本身仍会完整写入并生效）。
+/// 条件与 nmcli 后端历史行为对齐：v4 为 dhcp，或 v4 静态且显式给了网关。
+fn warn_extra_routes(env: &mut dyn Env, cfg: &Config) {
+    let needs = match &cfg.v4 {
+        Some(f) if f.is_dhcp => true,
+        Some(f) => f.gateway.as_deref().map(|g| !g.is_empty()).unwrap_or(false),
+        None => false,
+    };
+    if !needs {
+        return;
+    }
+    let extra = extra_default_routes(env, &cfg.net_device);
     if !extra.is_empty() {
-        eprintln!("[WARNING] system has extra default routes on other devices:");
+        env.say("[WARNING] system has extra default routes on other devices:");
         for r in &extra {
-            eprintln!("[WARNING]     {}", r);
+            env.say(&format!("[WARNING]     {}", r));
         }
     }
 }
 
-fn detect_net_manager() -> NetManager {
+fn detect_net_manager(env: &mut dyn Env) -> NetManager {
     // B2:netplan 命令存在 且 /etc/netplan/ 下任一 *.yaml 存在
-    if is_command_exists("netplan") {
-        let has_yaml = fs::read_dir("/etc/netplan")
-            .map(|entries| entries.flatten().any(|e| e.path().extension().map(|x| x == "yaml").unwrap_or(false)))
-            .unwrap_or(false);
-        if has_yaml {
-            return NetManager::Netplan;
+    if env.which("netplan")
+        && env
+            .list_files("/etc/netplan")
+            .iter()
+            .any(|f| f.ends_with(".yaml"))
+    {
+        return NetManager::Netplan;
+    }
+    if env.which("nmcli") {
+        let out = env.run("systemctl", &["is-active", "NetworkManager"]);
+        if out.ok && out.stdout.trim() == "active" {
+            return NetManager::NetworkManager;
         }
     }
-    if is_command_exists("nmcli") {
-        let status = Command::new("systemctl").arg("is-active").arg("NetworkManager").output();
-        if let Ok(output) = status {
-            if output.stdout == b"active\n" {
-                return NetManager::NetworkManager;
-            }
-        }
-    }
-    let status = Command::new("systemctl").arg("is-active").arg("systemd-networkd").output();
-    if let Ok(output) = status {
-        if output.stdout == b"active\n" {
-            return NetManager::SystemdNetworkd;
-        }
+    let out = env.run("systemctl", &["is-active", "systemd-networkd"]);
+    if out.ok && out.stdout.trim() == "active" {
+        return NetManager::SystemdNetworkd;
     }
     NetManager::Unknown
 }
@@ -857,39 +976,97 @@ fn get_or_create_mapping<'a>(map: &'a mut Mapping, key: &str) -> Result<&'a mut 
         .ok_or_else(|| format!("[ERROR] '{}' is not a mapping", key))
 }
 
+// ============ 配置快照与回滚 ============
+
+/// 写前快照：明确区分“原文件存在（内容已捕获）”与“原文件不存在”。
+/// 回滚只使用本快照，绝不读取可能来自历史遗留的 `.bak`。
+#[derive(Debug, Clone, PartialEq)]
+enum Snapshot {
+    Missing,
+    Present(String),
+}
+
+fn snapshot(env: &mut dyn Env, path: &str) -> Result<Snapshot, String> {
+    if !env.exists(path) {
+        return Ok(Snapshot::Missing);
+    }
+    match env.read(path) {
+        Ok(c) => Ok(Snapshot::Present(c)),
+        // 读不到原文就无法回滚 → 拒绝修改，避免把已有配置写坏
+        Err(e) => Err(format!(
+            "cannot snapshot {} (refusing to modify): {}",
+            path, e
+        )),
+    }
+}
+
+/// 按本次快照回滚：原文件存在则写回原文，原文件不存在则撤销本次新建的文件
+fn restore_snapshot(env: &mut dyn Env, path: &str, snap: &Snapshot) -> Result<(), String> {
+    match snap {
+        Snapshot::Present(c) => match env.write(path, c) {
+            Ok(()) => Ok(()),
+            Err(e) => Err(format!("failed to restore {}: {}", path, e)),
+        },
+        Snapshot::Missing => match env.remove(path) {
+            Ok(()) => Ok(()),
+            Err(e) => Err(format!("failed to remove newly created {}: {}", path, e)),
+        },
+    }
+}
+
+/// 写出供人工恢复用的 `.bak`（内容取自本次快照）。写失败即拒绝修改。
+/// 该文件只是运维便利，回滚绝不依赖它。
+fn write_backup(env: &mut dyn Env, path: &str, snap: &Snapshot) -> Result<Option<String>, String> {
+    match snap {
+        Snapshot::Present(c) => {
+            let bak = format!("{}.bm_set_ip.bak", path);
+            match env.write(&bak, c) {
+                Ok(()) => Ok(Some(bak)),
+                Err(e) => Err(format!(
+                    "cannot back up {} to {} (refusing to modify): {}",
+                    path, bak, e
+                )),
+            }
+        }
+        // 原文件不存在时没有可备份的内容，也不能凭空产生 .bak
+        Snapshot::Missing => Ok(None),
+    }
+}
+
 // ============ netplan 后端 ============
 
-fn select_netplan_file() -> String {
+fn select_netplan_file(env: &mut dyn Env) -> String {
     if let Ok(f) = std::env::var("BM_SET_IP_NETPLAN_FILE") {
         if !f.is_empty() {
             return f;
         }
     }
-    let mut yamls: Vec<String> = Vec::new();
-    if let Ok(entries) = fs::read_dir("/etc/netplan") {
-        for e in entries.flatten() {
-            let p = e.path();
-            if p.extension().map(|x| x == "yaml").unwrap_or(false) {
-                if let Some(name) = p.file_name().and_then(|s| s.to_str()) {
-                    yamls.push(name.to_string());
-                }
-            }
-        }
-    }
+    let mut yamls: Vec<String> = env
+        .list_files("/etc/netplan")
+        .into_iter()
+        .filter(|n| n.ends_with(".yaml"))
+        .collect();
     yamls.sort();
     if let Some(last) = yamls.last() {
         format!("/etc/netplan/{}", last)
     } else {
-        eprintln!("[WARNING] no /etc/netplan/*.yaml found, falling back to 01-netcfg.yaml");
+        env.say("[WARNING] no /etc/netplan/*.yaml found, falling back to 01-netcfg.yaml");
         "/etc/netplan/01-netcfg.yaml".to_string()
     }
 }
 
-fn netplan_render(cfg: &Config, existing_yaml: &str, target_file: &str) -> Result<String, String> {
+fn netplan_render(
+    cfg: &Config,
+    existing_yaml: &str,
+    target_file: &str,
+    rt: &HashMap<String, u32>,
+) -> Result<String, String> {
     let _ = target_file;
-    let mut doc: serde_yaml::Value = serde_yaml::from_str(existing_yaml)
-        .map_err(|e| format!("YAML parsing failed: {}", e))?;
-    let network_map = doc.as_mapping_mut().ok_or_else(|| "netplan yaml top-level is not a mapping".to_string())?;
+    let mut doc: serde_yaml::Value =
+        serde_yaml::from_str(existing_yaml).map_err(|e| format!("YAML parsing failed: {}", e))?;
+    let network_map = doc
+        .as_mapping_mut()
+        .ok_or_else(|| "netplan yaml top-level is not a mapping".to_string())?;
     let ethernets_map = get_or_create_mapping(network_map, "network")?;
     let ethernets = get_or_create_mapping(ethernets_map, "ethernets")?;
 
@@ -900,11 +1077,20 @@ fn netplan_render(cfg: &Config, existing_yaml: &str, target_file: &str) -> Resul
         _ => serde_yaml::Mapping::new(),
     };
     // 本工具管理的键(更新前移除,再按当前配置写入)
-    for k in ["dhcp4", "dhcp6", "addresses", "routes", "routing-policy", "nameservers", "optional", "gateway4", "gateway6"] {
+    for k in [
+        "dhcp4",
+        "dhcp6",
+        "addresses",
+        "routes",
+        "routing-policy",
+        "nameservers",
+        "optional",
+        "gateway4",
+        "gateway6",
+    ] {
         dev_cfg.remove(Value::String(k.into()));
     }
     // 表名 → 数字 id(netplan routes/routing-policy 的 table 只接受数字)
-    let rt = load_rt_tables();
     let resolve_t = |t: &str| -> Result<String, String> {
         if t.parse::<u32>().is_ok() {
             return Ok(t.to_string());
@@ -932,7 +1118,10 @@ fn netplan_render(cfg: &Config, existing_yaml: &str, target_file: &str) -> Resul
             if let Some(gw) = &v4f.gateway {
                 if !gw.is_empty() {
                     let mut r = Mapping::new();
-                    r.insert(Value::String("to".into()), Value::String("0.0.0.0/0".into()));
+                    r.insert(
+                        Value::String("to".into()),
+                        Value::String("0.0.0.0/0".into()),
+                    );
                     r.insert(Value::String("via".into()), Value::String(gw.clone()));
                     routes_seq.push(Value::Mapping(r));
                 }
@@ -959,7 +1148,10 @@ fn netplan_render(cfg: &Config, existing_yaml: &str, target_file: &str) -> Resul
     }
     for r in &cfg.routes {
         let mut m = Mapping::new();
-        m.insert(Value::String("to".into()), Value::String(format!("{}/{}", r.to, r.to_prefix)));
+        m.insert(
+            Value::String("to".into()),
+            Value::String(format!("{}/{}", r.to, r.to_prefix)),
+        );
         if let Some(via) = &r.via {
             m.insert(Value::String("via".into()), Value::String(via.clone()));
         }
@@ -969,7 +1161,10 @@ fn netplan_render(cfg: &Config, existing_yaml: &str, target_file: &str) -> Resul
         routes_seq.push(Value::Mapping(m));
     }
     if !addresses_seq.is_empty() {
-        dev_cfg.insert(Value::String("addresses".into()), Value::Sequence(addresses_seq));
+        dev_cfg.insert(
+            Value::String("addresses".into()),
+            Value::Sequence(addresses_seq),
+        );
     }
     if !routes_seq.is_empty() {
         dev_cfg.insert(Value::String("routes".into()), Value::Sequence(routes_seq));
@@ -980,10 +1175,16 @@ fn netplan_render(cfg: &Config, existing_yaml: &str, target_file: &str) -> Resul
         for p in &cfg.policies {
             let mut m = Mapping::new();
             if let Some((n, px)) = &p.from {
-                m.insert(Value::String("from".into()), Value::String(format!("{}/{}", n, px)));
+                m.insert(
+                    Value::String("from".into()),
+                    Value::String(format!("{}/{}", n, px)),
+                );
             }
             if let Some((n, px)) = &p.to {
-                m.insert(Value::String("to".into()), Value::String(format!("{}/{}", n, px)));
+                m.insert(
+                    Value::String("to".into()),
+                    Value::String(format!("{}/{}", n, px)),
+                );
             }
             if let Some(t) = &p.table {
                 m.insert(Value::String("table".into()), Value::String(resolve_t(t)?));
@@ -993,15 +1194,22 @@ fn netplan_render(cfg: &Config, existing_yaml: &str, target_file: &str) -> Resul
             }
         }
         if !policy_seq.is_empty() {
-            dev_cfg.insert(Value::String("routing-policy".into()), Value::Sequence(policy_seq));
+            dev_cfg.insert(
+                Value::String("routing-policy".into()),
+                Value::Sequence(policy_seq),
+            );
         }
     }
     let mut dns_list = Vec::new();
     if let Some(v4f) = &cfg.v4 {
-        for d in &v4f.dns { dns_list.push(Value::String(d.clone())); }
+        for d in &v4f.dns {
+            dns_list.push(Value::String(d.clone()));
+        }
     }
     if let Some(v6f) = &cfg.v6 {
-        for d in &v6f.dns { dns_list.push(Value::String(d.clone())); }
+        for d in &v6f.dns {
+            dns_list.push(Value::String(d.clone()));
+        }
     }
     if !dns_list.is_empty() {
         let mut dns_map = serde_yaml::Mapping::new();
@@ -1014,88 +1222,89 @@ fn netplan_render(cfg: &Config, existing_yaml: &str, target_file: &str) -> Resul
     serde_yaml::to_string(&doc).map_err(|e| format!("YAML serialize failed: {}", e))
 }
 
-fn configure_with_netplan(cfg: &Config) {
-    let file_path = select_netplan_file();
-    let content = match fs::read_to_string(&file_path) {
-        Ok(c) => c,
-        Err(_) => {
-            eprintln!("[ERROR] Cannot read {}", file_path);
-            std::process::exit(1);
-        }
+fn run_netplan_apply(env: &mut dyn Env) -> Result<(), String> {
+    let out = env.run("netplan", &["apply"]);
+    if !out.ok {
+        return Err(format!("`netplan apply` failed{}", out.detail()));
+    }
+    // netplan apply 有时退出码为 0 但把错误打在 stderr：仍然视为失败
+    let stderr = out.stderr;
+    let bad: Vec<&str> = stderr
+        .lines()
+        .filter(|l| l.starts_with("Error") || l.contains("Conflicting default route"))
+        .collect();
+    if !bad.is_empty() {
+        return Err(format!(
+            "`netplan apply` reported error: {}",
+            bad.join("; ")
+        ));
+    }
+    Ok(())
+}
+
+fn configure_with_netplan(cfg: &Config, env: &mut dyn Env) -> Result<(), String> {
+    let file_path = select_netplan_file(env);
+
+    // 先快照：读不到原配置就拒绝继续，绝不覆盖
+    let snap = snapshot(env, &file_path)?;
+    let content = match &snap {
+        Snapshot::Present(c) => c.clone(),
+        // 本后端只更新已有 netplan 配置，不凭空新建 yaml（避免与其它 yaml 争抢同设备）
+        Snapshot::Missing => return Err(format!("netplan config {} not found", file_path)),
     };
 
     // C5:与 networkd/nmcli/ip 对齐,多默认网关时告警
-    if let Some(v4f) = &cfg.v4 {
-        if !v4f.is_dhcp {
-            if let Some(gw) = &v4f.gateway {
-                if !gw.is_empty() {
-                    warn_extra_routes(&cfg.net_device);
-                }
-            }
-        }
+    warn_extra_routes(env, cfg);
+
+    let rt = load_rt_tables(env);
+    let new_content = netplan_render(cfg, &content, &file_path, &rt)?;
+    let bak = write_backup(env, &file_path, &snap)?;
+
+    if let Err(e) = env.write(&file_path, &new_content) {
+        // 写入失败（可能已截断）：用本次快照恢复
+        return match restore_snapshot(env, &file_path, &snap) {
+            Ok(()) => Err(format!(
+                "failed to write {}: {}; restored from this run's snapshot",
+                file_path, e
+            )),
+            Err(re) => Err(format!(
+                "failed to write {}: {}; restore also failed: {}",
+                file_path, e, re
+            )),
+        };
     }
+    env.say(&format!(
+        "[INFO] Wrote {}{}",
+        file_path,
+        bak.as_deref()
+            .map(|b| format!(" (backup at {})", b))
+            .unwrap_or_default()
+    ));
 
-    let new_content = match netplan_render(cfg, &content, &file_path) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("[ERROR] {}", e);
-            std::process::exit(1);
-        }
-    };
-
-    // B1:写前备份
-    let bak = format!("{}.bm_set_ip.bak", file_path);
-    if let Err(e) = fs::copy(&file_path, &bak) {
-        eprintln!("[WARNING] could not back up {} to {}: {}", file_path, bak, e);
+    if let Err(e) = run_netplan_apply(env) {
+        let rb = restore_snapshot(env, &file_path, &snap);
+        // 让回滚后的配置重新生效（best-effort，结果已在下面的消息里区分）
+        let reapplied = run_netplan_apply(env);
+        return match (rb, reapplied) {
+            (Ok(()), Ok(())) => Err(format!(
+                "{}; rolled back {} from this run's snapshot and re-applied",
+                e, file_path
+            )),
+            (Ok(()), Err(e2)) => Err(format!(
+                "{}; rolled back {} but re-apply failed: {}",
+                e, file_path, e2
+            )),
+            (Err(re), _) => Err(format!("{}; rollback failed: {}", e, re)),
+        };
     }
-
-    if let Err(e) = fs::write(&file_path, &new_content) {
-        eprintln!("[ERROR] Failed to write {}: {}", file_path, e);
-        let _ = fs::copy(&bak, &file_path);
-        std::process::exit(1);
-    }
-    println!("[INFO] Wrote {} (backup at {})", file_path, bak);
-
-    let out = Command::new("netplan").arg("apply").output();
-    let apply_ok = match out {
-        Ok(o) => {
-            let stderr = String::from_utf8_lossy(&o.stderr);
-            let bad = !o.status.success()
-                || stderr.lines().any(|l| l.starts_with("Error") || l.contains("Conflicting default route"));
-            if bad {
-                eprintln!("[ERROR] Failed to apply netplan configuration");
-                for l in stderr.lines().filter(|l| l.starts_with("Error") || l.contains("Conflicting")) {
-                    eprintln!("[ERROR]     {}", l);
-                }
-                false
-            } else {
-                true
-            }
-        }
-        Err(_) => {
-            eprintln!("[ERROR] Could not run netplan");
-            false
-        }
-    };
-
-    // B1:apply 失败 → 恢复备份
-    if !apply_ok {
-        match fs::copy(&bak, &file_path) {
-            Ok(_) => {
-                eprintln!("[ERROR] Restored {} from backup", file_path);
-                let _ = Command::new("netplan").arg("apply").output();
-            }
-            Err(e) => eprintln!("[ERROR] Failed to restore {} from {}: {}; config may be broken", file_path, bak, e),
-        }
-        std::process::exit(1);
-    }
-    println!("[INFO] Netplan configuration applied successfully");
+    env.say("[INFO] Netplan configuration applied successfully");
+    Ok(())
 }
 
 /// 解析 /etc/iproute2/rt_tables,返回 表名→数字id 的映射
-fn load_rt_tables() -> std::collections::HashMap<String, u32> {
-    let mut map = std::collections::HashMap::new();
-    if let Ok(content) = fs::read_to_string("/etc/iproute2/rt_tables") {
+fn load_rt_tables(env: &mut dyn Env) -> HashMap<String, u32> {
+    let mut map = HashMap::new();
+    if let Ok(content) = env.read("/etc/iproute2/rt_tables") {
         for line in content.lines() {
             let line = line.trim();
             if line.is_empty() || line.starts_with('#') {
@@ -1116,7 +1325,7 @@ fn load_rt_tables() -> std::collections::HashMap<String, u32> {
 /// 表名 → 数字 id(用于 nmcli 后端)
 /// 1. 直接数字 → 返回 2. allocated 已有该名 → 返回 3. 自动分配空闲 id(从 100 起)并写入 allocated
 /// 返回 (id, 是否新分配)
-fn resolve_table_id(t: &str, allocated: &mut std::collections::HashMap<String, u32>) -> (u32, bool) {
+fn resolve_table_id(t: &str, allocated: &mut HashMap<String, u32>) -> (u32, bool) {
     if let Ok(n) = t.parse::<u32>() {
         // 注册进 allocated,避免后续表名自动分配与此数字撞 id
         allocated.entry(t.to_string()).or_insert(n);
@@ -1134,45 +1343,176 @@ fn resolve_table_id(t: &str, allocated: &mut std::collections::HashMap<String, u
 }
 
 /// 把 allocated 中比 initial 多出的条目追加写回 /etc/iproute2/rt_tables(去重)
-fn writeback_rt_tables(allocated: &std::collections::HashMap<String, u32>, initial: &std::collections::HashMap<String, u32>) {
-    let existing = {
-        let mut base = initial.clone();
-        if let Ok(content) = fs::read_to_string("/etc/iproute2/rt_tables") {
-            for line in content.lines() {
-                let line = line.trim();
-                if line.is_empty() || line.starts_with('#') { continue; }
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 2 {
-                    if let Ok(id) = parts[0].parse::<u32>() {
-                        base.insert(parts[1].to_string(), id);
-                    }
+fn writeback_rt_tables(
+    env: &mut dyn Env,
+    allocated: &HashMap<String, u32>,
+    initial: &HashMap<String, u32>,
+) -> Result<(), String> {
+    let path = "/etc/iproute2/rt_tables";
+    let mut existing = initial.clone();
+    let mut base_text = String::new();
+    if env.exists(path) {
+        base_text = env
+            .read(path)
+            .map_err(|e| format!("cannot read {}: {}", path, e))?;
+        for line in base_text.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 2 {
+                if let Ok(id) = parts[0].parse::<u32>() {
+                    existing.insert(parts[1].to_string(), id);
                 }
             }
         }
-        base
-    };
-    let mut to_write: Vec<(u32, String)> = allocated.iter()
+    }
+    let mut to_write: Vec<(u32, String)> = allocated
+        .iter()
         .filter(|(name, _)| name.parse::<u32>().is_err() && !existing.contains_key(*name))
         .map(|(name, &id)| (id, name.clone()))
         .collect();
     to_write.sort_by_key(|(id, _)| *id);
-    if to_write.is_empty() { return; }
-    if let Ok(mut f) = fs::OpenOptions::new().append(true).open("/etc/iproute2/rt_tables") {
-        for (id, name) in &to_write {
-            let _ = writeln!(f, "{} {}", id, name);
-        }
+    if to_write.is_empty() {
+        return Ok(());
     }
+    if !base_text.is_empty() && !base_text.ends_with('\n') {
+        base_text.push('\n');
+    }
+    for (id, name) in &to_write {
+        base_text.push_str(&format!("{} {}\n", id, name));
+    }
+    env.write(path, &base_text)
+        .map_err(|e| format!("cannot write {}: {}", path, e))
 }
 
 // ============ nmcli 后端 ============
 
-fn nmcli_render(cfg: &Config, allocated: &mut std::collections::HashMap<String, u32>) -> Vec<String> {
+/// 一条 NM 连接的最小标识（用于按 UUID 区分新旧 profile）
+#[derive(Debug, Clone, PartialEq)]
+struct NmConn {
+    uuid: String,
+    name: String,
+    con_type: String,
+}
+
+/// 解析 `nmcli -t` 的转义输出：`\:` 表示字段内的冒号，`\\` 表示反斜杠
+fn split_terse(line: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let mut esc = false;
+    for ch in line.chars() {
+        if esc {
+            cur.push(ch);
+            esc = false;
+        } else if ch == '\\' {
+            esc = true;
+        } else if ch == ':' {
+            out.push(std::mem::take(&mut cur));
+        } else {
+            cur.push(ch);
+        }
+    }
+    out.push(cur);
+    out
+}
+
+fn parse_terse_conns(text: &str) -> Vec<NmConn> {
+    let mut out = Vec::new();
+    for line in text.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let f = split_terse(line);
+        if f.len() < 3 {
+            continue;
+        }
+        out.push(NmConn {
+            uuid: f[0].clone(),
+            name: f[1].clone(),
+            con_type: f[2].clone(),
+        });
+    }
+    out
+}
+
+fn nm_connections(env: &mut dyn Env) -> Result<Vec<NmConn>, String> {
+    let out = env.run("nmcli", &["-t", "-f", "UUID,NAME,TYPE", "con", "show"]);
+    if !out.ok {
+        return Err(format!(
+            "`nmcli -t -f UUID,NAME,TYPE con show` failed{}; 无法确认现有连接，未做任何改动",
+            out.detail()
+        ));
+    }
+    Ok(parse_terse_conns(&out.stdout))
+}
+
+/// 查询某接口当前**实际激活**的连接 UUID（可能是本工具创建之外的连接）。
+/// 返回 Ok(None) = 该接口没有 active 连接；Err = 无法判断（NM 不可用等）。
+fn nm_active_uuid(env: &mut dyn Env, dev: &str) -> Result<Option<String>, String> {
+    let out = env.run(
+        "nmcli",
+        &["-t", "-f", "UUID,NAME,TYPE,DEVICE", "con", "show", "--active"],
+    );
+    if !out.ok {
+        return Err(format!(
+            "`nmcli -t -f UUID,NAME,TYPE,DEVICE con show --active` failed{}; 无法确认 {} 当前活跃连接",
+            out.detail(),
+            dev
+        ));
+    }
+    for line in out.stdout.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let f = split_terse(line);
+        // UUID:NAME:TYPE:DEVICE
+        if f.len() >= 4 && f[3] == dev {
+            return Ok(Some(f[0].clone()));
+        }
+    }
+    Ok(None)
+}
+
+/// 查询连接绑定的接口名；查不到（命令失败/未设置）返回 None
+fn nm_ifname_of(env: &mut dyn Env, uuid: &str) -> Option<String> {
+    let out = env.run(
+        "nmcli",
+        &["-g", "connection.interface-name", "con", "show", uuid],
+    );
+    if !out.ok {
+        return None;
+    }
+    for line in out.stdout.lines() {
+        let l = line.trim();
+        if l.is_empty() {
+            continue;
+        }
+        let v = l
+            .strip_prefix("connection.interface-name:")
+            .unwrap_or(l)
+            .trim();
+        if !v.is_empty() {
+            return Some(v.to_string());
+        }
+    }
+    None
+}
+
+fn nmcli_render(cfg: &Config, allocated: &mut HashMap<String, u32>) -> Vec<String> {
     let con_name = format!("static-{}", &cfg.net_device);
     let mut args: Vec<String> = vec![
-        "con".into(), "add".into(), "type".into(), "ethernet".into(),
-        "ifname".into(), cfg.net_device.clone().into(),
-        "con-name".into(), con_name.clone().into(),
-        "connection.autoconnect-priority".into(), "10".into(),
+        "con".into(),
+        "add".into(),
+        "type".into(),
+        "ethernet".into(),
+        "ifname".into(),
+        cfg.net_device.clone().into(),
+        "con-name".into(),
+        con_name.clone().into(),
+        "connection.autoconnect-priority".into(),
+        "10".into(),
     ];
 
     if let Some(v4f) = &cfg.v4 {
@@ -1184,7 +1524,11 @@ fn nmcli_render(cfg: &Config, allocated: &mut std::collections::HashMap<String, 
                 args.push(v4f.dns.join(","));
             }
         } else if !v4f.addrs.is_empty() {
-            let addrs: Vec<String> = v4f.addrs.iter().map(|(a, p)| format!("{}/{}", a, p)).collect();
+            let addrs: Vec<String> = v4f
+                .addrs
+                .iter()
+                .map(|(a, p)| format!("{}/{}", a, p))
+                .collect();
             args.push("ipv4.addresses".into());
             args.push(addrs.join(","));
             args.push("ipv4.method".into());
@@ -1210,7 +1554,11 @@ fn nmcli_render(cfg: &Config, allocated: &mut std::collections::HashMap<String, 
                 args.push(v6f.dns.join(","));
             }
         } else if !v6f.addrs.is_empty() {
-            let addrs: Vec<String> = v6f.addrs.iter().map(|(a, p)| format!("{}/{}", a, p)).collect();
+            let addrs: Vec<String> = v6f
+                .addrs
+                .iter()
+                .map(|(a, p)| format!("{}/{}", a, p))
+                .collect();
             args.push("ipv6.addresses".into());
             args.push(addrs.join(","));
             args.push("ipv6.method".into());
@@ -1237,17 +1585,21 @@ fn nmcli_render(cfg: &Config, allocated: &mut std::collections::HashMap<String, 
     }
     // A4:路由 table=表名 → 数字 id
     if !cfg.routes.is_empty() {
-        let entries: Vec<String> = cfg.routes.iter().map(|r| {
-            let mut e = format!("{}/{}", r.to, r.to_prefix);
-            if let Some(via) = &r.via {
-                e.push_str(&format!(" {}", via));
-            }
-            if let Some(t) = &r.table {
-                let (tid, _) = resolve_table_id(t, allocated);
-                e.push_str(&format!(" table={}", tid));
-            }
-            e
-        }).collect();
+        let entries: Vec<String> = cfg
+            .routes
+            .iter()
+            .map(|r| {
+                let mut e = format!("{}/{}", r.to, r.to_prefix);
+                if let Some(via) = &r.via {
+                    e.push_str(&format!(" {}", via));
+                }
+                if let Some(t) = &r.table {
+                    let (tid, _) = resolve_table_id(t, allocated);
+                    e.push_str(&format!(" table={}", tid));
+                }
+                e
+            })
+            .collect();
         args.push("ipv4.routes".into());
         args.push(entries.join(","));
     }
@@ -1257,13 +1609,18 @@ fn nmcli_render(cfg: &Config, allocated: &mut std::collections::HashMap<String, 
         let mut prio = 32760u32;
         for p in &cfg.policies {
             let t = p.table.as_deref().unwrap_or("");
-            if t.is_empty() { continue; }
+            if t.is_empty() {
+                continue;
+            }
             let tid = match t.parse::<u32>() {
                 Ok(n) => n,
                 Err(_) => {
                     let (id, alloced) = resolve_table_id(t, allocated);
                     if alloced {
-                        eprintln!("[INFO] nmcli: auto-assigned table id {} for name '{}'", id, t);
+                        eprintln!(
+                            "[INFO] nmcli: auto-assigned table id {} for name '{}'",
+                            id, t
+                        );
                     } else {
                         eprintln!("[INFO] nmcli: resolved table name '{}' → id {}", t, id);
                     }
@@ -1279,7 +1636,9 @@ fn nmcli_render(cfg: &Config, allocated: &mut std::collections::HashMap<String, 
             }
             rule.push_str(&format!(" table {}", tid));
             rules.push(rule);
-            if prio > 100 { prio -= 1; }
+            if prio > 100 {
+                prio -= 1;
+            }
         }
         if !rules.is_empty() {
             args.push("ipv4.routing-rules".into());
@@ -1289,46 +1648,232 @@ fn nmcli_render(cfg: &Config, allocated: &mut std::collections::HashMap<String, 
     args
 }
 
-fn configure_with_nmcli(cfg: &Config) {
-    let con_name = format!("static-{}", &cfg.net_device);
-    // 先建新连接;成功后再删旧连接,避免 add 失败时旧配置已丢
-    let initial = load_rt_tables();
-    let mut allocated = initial.clone();
-    if let Some(v4f) = &cfg.v4 {
-        if v4f.is_dhcp || (!v4f.addrs.is_empty() && v4f.gateway.as_deref().map(|g| !g.is_empty()).unwrap_or(false)) {
-            warn_extra_routes(&cfg.net_device);
+/// NM 后端：以 UUID 明确区分新旧 profile，并显式跟踪/恢复**实际活跃**连接。
+///
+/// NM 要求 con-name 唯一，因此若按最终名 `static-<dev>` 直接 add，会与旧 profile 冲突；
+/// 而先删旧 profile 又违背“任何失败都不丢旧配置”。因此：
+///   1. 新 profile 先以临时名 `static-<dev>.bmip-new` 创建；
+///   2. 用去程/回程两次 `con show` 的 UUID 差集确定新连接，按 UUID 激活；
+///   3. 激活成功后按 UUID 删除本工具旧 profile，再把新连接改名为最终名。
+///
+/// 关键点（验收指出的两个坑）：
+/// - **记录原 active UUID**：`con up <新>` 会把该设备上原 active 连接踢下线，
+///   因此失败时必须按 UUID 把原连接重新激活，仅仅“保住 profile”不等于恢复连通性。
+///   原 active 连接可能是非托管连接（如 `Wired connection 1`），也必须原样恢复。
+/// - **不预先删除可能 active 的临时 profile**：上一轮若 `con up` 成功但改名失败，
+///   残留的 `.bmip-new` 恰恰是当前唯一可用连接；重跑时先删它会在 add/up 失败后断网。
+///   改为只用 `con modify connection.id` 把它改名让位，绝不删除。
+
+/// 把设备上的原活跃连接重新激活，用于失败回退。返回给人看的说明。
+fn nm_restore_active(env: &mut dyn Env, original: Option<&str>) -> String {
+    let Some(uuid) = original else {
+        // 原来就没有 active 连接：不去激活任何历史 profile（那会凭空改配置）
+        return "; 该设备原本没有活跃连接，未激活任何既有 profile".to_string();
+    };
+    let r = env.run("nmcli", &["con", "up", uuid]);
+    if r.ok {
+        format!("; re-activated previous active connection {}", uuid)
+    } else {
+        format!(
+            "; FAILED to re-activate previous active connection {}{} — 该接口可能已断网，请手工 `nmcli con up {}`",
+            uuid,
+            r.detail(),
+            uuid
+        )
+    }
+}
+
+fn configure_with_nmcli(cfg: &Config, env: &mut dyn Env) -> Result<(), String> {
+    let con_name = format!("static-{}", cfg.net_device);
+    let tmp_name = format!("{}.bmip-new", con_name);
+    let dev = cfg.net_device.clone();
+
+    // 1) 前置准备（无副作用）：现状查询失败就不动配置
+    warn_extra_routes(env, cfg);
+    let before = nm_connections(env)?;
+    // 原活跃连接：可能是本工具 profile，也可能是非托管连接。失败的唯一补救依据。
+    let active_before = nm_active_uuid(env, &dev)?;
+
+    // 本工具的旧连接 = 名称精确等于 static-<dev> 且接口名确为本设备。
+    // 不按模糊/前缀同名删除，也不碰其它接口或非本工具创建的 profile。
+    let mut old_managed: Vec<String> = Vec::new();
+    for c in &before {
+        if c.name != con_name {
+            continue;
+        }
+        match nm_ifname_of(env, &c.uuid) {
+            Some(ifname) if ifname == dev => old_managed.push(c.uuid.clone()),
+            Some(other) => env.say(&format!(
+                "[WARNING] connection '{}' (uuid {}) has this tool's name but is bound to '{}', not '{}'; keeping it untouched",
+                c.name, c.uuid, other, dev
+            )),
+            None => env.say(&format!(
+                "[WARNING] cannot verify interface of connection '{}' (uuid {}); keeping it untouched to avoid breaking other interfaces",
+                c.name, c.uuid
+            )),
         }
     }
-    let add_args = nmcli_render(cfg, &mut allocated);
 
-    let add_ok = match Command::new("nmcli").args(&add_args).output() {
-        Ok(o) => {
-            if !o.status.success() {
-                let err = String::from_utf8_lossy(&o.stderr);
-                eprintln!("[ERROR] Failed to add nmcli connection '{}': {}", con_name, err.trim_end());
-                false
-            } else {
-                true
+    // 上次运行中断/改名失败留下的临时 profile：
+    // - 若它正是当前 active 连接 → 绝不能删（删了立刻断网）；只能改名让位。
+    // - 若不是 active → 直接删除是安全的。
+    let mut leftover_tmp: Option<String> = None;
+    for c in &before {
+        if c.name != tmp_name || nm_ifname_of(env, &c.uuid).as_deref() != Some(dev.as_str()) {
+            continue;
+        }
+        if active_before.as_deref() == Some(c.uuid.as_str()) {
+            // 保住这条连接：改名让出临时名，下一轮它就会被当作旧 profile 正常替换
+            let ren = env.run(
+                "nmcli",
+                &["con", "modify", c.uuid.as_str(), "connection.id", con_name.as_str()],
+            );
+            if !ren.ok {
+                return Err(format!(
+                    "leftover temporary profile '{}' ({}) is currently ACTIVE on {}; it must be renamed (never deleted) before creating a new profile, but `nmcli con modify` failed{}; nothing was changed",
+                    tmp_name,
+                    c.uuid,
+                    dev,
+                    ren.detail()
+                ));
+            }
+            env.say(&format!(
+                "[INFO] left over active profile {} renamed from '{}' to '{}' (kept, never deleted)",
+                c.uuid, tmp_name, con_name
+            ));
+            leftover_tmp = Some(c.uuid.clone());
+            old_managed.push(c.uuid.clone());
+        } else {
+            let d = env.run("nmcli", &["con", "delete", c.uuid.as_str()]);
+            if !d.ok {
+                return Err(format!(
+                    "cannot remove inactive leftover temporary profile '{}' ({}){}; nothing was changed",
+                    tmp_name,
+                    c.uuid,
+                    d.detail()
+                ));
             }
         }
+    }
+    let _ = leftover_tmp;
+
+    let initial = load_rt_tables(env);
+    let mut allocated = initial.clone();
+    // 渲染时用最终名生成参数，再把 con-name 换成临时名提交
+    let add_args = nmcli_render(cfg, &mut allocated);
+    let add_args: Vec<String> = add_args
+        .into_iter()
+        .map(|a| if a == con_name { tmp_name.clone() } else { a })
+        .collect();
+    let add_refs: Vec<&str> = add_args.iter().map(String::as_str).collect();
+
+    // 2) 以临时名新建连接；失败立即返回，旧配置与激活状态都未被触碰
+    let add_out = env.run("nmcli", &add_refs);
+    if !add_out.ok {
+        return Err(format!(
+            "nmcli con add '{}' failed{}; no existing connection was touched and the active connection is unchanged",
+            tmp_name,
+            add_out.detail()
+        ));
+    }
+
+    // 3) 用 UUID 差集明确标识本次新建的连接（不按同名猜测）
+    let after = match nm_connections(env) {
+        Ok(v) => v,
         Err(e) => {
-            eprintln!("[ERROR] Could not run nmcli: {}", e);
-            false
+            return Err(format!(
+                "{}; 无法确认新建连接的 UUID，已保留全部既有配置，请手工 `nmcli con show` 检查（临时 profile '{}' 可能残留）",
+                e, tmp_name
+            ));
         }
     };
-    if !add_ok {
-        return;
+    let created: Vec<&NmConn> = after
+        .iter()
+        .filter(|c| !before.iter().any(|b| b.uuid == c.uuid))
+        .collect();
+    if created.len() != 1 {
+        return Err(format!(
+            "cannot identify the newly created connection after `nmcli con add` ({} new uuid(s)); existing connections were left untouched",
+            created.len()
+        ));
     }
-    // con add 成功,此时才删除旧连接(避免旧配置在 add 失败时丢失)
-    let _ = Command::new("nmcli").args(["con", "delete", &con_name]).output();
-    let up_ok = Command::new("nmcli").args(["con", "up", &con_name]).status().map(|s| s.success()).unwrap_or(false);
-    if up_ok {
-        // 仅在连接成功激活后才回写自动分配的表 id,避免 add/up 失败时留下孤儿条目
-        writeback_rt_tables(&allocated, &initial);
-        println!("[INFO] nmcli configuration applied successfully");
-    } else {
-        eprintln!("[ERROR] nmcli connection '{}' added but failed to activate; check `nmcli con up {}`", con_name, con_name);
+    let new_uuid = created[0].uuid.clone();
+
+    // 4) 按 UUID 激活新连接。这一步会把原 active 连接踢下线，所以失败必须把**原 active UUID**
+    //    重新拉起来（而不是只保证 profile 还在）。
+    let up_out = env.run("nmcli", &["con", "up", new_uuid.as_str()]);
+    if !up_out.ok {
+        let del = env.run("nmcli", &["con", "delete", new_uuid.as_str()]);
+        let restore = nm_restore_active(env, active_before.as_deref());
+        let mut msg = format!(
+            "nmcli con up {} failed{}; the new profile was removed and the previous active connection was restored by uuid{}",
+            new_uuid,
+            up_out.detail(),
+            restore
+        );
+        if !del.ok {
+            msg.push_str(&format!(
+                "; additionally the temporary profile {} could not be removed{}",
+                new_uuid,
+                del.detail()
+            ));
+        }
+        return Err(msg);
     }
+
+    // 5) 新连接已激活，才清理本工具的旧托管 profile（按 UUID 逐个删除）
+    for old in &old_managed {
+        if *old == new_uuid {
+            continue;
+        }
+        let d = env.run("nmcli", &["con", "delete", old.as_str()]);
+        if !d.ok {
+            // 非致命：新配置已生效，旧 profile 残留只影响后续同名解析
+            env.say(&format!(
+                "[WARNING] new connection is active, but deleting stale profile {} failed{}; remove it manually with `nmcli con delete {}`",
+                old,
+                d.detail(),
+                old
+            ));
+        }
+    }
+
+    // 6) 把新连接改名为最终名，保证下次运行仍按 static-<dev> 识别。
+    //    失败是非致命的：新连接已 active，且残留的 .bmip-new 在下一轮会被“改名而非删除”接住。
+    let ren = env.run(
+        "nmcli",
+        &[
+            "con",
+            "modify",
+            new_uuid.as_str(),
+            "connection.id",
+            con_name.as_str(),
+        ],
+    );
+    if !ren.ok {
+        env.say(&format!(
+            "[WARNING] connection is active but renaming {} to '{}' failed{}; rename it manually with `nmcli con modify {} connection.id {}`",
+            new_uuid,
+            con_name,
+            ren.detail(),
+            new_uuid,
+            con_name
+        ));
+    }
+
+    // 7) 表 id 回写。非致命：连接已按数字 id 生效，回写只影响后续复用同一表名。
+    if let Err(e) = writeback_rt_tables(env, &allocated, &initial) {
+        env.say(&format!(
+            "[WARNING] {}; connection is active, only the table-name mapping was not persisted",
+            e
+        ));
+    }
+
+    env.say(&format!(
+        "[INFO] nmcli configuration applied successfully (connection uuid {})",
+        new_uuid
+    ));
+    Ok(())
 }
 
 // ============ systemd-networkd 后端 ============
@@ -1375,10 +1920,14 @@ fn networkd_render(cfg: &Config) -> (String, String) {
     }
     let mut dns_list = Vec::new();
     if let Some(v4f) = &cfg.v4 {
-        for d in &v4f.dns { dns_list.push(d.clone()); }
+        for d in &v4f.dns {
+            dns_list.push(d.clone());
+        }
     }
     if let Some(v6f) = &cfg.v6 {
-        for d in &v6f.dns { dns_list.push(d.clone()); }
+        for d in &v6f.dns {
+            dns_list.push(d.clone());
+        }
     }
     if !dns_list.is_empty() {
         s.push_str(&format!("DNS={}\n", dns_list.join(" ")));
@@ -1409,71 +1958,99 @@ fn networkd_render(cfg: &Config) -> (String, String) {
     (file_path, s)
 }
 
-fn configure_with_networkd(cfg: &Config) {
-    // C5:与 netplan/nmcli/ip 对齐,多默认网关时告警
-    if let Some(v4f) = &cfg.v4 {
-        if !v4f.is_dhcp {
-            if let Some(gw) = &v4f.gateway {
-                if !gw.is_empty() {
-                    warn_extra_routes(&cfg.net_device);
-                }
-            }
-        }
+/// 重新加载并让配置生效。
+///
+/// 按 systemd 官方 networkctl(1) 文档，`reconfigure DEVICE…` **不会**重新读取
+/// `.network`/`.netdev` 文件——配置变更必须先 `networkctl reload`。因此 reload
+/// 是关键步骤，失败时即使随后的 reconfigure 返回 0 也不能认为配置已生效。
+fn networkd_apply(env: &mut dyn Env, dev: &str) -> Result<(), String> {
+    let reload = env.run("networkctl", &["reload"]);
+    if !reload.ok {
+        return Err(format!(
+            "`networkctl reload` failed{}; new configuration was NOT loaded (reconfigure alone does not re-read .network files)",
+            reload.detail()
+        ));
     }
+    let rc = env.run("networkctl", &["reconfigure", dev]);
+    if rc.ok {
+        return Ok(());
+    }
+    // networkctl 不可用时回退重启 networkd（历史行为，保留）
+    if !env.which("networkctl") {
+        env.say("[WARNING] networkctl unavailable, falling back to restart systemd-networkd");
+        return run_checked(env, "systemctl", &["restart", "systemd-networkd"]);
+    }
+    Err(format!(
+        "`networkctl reconfigure {}` failed{}",
+        dev,
+        rc.detail()
+    ))
+}
+
+fn configure_with_networkd(cfg: &Config, env: &mut dyn Env) -> Result<(), String> {
+    // C5:与 netplan/nmcli/ip 对齐,多默认网关时告警
+    warn_extra_routes(env, cfg);
 
     let (file_path, content) = networkd_render(cfg);
-    // 写前备份(与 netplan 后端对齐,失败可回滚)
-    let bak = format!("{}.bm_set_ip.bak", file_path);
-    if let Err(e) = fs::copy(&file_path, &bak) {
-        eprintln!("[WARNING] could not back up {} to {}: {}", file_path, bak, e);
+
+    // 写前快照：明确原文件存在/不存在；读不到就拒绝修改
+    let snap = snapshot(env, &file_path)?;
+    let bak = write_backup(env, &file_path, &snap)?;
+
+    if let Err(e) = env.write(&file_path, &content) {
+        return match restore_snapshot(env, &file_path, &snap) {
+            Ok(()) => Err(format!(
+                "failed to write {}: {}; restored from this run's snapshot",
+                file_path, e
+            )),
+            Err(re) => Err(format!(
+                "failed to write {}: {}; restore also failed: {}",
+                file_path, e, re
+            )),
+        };
     }
-    let write_ok = (|| -> std::io::Result<()> {
-        fs::write(&file_path, &content)
-    })();
-    if let Err(e) = write_ok {
-        eprintln!("[ERROR] Failed to write {}: {}", file_path, e);
-        let _ = fs::copy(&bak, &file_path);
-        std::process::exit(1);
+    env.say(&format!(
+        "[INFO] Created systemd-networkd config at {}{}",
+        file_path,
+        bak.as_deref()
+            .map(|b| format!(" (backup at {})", b))
+            .unwrap_or_default()
+    ));
+
+    if let Err(e) = networkd_apply(env, &cfg.net_device) {
+        let rb = restore_snapshot(env, &file_path, &snap);
+        let reapplied = networkd_apply(env, &cfg.net_device);
+        return match (rb, reapplied) {
+            (Ok(()), Ok(())) => Err(format!(
+                "{}; rolled back {} from this run's snapshot and re-applied",
+                e, file_path
+            )),
+            (Ok(()), Err(e2)) => Err(format!(
+                "{}; rolled back {} but re-apply failed: {}",
+                e, file_path, e2
+            )),
+            (Err(re), _) => Err(format!("{}; rollback failed: {}", e, re)),
+        };
     }
-    println!("[INFO] Created systemd-networkd config at {} (backup at {})", file_path, bak);
-    let _ = Command::new("networkctl").arg("reload").status();
-    let rc = Command::new("networkctl").arg("reconfigure").arg(&cfg.net_device).status();
-    let ok = match rc {
-        Ok(s) => s.success(),
-        Err(_) => {
-            eprintln!("[WARNING] networkctl unavailable, falling back to restart systemd-networkd");
-            Command::new("systemctl").args(["restart", "systemd-networkd"]).status().map(|s| s.success()).unwrap_or(false)
-        }
-    };
-    if ok {
-        println!("[INFO] systemd-networkd configuration applied successfully");
-    } else {
-        eprintln!("[ERROR] Failed to apply systemd-networkd configuration, restoring previous config");
-        let _ = fs::copy(&bak, &file_path);
-        let _ = Command::new("networkctl").arg("reload").status();
-        let _ = Command::new("networkctl").arg("reconfigure").arg(&cfg.net_device).status();
-        std::process::exit(1);
-    }
+    env.say("[INFO] systemd-networkd configuration applied successfully");
+    Ok(())
 }
 
 // ============ ip 兜底后端 ============
 
 /// 返回当前 main 表默认路由所在设备(解析 `ip route show default` 的 `dev X`)
-fn default_route_dev() -> Option<String> {
-    let out = Command::new("ip").args(["route", "show", "default"]).output().ok()?;
-    let s = String::from_utf8_lossy(&out.stdout);
-    for line in s.lines() {
+fn default_route_dev(env: &mut dyn Env) -> Option<String> {
+    let out = env.run("ip", &["route", "show", "default"]);
+    if !out.ok {
+        return None;
+    }
+    for line in out.stdout.lines() {
         if line.starts_with("default ") {
-            let mut dev = None;
             let mut iter = line.split_whitespace();
             while let Some(tok) = iter.next() {
                 if tok == "dev" {
-                    dev = iter.next().map(|x| x.to_string());
-                    break;
+                    return iter.next().map(|x| x.to_string());
                 }
-            }
-            if dev.is_some() {
-                return dev;
             }
         }
     }
@@ -1483,30 +2060,74 @@ fn default_route_dev() -> Option<String> {
 /// 生成 ip 兜底要执行的命令参数序列(纯函数,不执行)
 fn ip_render(cfg: &Config) -> Vec<Vec<String>> {
     let mut cmds: Vec<Vec<String>> = Vec::new();
-    cmds.push(vec!["addr".into(), "flush".into(), "dev".into(), cfg.net_device.clone()]);
-    cmds.push(vec!["link".into(), "set".into(), "dev".into(), cfg.net_device.clone(), "up".into()]);
+    cmds.push(vec![
+        "addr".into(),
+        "flush".into(),
+        "dev".into(),
+        cfg.net_device.clone(),
+    ]);
+    cmds.push(vec![
+        "link".into(),
+        "set".into(),
+        "dev".into(),
+        cfg.net_device.clone(),
+        "up".into(),
+    ]);
     if let Some(v4f) = &cfg.v4 {
         for (a, p) in &v4f.addrs {
-            cmds.push(vec!["addr".into(), "add".into(), format!("{}/{}", a, p), "dev".into(), cfg.net_device.clone()]);
+            cmds.push(vec![
+                "addr".into(),
+                "add".into(),
+                format!("{}/{}", a, p),
+                "dev".into(),
+                cfg.net_device.clone(),
+            ]);
         }
         if let Some(gw) = &v4f.gateway {
             if !gw.is_empty() {
-                cmds.push(vec!["route".into(), "add".into(), "default".into(), "via".into(), gw.clone(), "dev".into(), cfg.net_device.clone()]);
+                cmds.push(vec![
+                    "route".into(),
+                    "add".into(),
+                    "default".into(),
+                    "via".into(),
+                    gw.clone(),
+                    "dev".into(),
+                    cfg.net_device.clone(),
+                ]);
             }
         }
     }
     if let Some(v6f) = &cfg.v6 {
         for (a, p) in &v6f.addrs {
-            cmds.push(vec!["addr".into(), "add".into(), format!("{}/{}", a, p), "dev".into(), cfg.net_device.clone()]);
+            cmds.push(vec![
+                "addr".into(),
+                "add".into(),
+                format!("{}/{}", a, p),
+                "dev".into(),
+                cfg.net_device.clone(),
+            ]);
         }
         if let Some(gw) = &v6f.gateway {
             if !gw.is_empty() {
-                cmds.push(vec!["-6".into(), "route".into(), "add".into(), "default".into(), "via".into(), gw.clone(), "dev".into(), cfg.net_device.clone()]);
+                cmds.push(vec![
+                    "-6".into(),
+                    "route".into(),
+                    "add".into(),
+                    "default".into(),
+                    "via".into(),
+                    gw.clone(),
+                    "dev".into(),
+                    cfg.net_device.clone(),
+                ]);
             }
         }
     }
     for r in &cfg.routes {
-        let mut c: Vec<String> = vec!["route".into(), "add".into(), format!("{}/{}", r.to, r.to_prefix)];
+        let mut c: Vec<String> = vec![
+            "route".into(),
+            "add".into(),
+            format!("{}/{}", r.to, r.to_prefix),
+        ];
         if let Some(via) = &r.via {
             c.push("via".into());
             c.push(via.clone());
@@ -1536,299 +2157,665 @@ fn ip_render(cfg: &Config) -> Vec<Vec<String>> {
             cmds.push(c);
         }
     }
-    cmds.push(vec!["link".into(), "set".into(), "dev".into(), cfg.net_device.clone(), "up".into()]);
+    cmds.push(vec![
+        "link".into(),
+        "set".into(),
+        "dev".into(),
+        cfg.net_device.clone(),
+        "up".into(),
+    ]);
     cmds
 }
 
-fn configure_with_ip(cfg: &Config) {
+fn collect_dns(cfg: &Config) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for fam in [cfg.v4.as_ref(), cfg.v6.as_ref()].into_iter().flatten() {
+        for d in &fam.dns {
+            if !d.is_empty() && !out.contains(d) {
+                out.push(d.clone());
+            }
+        }
+    }
+    out
+}
+
+fn configure_with_ip(cfg: &Config, env: &mut dyn Env) -> Result<(), String> {
     let any_dhcp = cfg.v4.as_ref().map(|f| f.is_dhcp).unwrap_or(false)
         || cfg.v6.as_ref().map(|f| f.is_dhcp).unwrap_or(false);
     if any_dhcp {
-        eprintln!("[ERROR] DHCP is not supported when using manual IP configuration");
-        std::process::exit(1);
+        return Err("DHCP is not supported when using manual IP configuration".into());
     }
 
-    // DNS:ip 兜底无声明式后端,收集 v4/v6 的 DNS 应用之(resolvconf 优先,否则直写 resolv.conf)
-    let mut dns_list: Vec<String> = Vec::new();
-    if let Some(v4f) = &cfg.v4 {
-        for d in &v4f.dns {
-            if !d.is_empty() && !dns_list.contains(d) {
-                dns_list.push(d.clone());
-            }
-        }
-    }
-    if let Some(v6f) = &cfg.v6 {
-        for d in &v6f.dns {
-            if !d.is_empty() && !dns_list.contains(d) {
-                dns_list.push(d.clone());
-            }
-        }
-    }
-    if !dns_list.is_empty() {
-        apply_dns(&dns_list);
-    }
-
-    // C6:保护当前默认路由所在设备(通常是管理口),避免 flush 断 SSH
+    // 1) 管理口保护必须早于任何写入（包含 DNS），否则拒绝时已经产生副作用
     if !cfg.force {
-        if let Some(dev) = default_route_dev() {
+        if let Some(dev) = default_route_dev(env) {
             if dev == cfg.net_device {
-                eprintln!(
-                    "[ERROR] refusing to flush {}: it carries the default route (likely management iface); use --force to override",
+                return Err(format!(
+                    "refusing to flush {}: it carries the default route (likely management iface); use --force to override",
                     cfg.net_device
-                );
-                std::process::exit(1);
+                ));
             }
         }
     }
 
     // C5:与 netplan/networkd/nmcli 对齐,多默认网关时告警
-    if let Some(v4f) = &cfg.v4 {
-        if !v4f.is_dhcp {
-            if let Some(gw) = &v4f.gateway {
-                if !gw.is_empty() {
-                    warn_extra_routes(&cfg.net_device);
-                }
+    warn_extra_routes(env, cfg);
+
+    // 2) 执行 ip 命令。flush/link 失败立即中止（设备已不可用），
+    //    地址/路由/规则失败继续跑完收集全部失败后再统一非零退出。
+    let cmds = ip_render(cfg);
+    let dev = cfg.net_device.clone();
+    let mut failures: Vec<String> = Vec::new();
+    let mut addr_ok = 0usize;
+    let mut addr_total = 0usize;
+
+    for c in &cmds {
+        let refs: Vec<&str> = c.iter().map(String::as_str).collect();
+        let is_flush = c.len() >= 2 && c[0] == "addr" && c[1] == "flush";
+        let is_link = c[0] == "link";
+        let is_addr_add = c.len() >= 2 && c[0] == "addr" && c[1] == "add";
+
+        let out = env.run("ip", &refs);
+        if is_addr_add {
+            addr_total += 1;
+        }
+        if out.ok {
+            if is_addr_add {
+                addr_ok += 1;
+            }
+            continue;
+        }
+        let msg = format!("[ERROR] `ip {}` failed{}", c.join(" "), out.detail());
+        if is_flush || is_link {
+            // 设备基础状态都没建立起来，继续执行没有意义
+            return Err(format!("`ip {}` failed{}", c.join(" "), out.detail()));
+        }
+        failures.push(msg);
+    }
+
+    if addr_total > 0 && addr_ok < addr_total {
+        failures.push(format!(
+            "[ERROR] only {}/{} address(es) were added to {}",
+            addr_ok, addr_total, dev
+        ));
+    }
+
+    // 3) DNS 最后应用：地址配置自身失败时不再改动 DNS，避免把解析指向未配置的链路
+    if failures.is_empty() {
+        let dns_list = collect_dns(cfg);
+        if !dns_list.is_empty() {
+            if let Err(e) = apply_dns(env, &dev, &dns_list) {
+                failures.push(format!("[ERROR] {}", e));
             }
         }
     }
 
-    let run = |args: &[String]| -> bool {
-        let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-        let out = Command::new("ip").args(&refs).output();
-        match out {
-            Ok(o) => {
-                if !o.status.success() {
-                    let err = String::from_utf8_lossy(&o.stderr);
-                    eprintln!("[WARNING] `ip {}` failed: {}", args.join(" "), err.trim_end());
-                    false
-                } else {
-                    true
-                }
-            }
-            Err(_) => {
-                eprintln!("[ERROR] Could not run `ip {}`", args.join(" "));
-                false
-            }
+    if !failures.is_empty() {
+        return Err(failures.join("; "));
+    }
+
+    env.say(&format!(
+        "[INFO] Manual IP configuration applied (addresses: {}/{})",
+        addr_ok, addr_total
+    ));
+    Ok(())
+}
+
+/// 应用 DNS:优先 resolvconf(写完整 stdin 并检查退出码),其次 resolvectl(真实接口名 + 一次传全部),
+/// 最后回退直写 /etc/resolv.conf(写前快照,失败传播)。
+fn apply_dns(env: &mut dyn Env, dev: &str, servers: &[String]) -> Result<(), String> {
+    let body: String = servers
+        .iter()
+        .map(|s| format!("nameserver {}\n", s))
+        .collect();
+
+    if env.which("resolvconf") {
+        // 完整 stdin + 等待退出：resolvconf 从 stdin 读 nameserver
+        let out = env.run_stdin("resolvconf", &["-a", dev], &body);
+        if !out.ok {
+            return Err(format!("`resolvconf -a {}` failed{}", dev, out.detail()));
+        }
+        env.say(&format!(
+            "[INFO] Applied {} DNS server(s) via resolvconf on {}",
+            servers.len(),
+            dev
+        ));
+        return Ok(());
+    }
+
+    if env.which("resolvectl") {
+        // 真实接口名 + 一次性传入全部 DNS（逐条调用会互相覆盖）
+        let mut args: Vec<&str> = vec!["dns", dev];
+        for s in servers {
+            args.push(s.as_str());
+        }
+        let out = env.run("resolvectl", &args);
+        if !out.ok {
+            return Err(format!(
+                "`resolvectl dns {} {}` failed{}",
+                dev,
+                servers.join(" "),
+                out.detail()
+            ));
+        }
+        env.say(&format!(
+            "[INFO] Applied {} DNS server(s) via resolvectl on {}",
+            servers.len(),
+            dev
+        ));
+        return Ok(());
+    }
+
+    // 文件回退
+    let path = "/etc/resolv.conf";
+    let snap = snapshot(env, path)?;
+    let bak = write_backup(env, path, &snap)?;
+    if let Err(e) = env.write(path, &body) {
+        let rb = restore_snapshot(env, path, &snap);
+        return Err(match rb {
+            Ok(()) => format!("failed to write {}: {}", path, e),
+            Err(re) => format!(
+                "failed to write {}: {}; restore also failed: {}",
+                path, e, re
+            ),
+        });
+    }
+    env.say(&format!(
+        "[INFO] Wrote {}{} ({} DNS server(s))",
+        path,
+        bak.as_deref()
+            .map(|b| format!(" (backup at {})", b))
+            .unwrap_or_default(),
+        servers.len()
+    ));
+    Ok(())
+}
+
+// ============ 后端分发 ============
+
+fn dispatch(cfg: &Config, nm: NetManager, env: &mut dyn Env) -> Result<(), String> {
+    match nm {
+        NetManager::Netplan => {
+            env.say("[INFO] Using netplan for network configuration");
+            configure_with_netplan(cfg, env)
+        }
+        NetManager::NetworkManager => {
+            env.say("[INFO] Using NetworkManager (nmcli) for network configuration");
+            configure_with_nmcli(cfg, env)
+        }
+        NetManager::SystemdNetworkd => {
+            env.say("[INFO] Using systemd-networkd for network configuration");
+            configure_with_networkd(cfg, env)
+        }
+        NetManager::Unknown => {
+            // 原来是 [ERROR] 但仍继续并返回 0；改成 WARNING，失败一律走非零退出
+            env.say("[WARNING] Could not detect a supported network manager! Trying to configure IP manually using ip command");
+            configure_with_ip(cfg, env)
+        }
+    }
+}
+
+fn main() {
+    // 版本信息固定为执行首行（MYS-809 发版规范：可执行文件首行即版本号）。
+    // GIT_TAG_COMMIT 由 build.rs 注入（release.sh 传 BM_SET_IP_GIT_VERSION，回退
+    // .git_version 文件），见 build.rs。
+    println!("bm_set_ip version: {}", env!("GIT_TAG_COMMIT"));
+
+    let cfg = match Config::parse() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            print_usage();
+            exit(1);
         }
     };
 
-    let cmds = ip_render(cfg);
-    // 统计地址成功数(地址命令在 flush/link 之后、最后 link 之前)
-    let mut addr_ok = 0usize;
-    let mut addr_total = 0usize;
-    for c in &cmds {
-        if c.len() >= 2 && c[0] == "addr" && c[1] == "add" {
-            addr_total += 1;
-            if run(c) {
-                addr_ok += 1;
-            }
-        } else if c.len() >= 3 && c[0] == "route" && c[1] == "add" && c[2] == "default" {
-            if !run(c) {
-                eprintln!("[WARNING] default route not added (another default route may exist in table main; use policy routing for multi-gateway)");
-            }
-        } else {
-            run(c);
-        }
+    if cfg.dry_run {
+        print_analyzed_config(&cfg);
+        return;
     }
-    if addr_total > 0 && addr_ok == 0 {
-        eprintln!("[ERROR] Failed to add any of the {} address(es) to {}", addr_total, cfg.net_device);
+
+    if !is_root() {
+        let exe = match env::current_exe() {
+            Ok(e) => e,
+            Err(e) => {
+                eprintln!("[ERROR] cannot resolve current executable: {}", e);
+                exit(1);
+            }
+        };
+        let argv: Vec<String> = env::args().skip(1).collect();
+        let status = match Command::new("sudo").arg(exe).args(&argv).status() {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("[ERROR] failed to execute sudo: {}", e);
+                exit(1);
+            }
+        };
+        exit(status.code().unwrap_or(1));
     }
-    println!("[INFO] Manual IP configuration applied (addresses: {}/{})", addr_ok, addr_total);
+
+    let mut net_env = OsEnv::new();
+    let net_manager = detect_net_manager(&mut net_env);
+    if let Err(e) = dispatch(&cfg, net_manager, &mut net_env) {
+        eprintln!("[ERROR] {}", e);
+        exit(1);
+    }
 }
 
-/// 应用 DNS:优先 resolvconf(resolvconf/resolvectl 二选一),否则直写 /etc/resolv.conf(先备份)。
-fn apply_dns(servers: &[String]) {
-    let nameserver_lines: Vec<String> = servers.iter().map(|s| format!("nameserver {}", s)).collect();
-    if is_command_exists("resolvconf") {
-        let _ = Command::new("resolvconf").args(["-a", "bm_set_ip"]).stdin(std::process::Stdio::piped()).spawn();
-    } else if is_command_exists("resolvectl") {
-        for s in servers {
-            let _ = Command::new("resolvectl").args(["dns", "bm_set_ip", s]).status();
-        }
-    } else {
-        let path = "/etc/resolv.conf";
-        let bak = format!("{}.bm_set_ip.bak", path);
-        let _ = fs::copy(path, &bak);
-        match fs::write(path, nameserver_lines.join("\n") + "\n") {
-            Ok(_) => println!("[INFO] Wrote {} (backup at {})", path, bak),
-            Err(e) => eprintln!("[ERROR] Failed to write {}: {} (previous file kept at {})", path, e, bak),
-        }
-    }
-}
+// ============ 测试：stateful fake 后端 ============
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet, VecDeque};
 
-    fn cfg_ip(routes: Vec<Route>, policies: Vec<Policy>, force: bool) -> Config {
+    /// 有状态的 NM 连接模型（uuid 独立于名称，用于验证“按 UUID 区分新旧”）
+    #[derive(Clone, Debug)]
+    struct Conn {
+        uuid: String,
+        name: String,
+        con_type: String,
+        ifname: String,
+        /// 该连接当前是否处于 active 状态（同一接口至多一个）
+        active: bool,
+    }
+
+    struct Fake {
+        files: HashMap<String, String>,
+        dirs: HashMap<String, Vec<String>>,
+        unreadable: HashSet<String>,
+        unwritable: HashSet<String>,
+        programs: HashSet<String>,
+        nm: Vec<Conn>,
+        nm_next: u32,
+        /// 失败开关："add" / "show" / "up" / "up:<uuid>" / "delete:<uuid>" /
+        /// "modify" / "modify:<uuid>" / "active"
+        /// 另有 on_up_fail_deactivate_first：新连接 up 失败前已把旧链路切掉（真实 NM 行为）
+        nm_fail: HashSet<String>,
+        /// ip 命令失败前缀（如 "addr flush"）：命中即返回非零
+        ip_fail: Vec<String>,
+        ip_default_route: String,
+        netplan_apply: VecDeque<Out>,
+        netctl_reload: VecDeque<Out>,
+        netctl_reconfigure: VecDeque<Out>,
+        resolvconf: VecDeque<Out>,
+        resolvectl: VecDeque<Out>,
+        calls: Vec<String>,
+        stdin_log: Vec<(String, String)>,
+        said: Vec<String>,
+    }
+
+    impl Fake {
+        fn new() -> Self {
+            Fake {
+                files: HashMap::new(),
+                dirs: HashMap::new(),
+                unreadable: HashSet::new(),
+                unwritable: HashSet::new(),
+                programs: HashSet::new(),
+                nm: Vec::new(),
+                nm_next: 0,
+                nm_fail: HashSet::new(),
+                ip_fail: Vec::new(),
+                ip_default_route: "default via 192.0.2.1 dev eth9".to_string(),
+                netplan_apply: VecDeque::new(),
+                netctl_reload: VecDeque::new(),
+                netctl_reconfigure: VecDeque::new(),
+                resolvconf: VecDeque::new(),
+                resolvectl: VecDeque::new(),
+                calls: Vec::new(),
+                stdin_log: Vec::new(),
+                said: Vec::new(),
+            }
+        }
+
+        fn file(mut self, path: &str, content: &str) -> Self {
+            self.files.insert(path.to_string(), content.to_string());
+            self
+        }
+
+        fn prog(mut self, name: &str) -> Self {
+            self.programs.insert(name.to_string());
+            self
+        }
+
+        fn conn(mut self, name: &str, ifname: &str) -> Self {
+            let uuid = format!("uuid-legacy-{}", name);
+            self.nm.push(Conn {
+                uuid,
+                name: name.to_string(),
+                con_type: "802-3-ethernet".to_string(),
+                ifname: ifname.to_string(),
+                active: false,
+            });
+            self
+        }
+
+        /// 让某个连接成为该接口的 active 连接（隐含把同接口其它连接置为 inactive）
+        fn activated(mut self, uuid: &str) -> Self {
+            let ifname = self.nm.iter().find(|c| c.uuid == uuid).map(|c| c.ifname.clone());
+            if let Some(dev) = ifname {
+                for c in self.nm.iter_mut() {
+                    if c.ifname == dev {
+                        c.active = c.uuid == uuid;
+                    }
+                }
+            }
+            self
+        }
+
+        fn active_uuid_on(&self, dev: &str) -> Option<String> {
+            self.nm
+                .iter()
+                .find(|c| c.ifname == dev && c.active)
+                .map(|c| c.uuid.clone())
+        }
+
+        fn calls_of(&self, prefix: &str) -> Vec<String> {
+            self.calls
+                .iter()
+                .filter(|c| c.starts_with(prefix))
+                .cloned()
+                .collect()
+        }
+
+        /// 所有会改动系统的外部命令（用于断言“拒绝时零副作用”）
+        fn mutating_calls(&self) -> Vec<String> {
+            self.calls
+                .iter()
+                .filter(|c| {
+                    c.starts_with("ip ") && !c.contains("route show")
+                        || c.starts_with("nmcli con add")
+                        || c.starts_with("nmcli con up")
+                        || c.starts_with("nmcli con delete")
+                        || c.starts_with("netplan apply")
+                        || c.starts_with("networkctl reconfigure")
+                        || c.starts_with("resolvconf")
+                        || c.starts_with("resolvectl")
+                })
+                .cloned()
+                .collect()
+        }
+
+        fn said(&self) -> String {
+            self.said.join("\n")
+        }
+
+        fn conn_by_uuid(&self, uuid: &str) -> Option<&Conn> {
+            self.nm.iter().find(|c| c.uuid == uuid)
+        }
+    }
+
+    fn terse_escape(s: &str) -> String {
+        s.replace('\\', "\\\\").replace(':', "\\:")
+    }
+
+    impl Env for Fake {
+        fn which(&mut self, program: &str) -> bool {
+            self.programs.contains(program)
+        }
+
+        fn run(&mut self, program: &str, args: &[&str]) -> Out {
+            self.calls.push(format!("{} {}", program, args.join(" ")));
+            match program {
+                "nmcli" => self.nmcli(args),
+                "ip" => {
+                    let joined = args.join(" ");
+                    if args == ["route", "show", "default"] {
+                        return Out::ok_with(self.ip_default_route.clone());
+                    }
+                    if self.ip_fail.iter().any(|p| joined.starts_with(p.as_str())) {
+                        return Out::fail_with("RTNETLINK answers: Operation not permitted");
+                    }
+                    Out::ok_with("")
+                }
+                "netplan" => self
+                    .netplan_apply
+                    .pop_front()
+                    .unwrap_or_else(|| Out::ok_with("")),
+                "networkctl" => match args.first().copied() {
+                    Some("reload") => self
+                        .netctl_reload
+                        .pop_front()
+                        .unwrap_or_else(|| Out::ok_with("")),
+                    Some("reconfigure") => self
+                        .netctl_reconfigure
+                        .pop_front()
+                        .unwrap_or_else(|| Out::ok_with("")),
+                    _ => Out::ok_with(""),
+                },
+                "resolvconf" => self
+                    .resolvconf
+                    .pop_front()
+                    .unwrap_or_else(|| Out::ok_with("")),
+                "resolvectl" => self
+                    .resolvectl
+                    .pop_front()
+                    .unwrap_or_else(|| Out::ok_with("")),
+                _ => Out::ok_with(""),
+            }
+        }
+
+        fn run_stdin(&mut self, program: &str, args: &[&str], input: &str) -> Out {
+            self.calls
+                .push(format!("{} {} <stdin>", program, args.join(" ")));
+            self.stdin_log
+                .push((format!("{} {}", program, args.join(" ")), input.to_string()));
+            match program {
+                "resolvconf" => self
+                    .resolvconf
+                    .pop_front()
+                    .unwrap_or_else(|| Out::ok_with("")),
+                "resolvectl" => self
+                    .resolvectl
+                    .pop_front()
+                    .unwrap_or_else(|| Out::ok_with("")),
+                _ => Out::ok_with(""),
+            }
+        }
+
+        fn read(&mut self, path: &str) -> io::Result<String> {
+            if self.unreadable.contains(path) {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "permission denied",
+                ));
+            }
+            self.files
+                .get(path)
+                .cloned()
+                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no such file"))
+        }
+
+        fn exists(&mut self, path: &str) -> bool {
+            self.files.contains_key(path)
+        }
+
+        fn write(&mut self, path: &str, content: &str) -> io::Result<()> {
+            if self.unwritable.contains(path) {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "read-only file",
+                ));
+            }
+            self.files.insert(path.to_string(), content.to_string());
+            Ok(())
+        }
+
+        fn remove(&mut self, path: &str) -> io::Result<()> {
+            match self.files.remove(path) {
+                Some(_) => Ok(()),
+                None => Ok(()),
+            }
+        }
+
+        fn list_files(&mut self, dir: &str) -> Vec<String> {
+            self.dirs.get(dir).cloned().unwrap_or_default()
+        }
+
+        fn say(&mut self, msg: &str) {
+            self.said.push(msg.to_string());
+        }
+    }
+
+    impl Fake {
+        fn nmcli(&mut self, args: &[&str]) -> Out {
+            // nmcli -t -f UUID,NAME,TYPE con show
+            if args.len() >= 5 && args[0] == "-t" {
+                if self.nm_fail.contains("show") {
+                    return Out::fail_with("Error: NetworkManager is not running");
+                }
+                let active_only = args.iter().any(|a| *a == "--active");
+                if active_only && self.nm_fail.contains("active") {
+                    return Out::fail_with("Error: NetworkManager is not running");
+                }
+                let mut s = String::new();
+                // -f 的字段清单是单个参数，如 "UUID,NAME,TYPE,DEVICE"
+                let want_device = args.iter().any(|a| a.split(',').any(|f| f == "DEVICE"));
+                for c in &self.nm {
+                    if active_only && !c.active {
+                        continue;
+                    }
+                    let mut line = format!(
+                        "{}:{}:{}",
+                        terse_escape(&c.uuid),
+                        terse_escape(&c.name),
+                        terse_escape(&c.con_type)
+                    );
+                    if want_device {
+                        // 未激活的连接 DEVICE 字段为空
+                        line.push(':');
+                        if c.active {
+                            line.push_str(&terse_escape(&c.ifname));
+                        }
+                    }
+                    s.push_str(&line);
+                    s.push('\n');
+                }
+                return Out::ok_with(s);
+            }
+            // nmcli -g connection.interface-name con show <uuid>
+            if args.len() >= 5 && args[0] == "-g" {
+                let target = args[4];
+                return match self
+                    .nm
+                    .iter()
+                    .find(|c| c.uuid == target || c.name == target)
+                {
+                    Some(c) => Out::ok_with(format!("connection.interface-name:{}\n", c.ifname)),
+                    None => Out::fail_with("Error: unknown connection"),
+                };
+            }
+            // nmcli con show <uuid>  —— 完整 profile dump（恢复用）
+            if args.len() == 3 && args[0] == "con" && args[1] == "show" {
+                let target = args[2];
+                return match self
+                    .nm
+                    .iter()
+                    .find(|c| c.uuid == target || c.name == target)
+                {
+                    Some(c) => Out::ok_with(format!(
+                        "connection.id:                          {}\nconnection.uuid:                        {}\nconnection.type:                        802-3-ethernet\nconnection.interface-name:              {}\nipv4.method:                            manual\n",
+                        c.name, c.uuid, c.ifname
+                    )),
+                    None => Out::fail_with("Error: unknown connection"),
+                };
+            }
+            if args.len() >= 2 && args[0] == "con" && args[1] == "add" {
+                if self.nm_fail.contains("add") {
+                    return Out::fail_with("Error: failed to create connection: invalid property");
+                }
+                let mut ifname = String::new();
+                let mut name = String::new();
+                let mut i = 2;
+                while i + 1 < args.len() {
+                    match args[i] {
+                        "ifname" => ifname = args[i + 1].to_string(),
+                        "con-name" => name = args[i + 1].to_string(),
+                        _ => {}
+                    }
+                    i += 1;
+                }
+                self.nm_next += 1;
+                self.nm.push(Conn {
+                    uuid: format!("uuid-new-{}", self.nm_next),
+                    name,
+                    con_type: "802-3-ethernet".to_string(),
+                    ifname,
+                    active: false,
+                });
+                return Out::ok_with("Connection 'x' created");
+            }
+            if args.len() >= 3 && args[0] == "con" && args[1] == "up" {
+                let target = args[2];
+                // 真实 NM 在尝试激活新连接时会先把该设备上原 active 连接切下来；
+                // 失败后旧链路就真的断了 —— 这正是必须按 UUID 恢复的现场。
+                let dev = self
+                    .nm
+                    .iter()
+                    .find(|c| c.uuid == target || c.name == target)
+                    .map(|c| c.ifname.clone());
+                if let Some(d) = dev.clone() {
+                    for c in self.nm.iter_mut() {
+                        if c.ifname == d {
+                            c.active = false;
+                        }
+                    }
+                }
+                if self.nm_fail.contains("up") || self.nm_fail.contains(&format!("up:{}", target)) {
+                    return Out::fail_with(
+                        "Error: Connection activation failed: No suitable device found",
+                    );
+                }
+                if dev.is_some() {
+                    for c in self.nm.iter_mut() {
+                        if c.uuid == target || c.name == target {
+                            c.active = true;
+                        }
+                    }
+                }
+                return Out::ok_with("Connection successfully activated");
+            }
+            if args.len() >= 5 && args[0] == "con" && args[1] == "modify" {
+                let target = args[2];
+                if self.nm_fail.contains("modify")
+                    || self.nm_fail.contains(&format!("modify:{}", target))
+                {
+                    return Out::fail_with("Error: failed to modify connection");
+                }
+                return match self.nm.iter_mut().find(|c| c.uuid == target) {
+                    Some(c) => {
+                        c.name = args[4].to_string();
+                        Out::ok_with("Connection 'x' successfully modified.")
+                    }
+                    None => Out::fail_with("Error: unknown connection"),
+                };
+            }
+            if args.len() >= 3 && args[0] == "con" && args[1] == "delete" {
+                let target = args[2];
+                if self.nm_fail.contains(&format!("delete:{}", target)) {
+                    return Out::fail_with("Error: unknown connection");
+                }
+                self.nm.retain(|c| c.uuid != target && c.name != target);
+                return Out::ok_with("Connection deleted");
+            }
+            Out::fail_with("Error: unsupported fake nmcli invocation")
+        }
+    }
+
+    // ---------- 测试夹具 ----------
+
+    fn cfg_v4(dev: &str, addrs: &[(&str, u8)], gw: Option<&str>, dns: &[&str]) -> Config {
         Config {
-            net_device: "eth1".into(),
+            net_device: dev.to_string(),
             family1_is_v6: false,
             v4: Some(Family {
-                addrs: vec![("1.1.1.1".into(), 24)],
-                gateway: Some("1.1.1.254".into()),
-                dns: vec![],
+                addrs: addrs.iter().map(|(a, p)| (a.to_string(), *p)).collect(),
+                gateway: gw.map(|g| g.to_string()),
+                dns: dns.iter().map(|d| d.to_string()).collect(),
                 is_dhcp: false,
             }),
             v6: None,
-            routes,
-            policies,
-            dry_run: false,
-            force,
-        }
-    }
-
-    #[test]
-    fn ip_render_policy_from_to_single_rule() {
-        let p = Policy {
-            from: Some(("10.0.0.0".into(), 24)),
-            to: Some(("192.168.3.0".into(), 24)),
-            table: Some("100".into()),
-        };
-        let cfg = cfg_ip(vec![], vec![p], false);
-        let cmds = ip_render(&cfg);
-        // 应只有一条 rule,同时带 from + to
-        let rules: Vec<&Vec<String>> = cmds.iter().filter(|c| c.first().map(|s| s == "rule").unwrap_or(false)).collect();
-        assert_eq!(rules.len(), 1, "from+to 应生成单条 rule,实际: {:?}", rules);
-        let joined = rules[0].join(" ");
-        assert!(joined.contains("from 10.0.0.0/24"), "缺 from: {}", joined);
-        assert!(joined.contains("to 192.168.3.0/24"), "缺 to: {}", joined);
-        assert!(joined.contains("table 100"), "缺 table: {}", joined);
-    }
-
-    #[test]
-    fn ip_render_flush_and_addr() {
-        let cfg = cfg_ip(vec![], vec![], false);
-        let cmds = ip_render(&cfg);
-        let joined: Vec<String> = cmds.iter().map(|c| c.join(" ")).collect();
-        assert!(joined.iter().any(|s| s == "addr flush dev eth1"), "缺 flush: {:?}", joined);
-        assert!(joined.iter().any(|s| s == "addr add 1.1.1.1/24 dev eth1"), "缺 addr add: {:?}", joined);
-        assert!(joined.iter().any(|s| s == "route add default via 1.1.1.254 dev eth1"), "缺默认路由: {:?}", joined);
-    }
-
-    #[test]
-    fn networkd_render_policy_from_to_single_section() {
-        let p = Policy {
-            from: Some(("10.0.0.0".into(), 24)),
-            to: Some(("192.168.3.0".into(), 24)),
-            table: Some("100".into()),
-        };
-        let cfg = cfg_ip(vec![], vec![p], false);
-        let (path, content) = networkd_render(&cfg);
-        assert!(path.ends_with("10-eth1.network"), "路径错: {}", path);
-        // 单个 [RoutingPolicyRule] 段同时含 From= 和 To=
-        let sections: Vec<&str> = content.split("[RoutingPolicyRule]").collect();
-        assert_eq!(sections.len(), 2, "from+to 应单个段,实际:\n{}", content);
-        let rule = sections[1];
-        assert!(rule.contains("From=10.0.0.0/24"), "缺 From: {}", rule);
-        assert!(rule.contains("To=192.168.3.0/24"), "缺 To: {}", rule);
-        assert!(rule.contains("Table=100"), "缺 Table: {}", rule);
-    }
-
-    #[test]
-    fn networkd_render_multi_addr_and_route() {
-        let cfg = cfg_ip(
-            vec![Route { to: "192.168.2.0".into(), to_prefix: 24, via: Some("1.1.1.254".into()), table: Some("100".into()) }],
-            vec![],
-            false,
-        );
-        let (_path, content) = networkd_render(&cfg);
-        assert!(content.contains("Address=1.1.1.1/24"), "缺地址: {}", content);
-        assert!(content.contains("Gateway=1.1.1.254"), "缺网关: {}", content);
-        assert!(content.contains("[Route]"), "缺 Route 段: {}", content);
-        assert!(content.contains("Destination=192.168.2.0/24"), "缺 Destination: {}", content);
-    }
-
-    #[test]
-    fn nmcli_render_two_unknown_tables_distinct_ids() {
-        // A1:两个未知表名应分到不同 id
-        let p1 = Policy { from: Some(("10.0.0.0".into(), 24)), to: None, table: Some("mystery_a".into()) };
-        let p2 = Policy { from: Some(("10.1.0.0".into(), 24)), to: None, table: Some("mystery_b".into()) };
-        let cfg = cfg_ip(vec![], vec![p1, p2], false);
-        let mut allocated = HashMap::new(); // 空 rt_tables
-        let args = nmcli_render(&cfg, &mut allocated);
-        // nmcli_render joins rules with comma in a single arg; split to inspect
-        let rules_joined = args.iter().find(|a| a.starts_with("priority ")).unwrap();
-        let rules: Vec<&str> = rules_joined.split(',').collect();
-        assert_eq!(rules.len(), 2, "应有 2 条 rule: {:?}", rules_joined);
-        let id_a: u32 = rules[0].rsplit("table ").next().unwrap().parse().unwrap();
-        let id_b: u32 = rules[1].rsplit("table ").next().unwrap().parse().unwrap();
-        assert_ne!(id_a, id_b, "两个未知表名不应分到同一 id: {} vs {}", id_a, id_b);
-        // allocated 应记录两个名字
-        assert_eq!(allocated.get("mystery_a"), Some(&id_a));
-        assert_eq!(allocated.get("mystery_b"), Some(&id_b));
-    }
-
-    #[test]
-    fn nmcli_render_route_table_name_to_id() {
-        // A4:路由 table=表名 应解析为数字
-        let r = Route { to: "192.168.2.0".into(), to_prefix: 24, via: Some("1.1.1.254".into()), table: Some("lan_table".into()) };
-        let cfg = cfg_ip(vec![r], vec![], false);
-        let mut allocated = HashMap::from([("lan_table".to_string(), 101u32)]);
-        let args = nmcli_render(&cfg, &mut allocated);
-        let routes_arg = args.iter().find(|a| a.contains("table=")).unwrap();
-        assert!(routes_arg.contains("table=101"), "路由表名应解析为数字 101: {}", routes_arg);
-        assert!(!routes_arg.contains("table=lan_table"), "不应保留表名: {}", routes_arg);
-    }
-
-    #[test]
-    fn nmcli_render_policy_from_to_single_rule() {
-        // A3:from+to 单条 rule
-        let p = Policy { from: Some(("10.0.0.0".into(), 24)), to: Some(("192.168.3.0".into(), 24)), table: Some("100".into()) };
-        let cfg = cfg_ip(vec![], vec![p], false);
-        let mut allocated = HashMap::new();
-        let args = nmcli_render(&cfg, &mut allocated);
-        // nmcli_render joins rules with comma in a single arg
-        let rules_joined = args.iter().find(|a| a.starts_with("priority ")).unwrap();
-        let rules: Vec<&str> = rules_joined.split(',').collect();
-        assert_eq!(rules.len(), 1, "from+to 应单条 rule: {:?}", rules_joined);
-        let joined = rules[0];
-        assert!(joined.contains("from 10.0.0.0/24") && joined.contains("to 192.168.3.0/24"), "缺 from/to: {}", joined);
-    }
-
-    #[test]
-    fn netplan_render_policy_from_to_single_item() {
-        // A3:from+to 单个 routing-policy 项
-        let p = Policy { from: Some(("10.0.0.0".into(), 24)), to: Some(("192.168.3.0".into(), 24)), table: Some("100".into()) };
-        let cfg = cfg_ip(vec![], vec![p], false);
-        let existing = "network:\n  version: 2\n  ethernets:\n    eth1:\n      mtu: 9000\n";
-        let out = netplan_render(&cfg, existing, "/etc/netplan/01-netcfg.yaml");
-        assert!(out.is_ok(), "render 失败: {:?}", out);
-        let yaml = out.unwrap();
-        // 应保留 mtu(B3)
-        assert!(yaml.contains("mtu: 9000"), "B3:应保留原 mtu:\n{}", yaml);
-        // routing-policy 应只有一项含 from+to
-        let pol_count = yaml.matches("from: 10.0.0.0/24").count();
-        assert_eq!(pol_count, 1, "A3:from 应只出现一次:\n{}", yaml);
-        assert!(yaml.contains("to: 192.168.3.0/24"), "A3:缺 to:\n{}", yaml);
-    }
-
-    #[test]
-    fn netplan_render_preserves_unmanaged_fields() {
-        // B3:保留 match/set-name/receive-checksum-offload
-        let cfg = cfg_ip(vec![], vec![], false);
-        let existing = "network:\n  version: 2\n  ethernets:\n    eth1:\n      mtu: 1500\n      match:\n        macaddress: 00:11:22:33:44:55\n      set-name: eth1\n      receive-checksum-offload: false\n";
-        let yaml = netplan_render(&cfg, existing, "/etc/netplan/01-netcfg.yaml").unwrap();
-        assert!(yaml.contains("macaddress: 00:11:22:33:44:55"), "B3:丢 match:\n{}", yaml);
-        assert!(yaml.contains("set-name: eth1"), "B3:丢 set-name:\n{}", yaml);
-        assert!(yaml.contains("receive-checksum-offload: false"), "B3:丢 checksum:\n{}", yaml);
-    }
-
-    #[test]
-    fn netplan_render_non_mapping_top_errors() {
-        // C8:顶层非 mapping → Err 而非 panic
-        let cfg = cfg_ip(vec![], vec![], false);
-        let out = netplan_render(&cfg, "not a mapping\n", "/etc/netplan/01-netcfg.yaml");
-        assert!(out.is_err(), "C8:非 mapping 应 Err");
-    }
-
-    fn cfg_v4_dhcp_v6_dhcp() -> Config {
-        Config {
-            net_device: "eth1".into(),
-            family1_is_v6: false,
-            v4: Some(Family { addrs: vec![], gateway: None, dns: vec![], is_dhcp: true }),
-            v6: Some(Family { addrs: vec![], gateway: None, dns: vec!["2001:4860:4860::8888".into()], is_dhcp: true }),
             routes: vec![],
             policies: vec![],
             dry_run: false,
@@ -1836,160 +2823,922 @@ mod tests {
         }
     }
 
-    fn cfg_v6_only() -> Config {
-        Config {
-            net_device: "eth1".into(),
-            family1_is_v6: true,
-            v4: None,
-            v6: Some(Family {
-                addrs: vec![("2001:db8::1".into(), 64)],
-                gateway: Some("fe80::1".into()),
-                dns: vec!["2001:4860:4860::8888".into()],
-                is_dhcp: false,
-            }),
-            routes: vec![],
-            policies: vec![],
-            dry_run: false,
-            force: false,
+    fn nm_state(f: &Fake) -> Vec<(String, String, String)> {
+        f.nm.iter()
+            .map(|c| (c.uuid.clone(), c.name.clone(), c.ifname.clone()))
+            .collect()
+    }
+
+    // ---------- NM：配置丢失 ----------
+
+    #[test]
+    fn nm_first_run_creates_and_activates_without_deleting_anything() {
+        let mut f = Fake::new();
+        let cfg = cfg_v4("eth1", &[("10.1.0.5", 24)], Some("10.1.0.1"), &[]);
+        let r = configure_with_nmcli(&cfg, &mut f);
+        assert!(r.is_ok(), "首次配置应成功: {:?}", r);
+
+        // 首次没有旧连接：不得出现任何 delete
+        assert!(
+            f.calls_of("nmcli con delete").is_empty(),
+            "首次不应删除连接: {:?}",
+            f.calls
+        );
+        // 且激活用的是新建连接的 UUID，而不是同名猜测
+        let ups = f.calls_of("nmcli con up");
+        assert_eq!(
+            ups,
+            vec!["nmcli con up uuid-new-1"],
+            "应按 UUID 激活新连接: {:?}",
+            f.calls
+        );
+        // 激活后改名为最终名，便于下次运行识别
+        assert!(
+            f.calls
+                .iter()
+                .any(|c| c == "nmcli con modify uuid-new-1 connection.id static-eth1"),
+            "应按 UUID 把新连接改名为最终名: {:?}",
+            f.calls
+        );
+        assert_eq!(
+            nm_state(&f).len(),
+            1,
+            "应只留下一个连接: {:?}",
+            nm_state(&f)
+        );
+        assert!(
+            f.said().contains("applied successfully"),
+            "成功路径应有成功文案"
+        );
+    }
+
+    #[test]
+    fn nm_same_name_old_connection_is_removed_only_after_new_is_active() {
+        let mut f = Fake::new().conn("static-eth1", "eth1");
+        let cfg = cfg_v4("eth1", &[("10.1.0.5", 24)], Some("10.1.0.1"), &[]);
+        let r = configure_with_nmcli(&cfg, &mut f);
+        assert!(r.is_ok(), "修复后应成功: {:?}", r);
+
+        // 旧连接被删除，新连接保留 —— 原代码 delete 同名会把新连接删掉
+        let deletes = f.calls_of("nmcli con delete");
+        assert_eq!(
+            deletes,
+            vec!["nmcli con delete uuid-legacy-static-eth1"],
+            "只应删除旧 UUID: {:?}",
+            deletes
+        );
+        assert!(
+            f.conn_by_uuid("uuid-new-1").is_some(),
+            "新连接必须留存: {:?}",
+            nm_state(&f)
+        );
+        assert!(
+            f.conn_by_uuid("uuid-legacy-static-eth1").is_none(),
+            "旧连接应被清理"
+        );
+
+        // 顺序：add -> up(新UUID) -> delete(旧UUID) -> modify(改名)
+        let add_at = f
+            .calls
+            .iter()
+            .position(|c| c.starts_with("nmcli con add"))
+            .unwrap();
+        let up_at = f
+            .calls
+            .iter()
+            .position(|c| c == "nmcli con up uuid-new-1")
+            .unwrap();
+        let del_at = f
+            .calls
+            .iter()
+            .position(|c| c == "nmcli con delete uuid-legacy-static-eth1")
+            .unwrap();
+        let ren_at = f
+            .calls
+            .iter()
+            .position(|c| c == "nmcli con modify uuid-new-1 connection.id static-eth1")
+            .unwrap();
+        assert!(
+            add_at < up_at && up_at < del_at && del_at < ren_at,
+            "顺序必须 add < up < delete < modify: {:?}",
+            f.calls
+        );
+        // 新 profile 先以临时名创建，避免与旧 profile 的 con-name 冲突
+        assert!(
+            f.calls
+                .iter()
+                .any(|c| c.starts_with("nmcli con add") && c.contains("static-eth1.bmip-new")),
+            "应先以临时名创建: {:?}",
+            f.calls
+        );
+        assert_eq!(
+            f.nm.iter()
+                .find(|c| c.uuid == "uuid-new-1")
+                .map(|c| c.name.clone()),
+            Some("static-eth1".to_string()),
+            "最终名应为 static-eth1"
+        );
+    }
+
+    #[test]
+    fn nm_add_failure_is_nonzero_and_keeps_old_connection() {
+        let mut f = Fake::new().conn("static-eth1", "eth1");
+        f.nm_fail.insert("add".into());
+        let cfg = cfg_v4("eth1", &[("10.1.0.5", 24)], None, &[]);
+        let r = configure_with_nmcli(&cfg, &mut f);
+
+        assert!(r.is_err(), "add 失败必须返回错误（原来直接 return）");
+        assert!(
+            f.calls_of("nmcli con delete").is_empty(),
+            "add 失败不得删除旧连接: {:?}",
+            f.calls
+        );
+        assert!(
+            f.conn_by_uuid("uuid-legacy-static-eth1").is_some(),
+            "旧配置必须保留"
+        );
+        // 错误文案经 main 打出（said 只记录 say() 的 INFO/WARNING），这里断言返回值
+        assert!(
+            r.as_ref()
+                .unwrap_err()
+                .contains("no existing connection was touched"),
+            "应说明旧配置未被改动: {:?}",
+            r
+        );
+        assert!(
+            f.calls_of("nmcli con up").is_empty(),
+            "add 失败不应激活任何连接"
+        );
+        assert!(
+            f.conn_by_uuid("uuid-legacy-static-eth1").is_some(),
+            "旧配置必须保留"
+        );
+        assert!(
+            !f.said().contains("applied successfully"),
+            "失败不得输出成功文案"
+        );
+    }
+
+    #[test]
+    fn nm_up_failure_is_nonzero_removes_new_and_reactivates_old() {
+        let mut f = Fake::new().conn("static-eth1", "eth1");
+        f.nm_fail.insert("up:uuid-new-1".into());
+        let cfg = cfg_v4("eth1", &[("10.1.0.5", 24)], None, &[]);
+        let r = configure_with_nmcli(&cfg, &mut f);
+
+        assert!(r.is_err(), "up 失败必须非零");
+        assert!(
+            f.conn_by_uuid("uuid-new-1").is_none(),
+            "失败的半成品连接应撤销"
+        );
+        assert!(
+            f.conn_by_uuid("uuid-legacy-static-eth1").is_some(),
+            "旧连接不得丢失"
+        );
+        // 新 profile 用的是临时名，旧 profile 从未被删除，因此也无需（且不能）重建
+        assert!(
+            !f.calls_of("nmcli con delete")
+                .iter()
+                .any(|c| c == "nmcli con delete uuid-legacy-static-eth1"),
+            "旧连接不得被删除: {:?}",
+            f.calls
+        );
+        assert!(
+            !f.said().contains("applied successfully"),
+            "失败不得输出成功文案"
+        );
+    }
+
+    #[test]
+    fn nm_leaves_other_interfaces_and_unmanaged_connections_untouched() {
+        let mut f = Fake::new()
+            // 同名但绑定在别的接口：不得按名称模糊删除
+            .conn("static-eth1", "eth2")
+            // 非本工具创建的连接
+            .conn("Wired connection 1", "eth0");
+        let cfg = cfg_v4("eth1", &[("10.1.0.5", 24)], None, &[]);
+        let r = configure_with_nmcli(&cfg, &mut f);
+
+        assert!(r.is_ok(), "应成功: {:?}", r);
+        assert!(
+            f.calls_of("nmcli con delete").is_empty(),
+            "不得删除其它接口/非托管连接: {:?}",
+            f.calls
+        );
+        assert!(
+            f.conn_by_uuid("uuid-legacy-static-eth1").is_some(),
+            "绑定 eth2 的同名连接必须保留"
+        );
+        assert!(
+            f.conn_by_uuid("uuid-legacy-Wired connection 1").is_some(),
+            "非托管连接必须保留"
+        );
+        assert!(
+            f.said().contains("bound to 'eth2'"),
+            "应给出绑定接口不符的告警: {}",
+            f.said()
+        );
+    }
+
+    #[test]
+    fn nm_show_failure_aborts_without_touching_anything() {
+        let mut f = Fake::new().conn("static-eth1", "eth1");
+        f.nm_fail.insert("show".into());
+        let cfg = cfg_v4("eth1", &[("10.1.0.5", 24)], None, &[]);
+        let r = configure_with_nmcli(&cfg, &mut f);
+
+        assert!(r.is_err(), "无法读取现有连接时应拒绝修改");
+        assert!(
+            f.calls_of("nmcli con add").is_empty(),
+            "不得在状态未知时新增连接: {:?}",
+            f.calls
+        );
+        assert!(f.conn_by_uuid("uuid-legacy-static-eth1").is_some());
+    }
+
+    #[test]
+    fn nm_delete_failure_after_activation_is_nonfatal_warning() {
+        // 新连接已生效，清理旧 profile 失败属于有意的非致命告警
+        let mut f = Fake::new().conn("static-eth1", "eth1");
+        f.nm_fail.insert("delete:uuid-legacy-static-eth1".into());
+        let cfg = cfg_v4("eth1", &[("10.1.0.5", 24)], None, &[]);
+        let r = configure_with_nmcli(&cfg, &mut f);
+
+        assert!(r.is_ok(), "新配置已生效时清理失败不应整体失败: {:?}", r);
+        assert!(
+            f.said().contains("deleting stale profile"),
+            "必须明确告警: {}",
+            f.said()
+        );
+        assert!(
+            f.said().contains("applied successfully"),
+            "新配置确实已生效"
+        );
+        assert!(f.conn_by_uuid("uuid-new-1").is_some(), "新连接必须在用");
+    }
+
+    #[test]
+    fn nm_rename_failure_after_activation_is_nonfatal_warning() {
+        let mut f = Fake::new().conn("static-eth1", "eth1");
+        f.nm_fail.insert("modify".into());
+        let cfg = cfg_v4("eth1", &[("10.1.0.5", 24)], None, &[]);
+        let r = configure_with_nmcli(&cfg, &mut f);
+
+        assert!(r.is_ok(), "改名失败不应整体失败: {:?}", r);
+        assert!(f.said().contains("renaming"), "必须明确告警: {}", f.said());
+        assert!(f.said().contains("applied successfully"));
+    }
+
+    #[test]
+    fn nm_removes_leftover_temporary_profile() {
+        // 上次中断残留的临时 profile：按名字+接口确认后才清理，且不影响旧 profile
+        let mut f = Fake::new().conn("static-eth1", "eth1");
+        f.nm.push(Conn {
+            uuid: "uuid-leftover-tmp".into(),
+            name: "static-eth1.bmip-new".into(),
+            con_type: "802-3-ethernet".into(),
+            ifname: "eth1".into(),
+            active: false,
+        });
+        let cfg = cfg_v4("eth1", &[("10.1.0.5", 24)], None, &[]);
+        let r = configure_with_nmcli(&cfg, &mut f);
+        assert!(r.is_ok(), "{:?}", r);
+        assert!(
+            f.conn_by_uuid("uuid-leftover-tmp").is_none(),
+            "残留临时 profile 应被清理"
+        );
+        assert!(f.conn_by_uuid("uuid-new-1").is_some());
+    }
+
+    #[test]
+    fn nm_replaces_previous_tool_profile_end_to_end() {
+        // 模拟第二次运行：上一轮留下的 static-eth1（本工具、本接口）应被替换为新配置
+        let mut f = Fake::new();
+        f.nm.push(Conn {
+            uuid: "uuid-prev".into(),
+            name: "static-eth1".into(),
+            con_type: "802-3-ethernet".into(),
+            ifname: "eth1".into(),
+            active: false,
+        });
+        let cfg = cfg_v4("eth1", &[("10.2.0.9", 24)], Some("10.2.0.1"), &[]);
+        let r = configure_with_nmcli(&cfg, &mut f);
+        assert!(r.is_ok(), "{:?}", r);
+        assert!(
+            f.conn_by_uuid("uuid-prev").is_none(),
+            "上一轮的 profile 应被替换"
+        );
+        let live: Vec<&Conn> = f.nm.iter().collect();
+        assert_eq!(live.len(), 1, "最终只应有一个连接: {:?}", nm_state(&f));
+        assert_eq!(live[0].name, "static-eth1", "最终名应是 static-eth1");
+    }
+
+    // ---------- ip 后端：失败必须非零 ----------
+
+    #[test]
+    fn ip_flush_failure_is_nonzero_and_stops_before_addressing() {
+        let mut f = Fake::new();
+        f.ip_fail.push("addr flush".to_string());
+        f.ip_default_route = "default via 192.0.2.1 dev eth9".to_string();
+        let cfg = cfg_v4("eth1", &[("10.1.0.5", 24)], Some("10.1.0.1"), &[]);
+        let r = configure_with_ip(&cfg, &mut f);
+
+        assert!(r.is_err(), "flush 失败必须非零");
+        assert!(
+            f.calls_of("ip addr add").is_empty(),
+            "设备不可用时不应继续加地址: {:?}",
+            f.calls
+        );
+        assert!(!f.said().contains("applied"), "失败不得输出成功文案");
+    }
+
+    #[test]
+    fn ip_partial_address_failure_is_nonzero() {
+        let mut f = Fake::new();
+        f.ip_fail.push("addr add 10.1.0.6".to_string());
+        let cfg = cfg_v4("eth1", &[("10.1.0.5", 24), ("10.1.0.6", 24)], None, &[]);
+        let r = configure_with_ip(&cfg, &mut f);
+
+        let e = r.expect_err("部分地址失败必须非零");
+        assert!(e.contains("1/2"), "错误应指明部分失败: {}", e);
+        assert_eq!(f.calls_of("ip addr add").len(), 2, "两处地址都应尝试");
+    }
+
+    #[test]
+    fn ip_route_and_rule_failures_are_nonzero() {
+        let mut f = Fake::new();
+        f.ip_fail.push("route add 10.20.0.0".to_string());
+        let mut cfg = cfg_v4("eth1", &[("10.1.0.5", 24)], None, &[]);
+        cfg.routes = vec![Route {
+            to: "10.20.0.0".into(),
+            to_prefix: 24,
+            via: None,
+            table: Some("100".into()),
+        }];
+        cfg.policies = vec![Policy {
+            from: Some(("10.1.0.0".into(), 24)),
+            to: None,
+            table: Some("100".into()),
+        }];
+        let r = configure_with_ip(&cfg, &mut f);
+
+        let e = r.expect_err("显式请求的路由失败必须非零");
+        assert!(
+            e.contains("route add 10.20.0.0/24"),
+            "错误应包含失败命令: {}",
+            e
+        );
+        // rule 不是失败项，应仍被执行
+        assert_eq!(
+            f.calls_of("ip rule add").len(),
+            1,
+            "非失败命令继续执行: {:?}",
+            f.calls
+        );
+    }
+
+    #[test]
+    fn ip_dns_failure_is_nonzero() {
+        let mut f = Fake::new().prog("resolvconf");
+        f.resolvconf
+            .push_back(Out::fail_with("resolvconf: cannot write"));
+        let cfg = cfg_v4("eth1", &[("10.1.0.5", 24)], None, &["8.8.8.8"]);
+        let r = configure_with_ip(&cfg, &mut f);
+
+        let e = r.expect_err("DNS 失败必须非零");
+        assert!(e.contains("resolvconf"), "错误应指明 DNS 后端: {}", e);
+    }
+
+    #[test]
+    fn ip_management_guard_rejects_before_any_write_including_dns() {
+        let mut f = Fake::new().prog("resolvconf").prog("resolvectl");
+        // 默认路由就在目标接口上 —— 管理口保护必须拒绝
+        f.ip_default_route = "default via 10.43.0.1 dev eth0 metric 100".to_string();
+        let cfg = cfg_v4(
+            "eth0",
+            &[("10.43.0.157", 24)],
+            Some("10.43.0.1"),
+            &["8.8.8.8", "114.114.114.114"],
+        );
+        let r = configure_with_ip(&cfg, &mut f);
+
+        assert!(r.is_err(), "管理口必须被拒绝");
+        assert!(
+            r.unwrap_err().contains("refusing to flush"),
+            "应给出保护原因"
+        );
+        // 关键：拒绝时不得有任何写操作，DNS 也不能先被写（原代码先写 DNS）
+        assert!(
+            f.mutating_calls().is_empty(),
+            "拒绝时必须零副作用: {:?}",
+            f.mutating_calls()
+        );
+        assert!(
+            f.stdin_log.is_empty(),
+            "不得向 resolvconf 写入 stdin: {:?}",
+            f.stdin_log
+        );
+        assert_eq!(f.calls_of("resolvectl").len(), 0, "不得调用 resolvectl");
+    }
+
+    #[test]
+    fn ip_success_reports_all_addresses() {
+        let mut f = Fake::new();
+        let cfg = cfg_v4(
+            "eth1",
+            &[("10.1.0.5", 24), ("10.1.0.6", 24)],
+            Some("10.1.0.1"),
+            &[],
+        );
+        let r = configure_with_ip(&cfg, &mut f);
+        assert!(r.is_ok(), "全部成功应 Ok: {:?}", r);
+        assert!(
+            f.said().contains("addresses: 2/2"),
+            "成功文案应含计数: {}",
+            f.said()
+        );
+    }
+
+    // ---------- DNS 后端 ----------
+
+    #[test]
+    fn dns_resolvconf_receives_full_stdin_and_waits_on_exit_code() {
+        let mut f = Fake::new().prog("resolvconf");
+        let servers = vec!["8.8.8.8".to_string(), "114.114.114.114".to_string()];
+        let r = apply_dns(&mut f, "eth1", &servers);
+        assert!(r.is_ok(), "{:?}", r);
+
+        assert_eq!(f.stdin_log.len(), 1, "resolvconf 应被调用一次并写入 stdin");
+        let (cmd, body) = &f.stdin_log[0];
+        assert_eq!(cmd, "resolvconf -a eth1", "应以真实接口名标识: {}", cmd);
+        assert_eq!(
+            body, "nameserver 8.8.8.8\nnameserver 114.114.114.114\n",
+            "stdin 必须包含全部 nameserver（原代码未写 stdin）"
+        );
+    }
+
+    #[test]
+    fn dns_resolvconf_failure_propagates() {
+        let mut f = Fake::new().prog("resolvconf");
+        f.resolvconf
+            .push_back(Out::fail_with("resolvconf: no such interface"));
+        let r = apply_dns(&mut f, "eth1", &["8.8.8.8".to_string()]);
+        assert!(r.is_err(), "resolvconf 非零退出必须传播");
+    }
+
+    #[test]
+    fn dns_resolvectl_uses_real_ifname_and_all_servers_in_one_call() {
+        let mut f = Fake::new().prog("resolvectl");
+        let servers = vec!["8.8.8.8".to_string(), "114.114.114.114".to_string()];
+        let r = apply_dns(&mut f, "eth1", &servers);
+        assert!(r.is_ok(), "{:?}", r);
+
+        let calls = f.calls_of("resolvectl");
+        assert_eq!(
+            calls,
+            vec!["resolvectl dns eth1 8.8.8.8 114.114.114.114"],
+            "应一次传全部 DNS 且用真实接口名: {:?}",
+            calls
+        );
+        assert!(
+            !calls[0].contains("bm_set_ip"),
+            "不得再使用假的接口名: {}",
+            calls[0]
+        );
+    }
+
+    #[test]
+    fn dns_resolvectl_failure_propagates() {
+        let mut f = Fake::new().prog("resolvectl");
+        f.resolvectl
+            .push_back(Out::fail_with("Failed to set DNS configuration"));
+        let r = apply_dns(&mut f, "eth1", &["8.8.8.8".to_string()]);
+        assert!(r.is_err(), "resolvectl 失败必须传播");
+    }
+
+    #[test]
+    fn dns_file_fallback_write_failure_propagates() {
+        let mut f = Fake::new().file("/etc/resolv.conf", "nameserver 1.1.1.1\n");
+        f.unwritable.insert("/etc/resolv.conf".into());
+        let r = apply_dns(&mut f, "eth1", &["8.8.8.8".to_string()]);
+        assert!(r.is_err(), "文件回退写失败必须传播（原代码只打印）");
+    }
+
+    #[test]
+    fn dns_file_fallback_snapshots_and_writes_all_servers() {
+        let mut f = Fake::new().file("/etc/resolv.conf", "nameserver 1.1.1.1\n");
+        let servers = vec!["8.8.8.8".to_string(), "114.114.114.114".to_string()];
+        let r = apply_dns(&mut f, "eth1", &servers);
+        assert!(r.is_ok(), "{:?}", r);
+        assert_eq!(
+            f.files.get("/etc/resolv.conf").map(String::as_str),
+            Some("nameserver 8.8.8.8\nnameserver 114.114.114.114\n")
+        );
+        assert_eq!(
+            f.files
+                .get("/etc/resolv.conf.bm_set_ip.bak")
+                .map(String::as_str),
+            Some("nameserver 1.1.1.1\n"),
+            "应保留本次快照的备份"
+        );
+    }
+
+    // ---------- 快照 / 回滚 ----------
+
+    fn netplan_fake(original: &str, apply: Vec<Out>) -> Fake {
+        let mut f = Fake::new()
+            .prog("netplan")
+            .file("/etc/netplan/01-netcfg.yaml", original)
+            .file(
+                // 陈旧遗留备份：绝不能用于回滚
+                "/etc/netplan/01-netcfg.yaml.bm_set_ip.bak",
+                "network:\n  version: 2\n  ethernets:\n    eth1:\n      addresses: [9.9.9.9/24]\n",
+            );
+        f.dirs.insert(
+            "/etc/netplan".into(),
+            vec![
+                "01-netcfg.yaml".into(),
+                "01-netcfg.yaml.bm_set_ip.bak".into(),
+            ],
+        );
+        f.netplan_apply = apply.into();
+        f
+    }
+
+    #[test]
+    fn netplan_rollback_uses_this_run_snapshot_not_stale_bak() {
+        // 原配置与陈旧 .bak 内容不同；apply 失败后必须恢复“原配置”而不是陈旧备份
+        let original = "network:\n  version: 2\n  ethernets:\n    eth1:\n      mtu: 1400\n";
+        let mut f = netplan_fake(
+            original,
+            vec![
+                Out::fail_with("Error: Conflicting default route"),
+                Out::ok_with(""),
+            ],
+        );
+        let cfg = cfg_v4("eth1", &[("10.1.0.5", 24)], Some("10.1.0.1"), &[]);
+        let r = configure_with_netplan(&cfg, &mut f);
+
+        assert!(r.is_err(), "apply 失败必须非零");
+        let restored = f
+            .files
+            .get("/etc/netplan/01-netcfg.yaml")
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(restored, original, "必须恢复本次快照，而不是陈旧 .bak");
+        assert!(
+            !restored.contains("9.9.9.9"),
+            "不得恢复陈旧备份内容: {}",
+            restored
+        );
+        assert!(r.unwrap_err().contains("rolled back"), "应说明已回滚");
+        assert!(
+            !f.said().contains("applied successfully"),
+            "失败不得输出成功文案"
+        );
+    }
+
+    #[test]
+    fn netplan_backup_failure_refuses_to_modify() {
+        let original = "network:\n  version: 2\n  ethernets:\n    eth1:\n      mtu: 1400\n";
+        let mut f = netplan_fake(original, vec![]);
+        f.unwritable
+            .insert("/etc/netplan/01-netcfg.yaml.bm_set_ip.bak".into());
+        let cfg = cfg_v4("eth1", &[("10.1.0.5", 24)], None, &[]);
+        let r = configure_with_netplan(&cfg, &mut f);
+
+        assert!(r.is_err(), "备份失败必须拒绝修改");
+        assert!(
+            r.unwrap_err().contains("refusing to modify"),
+            "错误应说明拒绝原因"
+        );
+        assert_eq!(
+            f.files
+                .get("/etc/netplan/01-netcfg.yaml")
+                .map(String::as_str),
+            Some(original),
+            "原配置不得被改动"
+        );
+        assert!(
+            f.calls_of("netplan apply").is_empty(),
+            "拒绝时不得 apply: {:?}",
+            f.calls
+        );
+    }
+
+    #[test]
+    fn netplan_unreadable_original_refuses_to_modify() {
+        let mut f = netplan_fake("network: {}\n", vec![]);
+        f.unreadable.insert("/etc/netplan/01-netcfg.yaml".into());
+        let cfg = cfg_v4("eth1", &[("10.1.0.5", 24)], None, &[]);
+        let r = configure_with_netplan(&cfg, &mut f);
+
+        assert!(r.is_err(), "读不到原配置必须拒绝");
+        assert!(f.calls_of("netplan apply").is_empty());
+    }
+
+    #[test]
+    fn netplan_success_writes_and_applies() {
+        let original = "network:\n  version: 2\n  ethernets: {}\n";
+        let mut f = netplan_fake(original, vec![Out::ok_with("")]);
+        let cfg = cfg_v4("eth1", &[("10.1.0.5", 24)], Some("10.1.0.1"), &["8.8.8.8"]);
+        let r = configure_with_netplan(&cfg, &mut f);
+        assert!(r.is_ok(), "{:?}", r);
+        let written = f.files.get("/etc/netplan/01-netcfg.yaml").cloned().unwrap();
+        assert!(written.contains("10.1.0.5/24"), "应写入地址: {}", written);
+        assert_eq!(f.calls_of("netplan apply").len(), 1);
+        assert!(f.said().contains("applied successfully"));
+    }
+
+    fn networkd_fake(file: Option<&str>, reconfigure: Vec<Out>) -> Fake {
+        let mut f = Fake::new().prog("networkctl");
+        if let Some(c) = file {
+            f.files.insert(
+                "/etc/systemd/network/10-eth1.network".to_string(),
+                c.to_string(),
+            );
         }
+        f.netctl_reconfigure = reconfigure.into();
+        f
     }
 
     #[test]
-    fn networkd_render_dual_dhcp_single_line() {
-        // F6:双 DHCP 应合并为单行 DHCP=yes,而非两行互相覆盖
-        let cfg = cfg_v4_dhcp_v6_dhcp();
-        let (_path, content) = networkd_render(&cfg);
-        assert_eq!(content.matches("DHCP=").count(), 1, "DHCP= 应只有一行:\n{}", content);
-        assert!(content.contains("DHCP=yes"), "双 dhcp 应为 DHCP=yes:\n{}", content);
-    }
+    fn networkd_removes_new_file_when_original_did_not_exist() {
+        // 原文件不存在 + apply 失败 → 撤销本次新文件，而不是“恢复”出一个假的原文件
+        let mut f = networkd_fake(
+            None,
+            vec![Out::fail_with("Failed to reconfigure"), Out::ok_with("")],
+        );
+        let cfg = cfg_v4("eth1", &[("10.1.0.5", 24)], None, &[]);
+        let r = configure_with_networkd(&cfg, &mut f);
 
-    #[test]
-    fn networkd_render_v4_dhcp_v6_static() {
-        // v4 dhcp + v6 static:DHCP=ipv4 一行,另加 v6 地址
-        let cfg = cfg_ip(vec![], vec![], false);
-        let mut cfg = cfg;
-        cfg.v4 = Some(Family { addrs: vec![], gateway: None, dns: vec![], is_dhcp: true });
-        cfg.v6 = Some(Family { addrs: vec![("2001:db8::1".into(), 64)], gateway: Some("fe80::1".into()), dns: vec![], is_dhcp: false });
-        let (_path, content) = networkd_render(&cfg);
-        assert_eq!(content.matches("DHCP=").count(), 1, "DHCP= 应只有一行:\n{}", content);
-        assert!(content.contains("DHCP=ipv4"), "应为 DHCP=ipv4:\n{}", content);
-        assert!(content.contains("Address=2001:db8::1/64"), "缺 v6 地址:\n{}", content);
-    }
-
-    #[test]
-    fn ip_render_v6_gateway_default_route() {
-        // F4:ip 兜底后端应为 v6 网关生成默认路由
-        let cfg = cfg_v6_only();
-        let cmds = ip_render(&cfg);
-        let joined: Vec<String> = cmds.iter().map(|c| c.join(" ")).collect();
-        assert!(joined.iter().any(|s| s.contains("-6 route add default via fe80::1 dev eth1")), "缺 v6 默认路由: {:?}", joined);
-    }
-
-    #[test]
-    fn nmcli_render_missing_family_method_disabled() {
-        // F8:缺席 family 应显式 method=disabled,避免默认 auto 意外启用 DHCP
-        let cfg = cfg_v6_only();
-        let mut allocated = HashMap::new();
-        let args = nmcli_render(&cfg, &mut allocated);
-        let joined = args.join(" ");
-        assert!(joined.contains("ipv4.method disabled"), "v6-only 应显式 ipv4.method disabled: {}", joined);
-        assert!(joined.contains("ipv6.method manual"), "v6 应为 manual: {}", joined);
-    }
-
-    #[test]
-    fn nmcli_render_dual_dhcp_methods_auto() {
-        // F8:双 DHCP 时两族 method 均 auto,且 v6 dhcp 的 dns 保留
-        let cfg = cfg_v4_dhcp_v6_dhcp();
-        let mut allocated = HashMap::new();
-        let args = nmcli_render(&cfg, &mut allocated);
-        let joined = args.join(" ");
-        assert!(joined.contains("ipv4.method auto"), "缺 ipv4.method auto: {}", joined);
-        assert!(joined.contains("ipv6.method auto"), "缺 ipv6.method auto: {}", joined);
-        assert!(joined.contains("ipv6.dns 2001:4860:4860::8888"), "v6 dhcp 的 dns 应保留: {}", joined);
-    }
-
-    #[test]
-    fn resolve_table_id_digit_blocks_automatic() {
-        // F8:数字 id 注册进 allocated,后续表名自动分配不与数字撞车
-        let mut allocated = HashMap::new();
-        let (id_a, _) = resolve_table_id("100", &mut allocated);
-        let (id_b, _) = resolve_table_id("lan_table", &mut allocated);
-        assert_eq!(id_a, 100);
-        assert_ne!(id_b, 100, "表名自动分配不应与已用数字 id 100 撞车");
-        assert_eq!(allocated.get("100"), Some(&100u32));
-    }
-
-    #[test]
-    fn netplan_render_removes_gateway4() {
-        // F12:受管理键应清除旧 gateway4,避免与 routes 默认路由冲突
-        let cfg = cfg_ip(vec![], vec![], false);
-        let existing = "network:\n  version: 2\n  ethernets:\n    eth1:\n      gateway4: 192.168.1.1\n      dhcp4: false\n";
-        let yaml = netplan_render(&cfg, existing, "/etc/netplan/01-netcfg.yaml").unwrap();
-        assert!(!yaml.contains("gateway4"), "应清除旧 gateway4:\n{}", yaml);
-        assert!(yaml.contains("to: 0.0.0.0/0"), "应生成 routes 默认路由:\n{}", yaml);
-    }
-
-    fn cfg_multi_dns() -> Config {
-        let mut cfg = cfg_ip(vec![], vec![], false);
-        cfg.v4.as_mut().unwrap().dns = vec!["8.8.8.8".into(), "114.114.114.114".into()];
-        cfg
-    }
-
-    #[test]
-    fn netplan_render_multi_dns_array_items() {
-        // MYS-436:多 DNS 应渲染为数组的独立项,而非单串 "8.8.8.8,114.114.114.114"
-        let cfg = cfg_multi_dns();
-        let existing = "network:\n  version: 2\n  ethernets:\n    eth1:\n      mtu: 9000\n";
-        let yaml = netplan_render(&cfg, existing, "/etc/netplan/01-netcfg.yaml").unwrap();
+        assert!(r.is_err(), "reconfigure 失败必须非零");
         assert!(
-            yaml.contains("- 8.8.8.8") && yaml.contains("- 114.114.114.114"),
-            "多 DNS 应为数组两项:\n{}",
-            yaml
+            !f.exists("/etc/systemd/network/10-eth1.network"),
+            "原文件不存在时失败必须撤销新文件: {:?}",
+            f.files.keys().collect::<Vec<_>>()
         );
         assert!(
-            !yaml.contains("8.8.8.8,114.114.114.114"),
-            "不应出现逗号合并的单串 DNS 项:\n{}",
-            yaml
+            !f.exists("/etc/systemd/network/10-eth1.network.bm_set_ip.bak"),
+            "原本没有文件时不应凭空产生 .bak"
         );
-        assert_eq!(yaml.matches("- 8.8.8.8").count(), 1, "8.8.8.8 应只出现一次:\n{}", yaml);
     }
 
     #[test]
-    fn networkd_render_multi_dns_space_separated() {
-        // MYS-436:networkd DNS= 应空格分隔多项
-        let cfg = cfg_multi_dns();
-        let (_path, content) = networkd_render(&cfg);
-        assert!(content.contains("DNS=8.8.8.8 114.114.114.114"), "DNS= 应空格分隔:\n{}", content);
-        assert!(!content.contains("DNS=8.8.8.8,"), "不应有逗号:\n{}", content);
+    fn networkd_restores_existing_file_on_apply_failure() {
+        let original = "[Match]\nName=eth1\n\n[Network]\nDHCP=ipv4\n";
+        let mut f = networkd_fake(
+            Some(original),
+            vec![Out::fail_with("Failed to reconfigure"), Out::ok_with("")],
+        );
+        let cfg = cfg_v4("eth1", &[("10.1.0.5", 24)], None, &[]);
+        let r = configure_with_networkd(&cfg, &mut f);
+
+        assert!(r.is_err());
+        assert_eq!(
+            f.files
+                .get("/etc/systemd/network/10-eth1.network")
+                .map(String::as_str),
+            Some(original),
+            "必须恢复原文件"
+        );
+    }
+
+    // ---------- 原 active 连接的恢复（验收意见 2）----------
+
+    #[test]
+    fn nm_up_failure_reactivates_previously_active_managed_connection() {
+        // 原 active 就是本工具的 static-eth1；新 up 失败后必须把它重新拉起来
+        let mut f = Fake::new().conn("static-eth1", "eth1").activated("uuid-legacy-static-eth1");
+        f.nm_fail.insert("up:uuid-new-1".into());
+        let cfg = cfg_v4("eth1", &[("10.1.0.5", 24)], None, &[]);
+        let r = configure_with_nmcli(&cfg, &mut f);
+
+        let e = r.expect_err("up 失败必须非零");
+        assert_eq!(
+            f.active_uuid_on("eth1").as_deref(),
+            Some("uuid-legacy-static-eth1"),
+            "必须恢复原 active 连接，实际: {:?}",
+            nm_state(&f)
+        );
+        assert!(
+            f.calls_of("nmcli con up").iter().any(|c| c == "nmcli con up uuid-legacy-static-eth1"),
+            "应按原 active UUID 重新激活: {:?}",
+            f.calls
+        );
+        assert!(e.contains("re-activated previous active connection"), "错误里应报告恢复结果: {}", e);
     }
 
     #[test]
-    fn nmcli_render_multi_dns_comma_separated() {
-        // MYS-436:nmcli ipv4.dns 属性原生逗号分隔(单参数)
-        let cfg = cfg_multi_dns();
-        let mut allocated = HashMap::new();
-        let args = nmcli_render(&cfg, &mut allocated);
-        let joined = args.join(" ");
-        assert!(joined.contains("ipv4.dns 8.8.8.8,114.114.114.114"), "nmcli dns 应逗号分隔:\n{}", joined);
+    fn nm_up_failure_reactivates_previously_active_unmanaged_connection() {
+        // 原 active 是非托管连接（Wired connection 1）——也必须恢复，不能只管自己的 profile
+        let mut f = Fake::new()
+            .conn("Wired connection 1", "eth1")
+            .activated("uuid-legacy-Wired connection 1");
+        f.nm_fail.insert("up:uuid-new-1".into());
+        let cfg = cfg_v4("eth1", &[("10.1.0.5", 24)], None, &[]);
+        let r = configure_with_nmcli(&cfg, &mut f);
+
+        r.expect_err("up 失败必须非零");
+        assert_eq!(
+            f.active_uuid_on("eth1").as_deref(),
+            Some("uuid-legacy-Wired connection 1"),
+            "非托管原 active 连接也必须恢复: {:?}",
+            nm_state(&f)
+        );
+        assert!(
+            f.conn_by_uuid("uuid-legacy-Wired connection 1").is_some(),
+            "非托管连接不得被删除"
+        );
     }
 
     #[test]
-    fn parse_dns_splits_validates_dedups() {
-        // MYS-436:拆分/trim/去重/空项与非法项/族约束
-        assert_eq!(parse_dns("8.8.8.8,114.114.114.114", false).unwrap(), vec!["8.8.8.8", "114.114.114.114"]);
-        assert_eq!(parse_dns("8.8.8.8, 114.114.114.114", false).unwrap(), vec!["8.8.8.8", "114.114.114.114"]);
-        assert_eq!(parse_dns("2001:4860:4860::8888,2001:4860:4860::8844", true).unwrap(), vec!["2001:4860:4860::8888", "2001:4860:4860::8844"]);
-        assert_eq!(parse_dns("8.8.8.8,8.8.8.8", false).unwrap(), vec!["8.8.8.8"], "重复项应去重");
-        assert!(parse_dns("8.8.8.8,,1.1.1.1", false).is_err(), "连续逗号应报错");
-        assert!(parse_dns("8.8.8.8,", false).is_err(), "尾逗号应报错");
-        assert!(parse_dns("8.8.8.8, ,1.1.1.1", false).is_err(), "纯空白项应报错");
-        assert!(parse_dns("8.8.8.8,999.1.1.1", false).is_err(), "非法项应报错");
-        assert!(parse_dns("8.8.8.8,1.1.1.1/24", false).is_err(), "含 / 项应报错");
-        // 族约束:混族 DNS 必须拦截(nmcli ipv4.dns/ipv6.dns 分族)
-        assert!(parse_dns("8.8.8.8,2001:4860:4860::8888", false).is_err(), "v4 族混入 v6 DNS 应报错");
-        assert!(parse_dns("8.8.8.8", true).is_err(), "v6 族混入 v4 DNS 应报错");
-        assert!(parse_dns_opt(&Some("  8.8.8.8  ".into()), false).unwrap() == vec!["8.8.8.8"], "trim 后接受");
-        assert!(parse_dns_opt(&None, false).unwrap().is_empty(), "None → 空数组");
-        assert!(parse_dns_opt(&Some(String::new()), false).unwrap().is_empty(), "空串 → 空数组");
+    fn nm_up_failure_without_previous_active_activates_nothing() {
+        // 原本没有 active 连接：不得凭空激活任何历史 profile
+        let mut f = Fake::new().conn("static-eth1", "eth1"); // active = false
+        f.nm_fail.insert("up:uuid-new-1".into());
+        let cfg = cfg_v4("eth1", &[("10.1.0.5", 24)], None, &[]);
+        let r = configure_with_nmcli(&cfg, &mut f);
+
+        let e = r.expect_err("up 失败必须非零");
+        assert_eq!(f.active_uuid_on("eth1"), None, "不得激活任何既有 profile: {:?}", nm_state(&f));
+        assert_eq!(
+            f.calls_of("nmcli con up"),
+            vec!["nmcli con up uuid-new-1"],
+            "只应尝试激活本次新建的连接: {:?}",
+            f.calls
+        );
+        assert!(e.contains("原本没有活跃连接"), "应说明未激活任何 profile: {}", e);
+    }
+
+    #[test]
+    fn nm_reports_when_restore_of_previous_active_fails() {
+        // 恢复失败必须明确报告（不能静默当作已恢复）
+        let mut f = Fake::new().conn("static-eth1", "eth1").activated("uuid-legacy-static-eth1");
+        f.nm_fail.insert("up:uuid-new-1".into());
+        f.nm_fail.insert("up:uuid-legacy-static-eth1".into());
+        let cfg = cfg_v4("eth1", &[("10.1.0.5", 24)], None, &[]);
+        let e = configure_with_nmcli(&cfg, &mut f).expect_err("必须非零");
+
+        assert!(e.contains("FAILED to re-activate"), "必须显式报告恢复失败: {}", e);
+        assert!(e.contains("nmcli con up uuid-legacy-static-eth1"), "应给出可执行的补救命令: {}", e);
+    }
+
+    #[test]
+    fn nm_active_query_failure_aborts_before_any_change() {
+        // 查不到原 active 状态就不动手：否则失败时无法恢复
+        let mut f = Fake::new().conn("static-eth1", "eth1");
+        f.nm_fail.insert("active".into());
+        let cfg = cfg_v4("eth1", &[("10.1.0.5", 24)], None, &[]);
+        let r = configure_with_nmcli(&cfg, &mut f);
+
+        assert!(r.is_err(), "无法确认 active 状态时必须拒绝修改");
+        assert!(f.calls_of("nmcli con add").is_empty(), "不得新建: {:?}", f.calls);
+        assert!(f.conn_by_uuid("uuid-legacy-static-eth1").is_some());
+    }
+
+    #[test]
+    fn nm_success_makes_new_connection_active() {
+        let mut f = Fake::new().conn("static-eth1", "eth1").activated("uuid-legacy-static-eth1");
+        let cfg = cfg_v4("eth1", &[("10.1.0.5", 24)], None, &[]);
+        configure_with_nmcli(&cfg, &mut f).expect("应成功");
+        assert_eq!(f.active_uuid_on("eth1").as_deref(), Some("uuid-new-1"), "新连接应成为 active");
+    }
+
+    // ---------- 连续运行：不得先删掉当前唯一有效连接（验收意见 3）----------
+
+    #[test]
+    fn nm_second_run_keeps_active_leftover_and_survives_add_failure() {
+        // 场景：上一轮 up 成功但改名失败 → 留下 static-eth1.bmip-new 且它是当前 active 连接。
+        // 重跑时绝不能先删它；add 失败后旧链路必须还在。
+        let mut f = Fake::new()
+            .conn("static-eth1.bmip-new", "eth1")
+            .activated("uuid-legacy-static-eth1.bmip-new");
+        f.nm_fail.insert("add".into());
+        let cfg = cfg_v4("eth1", &[("10.2.0.9", 24)], None, &[]);
+        let r = configure_with_nmcli(&cfg, &mut f);
+
+        r.expect_err("add 失败必须非零");
+        assert!(
+            f.conn_by_uuid("uuid-legacy-static-eth1.bmip-new").is_some(),
+            "当前唯一有效连接不得被删除: {:?}",
+            nm_state(&f)
+        );
+        assert_eq!(
+            f.active_uuid_on("eth1").as_deref(),
+            Some("uuid-legacy-static-eth1.bmip-new"),
+            "链路不得中断"
+        );
+        assert!(
+            !f.calls_of("nmcli con delete").iter().any(|c| c.contains("bmip-new")),
+            "不得先删除可能 active 的临时 profile: {:?}",
+            f.calls
+        );
+    }
+
+    #[test]
+    fn nm_second_run_keeps_active_leftover_and_survives_up_failure() {
+        // 同上，但这次是 up 失败：临时 profile 被删/旧链路被切都必须被恢复
+        let mut f = Fake::new()
+            .conn("static-eth1.bmip-new", "eth1")
+            .activated("uuid-legacy-static-eth1.bmip-new");
+        f.nm_fail.insert("up:uuid-new-1".into());
+        let cfg = cfg_v4("eth1", &[("10.2.0.9", 24)], None, &[]);
+        let r = configure_with_nmcli(&cfg, &mut f);
+
+        r.expect_err("up 失败必须非零");
+        // 该接口必须仍有一条 active 连接（内容可被改名，但连通性不能丢）
+        assert!(
+            f.active_uuid_on("eth1").is_some(),
+            "链路不得中断: {:?}",
+            nm_state(&f)
+        );
+        assert!(
+            f.conn_by_uuid("uuid-legacy-static-eth1.bmip-new").is_some(),
+            "原临时 profile 不得被删除: {:?}",
+            nm_state(&f)
+        );
+    }
+
+    #[test]
+    fn nm_second_run_replaces_leftover_named_profile() {
+        // 改名成功后第二轮：临时 profile 已变成 static-eth1，应被正常替换，最终仍只有一条
+        let mut f = Fake::new().conn("static-eth1", "eth1").activated("uuid-legacy-static-eth1");
+        let cfg = cfg_v4("eth1", &[("10.2.0.9", 24)], None, &[]);
+        configure_with_nmcli(&cfg, &mut f).expect("第一次应成功");
+        // 第二次运行
+        let r = configure_with_nmcli(&cfg, &mut f);
+        assert!(r.is_ok(), "第二次运行应成功: {:?}", r);
+        assert_eq!(f.nm.iter().count(), 1, "最终只应有一条连接: {:?}", nm_state(&f));
+        assert_eq!(f.active_uuid_on("eth1").as_deref(), Some("uuid-new-2"), "新连接应 active");
+    }
+
+    // ---------- networkctl reload 是关键命令（验收意见 4）----------
+
+    #[test]
+    fn networkd_reload_failure_is_fatal_even_if_reconfigure_succeeds() {
+        // systemd 文档：reconfigure 不会重新读取 .network 文件，必须先 reload。
+        // 因此 reload 失败即使 reconfigure 返回 0 也不能报成功。
+        let mut f = networkd_fake(None, vec![Out::ok_with("")]);
+        f.netctl_reload = vec![Out::fail_with("Failed to reload")].into();
+        let cfg = cfg_v4("eth1", &[("10.1.0.5", 24)], None, &[]);
+        let r = configure_with_networkd(&cfg, &mut f);
+
+        let e = r.expect_err("reload 失败必须非零（reconfigure 成功也不行）");
+        assert!(e.contains("networkctl reload"), "错误应指明 reload: {}", e);
+        assert!(
+            !f.said().contains("applied successfully"),
+            "不得输出成功文案: {}",
+            f.said()
+        );
+        // 必须回滚：原本不存在的文件应被撤销
+        assert!(
+            !f.exists("/etc/systemd/network/10-eth1.network"),
+            "失败必须回滚本次新建的文件: {:?}",
+            f.files.keys().collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn networkd_reload_failure_restores_existing_file() {
+        let original = "[Match]\nName=eth1\n\n[Network]\nDHCP=ipv4\n";
+        let mut f = networkd_fake(Some(original), vec![Out::ok_with("")]);
+        f.netctl_reload = vec![Out::fail_with("Failed to reload")].into();
+        let cfg = cfg_v4("eth1", &[("10.1.0.5", 24)], None, &[]);
+        let r = configure_with_networkd(&cfg, &mut f);
+
+        r.expect_err("reload 失败必须非零");
+        assert_eq!(
+            f.files.get("/etc/systemd/network/10-eth1.network").map(String::as_str),
+            Some(original),
+            "必须恢复原文件"
+        );
+        assert!(!f.said().contains("applied successfully"));
+    }
+
+    #[test]
+    fn networkd_reload_success_then_reconfigure_proceeds() {
+        let mut f = networkd_fake(None, vec![Out::ok_with("")]);
+        f.netctl_reload = vec![Out::ok_with("")].into();
+        let cfg = cfg_v4("eth1", &[("10.1.0.5", 24)], None, &[]);
+        let r = configure_with_networkd(&cfg, &mut f);
+        assert!(r.is_ok(), "{:?}", r);
+        assert_eq!(f.calls_of("networkctl reload").len(), 1);
+        assert_eq!(f.calls_of("networkctl reconfigure").len(), 1);
+        assert!(f.said().contains("applied successfully"));
+    }
+
+    #[test]
+    fn networkd_missing_original_and_success_leaves_new_file() {
+        let mut f = networkd_fake(None, vec![Out::ok_with("")]);
+        let cfg = cfg_v4("eth1", &[("10.1.0.5", 24)], None, &[]);
+        let r = configure_with_networkd(&cfg, &mut f);
+        assert!(r.is_ok(), "{:?}", r);
+        let written = f
+            .files
+            .get("/etc/systemd/network/10-eth1.network")
+            .cloned()
+            .unwrap();
+        assert!(written.contains("Address=10.1.0.5/24"), "{}", written);
     }
 }
