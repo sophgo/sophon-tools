@@ -186,9 +186,14 @@ bm_set_ip --dry-run eth0 192.168.1.100 24 192.168.1.1 8.8.8.8 192.168.2.0 24 192
 ## 测试
 
 ```bash
-cargo test --test parse_cases   # 80 项,覆盖双模式 + 4 元组各场景(含多策略)+ 输入校验(畸形IP/越界前缀/非连续掩码)+ 异常报错 + 解析层防静默丢弃(review 修复)
-bash tests/parse_cases.sh        # 等价包装
+cargo test                       # 118 项:92 项解析用例 + 26 项后端单元测试(stateful fake）
+bash tests/parse_cases.sh        # 解析用例包装(等价 cargo test --test parse_cases)
+bash tests/backend_contract.sh   # 54 项后端行为契约(真实二进制 + 有状态 fake 命令)
 ```
+
+`tests/backend_contract.sh` 用有状态的 fake `nmcli`/`ip`/`resolvconf`/`resolvectl`/`netplan`/`networkctl`
+(全部放在临时 PATH 前缀,被测程序只能看到 fake)驱动**真实可执行文件**,断言退出码、成功文案与调用序列;
+默认在 `unshare -rmn` 中用 tmpfs 覆盖 `/etc` 后运行,不在宿主产生任何网络或文件副作用。
 
 ## 输入校验
 
@@ -205,12 +210,32 @@ bash tests/parse_cases.sh        # 等价包装
 
 ## 后端
 
-自动探测:`netplan`(需 `/etc/netplan/01-netcfg.yaml` 存在)→ `NetworkManager(nmcli)` → `systemd-networkd` → `ip` 兜底。
+自动探测:`netplan`(需 `/etc/netplan/*.yaml` 存在)→ `NetworkManager(nmcli)` → `systemd-networkd` → `ip` 兜底。
 
-- **netplan**:写 `addresses`/`routes`/`routing-policy` 到 yaml 后 `netplan apply`。默认网关用 `routes: to:0.0.0.0/0`(避开 deprecated `gateway4` 的冲突检测);写入前清除设备上旧的 `gateway4`/`gateway6` 键,避免与新 routes 默认路由冲突。apply 退出码 0 但 stderr 含 `Error`/`Conflicting` 时报失败。路由/策略的表名须为数字或已在 `/etc/iproute2/rt_tables` 注册(netplan 的 `table` 只接受数字),否则报错。
-- **nmcli**:`ipv4.routes` 用 `table=N` 语法;`ipv4.routing-rules` 逗号分隔、固定 priority、table 仅数字 id。未指定的 family 显式 `method=disabled`(避免默认 auto 意外启用 DHCP)。先 `con add` 新连接、成功后才删旧连接,add/激活失败不丢旧配置。
-- **systemd-networkd**:写 `/etc/systemd/network/10-<dev>.network`,`networkctl reload` + `reconfigure <dev>`(仅重载该设备,不波及其他网口)。写前备份 `<file>.bm_set_ip.bak`,reconfigure 失败自动恢复备份。
-- **ip**(兜底):逐条 `ip addr/route/rule add`,失败打印 `[WARNING]`(如 main 表已有默认路由时 `ip route add default` 失败会提示用策略路由);DHCP 不支持,报错退出。支持 IPv6 默认路由(`-6 route add default`)与 DNS(优先 `resolvconf`/`resolvectl`,否则直写 `/etc/resolv.conf` 并备份)。
+**错误契约**:任何关键命令失败(nmcli add/up、ip flush/link/地址/显式请求的路由与规则、DNS 写入、netplan apply、networkctl reconfigure、备份失败)都以**非零退出**结束,且不打印成功文案。只有明确标注理由的情形保留为非致命告警(见下)。
+
+- **netplan**:写 `addresses`/`routes`/`routing-policy` 到 yaml 后 `netplan apply`。默认网关用 `routes: to:0.0.0.0/0`(避开 deprecated `gateway4` 的冲突检测);写入前清除设备上旧的 `gateway4`/`gateway6` 键,避免与新 routes 默认路由冲突。apply 退出码 0 但 stderr 含 `Error`/`Conflicting` 时报失败。路由/策略的表名须为数字或已在 `/etc/iproute2/rt_tables` 注册(netplan 的 `table` 只接受数字),否则报错。只更新已存在的 netplan 文件,不会凭空新建 yaml。
+- **nmcli**:`ipv4.routes` 用 `table=N` 语法;`ipv4.routing-rules` 逗号分隔、固定 priority、table 仅数字 id。未指定的 family 显式 `method=disabled`(避免默认 auto 意外启用 DHCP)。新旧 profile **按 UUID 区分**:先 `con add` 新连接 → 用新建的 UUID `con up` → 激活成功后才按 UUID 删除本工具的旧连接(名称为 `static-<dev>` **且**接口名确为本设备);add/up 失败保留旧配置并恢复旧连接激活状态,up 失败还会撤销本次新建的半成品。绑定在其它接口的同名连接、非本工具创建的连接一律不动。
+- **systemd-networkd**:写 `/etc/systemd/network/10-<dev>.network`,`networkctl reload` + `reconfigure <dev>`(仅重载该设备,不波及其他网口)。`networkctl` 不可用时回退 `systemctl restart systemd-networkd`。
+- **ip**(兜底):先做管理口保护(目标接口承载默认路由且未加 `--force` 时**直接拒绝,不做任何写入,含 DNS**),再逐条 `ip addr/route/rule add`。flush/link 失败立即中止;地址/路由/规则失败会跑完全部命令后统一非零退出,并报出每一条失败命令。地址配置自身有失败时不改动 DNS。DHCP 不支持,报错退出。支持 IPv6 默认路由(`-6 route add default`)与 DNS(优先 `resolvconf`/`resolvectl`,否则直写 `/etc/resolv.conf`)。
+
+### 配置快照与回滚
+
+三个写文件的后端(netplan / networkd / DNS 文件回退)统一使用**本次运行的内存快照**:
+
+- 写入前先明确原文件**存在**(读到内容)还是**不存在**;读不到原文件即拒绝修改。
+- 备份失败(`<file>.bm_set_ip.bak` 写不进去)则**拒绝修改**,不会出现“备份失败仍覆盖原配置”。
+- 应用失败时**只按本次快照回滚**:原文件存在则写回原文,原文件不存在则删除本次新建的文件。**绝不读取历史遗留的 `.bak`**,不会恢复陈旧内容。
+- `.bak` 仅供人工恢复参考,不参与自动回滚。
+
+### 有意保留的非致命告警
+
+| 情形 | 为何不致命 |
+| --- | --- |
+| nmcli 新连接已激活后,删除旧 profile 失败 | 新配置已生效;残留旧 profile 只影响后续同名解析,已提示 `nmcli con delete <uuid>` 手工清理 |
+| nmcli 新连接已激活后,rt_tables 表名映射回写失败 | 连接已按数字 id 生效;回写只影响后续复用同一表名 |
+| `networkctl reload` 失败 | 紧接的 `reconfigure` 会重新读取配置文件,reload 失败不影响最终生效 |
+| 系统上存在其它设备的默认路由 | 纯提示,配置本身仍完整写入并生效 |
 
 > 切换后端时注意:networkd 后端写的 `/etc/systemd/network/10-<dev>.network` 不会被 `netplan apply` 清除,切回 netplan 前应 `rm` 该文件,否则与 netplan 生成的配置竞争。
 
@@ -219,5 +244,13 @@ bash tests/parse_cases.sh        # 等价包装
 - **策略 from+to 单条语义**:策略同时指定源(`from`)和目的(`to`)时,生成单条规则(源且目的同时匹配),四后端一致:netplan `routing-policy` 项含两者;networkd `[RoutingPolicyRule]` 段含 From=/To=;nmcli 单条带 `from X to Y`;ip 单条 `from X to Y`。
 - **--force 标志**:仅长选项。ip 兜底后端默认保护当前默认路由所在设备(通常管理口,避免 SSH 断连);`--force` 覆盖该保护。
 - **环境变量 BM_SET_IP_NETPLAN_FILE**:netplan 后端优先使用此变量指定配置文件;未设则在 `/etc/netplan/` 取字典序最后一个 `*.yaml`;都无则回退 `01-netcfg.yaml` 并告警。
-- **netplan 合并与备份**:设备已存在时更新本工具管理的键(dhcp4/dhcp6/addresses/routes/routing-policy/nameservers/optional),保留其余(mtu/match/set-name 等);写前自动备份为 `<file>.bm_set_ip.bak`,apply 失败则恢复。
+- **netplan 合并与备份**:设备已存在时更新本工具管理的键(dhcp4/dhcp6/addresses/routes/routing-policy/nameservers/optional),保留其余(mtu/match/set-name 等);写前自动备份为 `<file>.bm_set_ip.bak`,apply 失败则按本次快照回滚(不读遗留 `.bak`)。
 - **nmcli 表名解析**:路由与策略的 table 参数统一解析为数字:直接数字用之;`/etc/iproute2/rt_tables` 已有的名字查表;未知名自动从 100 起分配空闲 id 并写回 rt_tables。
+
+## 2026-11-15 review 修复(后端配置丢失 / 失败退出 / DNS / 回滚)
+
+- **NM 不再删掉自己刚建的连接**:原实现 `con add static-<dev>` 后 `con delete static-<dev>` 会按同名删掉新建连接,首次配置即失效。现改为前后两次 `nmcli -t -f UUID,NAME,TYPE con show` 求 UUID 差集定位新连接,`con up <新UUID>` 成功后才按 UUID 清理本工具旧连接;add/up 失败保留(或恢复)旧配置,up 失败还撤销半成品。按名称模糊删除、删除其它接口/非托管连接的行为一并去除。
+- **失败不再返回成功**:`nmcli con add`/`con up` 失败、`ip` 关键命令失败(flush/link/全部地址失败/显式请求的 route 与 rule)、DNS 写入失败、备份失败、`netplan apply`/`networkctl reconfigure` 失败,一律非零退出且不打印成功文案(原来这些路径 `main` 仍返回 0,上层 bmssm 因此误报配置成功)。
+- **DNS 真正生效且顺序正确**:`resolvconf -a <真实设备>` 写入完整 stdin 并检查退出码(原来既不写 stdin 也不 wait);`resolvectl dns <真实设备> <全部DNS>` 一次传完(原来用不存在的 `bm_set_ip` 当接口且逐条覆盖);文件回退传播写失败。管理口保护移到所有写入之前,拒绝时 DNS 与全部修改命令调用次数为 0。
+- **回滚不再用陈旧备份**:写前在内存中区分“原文件存在(捕获内容)/不存在”,备份失败即拒绝修改;失败时只按本次快照回滚——原本不存在的文件会被删除,而不是恢复出一个假的原文件;历史遗留 `.bak` 不参与自动回滚。
+- **可测试性**:外部命令与文件系统访问收敛到 `Env` trait(生产实现 `OsEnv`),使 `cargo test` 可用 stateful fake 覆盖上述四类问题;`tests/backend_contract.sh` 用真实二进制 + fake 命令做端到端契约验证。
