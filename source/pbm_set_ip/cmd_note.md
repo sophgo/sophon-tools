@@ -55,9 +55,11 @@
 
 ## 后端
 
-netplan(需 yaml;apply 检测 stderr Error/Conflicting;写入前清除旧 gateway4/gateway6;routes/routing-policy 表名须数字或 rt_tables 已注册)→ nmcli(routes 用 `table=N`,routing-rules 逗号+固定 priority+数字 table;缺席 family 显式 method=disabled)→ networkd(`networkctl reload`+`reconfigure <dev>`,不波及其他网口)→ ip 兜底(DHCP 不支持报错退出;支持 v6 默认路由与 DNS(resolvconf/resolvectl/resolv.conf))。
+netplan(需 yaml;apply 检测 stderr Error/Conflicting;写入前清除旧 gateway4/gateway6;routes/routing-policy 表名须数字或 rt_tables 已注册)→ nmcli(routes 用 `table=N`,routing-rules 逗号+固定 priority+数字 table;缺席 family 显式 method=disabled)→ networkd(`networkctl reload`+`reconfigure <dev>`,不波及其他网口;reload 失败即关键失败)→ ip 兜底(DHCP 不支持报错退出;支持 v6 默认路由与 DNS(resolvconf/resolvectl/resolv.conf))。
 
-**错误契约**:关键命令失败一律非零退出且无成功文案——nmcli `con add`/`con up`、`ip addr flush`/`link set`/`addr add`/显式请求的 `route add`/`rule add`、DNS 写入(resolvconf/resolvectl/文件回退)、`netplan apply`、`networkctl reconfigure`、备份失败。非致命项仅限:`nmcli` 新连接激活后清旧 profile 失败、表名映射回写失败、`networkctl reload` 失败(随后 reconfigure 会重读配置)、多默认网关提示。
+**错误契约**:关键命令失败一律非零退出且无成功文案——nmcli `con add`/`con up`、`ip addr flush`/`link set`/`addr add`/显式请求的 `route add`/`rule add`、DNS 写入(resolvconf/resolvectl/文件回退)、`netplan apply`、`networkctl reconfigure`、备份失败。非致命项仅限:`nmcli` 新连接激活后清旧 profile 失败、改名为最终名失败、表名映射回写失败、多默认网关提示。**`networkctl reload` 属关键命令**:systemd 文档明确 `reconfigure` 不重新读取 `.network` 文件,reload 失败即失败并回滚。
+
+**NM 原活跃连接恢复**:激活新连接前记录该设备原 active UUID(可能是非托管连接),up 失败时按 UUID 重新激活;原本无 active 则不激活任何历史 profile;恢复失败显式报告。改名为最终名失败属非致命,残留 `.bmip-new` 下一轮改为**改名让位而非删除**,避免删掉当前唯一可用连接。
 
 **NM 新旧 profile 按 UUID 区分**:`con add` 前后各查一次 `nmcli -t -f UUID,NAME,TYPE con show`,差集即新建连接;用该 UUID `con up`;激活成功后才按 UUID 删除本工具旧连接(名称恰为 `static-<dev>` 且 `connection.interface-name` 确为本设备)。add 失败直接返回(不动旧配置);up 失败删除本次新连接并尝试 `con up` 旧连接恢复激活。不按同名/前缀模糊删除,不碰其它接口或非托管连接。`con show` 查询失败则拒绝修改。
 

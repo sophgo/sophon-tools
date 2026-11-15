@@ -4,12 +4,17 @@
 # 目的：覆盖 stateful fake 也表达不了的“退出码 + 成功文案 + 调用序列”契约，
 #       并给出“原代码失败 → 修复通过”的可复现红绿证据。
 #
-# 安全：默认在 `unshare -rmn`（用户+挂载+网络命名空间，/etc 用 tmpfs 覆盖）
-#       中运行；fake 命令全部放在临时目录的 PATH 前缀里，不存在被真实命令
-#       绕过的路径。即使在无命名空间权限的环境运行，也只会写到 tmpfs/临时目录。
+# 安全（fail-closed，验收意见 1）：
+#   本脚本会 `rm -rf /etc/netplan/*` 等绝对路径操作，因此**必须先证明**自己已在
+#   独立且 propagation=private 的 mount namespace 中，并且 /etc 已换成本次专用 tmpfs，
+#   然后才允许任何绝对路径 mkdir/rm/write。任一前置条件不满足 → 立即非零退出，
+#   绝不“降级在宿主上跑”。隔离证明用三段独立证据，不依赖可被外部伪造的单个环境变量：
+#     1. mount namespace 的 inode 与父进程不同（/proc/self/ns/mnt vs 调用者）；
+#     2. /etc 的挂载源是本脚本本次创建的 tmpfs（挂载点 inode + fstype 双重校验）；
+#     3. 写入一个哨兵文件并确认它落在 tmpfs 上，且宿主视角不可见（由 run_isolation_selftest 覆盖）。
 #
 # 用法：
-#   bash tests/backend_contract.sh              # 跑全部用例
+#   bash tests/backend_contract.sh              # 自动建立隔离环境并跑全部用例
 #   BIN=/path/to/bm_set_ip bash tests/backend_contract.sh
 #   bash tests/backend_contract.sh -v           # 打印每个用例的输出
 set -uo pipefail
@@ -29,27 +34,97 @@ if [ -z "$BIN" ]; then
 fi
 BIN="$(readlink -f "$BIN")"
 
-# 已在隔离环境内则由内层脚本执行；否则用 unshare 重新进入
-if [ "${BM_SET_IP_IN_NS:-0}" != "1" ]; then
-  if unshare -rmn --propagation private true 2>/dev/null; then
-    echo "==> 在 unshare -rmn 隔离环境内运行契约测试"
-    exec unshare -rmn --propagation private \
-      env BM_SET_IP_IN_NS=1 BIN="$BIN" BM_SET_IP_TEST_VERBOSE="$VERBOSE" \
-      CRATE_DIR="$CRATE_DIR" bash "$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")" "${1:-}"
+die() { echo "ERROR: $*" >&2; echo "ERROR: 隔离前置条件不满足，拒绝在宿主上运行（fail-closed）" >&2; exit 3; }
+
+# 仅供 run_isolation_selftest 注入故障：允许用包装命令替换 unshare/mount。
+UNSHARE_BIN="${BM_SET_IP_UNSHARE_BIN:-unshare}"
+MOUNT_BIN="${BM_SET_IP_MOUNT_BIN:-mount}"
+
+# 已在外层建立的隔离中？只认 TMPFS 标记 + namespace 自证，不单独信任 IN_NS 变量。
+if [ "${BM_SET_IP_ISOLATED:-0}" != "1" ]; then
+  # ---- 第一层：进入独立 mount+net namespace（privileged 用 -mn，否则尝试 -rmn）----
+  NS_CMD=""
+  if $UNSHARE_BIN -mn --propagation private true 2>/dev/null; then
+    NS_CMD="$UNSHARE_BIN -mn --propagation private"
+  elif $UNSHARE_BIN -rmn --propagation private true 2>/dev/null; then
+    NS_CMD="$UNSHARE_BIN -rmn --propagation private"
   fi
-  echo "[WARN] 无命名空间权限，改在临时目录 + fake PATH 下运行（仍不触碰真实命令）" >&2
+  [ -n "$NS_CMD" ] || die "无可用命名空间权限（unshare -mn / -rmn 均失败）。请以 root/CAP_SYS_ADMIN 运行，或显式跳过本脚本（不支持在宿主回退执行）。"
+
+  echo "==> 进入隔离环境: $NS_CMD"
+  # 内层负责证明隔离；外层只转发退出码
+  exec $NS_CMD env BM_SET_IP_ISOLATED=1 BIN="$BIN" BM_SET_IP_TEST_VERBOSE="$VERBOSE" \
+    CRATE_DIR="$CRATE_DIR" bash "$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")" "${1:-}"
 fi
 
-# ---- 隔离环境内的固定根 ----
-ROOT="$(mktemp -d)"
+# ---- 内层：逐条验证隔离证据，任何一条不成立就退出 ----
+
+# 证据 1：必须已处于独立 mount namespace。
+# 父进程（外层）在宿主的 mnt ns；若当前与自己父进程的 mnt ns inode 相同，说明没隔离。
+NS_SELF="$(readlink /proc/self/ns/mnt 2>/dev/null | cut -d: -f2)"
+[ -n "${NS_SELF:-}" ] || die "无法读取 /proc/self/ns/mnt"
+NS_PARENT="unavailable"
+if [ -r "/proc/$PPID/ns/mnt" ]; then
+  NS_PARENT="$(readlink "/proc/$PPID/ns/mnt" 2>/dev/null | cut -d: -f2)"
+  NS_PARENT="${NS_PARENT:-unavailable}"
+  [ "${NS_SELF}" != "${NS_PARENT}" ] || die "当前 mount namespace 与父进程相同（$NS_SELF），未真正隔离"
+fi
+
+# 解析 /proc/self/mountinfo 中某个挂载点的字段（纯 bash）。
+# 刻意不用 awk：Ubuntu/Debian 的 /usr/bin/awk 是 /etc/alternatives/awk 的符号链接，
+# 一旦 /etc 被 tmpfs 覆盖，awk 就不可用，反而会让隔离校验自己失败。
+# 参数：$1=挂载点  $2=要取的字段下标（1=mount id, 5=mount point, 9=fstype）
+mountinfo_field() {
+  local want="$1" idx="$2" line i f
+  while IFS= read -r line; do
+    set -f
+    # shellcheck disable=SC2086
+    local -a f=($line)
+    set +f
+    if [ "${f[4]:-}" = "$want" ]; then
+      printf '%s' "${f[$((idx-1))]-}"
+      return 0
+    fi
+  done < /proc/self/mountinfo
+  return 1
+}
+
+# 证据 2：在 mount 前记录原 /etc 的 mount id，mount 后必须变化
+orig_mnt_id="$(mountinfo_field /etc 1 || true)"
+orig_etc_dev="$(stat -c '%d' /etc 2>/dev/null || echo unknown)"
+
+ROOT="$(mktemp -d)" || die "mktemp 失败"
 export TMPDIR="$ROOT/tmp"
 mkdir -p "$TMPDIR"
-# /etc 用 tmpfs 覆盖，保证任何绝对路径写入都不落到宿主；覆盖后再建测试用目录
-if mount -t tmpfs tmpfs /etc 2>/dev/null; then
-  echo "[INFO] /etc 已用 tmpfs 覆盖（零宿主副作用）"
-else
-  echo "[WARN] 无法覆盖挂载 /etc：测试文件将落在真实 /etc（仅限 netplan/networkd/resolv.conf 测试文件）" >&2
-fi
+# 记录本次 tmpfs 的唯一标记，供事后校验 /etc 确实是“这一个” tmpfs
+TMPFS_TOKEN="bm_set_ip_test_tmpfs_$$_$(date +%s%N)"
+printf '%s' "$TMPFS_TOKEN" > "$ROOT/token"
+
+# /etc 换成 tmpfs：失败即退出（绝不带着真实 /etc 继续）
+$MOUNT_BIN -t tmpfs -o "size=8m" tmpfs /etc || die "mount tmpfs /etc 失败；不能覆盖 /etc 时禁止继续"
+
+# 证据 2a：/etc 的 mount id 必须变化，且 fstype 必须是 tmpfs
+new_mnt_id="$(mountinfo_field /etc 1 || true)"
+[ -n "$new_mnt_id" ] || die "无法确认 /etc 的挂载记录"
+[ "$new_mnt_id" != "${orig_mnt_id:-none}" ] || die "/etc 的 mount id 未变化（$new_mnt_id），tmpfs 未生效"
+etc_fstype="$(mountinfo_field /etc 9 || true)"
+[ "$etc_fstype" = "tmpfs" ] || die "/etc 实际 fstype=${etc_fstype:-unknown}，不是 tmpfs"
+# 证据 2b：设备号必须改变（新 tmpfs 是独立匿名设备）
+new_etc_dev="$(stat -c '%d' /etc)"
+[ "$new_etc_dev" != "$orig_etc_dev" ] || die "/etc 设备号未变化（$new_etc_dev），仍是原文件系统"
+
+# 证据 3：写入哨兵并确认可写；再校验“宿主视角不可见”——挂载点私有性
+printf '%s' "$TMPFS_TOKEN" > /etc/.bmip_isolation_token || die "无法在 tmpfs /etc 写入哨兵文件"
+[ "$(cat /etc/.bmip_isolation_token)" = "$TMPFS_TOKEN" ] || die "/etc 哨兵回读不一致"
+# propagation 必须是 private（否则挂载可能传播回宿主）
+prop="$(findmnt -no PROPAGATION /etc 2>/dev/null || true)"
+case "$prop" in
+  private|"") : ;;   # findmnt 缺失时退化为信任 unshare --propagation private
+  *) die "/etc 挂载传播类型为 '$prop'，不是 private" ;;
+esac
+
+echo "[INFO] 隔离已证明：mnt-ns=$NS_SELF (parent=$NS_PARENT) /etc=mount#${new_mnt_id} fstype=tmpfs dev=${new_etc_dev} prop=${prop:-unknown}"
+
 mkdir -p /etc/netplan /etc/systemd/network /etc/iproute2
 
 # ---- stateful fake 命令 ----
@@ -66,17 +141,42 @@ export PATH=/usr/bin:/bin   # fake 自身需要 coreutils；被测程序的 PATH
 S="$FAKE_STATE"
 log() { printf 'nmcli %s\n' "$*" >> "$S/calls.log"; }
 esc() { local s="${1//\\/\\\\}"; printf '%s' "${s//:/\\:}"; }
+# 连接文件格式：第一行 "name|ifname"，第二行可选 "ACTIVE=1"
+is_active() { grep -qxF 'ACTIVE=1' "$S/nm/$(basename "$1")" 2>/dev/null; }
+set_active() { # uuid
+  local f="$S/nm/$1"; [ -e "$f" ] || return 0
+  grep -v '^ACTIVE=' "$f" > "$f.tmp" 2>/dev/null || true
+  echo 'ACTIVE=1' >> "$f.tmp"; mv "$f.tmp" "$f"
+}
+clear_active_on() { # ifname
+  for f in "$S"/nm/*; do
+    [ -e "$f" ] || continue
+    IFS='|' read -r n i < "$f"
+    [ "$i" = "$1" ] && { grep -v '^ACTIVE=' "$f" > "$f.tmp" 2>/dev/null || true; mv "$f.tmp" "$f"; }
+  done
+}
 unesc() { printf '%s' "${1//\\:/:}"; }
 log "$@"
 
 case "$1" in
   -t)
-    # nmcli -t -f UUID,NAME,TYPE con show
+    # nmcli -t -f <fields> con show [--active]
+    active_only=0; want_dev=0
+    for a in "$@"; do
+      [ "$a" = "--active" ] && active_only=1
+      case ",$a," in *,DEVICE,*) want_dev=1 ;; esac
+    done
     for f in "$S"/nm/*; do
       [ -e "$f" ] || continue
       uuid="$(basename "$f")"
       IFS='|' read -r name ifname < "$f"
-      printf '%s:%s:802-3-ethernet\n' "$(esc "$uuid")" "$(esc "$name")"
+      act=""; is_active "$f" && act=1
+      [ "$active_only" = "1" ] && [ -z "$act" ] && continue
+      if [ "$want_dev" = "1" ]; then
+        printf '%s:%s:802-3-ethernet:%s\n' "$(esc "$uuid")" "$(esc "$name")" "${act:+$ifname}"
+      else
+        printf '%s:%s:802-3-ethernet\n' "$(esc "$uuid")" "$(esc "$name")"
+      fi
     done
     ;;
   -g)
@@ -116,10 +216,14 @@ case "$1" in
         ;;
       up)
         target="$3"
+        # 真实 NM 会先把该设备原 active 连接切下来
+        dev=""; [ -e "$S/nm/$target" ] && { IFS='|' read -r _ dev < "$S/nm/$target"; }
+        [ -n "$dev" ] && clear_active_on "$dev"
         if [ -n "${FAKE_NM_UP_FAIL:-}" ] && [ "$FAKE_NM_UP_FAIL" = "$target" ]; then
           echo "Error: Connection activation failed: No suitable device found" >&2; exit 4
         fi
         [ -e "$S/nm/$target" ] || { echo "Error: unknown connection '$target'" >&2; exit 10; }
+        set_active "$target"
         echo "Connection '$target' successfully activated."
         ;;
       show)
@@ -147,7 +251,9 @@ case "$1" in
           uuid="$(basename "$f")"
           [ "$uuid" = "$target" ] || continue
           IFS='|' read -r name ifname < "$f"
+          act=""; grep -qxF 'ACTIVE=1' "$f" 2>/dev/null && act=1
           printf '%s|%s\n' "$newid" "$ifname" > "$f"
+          [ -n "$act" ] && echo 'ACTIVE=1' >> "$f"
           echo "Connection '$newid' successfully modified."; exit 0
         done
         echo "Error: unknown connection '$target'" >&2; exit 10
@@ -210,7 +316,9 @@ cat > "$FAKE_BIN/networkctl" <<'FAKE'
 export PATH=/usr/bin:/bin   # fake 自身需要 coreutils；被测程序的 PATH 只含 fake 目录
 printf 'networkctl %s\n' "$*" >> "$FAKE_STATE/calls.log"
 case "$1" in
-  reload) exit 0 ;;
+  reload)
+    [ -n "${FAKE_NETCTL_RELOAD_FAIL:-}" ] && { echo "Failed to reload" >&2; exit 1; }
+    exit 0 ;;
   reconfigure)
     if [ -n "${FAKE_NETCTL_FAIL:-}" ]; then echo "Failed to reconfigure" >&2; exit 1; fi
     exit 0 ;;
@@ -263,9 +371,11 @@ reset_state() {
   : > /etc/iproute2/rt_tables
 }
 
-add_conn() { # name ifname -> goes to uuid-legacy-<name>
+add_conn() { # name ifname [active] -> uuid-legacy-<name>
   local uuid="uuid-legacy-$1"
   printf '%s|%s\n' "$1" "$2" > "$FAKE_STATE/nm/$uuid"
+  [ "${3:-}" = "active" ] && echo 'ACTIVE=1' >> "$FAKE_STATE/nm/$uuid"
+  return 0
 }
 
 # 运行被测程序：以 root 且 PATH 前缀为 fake
@@ -293,7 +403,11 @@ has_call_prefix() { calls | grep -q "$1"; }
 count_calls() { calls | grep -c "$1"; }
 out_has() { grep -qF "$1" "$FAKE_STATE/out.log" 2>/dev/null; }
 nm_has_uuid() { [ -e "$FAKE_STATE/nm/$1" ]; }
-nm_names() { for f in "$FAKE_STATE/nm"/*; do [ -e "$f" ] && cat "$f"; done; }
+# 只输出连接定义行（name|ifname），忽略 ACTIVE= 状态标记行
+nm_names() { for f in "$FAKE_STATE/nm"/*; do [ -e "$f" ] && grep -v '^ACTIVE=' "$f"; done; }
+nm_count() { nm_names | grep -c . ; }
+active_dev() { for f in "$FAKE_STATE/nm"/*; do [ -e "$f" ] || continue; grep -qxF 'ACTIVE=1' "$f" && { IFS='|' read -r n i < "$f"; echo "$i"; return 0; }; done; return 1; }
+active_uuid_on() { for f in "$FAKE_STATE/nm"/*; do [ -e "$f" ] || continue; IFS='|' read -r n i < "$f"; [ "$i" = "$1" ] && grep -qxF 'ACTIVE=1' "$f" && { basename "$f"; return 0; }; done; return 1; }
 
 echo "==> BIN=$BIN"
 "$BIN" --dry-run eth1 10.1.0.5 24 2>/dev/null | head -1
@@ -313,7 +427,7 @@ echo "$rc" > "$FAKE_STATE/rc"
 check "NM 首次配置（无旧连接）退出码 0" [ "$(cat "$FAKE_STATE/rc")" = "0" ]
 check "NM 首次配置不应删除任何连接" [ "$(count_calls 'nmcli con delete')" = "0" ]
 check "NM 首次配置按 UUID 激活新连接" has_call "nmcli con up uuid-new-1"
-check "NM 首次配置应只留一个连接" [ "$(nm_names | wc -l)" = "1" ]
+check "NM 首次配置应只留一个连接" [ "$(nm_count)" = "1" ]
 check "NM 首次配置输出成功文案" out_has "applied successfully"
 check "NM 新 profile 以临时名创建（避免与旧 profile 的 con-name 冲突）" has_call_prefix "nmcli con add type ethernet ifname eth1 con-name static-eth1.bmip-new"
 check "NM 激活后应改名为最终名" has_call "nmcli con modify uuid-new-1 connection.id static-eth1"
@@ -326,7 +440,7 @@ rc=$?
 check "NM 同名旧连接场景退出码 0" [ "$rc" = "0" ]
 check "NM 新连接必须在配置后仍存在（原代码会删掉它）" nm_has_uuid "uuid-new-1"
 check "NM 旧连接应按 UUID 被清理" [ ! -e "$FAKE_STATE/nm/uuid-legacy-static-eth1" ]
-check "NM 同名旧连接场景最终只留一个连接" [ "$(nm_names | wc -l)" = "1" ]
+check "NM 同名旧连接场景最终只留一个连接" [ "$(nm_count)" = "1" ]
 check "NM 同名旧连接场景最终名为 static-eth1" bash -c 'grep -qxF "static-eth1|eth1" "$0/nm/uuid-new-1"' "$FAKE_STATE"
 check "NM 不得按同名删除新连接" bash -c '! grep -qxF "nmcli con delete static-eth1" "$0"' "$FAKE_STATE/calls.log"
 
@@ -354,6 +468,68 @@ rc=$?
 check "NM 其它接口场景退出码 0" [ "$rc" = "0" ]
 check "NM 不得删除绑定别的接口的同名连接" nm_has_uuid "uuid-legacy-static-eth1"
 check "NM 不得删除非托管连接" nm_has_uuid "uuid-legacy-Wired connection 1"
+
+# ---- 原 active 连接必须被恢复（验收意见 2）----
+reset_state; add_conn "static-eth1" "eth1" active
+PATH="$ONLY_FAKE" FAKE_SYSTEMD_ACTIVE=NetworkManager FAKE_NM_UP_FAIL=uuid-new-1 \
+  "$BIN" eth1 10.1.0.5 24 > "$FAKE_STATE/out.log" 2>&1
+rc=$?
+check "NM up 失败必须非零" [ "$rc" != "0" ]
+check "NM up 失败必须按原 active UUID 重新激活（托管连接）" has_call "nmcli con up uuid-legacy-static-eth1"
+check "NM up 失败后该接口仍有一条 active 连接" bash -c 'for f in "$0"/nm/*; do [ -e "$f" ] || continue; grep -qxF "ACTIVE=1" "$f" && exit 0; done; exit 1' "$FAKE_STATE"
+check "NM up 失败后 active 的就是原连接" bash -c 'grep -qxF "ACTIVE=1" "$0/nm/uuid-legacy-static-eth1"' "$FAKE_STATE"
+check "NM up 失败不得输出成功文案" bash -c '! grep -qF "applied successfully" "$0/out.log"' "$FAKE_STATE"
+
+# 原 active 是非托管连接：同样必须恢复
+reset_state; add_conn "Wired connection 1" "eth1" active
+PATH="$ONLY_FAKE" FAKE_SYSTEMD_ACTIVE=NetworkManager FAKE_NM_UP_FAIL=uuid-new-1 \
+  "$BIN" eth1 10.1.0.5 24 > "$FAKE_STATE/out.log" 2>&1
+rc=$?
+check "NM up 失败必须恢复非托管原 active 连接" has_call "nmcli con up uuid-legacy-Wired connection 1"
+check "NM 非托管连接不得被删除" [ -e "$FAKE_STATE/nm/uuid-legacy-Wired connection 1" ]
+
+# 原本没有 active 连接：不得激活任何既有 profile
+reset_state; add_conn "static-eth1" "eth1"     # 未 active
+PATH="$ONLY_FAKE" FAKE_SYSTEMD_ACTIVE=NetworkManager FAKE_NM_UP_FAIL=uuid-new-1 \
+  "$BIN" eth1 10.1.0.5 24 > "$FAKE_STATE/out.log" 2>&1
+rc=$?
+check "原本无 active 时不得激活任何既有 profile" bash -c '! grep -qxF "nmcli con up uuid-legacy-static-eth1" "$0/calls.log"' "$FAKE_STATE"
+
+# 成功路径：新连接应成为 active
+reset_state; add_conn "static-eth1" "eth1" active
+PATH="$ONLY_FAKE" FAKE_SYSTEMD_ACTIVE=NetworkManager "$BIN" eth1 10.1.0.5 24 > "$FAKE_STATE/out.log" 2>&1
+rc=$?
+check "NM 成功路径退出码 0" [ "$rc" = "0" ]
+check "NM 成功后新连接是 active" bash -c 'grep -qxF "ACTIVE=1" "$0/nm/uuid-new-1"' "$FAKE_STATE"
+
+# ---- 连续运行：改名失败留下的临时 profile 不得被删（验收意见 3）----
+# 第一次：up 成功但改名失败 → 留下 active 的 static-eth1.bmip-new
+reset_state
+PATH="$ONLY_FAKE" FAKE_SYSTEMD_ACTIVE=NetworkManager FAKE_NM_MODIFY_FAIL=1 \
+  "$BIN" eth1 10.1.0.5 24 > "$FAKE_STATE/out.log" 2>&1
+rc=$?
+check "NM 改名失败仍整体成功（非致命）" [ "$rc" = "0" ]
+check "NM 改名失败留下 active 的临时 profile" bash -c 'grep -qxF "ACTIVE=1" "$0/nm/uuid-new-1"' "$FAKE_STATE"
+check "NM 改名失败留下临时名" bash -c 'grep -qxF "static-eth1.bmip-new|eth1" "$0/nm/uuid-new-1"' "$FAKE_STATE"
+
+# 第二次 add 失败：绝不能先删掉那条唯一可用的连接
+: > "$FAKE_STATE/calls.log"
+PATH="$ONLY_FAKE" FAKE_SYSTEMD_ACTIVE=NetworkManager FAKE_NM_ADD_FAIL=1 \
+  "$BIN" eth1 10.2.0.9 24 > "$FAKE_STATE/out.log" 2>&1
+rc=$?
+check "二次运行 add 失败必须非零" [ "$rc" != "0" ]
+check "二次运行 add 失败不得删除上次的唯一可用连接" [ -e "$FAKE_STATE/nm/uuid-new-1" ]
+check "二次运行 add 失败后接口仍有 active 连接" bash -c 'grep -qxF "ACTIVE=1" "$0/nm/uuid-new-1"' "$FAKE_STATE"
+check "二次运行不得删除 active 的临时 profile" bash -c '! grep -qE "^nmcli con delete uuid-new-1$" "$0/calls.log"' "$FAKE_STATE"
+
+# 第二次 up 失败：同样不得先删，且必须恢复原 active
+: > "$FAKE_STATE/calls.log"
+PATH="$ONLY_FAKE" FAKE_SYSTEMD_ACTIVE=NetworkManager FAKE_NM_ADD_FAIL= \
+  FAKE_NM_UP_FAIL=uuid-new-2 "$BIN" eth1 10.2.0.9 24 > "$FAKE_STATE/out.log" 2>&1
+rc=$?
+check "二次运行 up 失败必须非零" [ "$rc" != "0" ]
+check "二次运行 up 失败后仍有 active 连接" bash -c 'grep -qxF "ACTIVE=1" "$0/nm/uuid-new-1"' "$FAKE_STATE"
+check "二次运行 up 失败恢复的是上次的 active 连接" has_call "nmcli con up uuid-new-1"
 
 # ================= ip 兜底后端 =================
 echo "--- ip 兜底后端"
@@ -500,6 +676,22 @@ PATH="$ONLY_FAKE" FAKE_SYSTEMD_ACTIVE=systemd-networkd \
 rc=$?
 check "networkd 成功退出码 0" [ "$rc" = "0" ]
 check "networkd 成功应写入新配置" bash -c 'grep -qF "Address=10.1.0.5/24" /etc/systemd/network/10-eth1.network'
+
+# ---- reload 是关键命令（验收意见 4）----
+reset_state
+PATH="$ONLY_FAKE" FAKE_SYSTEMD_ACTIVE=systemd-networkd FAKE_NETCTL_RELOAD_FAIL=1 \
+  "$BIN" eth1 10.1.0.5 24 > "$FAKE_STATE/out.log" 2>&1
+rc=$?
+check "networkd reload 失败必须非零（即使 reconfigure 成功）" [ "$rc" != "0" ]
+check "networkd reload 失败不得输出成功文案" bash -c '! grep -qF "applied successfully" "$0/out.log"' "$FAKE_STATE"
+check "networkd reload 失败必须回滚新文件" [ ! -e /etc/systemd/network/10-eth1.network ]
+
+reset_state
+printf '[Match]\nName=eth1\n\n[Network]\nDHCP=ipv4\n' > /etc/systemd/network/10-eth1.network
+PATH="$ONLY_FAKE" FAKE_SYSTEMD_ACTIVE=systemd-networkd FAKE_NETCTL_RELOAD_FAIL=1 \
+  "$BIN" eth1 10.1.0.5 24 > "$FAKE_STATE/out.log" 2>&1
+rc=$?
+check "networkd reload 失败必须恢复原文件" bash -c 'grep -qxF "DHCP=ipv4" /etc/systemd/network/10-eth1.network'
 
 # ================= 汇总 =================
 echo

@@ -1448,6 +1448,33 @@ fn nm_connections(env: &mut dyn Env) -> Result<Vec<NmConn>, String> {
     Ok(parse_terse_conns(&out.stdout))
 }
 
+/// 查询某接口当前**实际激活**的连接 UUID（可能是本工具创建之外的连接）。
+/// 返回 Ok(None) = 该接口没有 active 连接；Err = 无法判断（NM 不可用等）。
+fn nm_active_uuid(env: &mut dyn Env, dev: &str) -> Result<Option<String>, String> {
+    let out = env.run(
+        "nmcli",
+        &["-t", "-f", "UUID,NAME,TYPE,DEVICE", "con", "show", "--active"],
+    );
+    if !out.ok {
+        return Err(format!(
+            "`nmcli -t -f UUID,NAME,TYPE,DEVICE con show --active` failed{}; 无法确认 {} 当前活跃连接",
+            out.detail(),
+            dev
+        ));
+    }
+    for line in out.stdout.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let f = split_terse(line);
+        // UUID:NAME:TYPE:DEVICE
+        if f.len() >= 4 && f[3] == dev {
+            return Ok(Some(f[0].clone()));
+        }
+    }
+    Ok(None)
+}
+
 /// 查询连接绑定的接口名；查不到（命令失败/未设置）返回 None
 fn nm_ifname_of(env: &mut dyn Env, uuid: &str) -> Option<String> {
     let out = env.run(
@@ -1621,14 +1648,41 @@ fn nmcli_render(cfg: &Config, allocated: &mut HashMap<String, u32>) -> Vec<Strin
     args
 }
 
-/// NM 后端：以 UUID 明确区分新旧 profile。
+/// NM 后端：以 UUID 明确区分新旧 profile，并显式跟踪/恢复**实际活跃**连接。
 ///
 /// NM 要求 con-name 唯一，因此若按最终名 `static-<dev>` 直接 add，会与旧 profile 冲突；
-/// 而先删旧 profile 又违背“任何失败都不丢旧配置”。折中做法：
+/// 而先删旧 profile 又违背“任何失败都不丢旧配置”。因此：
 ///   1. 新 profile 先以临时名 `static-<dev>.bmip-new` 创建；
 ///   2. 用去程/回程两次 `con show` 的 UUID 差集确定新连接，按 UUID 激活；
 ///   3. 激活成功后按 UUID 删除本工具旧 profile，再把新连接改名为最终名。
-/// 任何一步失败，旧 profile 都还在，且从未被修改。
+///
+/// 关键点（验收指出的两个坑）：
+/// - **记录原 active UUID**：`con up <新>` 会把该设备上原 active 连接踢下线，
+///   因此失败时必须按 UUID 把原连接重新激活，仅仅“保住 profile”不等于恢复连通性。
+///   原 active 连接可能是非托管连接（如 `Wired connection 1`），也必须原样恢复。
+/// - **不预先删除可能 active 的临时 profile**：上一轮若 `con up` 成功但改名失败，
+///   残留的 `.bmip-new` 恰恰是当前唯一可用连接；重跑时先删它会在 add/up 失败后断网。
+///   改为只用 `con modify connection.id` 把它改名让位，绝不删除。
+
+/// 把设备上的原活跃连接重新激活，用于失败回退。返回给人看的说明。
+fn nm_restore_active(env: &mut dyn Env, original: Option<&str>) -> String {
+    let Some(uuid) = original else {
+        // 原来就没有 active 连接：不去激活任何历史 profile（那会凭空改配置）
+        return "; 该设备原本没有活跃连接，未激活任何既有 profile".to_string();
+    };
+    let r = env.run("nmcli", &["con", "up", uuid]);
+    if r.ok {
+        format!("; re-activated previous active connection {}", uuid)
+    } else {
+        format!(
+            "; FAILED to re-activate previous active connection {}{} — 该接口可能已断网，请手工 `nmcli con up {}`",
+            uuid,
+            r.detail(),
+            uuid
+        )
+    }
+}
+
 fn configure_with_nmcli(cfg: &Config, env: &mut dyn Env) -> Result<(), String> {
     let con_name = format!("static-{}", cfg.net_device);
     let tmp_name = format!("{}.bmip-new", con_name);
@@ -1637,6 +1691,8 @@ fn configure_with_nmcli(cfg: &Config, env: &mut dyn Env) -> Result<(), String> {
     // 1) 前置准备（无副作用）：现状查询失败就不动配置
     warn_extra_routes(env, cfg);
     let before = nm_connections(env)?;
+    // 原活跃连接：可能是本工具 profile，也可能是非托管连接。失败的唯一补救依据。
+    let active_before = nm_active_uuid(env, &dev)?;
 
     // 本工具的旧连接 = 名称精确等于 static-<dev> 且接口名确为本设备。
     // 不按模糊/前缀同名删除，也不碰其它接口或非本工具创建的 profile。
@@ -1658,13 +1714,40 @@ fn configure_with_nmcli(cfg: &Config, env: &mut dyn Env) -> Result<(), String> {
         }
     }
 
-    // 上次运行中断可能留下的临时 profile：按名字 + 接口名确认是自己的才清掉
+    // 上次运行中断/改名失败留下的临时 profile：
+    // - 若它正是当前 active 连接 → 绝不能删（删了立刻断网）；只能改名让位。
+    // - 若不是 active → 直接删除是安全的。
+    let mut leftover_tmp: Option<String> = None;
     for c in &before {
-        if c.name == tmp_name && nm_ifname_of(env, &c.uuid).as_deref() == Some(dev.as_str()) {
+        if c.name != tmp_name || nm_ifname_of(env, &c.uuid).as_deref() != Some(dev.as_str()) {
+            continue;
+        }
+        if active_before.as_deref() == Some(c.uuid.as_str()) {
+            // 保住这条连接：改名让出临时名，下一轮它就会被当作旧 profile 正常替换
+            let ren = env.run(
+                "nmcli",
+                &["con", "modify", c.uuid.as_str(), "connection.id", con_name.as_str()],
+            );
+            if !ren.ok {
+                return Err(format!(
+                    "leftover temporary profile '{}' ({}) is currently ACTIVE on {}; it must be renamed (never deleted) before creating a new profile, but `nmcli con modify` failed{}; nothing was changed",
+                    tmp_name,
+                    c.uuid,
+                    dev,
+                    ren.detail()
+                ));
+            }
+            env.say(&format!(
+                "[INFO] left over active profile {} renamed from '{}' to '{}' (kept, never deleted)",
+                c.uuid, tmp_name, con_name
+            ));
+            leftover_tmp = Some(c.uuid.clone());
+            old_managed.push(c.uuid.clone());
+        } else {
             let d = env.run("nmcli", &["con", "delete", c.uuid.as_str()]);
             if !d.ok {
                 return Err(format!(
-                    "cannot remove leftover temporary profile '{}' ({}){}; nothing was changed",
+                    "cannot remove inactive leftover temporary profile '{}' ({}){}; nothing was changed",
                     tmp_name,
                     c.uuid,
                     d.detail()
@@ -1672,6 +1755,7 @@ fn configure_with_nmcli(cfg: &Config, env: &mut dyn Env) -> Result<(), String> {
             }
         }
     }
+    let _ = leftover_tmp;
 
     let initial = load_rt_tables(env);
     let mut allocated = initial.clone();
@@ -1683,11 +1767,11 @@ fn configure_with_nmcli(cfg: &Config, env: &mut dyn Env) -> Result<(), String> {
         .collect();
     let add_refs: Vec<&str> = add_args.iter().map(String::as_str).collect();
 
-    // 2) 以临时名新建连接；失败立即返回，旧配置完全未被触碰
+    // 2) 以临时名新建连接；失败立即返回，旧配置与激活状态都未被触碰
     let add_out = env.run("nmcli", &add_refs);
     if !add_out.ok {
         return Err(format!(
-            "nmcli con add '{}' failed{}; no existing connection was touched",
+            "nmcli con add '{}' failed{}; no existing connection was touched and the active connection is unchanged",
             tmp_name,
             add_out.detail()
         ));
@@ -1715,14 +1799,17 @@ fn configure_with_nmcli(cfg: &Config, env: &mut dyn Env) -> Result<(), String> {
     }
     let new_uuid = created[0].uuid.clone();
 
-    // 4) 按 UUID 激活新连接；失败撤销本次新建，旧 profile 仍保持原状
+    // 4) 按 UUID 激活新连接。这一步会把原 active 连接踢下线，所以失败必须把**原 active UUID**
+    //    重新拉起来（而不是只保证 profile 还在）。
     let up_out = env.run("nmcli", &["con", "up", new_uuid.as_str()]);
     if !up_out.ok {
         let del = env.run("nmcli", &["con", "delete", new_uuid.as_str()]);
+        let restore = nm_restore_active(env, active_before.as_deref());
         let mut msg = format!(
-            "nmcli con up {} failed{}; the new profile was removed and the previous configuration was left untouched",
+            "nmcli con up {} failed{}; the new profile was removed and the previous active connection was restored by uuid{}",
             new_uuid,
-            up_out.detail()
+            up_out.detail(),
+            restore
         );
         if !del.ok {
             msg.push_str(&format!(
@@ -1736,6 +1823,9 @@ fn configure_with_nmcli(cfg: &Config, env: &mut dyn Env) -> Result<(), String> {
 
     // 5) 新连接已激活，才清理本工具的旧托管 profile（按 UUID 逐个删除）
     for old in &old_managed {
+        if *old == new_uuid {
+            continue;
+        }
         let d = env.run("nmcli", &["con", "delete", old.as_str()]);
         if !d.ok {
             // 非致命：新配置已生效，旧 profile 残留只影响后续同名解析
@@ -1748,7 +1838,8 @@ fn configure_with_nmcli(cfg: &Config, env: &mut dyn Env) -> Result<(), String> {
         }
     }
 
-    // 6) 把新连接改名为最终名（旧 profile 已让位），保证下次运行仍按 static-<dev> 识别
+    // 6) 把新连接改名为最终名，保证下次运行仍按 static-<dev> 识别。
+    //    失败是非致命的：新连接已 active，且残留的 .bmip-new 在下一轮会被“改名而非删除”接住。
     let ren = env.run(
         "nmcli",
         &[
@@ -1760,7 +1851,6 @@ fn configure_with_nmcli(cfg: &Config, env: &mut dyn Env) -> Result<(), String> {
         ],
     );
     if !ren.ok {
-        // 非致命：配置已生效，只是名字不是最终名；下次运行会因名字不匹配而额外创建一个
         env.say(&format!(
             "[WARNING] connection is active but renaming {} to '{}' failed{}; rename it manually with `nmcli con modify {} connection.id {}`",
             new_uuid,
@@ -1868,14 +1958,16 @@ fn networkd_render(cfg: &Config) -> (String, String) {
     (file_path, s)
 }
 
-/// 重新加载并让配置生效。reconfigure 是关键命令，失败必须上报。
+/// 重新加载并让配置生效。
+///
+/// 按 systemd 官方 networkctl(1) 文档，`reconfigure DEVICE…` **不会**重新读取
+/// `.network`/`.netdev` 文件——配置变更必须先 `networkctl reload`。因此 reload
+/// 是关键步骤，失败时即使随后的 reconfigure 返回 0 也不能认为配置已生效。
 fn networkd_apply(env: &mut dyn Env, dev: &str) -> Result<(), String> {
-    // reload 只刷新 networkd 的配置缓存；即便失败，reconfigure 也会重新读取文件，
-    // 因此这里只告警，不作为失败（有意的非致命提示）。
     let reload = env.run("networkctl", &["reload"]);
     if !reload.ok {
-        env.say(&format!(
-            "[WARNING] `networkctl reload` failed{}; relying on reconfigure to re-read the file",
+        return Err(format!(
+            "`networkctl reload` failed{}; new configuration was NOT loaded (reconfigure alone does not re-read .network files)",
             reload.detail()
         ));
     }
@@ -2324,6 +2416,8 @@ mod tests {
         name: String,
         con_type: String,
         ifname: String,
+        /// 该连接当前是否处于 active 状态（同一接口至多一个）
+        active: bool,
     }
 
     struct Fake {
@@ -2334,7 +2428,9 @@ mod tests {
         programs: HashSet<String>,
         nm: Vec<Conn>,
         nm_next: u32,
-        /// 失败开关："add" / "show" / "up" / "up:<uuid>" / "delete:<uuid>"
+        /// 失败开关："add" / "show" / "up" / "up:<uuid>" / "delete:<uuid>" /
+        /// "modify" / "modify:<uuid>" / "active"
+        /// 另有 on_up_fail_deactivate_first：新连接 up 失败前已把旧链路切掉（真实 NM 行为）
         nm_fail: HashSet<String>,
         /// ip 命令失败前缀（如 "addr flush"）：命中即返回非零
         ip_fail: Vec<String>,
@@ -2390,8 +2486,29 @@ mod tests {
                 name: name.to_string(),
                 con_type: "802-3-ethernet".to_string(),
                 ifname: ifname.to_string(),
+                active: false,
             });
             self
+        }
+
+        /// 让某个连接成为该接口的 active 连接（隐含把同接口其它连接置为 inactive）
+        fn activated(mut self, uuid: &str) -> Self {
+            let ifname = self.nm.iter().find(|c| c.uuid == uuid).map(|c| c.ifname.clone());
+            if let Some(dev) = ifname {
+                for c in self.nm.iter_mut() {
+                    if c.ifname == dev {
+                        c.active = c.uuid == uuid;
+                    }
+                }
+            }
+            self
+        }
+
+        fn active_uuid_on(&self, dev: &str) -> Option<String> {
+            self.nm
+                .iter()
+                .find(|c| c.ifname == dev && c.active)
+                .map(|c| c.uuid.clone())
         }
 
         fn calls_of(&self, prefix: &str) -> Vec<String> {
@@ -2548,14 +2665,32 @@ mod tests {
                 if self.nm_fail.contains("show") {
                     return Out::fail_with("Error: NetworkManager is not running");
                 }
+                let active_only = args.iter().any(|a| *a == "--active");
+                if active_only && self.nm_fail.contains("active") {
+                    return Out::fail_with("Error: NetworkManager is not running");
+                }
                 let mut s = String::new();
+                // -f 的字段清单是单个参数，如 "UUID,NAME,TYPE,DEVICE"
+                let want_device = args.iter().any(|a| a.split(',').any(|f| f == "DEVICE"));
                 for c in &self.nm {
-                    s.push_str(&format!(
-                        "{}:{}:{}\n",
+                    if active_only && !c.active {
+                        continue;
+                    }
+                    let mut line = format!(
+                        "{}:{}:{}",
                         terse_escape(&c.uuid),
                         terse_escape(&c.name),
                         terse_escape(&c.con_type)
-                    ));
+                    );
+                    if want_device {
+                        // 未激活的连接 DEVICE 字段为空
+                        line.push(':');
+                        if c.active {
+                            line.push_str(&terse_escape(&c.ifname));
+                        }
+                    }
+                    s.push_str(&line);
+                    s.push('\n');
                 }
                 return Out::ok_with(s);
             }
@@ -2607,15 +2742,37 @@ mod tests {
                     name,
                     con_type: "802-3-ethernet".to_string(),
                     ifname,
+                    active: false,
                 });
                 return Out::ok_with("Connection 'x' created");
             }
             if args.len() >= 3 && args[0] == "con" && args[1] == "up" {
                 let target = args[2];
+                // 真实 NM 在尝试激活新连接时会先把该设备上原 active 连接切下来；
+                // 失败后旧链路就真的断了 —— 这正是必须按 UUID 恢复的现场。
+                let dev = self
+                    .nm
+                    .iter()
+                    .find(|c| c.uuid == target || c.name == target)
+                    .map(|c| c.ifname.clone());
+                if let Some(d) = dev.clone() {
+                    for c in self.nm.iter_mut() {
+                        if c.ifname == d {
+                            c.active = false;
+                        }
+                    }
+                }
                 if self.nm_fail.contains("up") || self.nm_fail.contains(&format!("up:{}", target)) {
                     return Out::fail_with(
                         "Error: Connection activation failed: No suitable device found",
                     );
+                }
+                if dev.is_some() {
+                    for c in self.nm.iter_mut() {
+                        if c.uuid == target || c.name == target {
+                            c.active = true;
+                        }
+                    }
                 }
                 return Out::ok_with("Connection successfully activated");
             }
@@ -2941,6 +3098,7 @@ mod tests {
             name: "static-eth1.bmip-new".into(),
             con_type: "802-3-ethernet".into(),
             ifname: "eth1".into(),
+            active: false,
         });
         let cfg = cfg_v4("eth1", &[("10.1.0.5", 24)], None, &[]);
         let r = configure_with_nmcli(&cfg, &mut f);
@@ -2961,6 +3119,7 @@ mod tests {
             name: "static-eth1".into(),
             con_type: "802-3-ethernet".into(),
             ifname: "eth1".into(),
+            active: false,
         });
         let cfg = cfg_v4("eth1", &[("10.2.0.9", 24)], Some("10.2.0.1"), &[]);
         let r = configure_with_nmcli(&cfg, &mut f);
@@ -3343,6 +3502,230 @@ mod tests {
             Some(original),
             "必须恢复原文件"
         );
+    }
+
+    // ---------- 原 active 连接的恢复（验收意见 2）----------
+
+    #[test]
+    fn nm_up_failure_reactivates_previously_active_managed_connection() {
+        // 原 active 就是本工具的 static-eth1；新 up 失败后必须把它重新拉起来
+        let mut f = Fake::new().conn("static-eth1", "eth1").activated("uuid-legacy-static-eth1");
+        f.nm_fail.insert("up:uuid-new-1".into());
+        let cfg = cfg_v4("eth1", &[("10.1.0.5", 24)], None, &[]);
+        let r = configure_with_nmcli(&cfg, &mut f);
+
+        let e = r.expect_err("up 失败必须非零");
+        assert_eq!(
+            f.active_uuid_on("eth1").as_deref(),
+            Some("uuid-legacy-static-eth1"),
+            "必须恢复原 active 连接，实际: {:?}",
+            nm_state(&f)
+        );
+        assert!(
+            f.calls_of("nmcli con up").iter().any(|c| c == "nmcli con up uuid-legacy-static-eth1"),
+            "应按原 active UUID 重新激活: {:?}",
+            f.calls
+        );
+        assert!(e.contains("re-activated previous active connection"), "错误里应报告恢复结果: {}", e);
+    }
+
+    #[test]
+    fn nm_up_failure_reactivates_previously_active_unmanaged_connection() {
+        // 原 active 是非托管连接（Wired connection 1）——也必须恢复，不能只管自己的 profile
+        let mut f = Fake::new()
+            .conn("Wired connection 1", "eth1")
+            .activated("uuid-legacy-Wired connection 1");
+        f.nm_fail.insert("up:uuid-new-1".into());
+        let cfg = cfg_v4("eth1", &[("10.1.0.5", 24)], None, &[]);
+        let r = configure_with_nmcli(&cfg, &mut f);
+
+        r.expect_err("up 失败必须非零");
+        assert_eq!(
+            f.active_uuid_on("eth1").as_deref(),
+            Some("uuid-legacy-Wired connection 1"),
+            "非托管原 active 连接也必须恢复: {:?}",
+            nm_state(&f)
+        );
+        assert!(
+            f.conn_by_uuid("uuid-legacy-Wired connection 1").is_some(),
+            "非托管连接不得被删除"
+        );
+    }
+
+    #[test]
+    fn nm_up_failure_without_previous_active_activates_nothing() {
+        // 原本没有 active 连接：不得凭空激活任何历史 profile
+        let mut f = Fake::new().conn("static-eth1", "eth1"); // active = false
+        f.nm_fail.insert("up:uuid-new-1".into());
+        let cfg = cfg_v4("eth1", &[("10.1.0.5", 24)], None, &[]);
+        let r = configure_with_nmcli(&cfg, &mut f);
+
+        let e = r.expect_err("up 失败必须非零");
+        assert_eq!(f.active_uuid_on("eth1"), None, "不得激活任何既有 profile: {:?}", nm_state(&f));
+        assert_eq!(
+            f.calls_of("nmcli con up"),
+            vec!["nmcli con up uuid-new-1"],
+            "只应尝试激活本次新建的连接: {:?}",
+            f.calls
+        );
+        assert!(e.contains("原本没有活跃连接"), "应说明未激活任何 profile: {}", e);
+    }
+
+    #[test]
+    fn nm_reports_when_restore_of_previous_active_fails() {
+        // 恢复失败必须明确报告（不能静默当作已恢复）
+        let mut f = Fake::new().conn("static-eth1", "eth1").activated("uuid-legacy-static-eth1");
+        f.nm_fail.insert("up:uuid-new-1".into());
+        f.nm_fail.insert("up:uuid-legacy-static-eth1".into());
+        let cfg = cfg_v4("eth1", &[("10.1.0.5", 24)], None, &[]);
+        let e = configure_with_nmcli(&cfg, &mut f).expect_err("必须非零");
+
+        assert!(e.contains("FAILED to re-activate"), "必须显式报告恢复失败: {}", e);
+        assert!(e.contains("nmcli con up uuid-legacy-static-eth1"), "应给出可执行的补救命令: {}", e);
+    }
+
+    #[test]
+    fn nm_active_query_failure_aborts_before_any_change() {
+        // 查不到原 active 状态就不动手：否则失败时无法恢复
+        let mut f = Fake::new().conn("static-eth1", "eth1");
+        f.nm_fail.insert("active".into());
+        let cfg = cfg_v4("eth1", &[("10.1.0.5", 24)], None, &[]);
+        let r = configure_with_nmcli(&cfg, &mut f);
+
+        assert!(r.is_err(), "无法确认 active 状态时必须拒绝修改");
+        assert!(f.calls_of("nmcli con add").is_empty(), "不得新建: {:?}", f.calls);
+        assert!(f.conn_by_uuid("uuid-legacy-static-eth1").is_some());
+    }
+
+    #[test]
+    fn nm_success_makes_new_connection_active() {
+        let mut f = Fake::new().conn("static-eth1", "eth1").activated("uuid-legacy-static-eth1");
+        let cfg = cfg_v4("eth1", &[("10.1.0.5", 24)], None, &[]);
+        configure_with_nmcli(&cfg, &mut f).expect("应成功");
+        assert_eq!(f.active_uuid_on("eth1").as_deref(), Some("uuid-new-1"), "新连接应成为 active");
+    }
+
+    // ---------- 连续运行：不得先删掉当前唯一有效连接（验收意见 3）----------
+
+    #[test]
+    fn nm_second_run_keeps_active_leftover_and_survives_add_failure() {
+        // 场景：上一轮 up 成功但改名失败 → 留下 static-eth1.bmip-new 且它是当前 active 连接。
+        // 重跑时绝不能先删它；add 失败后旧链路必须还在。
+        let mut f = Fake::new()
+            .conn("static-eth1.bmip-new", "eth1")
+            .activated("uuid-legacy-static-eth1.bmip-new");
+        f.nm_fail.insert("add".into());
+        let cfg = cfg_v4("eth1", &[("10.2.0.9", 24)], None, &[]);
+        let r = configure_with_nmcli(&cfg, &mut f);
+
+        r.expect_err("add 失败必须非零");
+        assert!(
+            f.conn_by_uuid("uuid-legacy-static-eth1.bmip-new").is_some(),
+            "当前唯一有效连接不得被删除: {:?}",
+            nm_state(&f)
+        );
+        assert_eq!(
+            f.active_uuid_on("eth1").as_deref(),
+            Some("uuid-legacy-static-eth1.bmip-new"),
+            "链路不得中断"
+        );
+        assert!(
+            !f.calls_of("nmcli con delete").iter().any(|c| c.contains("bmip-new")),
+            "不得先删除可能 active 的临时 profile: {:?}",
+            f.calls
+        );
+    }
+
+    #[test]
+    fn nm_second_run_keeps_active_leftover_and_survives_up_failure() {
+        // 同上，但这次是 up 失败：临时 profile 被删/旧链路被切都必须被恢复
+        let mut f = Fake::new()
+            .conn("static-eth1.bmip-new", "eth1")
+            .activated("uuid-legacy-static-eth1.bmip-new");
+        f.nm_fail.insert("up:uuid-new-1".into());
+        let cfg = cfg_v4("eth1", &[("10.2.0.9", 24)], None, &[]);
+        let r = configure_with_nmcli(&cfg, &mut f);
+
+        r.expect_err("up 失败必须非零");
+        // 该接口必须仍有一条 active 连接（内容可被改名，但连通性不能丢）
+        assert!(
+            f.active_uuid_on("eth1").is_some(),
+            "链路不得中断: {:?}",
+            nm_state(&f)
+        );
+        assert!(
+            f.conn_by_uuid("uuid-legacy-static-eth1.bmip-new").is_some(),
+            "原临时 profile 不得被删除: {:?}",
+            nm_state(&f)
+        );
+    }
+
+    #[test]
+    fn nm_second_run_replaces_leftover_named_profile() {
+        // 改名成功后第二轮：临时 profile 已变成 static-eth1，应被正常替换，最终仍只有一条
+        let mut f = Fake::new().conn("static-eth1", "eth1").activated("uuid-legacy-static-eth1");
+        let cfg = cfg_v4("eth1", &[("10.2.0.9", 24)], None, &[]);
+        configure_with_nmcli(&cfg, &mut f).expect("第一次应成功");
+        // 第二次运行
+        let r = configure_with_nmcli(&cfg, &mut f);
+        assert!(r.is_ok(), "第二次运行应成功: {:?}", r);
+        assert_eq!(f.nm.iter().count(), 1, "最终只应有一条连接: {:?}", nm_state(&f));
+        assert_eq!(f.active_uuid_on("eth1").as_deref(), Some("uuid-new-2"), "新连接应 active");
+    }
+
+    // ---------- networkctl reload 是关键命令（验收意见 4）----------
+
+    #[test]
+    fn networkd_reload_failure_is_fatal_even_if_reconfigure_succeeds() {
+        // systemd 文档：reconfigure 不会重新读取 .network 文件，必须先 reload。
+        // 因此 reload 失败即使 reconfigure 返回 0 也不能报成功。
+        let mut f = networkd_fake(None, vec![Out::ok_with("")]);
+        f.netctl_reload = vec![Out::fail_with("Failed to reload")].into();
+        let cfg = cfg_v4("eth1", &[("10.1.0.5", 24)], None, &[]);
+        let r = configure_with_networkd(&cfg, &mut f);
+
+        let e = r.expect_err("reload 失败必须非零（reconfigure 成功也不行）");
+        assert!(e.contains("networkctl reload"), "错误应指明 reload: {}", e);
+        assert!(
+            !f.said().contains("applied successfully"),
+            "不得输出成功文案: {}",
+            f.said()
+        );
+        // 必须回滚：原本不存在的文件应被撤销
+        assert!(
+            !f.exists("/etc/systemd/network/10-eth1.network"),
+            "失败必须回滚本次新建的文件: {:?}",
+            f.files.keys().collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn networkd_reload_failure_restores_existing_file() {
+        let original = "[Match]\nName=eth1\n\n[Network]\nDHCP=ipv4\n";
+        let mut f = networkd_fake(Some(original), vec![Out::ok_with("")]);
+        f.netctl_reload = vec![Out::fail_with("Failed to reload")].into();
+        let cfg = cfg_v4("eth1", &[("10.1.0.5", 24)], None, &[]);
+        let r = configure_with_networkd(&cfg, &mut f);
+
+        r.expect_err("reload 失败必须非零");
+        assert_eq!(
+            f.files.get("/etc/systemd/network/10-eth1.network").map(String::as_str),
+            Some(original),
+            "必须恢复原文件"
+        );
+        assert!(!f.said().contains("applied successfully"));
+    }
+
+    #[test]
+    fn networkd_reload_success_then_reconfigure_proceeds() {
+        let mut f = networkd_fake(None, vec![Out::ok_with("")]);
+        f.netctl_reload = vec![Out::ok_with("")].into();
+        let cfg = cfg_v4("eth1", &[("10.1.0.5", 24)], None, &[]);
+        let r = configure_with_networkd(&cfg, &mut f);
+        assert!(r.is_ok(), "{:?}", r);
+        assert_eq!(f.calls_of("networkctl reload").len(), 1);
+        assert_eq!(f.calls_of("networkctl reconfigure").len(), 1);
+        assert!(f.said().contains("applied successfully"));
     }
 
     #[test]
