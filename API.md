@@ -131,7 +131,7 @@ bmssm(:9779)为后端,sophliteos(:8080)反代 `/api/v1/*` 到 bmssm 并补充少
 | GET | `/api/sso/active` | 当前活跃会话 `{active,username}` |
 | POST | `/api/sso/register` | body `{username,token}` 注册新会话(踢旧) |
 | POST | `/api/sso/logout` | 注销当前会话 |
-| GET | `/api/sso/events?token=` | SSE 长连接,被踢时推 `SESSION_OFFLINE`,25s ping |
+| GET | `/api/sso/events` | SSE 长连接(仅 `Authorization: Bearer`,不接受 `?token=`),被踢时推 `SESSION_OFFLINE` 后服务端关闭该流,25s ping。上限:全局 32 条真实连接、单 token 8 条、同 IP 每分钟 10 次新建;同 (username, token) 重复 register 幂等不踢自身 |
 
 **`/api/device/*` 本地端点**(不反代,TimeoutMiddleware):
 
@@ -140,7 +140,8 @@ bmssm(:9779)为后端,sophliteos(:8080)反代 `/api/v1/*` 到 bmssm 并补充少
 | GET | `/api/device/ota/list` | OTA 文件列表 |
 | POST | `/api/device/ota/chunked` `/api/device/ota/file` | OTA 分块/整包上传 |
 | GET | `/api/device/version` | 版本信息 |
-| POST | `/api/upgrade` | 升级执行 |
+| POST | `/api/upgrade` | **已下线**：固定返回 HTTP 200 + 业务码 501「此升级方式暂不支持，请使用正式发布的软件包」，不落盘/不阻塞/不重启；正式升级走 OTA |
+| POST | `/api/upgrade/confirm` | **已下线**：同上（旧自升级流程整体下线） |
 | GET/PUT | `/api/device/metrics-selection` | 性能历史指标选择持久化 |
 
 **静态**:sophliteos 从 `server.www`(默认 `/opt/sophon/sophliteos/dist`)服务前端(`/`、`/assets`、`/resource`、`/_app.config.js`)。

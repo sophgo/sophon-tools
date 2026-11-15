@@ -25,6 +25,7 @@ import (
 	"sophliteos/logger"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -34,35 +35,70 @@ var (
 	ssoMu    sync.RWMutex
 	ssoUser  string // 当前活跃会话用户名；空表示无在线会话（SSO 未启用）
 	ssoToken string // 当前活跃会话 token（用于 logout 匹配 + 踢人比对）
+	// ssoGen 会话代次：每次会话实质变更（登录换人/换 token、logout 清空）自增。
+	// SSE 订阅绑定订阅当时的代次（ssoClient.gen），会话变更时只终止"代次已过期"的
+	// 连接 —— 这样"终止通知"针对的是被替换掉的那一代会话，而不是"当前 token 桶"，
+	// 因此不会误踢窗口期内重新登录、恰好复用同一 token 的新连接（MYS-2885 review）。
+	ssoGen uint64
+	// ssoAfterPublish 测试注入点：在"新会话已发布、终止通知未发出"且仍持 ssoMu 写锁的
+	// 那一刻被调用。生产恒为 nil。仅用于断言该窗口内不可能插入并发订阅/会话变更。
+	ssoAfterPublish func(newGen uint64)
 )
 
 // --- SSE 推送：被踢的旧会话主动通知 ----------------------------------------
-// 旧端登录后建立 /api/sso/events?token=X 长连接；新登录 register 时，
+// 旧端登录后建立 /api/sso/events（Authorization: Bearer）长连接；新登录 register 时，
 // 服务端向旧 token 的所有 SSE 客户端推送 SESSION_OFFLINE，前端弹窗并登出，
 // 无需等旧端下次请求才发现 401。
+//
+// 连接生命周期（MYS-2885）：
+//   - 客户端句柄由 ssoClientMu 统一保护，ssoConnTotal 记录**真实连接数**（不是 token 桶数）；
+//   - 每个订阅记录订阅时的会话代次（ssoClient.gen）；会话变更时只终止"代次已过期"的连接，
+//     而不是按 token 桶无差别清理 —— 见 ssoApplySessionChange；
+//   - **会话变更与终止通知在同一把 ssoMu 写锁内完成**，不存在"发布新会话 → 再通知旧会话"
+//     的窗口，因此不会出现旧登录的延迟通知误踢窗口期内重新登录的同 token 连接；
+//   - SESSION_OFFLINE 是终止事件：写出后服务端主动结束该流并回收名额；
+//   - 写失败/缓冲满同样结束流，不再让失效连接长期占用名额；
+//   - 会话校验与订阅在同一临界区（ssoMu）内完成，杜绝"校验用旧会话、订阅在切换之后"
+//     的漏通知窗口。锁序固定为 ssoMu → sseConnTimesMu → ssoClientMu，无反向获取。
 type ssoClient struct {
-	ch chan string
+	ch      chan string
+	once    sync.Once
+	gen     uint64 // 订阅时的会话代次；代次过期即应收到 SESSION_OFFLINE
+	closing bool   // 已发出终止通知；由 ssoClientMu 保护，名额保留至 handler 退出
+}
+
+// send 非阻塞投递事件；缓冲满返回 false（调用方应据此终止该连接）。
+func (c *ssoClient) send(event string) bool {
+	select {
+	case c.ch <- event:
+		return true
+	default:
+		return false
+	}
+}
+
+// close 关闭事件通道，令 handler 的接收分支立即退出（可重复调用）。
+func (c *ssoClient) close() {
+	c.once.Do(func() { close(c.ch) })
 }
 
 var (
-	ssoClients  = map[string]map[*ssoClient]struct{}{} // token -> 该 token 的所有 SSE 客户端（多标签页）
-	ssoClientMu sync.Mutex
+	ssoClients   = map[string]map[*ssoClient]struct{}{} // token -> 该 token 的所有 SSE 客户端（多标签页）
+	ssoConnTotal int                                    // 当前真实 SSE 连接数（全局上限依据）
+	ssoClientMu  sync.Mutex
+
+	// ssoOfflineTotal 累计成功投递的终止事件数（诊断/并发冒烟观测用，不影响判定）。
+	ssoOfflineTotal int64
 )
 
-// ssoNotify 向指定 token 的所有 SSE 客户端推送一个事件（非阻塞）。
-func ssoNotify(token, event string) {
-	if token == "" {
-		return
-	}
+// SSEOfflineNotified 返回累计成功投递的终止事件数（诊断/并发冒烟观测用）。
+func SSEOfflineNotified() int64 { return atomic.LoadInt64(&ssoOfflineTotal) }
+
+// ssoConnCount 返回当前真实 SSE 连接数（诊断/测试用）。
+func ssoConnCount() int {
 	ssoClientMu.Lock()
-	set := ssoClients[token]
-	for c := range set {
-		select {
-		case c.ch <- event:
-		default: // 客户端缓冲满，跳过（重连后会重新对齐状态）
-		}
-	}
-	ssoClientMu.Unlock()
+	defer ssoClientMu.Unlock()
+	return ssoConnTotal
 }
 
 // SSOActive 返回当前在线用户名。ok=false 表示无在线会话。
@@ -79,29 +115,76 @@ func SSOActiveToken() (token string, ok bool) {
 	return ssoToken, ssoToken != ""
 }
 
-// SSORegister 注册会话为活跃会话（踢掉之前的会话）。
-// 捕获旧 token 并通过 SSE 主动通知旧端（不用等旧端下次请求才发现 401）。
-func SSORegister(username, token string) {
-	ssoMu.Lock()
-	oldToken := ssoToken
-	ssoUser = username
-	ssoToken = token
-	ssoMu.Unlock()
-	ssoNotify(oldToken, "SESSION_OFFLINE")
+// ssoApplySessionChange 原子地完成"发布新会话 + 终止被替换会话的 SSE 订阅"。
+// 调用方必须已持 ssoMu 写锁：会话状态更新与终止通知在同一临界区内，
+// 中间不存在任何可被其它 register/logout/握手插入的窗口。
+//
+// 只终止 gen < newGen 的连接（即被本次变更替换掉的那一代会话的订阅），
+// 而不是按 token 桶清理：若窗口期内有连接以新代次订阅（例如 A→B→A 重新登录后
+// 同 token 的新连接），它们不属于被替换的会话，必须保留。
+// 事件按 client.ch 投递给对应连接，因此"哪个 token 的通知"由连接自身所属代次决定。
+func ssoApplySessionChange(username, token string, clear bool) {
+	ssoGen++
+	newGen := ssoGen
+	if clear {
+		ssoUser, ssoToken = "", ""
+	} else {
+		ssoUser, ssoToken = username, token
+	}
+
+	// 测试注入点：位于"新会话已发布、终止通知尚未发出"这一刻，用于断言
+	// 此刻不可能有并发订阅插入（调用方仍持 ssoMu 写锁 → 订阅侧的 RLock 会阻塞）。
+	// 生产为 nil，无任何开销；它不是"把通知挪出锁外"，而是把这段窗口暴露给测试。
+	if ssoAfterPublish != nil {
+		ssoAfterPublish(newGen)
+	}
+
+	ssoClientMu.Lock()
+	defer ssoClientMu.Unlock()
+	for _, set := range ssoClients {
+		var expired []*ssoClient
+		for c := range set {
+			if c.gen < newGen && !c.closing {
+				expired = append(expired, c)
+			}
+		}
+		if len(expired) == 0 {
+			continue
+		}
+		// 通知只发送一次。关闭通道不等于 handler 已退出（写入/Flush 可能阻塞），
+		// 因此保留订阅与名额，由 handler 的 defer 统一回收。
+		for _, c := range expired {
+			if c.send(sseEventSessionOffline) {
+				atomic.AddInt64(&ssoOfflineTotal, 1)
+			}
+			c.closing = true
+			c.close()
+		}
+	}
 }
 
-// SSOLogout 若 token 匹配活跃会话则清除，并通知该 token 的 SSE 客户端。
+// SSORegister 注册会话为活跃会话（踢掉之前的会话），并原子地通知被替换会话的 SSE 订阅者。
+//
+// 幂等保护（MYS-2885）：同一 (username, token) 重复注册视为同一会话的重连/刷新，
+// 不重新踢自己 —— 否则前端每次重连都会把当前有效会话的 SSE 长连接踢掉，
+// 形成"自踢-重连"抖动。会话实质变化（换人或换 token）才推进代次并通知旧会话下线。
+func SSORegister(username, token string) {
+	ssoMu.Lock()
+	defer ssoMu.Unlock()
+	if token != "" && token == ssoToken && username == ssoUser {
+		return
+	}
+	ssoApplySessionChange(username, token, false)
+}
+
+// SSOLogout 若 token 匹配活跃会话则清除，并原子地通知该会话的 SSE 客户端。
 func SSOLogout(token string) {
 	ssoMu.Lock()
-	matched := token != "" && ssoToken == token
-	if matched {
-		ssoUser = ""
-		ssoToken = ""
+	defer ssoMu.Unlock()
+	if token == "" || ssoToken != token {
+		return
 	}
-	ssoMu.Unlock()
-	if matched {
-		ssoNotify(token, "SESSION_OFFLINE")
-	}
+	ssoApplySessionChange("", "", true)
 }
 
 // --- 一次性票据：URL 无法携带 Authorization 头的传输（<a download>、WebSocket） ---
@@ -243,10 +326,12 @@ func SSO() gin.HandlerFunc {
 }
 
 // SSE 长连接防护上限（防连接/goroutine 耗尽）。
-const (
-	sseMaxClientsPerToken  = 8  // 单 token 最大连接数（多标签页上限）
-	sseMaxClientsGlobal    = 32 // 全局最大 SSE 连接数
-	sseMaxConnsPerIPPerMin = 10 // 同 IP 每分钟最多新建连接数
+// 以可变量维护便于测试覆盖（同 api/v1/system 的 OTA 限额），生产取值不变：
+// 单 token 8（多标签页上限）、全局 32 真实连接、同 IP 每分钟 10 次新建。
+var (
+	sseMaxClientsPerToken  = 8
+	sseMaxClientsGlobal    = 32
+	sseMaxConnsPerIPPerMin = 10
 )
 
 var (
@@ -275,45 +360,78 @@ func sseAllowConnect(ip string) bool {
 	return true
 }
 
-// SSOEvents SSE 推送端点：登录后建立长连接（Authorization Bearer 鉴权），
-// 被新登录踢掉时服务端推 SESSION_OFFLINE 事件，前端弹窗并登出（无需刷新）。
-func SSOEvents(c *gin.Context) {
-	// 严格校验：必须等于当前活跃会话 token；无活跃会话或令牌不匹配一律 401
-	// （MYS-383：不再仅凭 ?token= 非空即建连，也不再把令牌放 URL）。
-	token := requestToken(c)
+// sseRegisterClient 原子完成"会话校验 + 频率限流 + 容量检查 + 订阅"：
+// 四步在同一临界区内完成（锁序 ssoMu → sseConnTimesMu → ssoClientMu，无反向获取），
+// 因此不会出现"校验通过 → 此时被新登录顶掉 → 才订阅"从而漏收 SESSION_OFFLINE 的窗口，
+// 也不会因并发建连而短暂超出上限。
+//
+// 鉴权先于每 IP 限流：与旧实现一致，未认证请求不消耗该 IP 的新建连接预算
+// （否则同 IP 的匿名洪泛会挤掉合法客户端的重连额度）。
+func sseRegisterClient(token, ip string) (cl *ssoClient, status int) {
 	ssoMu.RLock()
-	activeToken := ssoToken
-	ssoMu.RUnlock()
-	if activeToken == "" || token == "" || token != activeToken {
-		c.Status(http.StatusUnauthorized)
-		return
+	if ssoToken == "" || token != ssoToken {
+		ssoMu.RUnlock()
+		return nil, http.StatusUnauthorized
 	}
-	if !sseAllowConnect(c.ClientIP()) {
-		c.Status(http.StatusTooManyRequests)
-		return
+	if !sseAllowConnect(ip) {
+		ssoMu.RUnlock()
+		return nil, http.StatusTooManyRequests
 	}
-	cl := &ssoClient{ch: make(chan string, 4)}
+	// 持 ssoMu 读锁期间 register 无法切换会话，订阅到的是"校验时那个会话"的订阅表，
+	// 并且代次也取自同一临界区：该连接明确属于当前（尚未被替换的）这一代会话。
+	gen := ssoGen
 	ssoClientMu.Lock()
-	if len(ssoClients) >= sseMaxClientsGlobal || len(ssoClients[token]) >= sseMaxClientsPerToken {
+	if ssoConnTotal >= sseMaxClientsGlobal || len(ssoClients[token]) >= sseMaxClientsPerToken {
 		ssoClientMu.Unlock()
-		c.Status(http.StatusTooManyRequests)
-		return
+		ssoMu.RUnlock()
+		return nil, http.StatusTooManyRequests
 	}
+	cl = &ssoClient{ch: make(chan string, 4), gen: gen}
 	if ssoClients[token] == nil {
 		ssoClients[token] = map[*ssoClient]struct{}{}
 	}
 	ssoClients[token][cl] = struct{}{}
+	ssoConnTotal++
 	ssoClientMu.Unlock()
-	defer func() {
-		ssoClientMu.Lock()
-		if set := ssoClients[token]; set != nil {
+	ssoMu.RUnlock()
+	return cl, http.StatusOK
+}
+
+// sseUnregisterClient 在 handler 退出时摘除订阅并回收连接名额（幂等）。
+func sseUnregisterClient(token string, cl *ssoClient) {
+	ssoClientMu.Lock()
+	if set := ssoClients[token]; set != nil {
+		if _, ok := set[cl]; ok {
 			delete(set, cl)
-			if len(set) == 0 {
-				delete(ssoClients, token)
-			}
+			ssoConnTotal--
 		}
-		ssoClientMu.Unlock()
-	}()
+		if len(set) == 0 {
+			delete(ssoClients, token)
+		}
+	}
+	ssoClientMu.Unlock()
+	cl.close()
+}
+
+// SSOEvents SSE 推送端点：登录后建立长连接（Authorization Bearer 鉴权），
+// 被新登录踢掉时服务端推 SESSION_OFFLINE 事件，前端弹窗并登出（无需刷新）。
+//
+// SESSION_OFFLINE 为终止事件：写出后立即结束该流并回收连接名额。
+// 旧实现在推送后继续挂在循环里等待心跳，被踢的旧连接永不释放，长连接会持续累积。
+func SSOEvents(c *gin.Context) {
+	// 严格校验：必须等于当前活跃会话 token；无活跃会话或令牌不匹配一律 401
+	// （MYS-383：不再仅凭 ?token= 非空即建连，也不再把令牌放 URL）。
+	token := requestToken(c)
+	if token == "" {
+		c.Status(http.StatusUnauthorized)
+		return
+	}
+	cl, status := sseRegisterClient(token, c.ClientIP())
+	if status != http.StatusOK {
+		c.Status(status)
+		return
+	}
+	defer sseUnregisterClient(token, cl)
 
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
@@ -331,15 +449,36 @@ func SSOEvents(c *gin.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case ev := <-cl.ch:
-			fmt.Fprintf(c.Writer, "event: %s\ndata: {\"event\":\"%s\"}\n\n", ev, ev)
+		case ev, ok := <-cl.ch:
+			if !ok {
+				// 通道被关闭（会话下线/容量摘除）：握手已建立，正常结束即可
+				return
+			}
+			if _, err := fmt.Fprintf(c.Writer, "event: %s\ndata: {\"event\":\"%s\"}\n\n", ev, ev); err != nil {
+				logger.Debug("sse write event failed: %v", err)
+				return
+			}
 			c.Writer.Flush()
+			if isTerminalSSEEvent(ev) {
+				// 终止事件已写出：结束流，连接名额由 defer 回收
+				return
+			}
 		case <-time.After(25 * time.Second):
-			fmt.Fprintf(c.Writer, ": ping\n\n") // 心跳，防中间代理超时断连
+			if _, err := fmt.Fprintf(c.Writer, ": ping\n\n"); err != nil { // 心跳，防中间代理超时断连
+				logger.Debug("sse write ping failed: %v", err)
+				return
+			}
 			c.Writer.Flush()
 		}
 	}
 }
+
+// isTerminalSSEEvent 判断事件写出后是否应结束服务端推送流。
+func isTerminalSSEEvent(ev string) bool {
+	return ev == sseEventSessionOffline
+}
+
+const sseEventSessionOffline = "SESSION_OFFLINE"
 
 // requestToken 只取 Authorization: Bearer 头。
 // MYS-383：历史上作为 query ?token= 兜底会被打进 URL/访问日志，已移除；
