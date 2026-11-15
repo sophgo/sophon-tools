@@ -61,9 +61,10 @@ var (
 //   - 会话校验与订阅在同一临界区（ssoMu）内完成，杜绝"校验用旧会话、订阅在切换之后"
 //     的漏通知窗口。锁序固定为 ssoMu → sseConnTimesMu → ssoClientMu，无反向获取。
 type ssoClient struct {
-	ch   chan string
-	once sync.Once
-	gen  uint64 // 订阅时的会话代次；代次过期即应收到 SESSION_OFFLINE
+	ch      chan string
+	once    sync.Once
+	gen     uint64 // 订阅时的会话代次；代次过期即应收到 SESSION_OFFLINE
+	closing bool   // 已发出终止通知；由 ssoClientMu 保护，名额保留至 handler 退出
 }
 
 // send 非阻塞投递事件；缓冲满返回 false（调用方应据此终止该连接）。
@@ -140,28 +141,24 @@ func ssoApplySessionChange(username, token string, clear bool) {
 
 	ssoClientMu.Lock()
 	defer ssoClientMu.Unlock()
-	for tok, set := range ssoClients {
+	for _, set := range ssoClients {
 		var expired []*ssoClient
 		for c := range set {
-			if c.gen < newGen {
+			if c.gen < newGen && !c.closing {
 				expired = append(expired, c)
 			}
 		}
 		if len(expired) == 0 {
 			continue
 		}
-		// 先投递终止事件（非阻塞），再统一摘除并关闭：被替换会话的每条连接都会
-		// 收到 SESSION_OFFLINE 后读到通道关闭，handler 写出事件即结束。
+		// 通知只发送一次。关闭通道不等于 handler 已退出（写入/Flush 可能阻塞），
+		// 因此保留订阅与名额，由 handler 的 defer 统一回收。
 		for _, c := range expired {
 			if c.send(sseEventSessionOffline) {
 				atomic.AddInt64(&ssoOfflineTotal, 1)
 			}
-			delete(set, c)
-			ssoConnTotal--
+			c.closing = true
 			c.close()
-		}
-		if len(set) == 0 {
-			delete(ssoClients, tok)
 		}
 	}
 }
@@ -400,7 +397,7 @@ func sseRegisterClient(token, ip string) (cl *ssoClient, status int) {
 	return cl, http.StatusOK
 }
 
-// sseUnregisterClient 摘除订阅并回收连接名额（幂等：已被 ssoNotify 摘除时不重复扣减）。
+// sseUnregisterClient 在 handler 退出时摘除订阅并回收连接名额（幂等）。
 func sseUnregisterClient(token string, cl *ssoClient) {
 	ssoClientMu.Lock()
 	if set := ssoClients[token]; set != nil {

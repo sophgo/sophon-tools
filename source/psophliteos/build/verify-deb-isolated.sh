@@ -31,6 +31,14 @@ if [ "${1:-}" = "--inner" ]; then
 
   fail() { echo "FAIL: $*" >&2; exit 1; }
 
+  # 内部入口也必须自证隔离，避免直接调用 --inner 时修改宿主网络/挂载。
+  for ns in mnt net; do
+    current_ns="$(readlink /proc/self/ns/$ns)" || fail "无法读取 $ns namespace"
+    parent_ns="$(readlink /proc/$PPID/ns/$ns)" || fail "无法读取父进程 $ns namespace"
+    [ "$current_ns" != "$parent_ns" ] || fail "$ns namespace 未隔离，拒绝执行"
+  done
+  [ "$(findmnt -no PROPAGATION /)" = private ] || fail "mount propagation 非 private"
+
   # --- 私有回环：net namespace 里 lo 默认 DOWN ---
   ip link set lo up || fail "无法启用 namespace 内回环"
   ip -4 addr show lo | grep -q '127.0.0.1' || fail "namespace 内回环没有 127.0.0.1"
@@ -48,6 +56,7 @@ if [ "${1:-}" = "--inner" ]; then
   # 且宿主原路径里没有它。哨兵能双向对上，才说明这个挂载确实指向我们的临时目录。
   check_bound() {
     local target="$1" src="$2" probe
+    [ "$(stat -c '%d:%i' "$target")" = "$(stat -c '%d:%i' "$src")" ] || fail "$target 未绑定到 $src"
     probe=".__mys2885_probe_$RANDOM$RANDOM"
     if ! ( : > "$target/$probe" ) 2>/dev/null; then
       fail "$target 不可写，无法验证隔离"
