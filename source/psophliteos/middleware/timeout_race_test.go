@@ -65,8 +65,13 @@ func TestTimeoutMiddlewareResponseHeadersPreserved(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	router := gin.New()
+	router.Use(func(c *gin.Context) { c.Header("X-Inherited", "outer") })
 	router.Use(TimeoutMiddleware(2 * time.Second))
 	router.GET("/headers", func(c *gin.Context) {
+		if got := c.Writer.Header().Get("X-Inherited"); got != "outer" {
+			t.Errorf("inherited header = %q, want outer", got)
+		}
+		c.Writer.Header().Del("X-Inherited")
 		c.Header("Content-Type", "text/plain; charset=utf-8")
 		c.Header("X-Custom", "custom-value")
 		c.SetCookie("session", "abc123", 3600, "/", "", false, true)
@@ -88,6 +93,9 @@ func TestTimeoutMiddlewareResponseHeadersPreserved(t *testing.T) {
 
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200", w.Code)
+		}
+		if got := w.Result().Header.Get("X-Inherited"); got != "" {
+			t.Errorf("deleted inherited header remains: %q", got)
 		}
 		if got := w.Body.String(); got != "part-1|part-2" {
 			t.Fatalf("body = %q, want part-1|part-2", got)

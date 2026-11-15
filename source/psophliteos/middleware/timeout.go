@@ -220,8 +220,12 @@ func TimeoutMiddleware(timeOut time.Duration) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		w := &timeoutWriter{
 			ResponseWriter: c.Writer,
-			hdr:            http.Header{},
+			hdr:            c.Writer.Header().Clone(),
 			synced:         map[string]struct{}{},
+		}
+		// 前序中间件的响应头也属于 handler 视图，包含后续删除的同步。
+		for k := range w.hdr {
+			w.synced[k] = struct{}{}
 		}
 		c.Writer = w
 
