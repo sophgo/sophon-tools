@@ -54,10 +54,8 @@ func ResolvePath(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	for _, p := range blockedPrefixes {
-		if real == p || strings.HasPrefix(real, p+"/") {
-			return "", fmt.Errorf("access to %s is not allowed", p)
-		}
+	if err := checkBlocked(real); err != nil {
+		return "", err
 	}
 	return real, nil
 }
@@ -69,12 +67,65 @@ func ResolveWritePath(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	for _, p := range readonlyPrefixes {
-		if abs == p || strings.HasPrefix(abs, p+"/") {
-			return "", fmt.Errorf("write access to %s is not allowed", p)
-		}
+	if err := checkReadonly(abs); err != nil {
+		return "", err
 	}
 	return abs, nil
+}
+
+// checkBlocked 判断 abs 是否命中禁止访问前缀（/proc /sys /dev）。
+func checkBlocked(abs string) error {
+	for _, p := range blockedPrefixes {
+		if abs == p || strings.HasPrefix(abs, p+"/") {
+			return fmt.Errorf("access to %s is not allowed", p)
+		}
+	}
+	return nil
+}
+
+// checkReadonly 判断 abs 是否命中禁止写入前缀（关键系统目录）。
+func checkReadonly(abs string) error {
+	for _, p := range readonlyPrefixes {
+		if abs == p || strings.HasPrefix(abs, p+"/") {
+			return fmt.Errorf("write access to %s is not allowed", p)
+		}
+	}
+	return nil
+}
+
+// resolveEntry 以"目录项"语义解析写操作路径。与 ResolveWritePath 的区别是关键：
+// 只对父目录做符号链接解引用并校验，末级组件保持原样、不跟随链接。
+//
+// 这样 Delete / Rename / 上传落盘的目标是目录项本身而不是它指向的文件：
+//   - 删除或重命名一个链接只改动链接，绝不波及它的 referent；
+//   - 要删/移的是 /root/link/x 时，link 属于父目录段，仍会被解引用到真实目录再校验，
+//     因此 readonly / blocked 前缀不会被父目录链接绕过。
+//
+// 返回解引用后的父目录绝对路径与末级组件名。
+func resolveEntry(path string) (parentAbs, name string, err error) {
+	if strings.TrimSpace(path) == "" {
+		return "", "", errors.New("empty path")
+	}
+	abs, err := filepath.Abs(filepath.Clean(path))
+	if err != nil {
+		return "", "", fmt.Errorf("resolve path: %w", err)
+	}
+	parent, name := filepath.Dir(abs), filepath.Base(abs)
+	if name == "/" || name == "." || name == ".." {
+		return "", "", fmt.Errorf("invalid path %q", path)
+	}
+	realParent, err := resolveReal(parent)
+	if err != nil {
+		return "", "", err
+	}
+	entry := filepath.Join(realParent, name)
+	if err := checkBlocked(entry); err != nil {
+		return "", "", err
+	}
+	if err := checkReadonly(entry); err != nil {
+		return "", "", err
+	}
+	return realParent, name, nil
 }
 
 // resolveReal 对 abs 上最深已存在部分做符号链接解引用，返回归一化真实路径；
@@ -173,16 +224,18 @@ func (s *Service) Mkdir(path string) error {
 }
 
 // Rename 重命名/移动。源与目标均不得落在关键系统目录内。
+// 以目录项语义操作：末级组件是符号链接时移动的是链接本身，不改动其 referent；
+// 父目录仍会解引用并按关键系统目录校验，保护前缀不可绕过。
 func (s *Service) Rename(oldPath, newPath string) error {
-	oldAbs, err := ResolveWritePath(oldPath)
+	oldParent, oldName, err := resolveEntry(oldPath)
 	if err != nil {
 		return err
 	}
-	newAbs, err := ResolveWritePath(newPath)
+	newParent, newName, err := resolveEntry(newPath)
 	if err != nil {
 		return err
 	}
-	return os.Rename(oldAbs, newAbs)
+	return os.Rename(filepath.Join(oldParent, oldName), filepath.Join(newParent, newName))
 }
 
 // Chmod 修改权限。mode 为八进制权限串，形如 "0755" 或 "755"。关键系统目录内拒绝。
@@ -229,29 +282,35 @@ func (s *Service) Chown(path, owner, group string) error {
 
 // Delete 删除**单个文件**。
 // 安全护栏（按用户要求）：
-//   - 只删文件，拒绝删除目录（IsDir 直接报错）
-//   - 不递归：用 os.Remove（非 os.RemoveAll），目录/非空路径会失败
+//   - 只删文件，拒绝删除目录（真实目录直接报错）
+//   - 不递归：用 os.Remove（非 os.RemoveAll）
 //   - 拒删根、根下一级目录（depth<=1）
 //   - 关键系统目录内拒绝
+//
+// 以目录项语义工作：末级组件是符号链接时删除链接本身，绝不解引用后删除其 referent
+// （旧实现用 os.Stat+ResolveWritePath，Delete(link) 会把目标文件删掉、留下悬空链接）。
+// 父目录仍会解引用并校验，/etc、/proc 等保护不可经父目录链接绕过。
 func (s *Service) Delete(path string) error {
-	abs, err := ResolveWritePath(path)
+	parent, name, err := resolveEntry(path)
 	if err != nil {
 		return err
 	}
+	abs := filepath.Join(parent, name)
 	if abs == "/" {
 		return errors.New("refuse to delete root")
 	}
 	if pathDepth(abs) <= 1 {
 		return errors.New("refuse to delete top-level directory under root")
 	}
-	st, err := os.Stat(abs)
+	// Lstat：不跟随末级链接，链接（含 dangling、指向目录的链接）按链接本身判断。
+	st, err := os.Lstat(abs)
 	if err != nil {
 		return fmt.Errorf("stat: %w", err)
 	}
 	if st.IsDir() {
 		return errors.New("cannot delete directory: only files are allowed")
 	}
-	// os.Remove 不递归：对普通文件直接删；对目录（即便空）已被上面拒绝。
+	// os.Remove 不递归：对文件/符号链接都只解除一个目录项。
 	return os.Remove(abs)
 }
 
@@ -284,6 +343,11 @@ func (s *Service) DownloadName(path string) (name string, size int64, err error)
 
 // SaveUpload 将 reader 内容流式写入 dir/<filename>。支持大文件。
 // 仅取基名，禁止路径穿越（如 ../etc/passwd）；目标目录不得在关键系统目录内。
+//
+// 末级符号链接一律拒绝（含 dangling、指向普通文件/目录/受保护路径的链接）：
+// os.Create 会跟随链接，把内容写到链接目标从而绕过目录校验——旧实现即由此
+// 可写入 /dev/null 之类的受保护目标。写入用 O_NOFOLLOW 打开，创建始终落在
+// 目标目录内的新目录项上；Close / 写入失败都会作为错误返回，不报成功。
 func (s *Service) SaveUpload(dir, filename string, r io.Reader) (string, int64, error) {
 	abs, err := ResolveWritePath(dir)
 	if err != nil {
@@ -297,18 +361,34 @@ func (s *Service) SaveUpload(dir, filename string, r io.Reader) (string, int64, 
 		return "", 0, errors.New("upload target is not a directory")
 	}
 	safe := filepath.Base(filename)
-	if safe == "" || safe == "." || safe == ".." {
+	if safe == "" || safe == "." || safe == ".." || safe == "/" {
 		return "", 0, errors.New("invalid filename")
 	}
 	dst := filepath.Join(abs, safe)
-	out, err := os.Create(dst)
+	// Lstat 不跟随末级组件：链接（含 dangling）在这里就被识别并拒绝。
+	if li, lerr := os.Lstat(dst); lerr == nil {
+		if li.Mode()&os.ModeSymlink != 0 {
+			return "", 0, fmt.Errorf("refuse to upload to %q: target is a symbolic link", safe)
+		}
+		if li.IsDir() {
+			return "", 0, fmt.Errorf("refuse to upload to %q: target is a directory", safe)
+		}
+	} else if !errors.Is(lerr, os.ErrNotExist) {
+		return "", 0, fmt.Errorf("stat upload target: %w", lerr)
+	}
+	// O_NOFOLLOW 兜住 Lstat 与 open 之间的 TOCTOU：末级是链接时 open 直接失败。
+	// 权限位沿用 os.Create 的 0o666（受 umask 约束），保持既有上传行为不变。
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|syscall.O_NOFOLLOW, 0o666)
 	if err != nil {
 		return "", 0, fmt.Errorf("create file: %w", err)
 	}
-	defer out.Close()
 	n, err := io.Copy(out, r)
 	if err != nil {
+		out.Close()
 		return "", 0, fmt.Errorf("write file: %w", err)
+	}
+	if err := out.Close(); err != nil {
+		return "", 0, fmt.Errorf("close file: %w", err)
 	}
 	return dst, n, nil
 }
