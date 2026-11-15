@@ -5,234 +5,124 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"sophliteos/global"
+	"strings"
+
 	"sophliteos/logger"
 	mvc "sophliteos/mvc/core"
-	"sophliteos/mvc/i18n"
-	services "sophliteos/mvc/services/opt"
-	"strings"
-	"sync"
-	"syscall"
-	"time"
+	error2 "sophliteos/mvc/error"
 
 	"github.com/gin-gonic/gin"
 )
 
+// UpgradeApi 旧版 sophliteos 自升级接口。
+//
+// 该端点的自升级实现从未真正可用（下载→解包→自替换整段被注释掉，
+// 历史上仍会返回成功、设置全局 503 阻塞并 exec 重启旧程序），且上传流程在校验文件名之前就
+// 以 O_TRUNC 打开目标路径，任何持有有效会话的请求都能用任意普通文件名截断
+// /data/sophliteos 下的文件（含二进制本体）。
+//
+// MYS-2882/MYS-2885 决策：本轮不新增自升级能力，也不恢复未经审计的脚本执行。
+// 旧端点保留路由与鉴权（未登录仍 401），但明确返回"暂不支持"的非零业务码：
+// 不上传、不落盘、不置 BlockAllRequests、不 exec 重启，前端既有的非零 code
+// 错误展示会直接显示该提示，无需改视觉层。
 type UpgradeApi struct{}
 
-func init() {
-	i18n.SetString(i18n.Zh, "upgrade", "sophliteos 升级")
-	i18n.SetString(i18n.En, "upgrade", "sophliteos upgrade")
+// legacyUpgradeUnsupportedMsg 旧升级接口统一提示：告诉用户正确的升级路径。
+const legacyUpgradeUnsupportedMsg = "此升级方式暂不支持，请使用正式发布的软件包"
+
+// rejectLegacyUpgrade 统一拒绝：HTTP 200 + 非零业务码（兼容前端 body.code 判定）。
+// 不读取请求体、不解析 multipart —— 因此上传内容既不会落盘也不会进临时目录。
+func rejectLegacyUpgrade(c *gin.Context) {
+	// 明确丢弃请求体，避免客户端因未读 body 而阻塞在发送阶段（也避免连接复用问题）。
+	_, _ = io.Copy(io.Discard, io.LimitReader(c.Request.Body, maxLegacyUpgradeDrain))
+	c.JSON(http.StatusOK, mvc.FailWithMsg(error2.NotImplemented, legacyUpgradeUnsupportedMsg))
 }
 
-// 升级采用两段式流程（上传暂存 → 确认执行），并做并发互斥：
-//   - pendingUpgrade/pendingFileName：升级包先暂存，由用户再次确认后才真正执行升级/重启，
-//     持令牌一次请求无法直接触发"上传+重启"；
-//   - upgradeInFlight：升级/重启进行中，拒绝并发的上传/确认，避免双浏览器/重复请求误触，
-//     保证升级只执行一次（幂等）。
-//
-// 上述状态均受 upgradeMu 保护；与 OTA 上传（otaMu）相互独立。
-var (
-	upgradeMu       sync.Mutex
-	pendingUpgrade  bool   // 已暂存待确认的升级包
-	pendingFileName string // 暂存的升级包文件名
-	upgradeInFlight bool   // 升级/重启进行中
-)
+// maxLegacyUpgradeDrain 旧端点最多丢弃的请求体字节数（仅用于让客户端尽快结束发送，
+// 超过部分由 net/http 关闭连接处理）。
+const maxLegacyUpgradeDrain = 1 << 20
 
-// 重启流程的注入点：生产环境 sleep 5 秒后以 syscall.Exec 替换进程映像；
-// 测试中注入短延迟/安全函数，避免真实 sleep 与进程替换。
-var (
-	restartDelay = 5 * time.Second
-	execSelf     = func() error { return syscall.Exec(os.Args[0], os.Args, os.Environ()) }
-)
-
-// Upgrade 升级流程第一步：上传并暂存升级包（不执行升级）。
-// 幂等：重复上传会覆盖暂存包；升级进行中时拒绝上传。
+// Upgrade 旧升级流程第一步（上传暂存）：已下线，返回明确失败，无任何副作用。
 func (b *UpgradeApi) Upgrade(c *gin.Context) {
-	upgradeMu.Lock()
-	defer upgradeMu.Unlock()
-
-	if upgradeInFlight {
-		c.JSON(http.StatusOK, mvc.FailWithMsg(-1, "升级正在进行中，请等待升级完成后重试"))
-		return
-	}
-
-	// filename 保存为局部变量：全局变量在并发请求下会被覆盖，导致校验/清理错乱。
-	savedName, err := saveFile(c.Request, "/data/sophliteos/")
-	if err != nil {
-		logger.Error("update failed", err)
-		c.JSON(http.StatusOK, mvc.FailWithMsg(-1, "操作失败"))
-		return
-	}
-
-	if savedName != "sophliteos-linux_arm64.tgz" {
-		logger.Error("升级包上传错误")
-		c.JSON(http.StatusOK, mvc.FailWithMsg(-1, "升级包上传错误"))
-		return
-	}
-
-	pendingUpgrade = true
-	pendingFileName = savedName
-	services.SaveOptLog(c.Request, "升级包上传")
-	c.JSON(http.StatusOK, mvc.OkWithMsg("升级包已暂存，请点击「确认升级」执行升级"))
+	logger.Info("legacy /api/upgrade rejected: 旧升级接口已下线，请使用正式发布的软件包")
+	rejectLegacyUpgrade(c)
 }
 
-// UpgradeConfirm 升级流程第二步：确认执行已暂存的升级包。
-// 无暂存包或升级进行中时返回明确错误，避免误操作。
+// UpgradeConfirm 旧升级流程第二步（确认执行）：已下线，返回明确失败。
+// 旧实现在此置 BlockAllRequests 并 exec 重启旧程序（假成功）；现不做任何状态变更。
 func (b *UpgradeApi) UpgradeConfirm(c *gin.Context) {
-	upgradeMu.Lock()
-	defer upgradeMu.Unlock()
-
-	if upgradeInFlight {
-		c.JSON(http.StatusOK, mvc.FailWithMsg(-1, "升级正在进行中，请等待升级完成后重试"))
-		return
-	}
-	if !pendingUpgrade {
-		c.JSON(http.StatusOK, mvc.FailWithMsg(-1, "没有待升级的升级包，请先上传升级包"))
-		return
-	}
-
-	// 先复位暂存并置为进行中：后续并发请求（上传/确认）都会被拒绝，升级只会执行一次。
-	name := pendingFileName
-	pendingUpgrade = false
-	upgradeInFlight = true
-
-	err := upgradeLiteOs()
-	if err != nil {
-		upgradeInFlight = false
-		logger.Error("upgrade failed", err)
-		c.JSON(http.StatusOK, mvc.FailWithMsg(-1, "操作失败"))
-		return
-	}
-	global.BlockAllRequests = true
-	services.SaveOptLog(c.Request, i18n.GetString(mvc.GetLang(c.Request), "upgrade"))
-
-	// 重新执行更新后的程序；Exec 失败时会回滚 BlockAllRequests（见 restartUpgradedProgram）
-	go restartUpgradedProgram(name)
-	c.JSON(http.StatusOK, mvc.OkWithMsg("升级成功，LiteOS正在重启，请一分钟后刷新页面重新进入"))
+	logger.Info("legacy /api/upgrade/confirm rejected: 旧升级接口已下线，请使用正式发布的软件包")
+	rejectLegacyUpgrade(c)
 }
 
-func upgradeLiteOs() error {
-
-	/* 	cmd := exec.Command("tar", "-xzf", filename, "-C", "/data/sophliteos/")
-	   	cmd.Dir = "/data/sophliteos"
-
-	   	// 执行命令
-	   	err := cmd.Run()
-	   	if err != nil {
-	   		logger.Error("tar failed", err)
-	   	}
-
-	   	script := "/data/sophliteos/upgrade.sh"
-	   	// 检查脚本文件是否存在
-	   	_, err = os.Stat(script)
-	   	if err != nil {
-	   		logger.Error("Script file not found:", err)
-	   		return err
-	   	}
-	   	cmd = exec.Command("sudo", "/bin/bash", script)
-	   	cmd.Dir = "/data/sophliteos"
-	   	err = cmd.Run()
-	   	if err != nil {
-	   		logger.Error("script failed", err)
-	   		return err
-	   	}
-	   	// 读取升级文件
-	   	updatePath := "/data/sophliteos/sophliteos"
-	   	updateFile, err := os.Open(updatePath)
-	   	cmdPath := os.Args[0]
-	   	if err != nil {
-	   		return err
-	   	}
-	   	defer updateFile.Close()
-
-	   	// 执行自更新操作
-	   	err = update.Apply(updateFile, update.Options{
-	   		TargetPath: cmdPath,
-	   	})
-	   	if err != nil {
-	   		if rollbackErr := update.RollbackError(err); rollbackErr != nil {
-	   			logger.Error("Failed to rollback from bad update: %v", rollbackErr)
-	   		}
-	   		return err
-	   	}
-
-	   	logger.Info("sophliteos self upgrade successful!") */
-	return nil
-}
-
-func restartUpgradedProgram(savedName string) {
-	time.Sleep(restartDelay)
-	// 启动新进程；Exec 成功时进程映像即被新程序替换，此后的代码不再执行。
-	if err := execSelf(); err != nil {
-		// Exec 失败（二进制被替换/删除、无权限等）：进程并未重启。必须回滚阻塞标记，
-		// 否则整个平台将一直 503；同时记录告警日志，并复位 in-flight 允许重新升级。
-		logger.Error("升级重启失败: %v，回滚 BlockAllRequests，平台继续提供服务", err)
-		upgradeMu.Lock()
-		global.BlockAllRequests = false
-		upgradeInFlight = false
-		upgradeMu.Unlock()
-	}
-
-	// 清理上传的升级包（Exec 成功时进程已替换，此段不可达）
-	removeUpgradePackage(savedName)
-}
-
-// removeUpgradePackage 删除暂存的升级包；用完整路径清理，避免相对路径（进程 CWD）删错文件。
-func removeUpgradePackage(savedName string) {
-	if savedName == "" {
-		return
-	}
-	cmd := exec.Command("rm", "-f", filepath.Join("/data/sophliteos", savedName))
-	cmd.Dir = "/data/sophliteos"
-
-	// 执行命令
-	if err := cmd.Run(); err != nil {
-		logger.Error("tar rm failed", err)
-	}
-}
-
-// 文件上传控制
+// saveFile 保存 HTTP 上传的文件到 dir，返回保存后的文件名。
+//
+// 仅 OTA 上传（sys_ota.go）使用；旧自升级流程已下线，不再调用本函数。
+// 契约（MYS-2885 加固）：
+//   - 文件名先校验后打开：只接受单个普通文件名（不含路径分隔符、不以 '.' 开头、
+//     长度有界），因此不可能借 ".." 或绝对路径写到 dir 之外；
+//   - 写入失败/Close 失败都清理半成品文件并返回错误，不谎报成功；
+//   - 无论成功与否都清理 multipart 临时文件（含校验失败路径，旧实现会泄漏）。
 func saveFile(request *http.Request, dir string) (string, error) {
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		logger.Error("Failed to create directory", err)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		logger.Error("Failed to create directory: %v", err)
 		return "", err
 	}
-	os.Chmod(dir, 0755)
+	_ = os.Chmod(dir, 0o755)
 
 	file, handler, err := request.FormFile("file")
 	if err != nil {
+		cleanupMultipart(request)
 		return "", err
 	}
 	defer file.Close()
+	// 上传内容可能已被缓冲到临时文件（大文件）：成功/失败都要清理。
+	defer cleanupMultipart(request)
 
-	if strings.Contains(handler.Filename, "/") || strings.HasPrefix(handler.Filename, ".") {
-		logger.Error("file name error:%s", handler.Filename)
+	name := handler.Filename
+	if !validSaveFileName(name) {
+		logger.Error("file name error: %q", name)
 		return "", errors.New("file name error")
 	}
 
-	// 保存路径用绝对路径；清理时删除同一路径，避免相对路径（进程 CWD）删错文件。
-	dstPath := dir + handler.Filename
-	f, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	// 目标路径用显式拼接的绝对路径；name 已保证是单层文件名。
+	dstPath := filepath.Join(dir, name)
+	f, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
 	if err != nil {
 		return "", err
 	}
-	_, err = io.Copy(f, file)
-	if err != nil {
+	if _, err := io.Copy(f, file); err != nil {
 		_ = f.Close()
-		// 写入失败：清理半成品文件后返回
-		_ = os.Remove(dstPath)
+		_ = os.Remove(dstPath) // 写入失败：清理半成品，不留下被截断的文件
 		return "", err
 	}
 	if err := f.Close(); err != nil {
 		_ = os.Remove(dstPath)
 		return "", err
 	}
+	return name, nil
+}
 
-	// 注意：上传文件保留在磁盘（升级暂存/OtaFile 后续 MD5 校验都需要），
-	// 由调用方负责清理；不再在返回时无条件删除。
-	_ = request.MultipartForm.RemoveAll()
-	return handler.Filename, nil
+// validSaveFileName 校验上传文件名是"单个普通文件名"：
+// 拒绝路径分隔符、目录穿越、隐藏文件和超长名字（与 OTA 的分片文件名校验同口径）。
+func validSaveFileName(name string) bool {
+	if name == "" || name == "." || name == ".." {
+		return false
+	}
+	if strings.ContainsAny(name, "/\\") || strings.HasPrefix(name, ".") {
+		return false
+	}
+	if len(name) > maxOtaFileNameLen {
+		return false
+	}
+	// 仅接受单层名字：filepath.Base 结果必须与原值一致（防御平台差异）。
+	return filepath.Base(name) == name
+}
+
+// cleanupMultipart 清理 multipart 解析产生的临时文件（未解析时无操作）。
+func cleanupMultipart(request *http.Request) {
+	if request.MultipartForm != nil {
+		_ = request.MultipartForm.RemoveAll()
+	}
 }

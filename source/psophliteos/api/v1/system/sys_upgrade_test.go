@@ -4,13 +4,13 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
-	"sync"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
-	"time"
 
 	"sophliteos/database"
 	"sophliteos/global"
@@ -19,52 +19,8 @@ import (
 	"github.com/jinzhu/gorm"
 )
 
-// 升级接口对外返回的结构（与 mvc.Result 对应）
-type upgradeResp struct {
-	Code int    `json:"code"`
-	Msg  string `json:"msg"`
-}
-
-// newUpgradeUploadRequest 构造携带升级包的 multipart 上传请求。
-func newUpgradeUploadRequest(t *testing.T, filename string) *http.Request {
-	t.Helper()
-	body := &bytes.Buffer{}
-	writer := multipart.NewWriter(body)
-	part, err := writer.CreateFormFile("file", filename)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := part.Write([]byte("fake upgrade package")); err != nil {
-		t.Fatal(err)
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatal(err)
-	}
-	req := httptest.NewRequest(http.MethodPost, "/api/upgrade", body)
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	return req
-}
-
-func doUpgrade(t *testing.T, api *UpgradeApi, req *http.Request) upgradeResp {
-	t.Helper()
-	gin.SetMode(gin.TestMode)
-	router := gin.New()
-	router.POST("/api/upgrade", api.Upgrade)
-	router.POST("/api/upgrade/confirm", api.UpgradeConfirm)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body=%q)", w.Code, w.Body.String())
-	}
-	var resp upgradeResp
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("invalid json %q: %v", w.Body.String(), err)
-	}
-	return resp
-}
-
-// setupDatabase 用 in-memory sqlite 初始化 database.DB，保证 SaveOptLog 等
-// 数据库查询路径不因 DB 为 nil 而 panic（生产环境由 InitDB 初始化）。
+// setupDatabase 用 in-memory sqlite 初始化 database.DB，避免操作日志路径因
+// DB 为 nil 而 panic（旧实现会调 SaveOptLog；修复后不再调用，保留以防回归）。
 func setupDatabase(t *testing.T) {
 	t.Helper()
 	sqlDb, err := sql.Open("sqlite3_with_go_func", ":memory:")
@@ -83,213 +39,366 @@ func setupDatabase(t *testing.T) {
 	})
 }
 
-// waitUpgradeDone 阻塞直到后台重启流程完成：注入的 execSelf 必然失败，
-// 失败回滚会复位 upgradeInFlight，此函数等待其复位，保证测试结束时无遗留
-// goroutine 读写注入点（否则会与后续测试的 setup 竞争）。
-func waitUpgradeDone(t *testing.T) {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		upgradeMu.Lock()
-		done := !upgradeInFlight
-		upgradeMu.Unlock()
-		if done {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("等待升级流程完成超时")
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+// 旧升级接口（/api/upgrade、/api/upgrade/confirm）的自升级实现已在 MYS-2882/MYS-2885
+// 明确下线：这两个端点只返回"暂不支持"的非零业务码，不做任何副作用。
+// 以下用例逐条锁定该契约：
+//   - 合法名/非法名/任意内容一律失败，且失败信息明确指向"使用正式发布的软件包"；
+//   - 不落盘（multipart 根本不被解析），因此无法截断 /data/sophliteos 下同名文件；
+//   - 不置 BlockAllRequests、不触发 Exec/重启、不留存"待确认"状态。
+
+// upgradeResp 升级接口对外返回的结构（与 mvc.Result 对应）。
+type upgradeResp struct {
+	Code int    `json:"code"`
+	Msg  string `json:"msg"`
 }
 
-// setupUpgradeTest 备份/恢复升级流程的全局状态与注入点，避免测试相互污染。
-// 默认把重启延迟拉到极大并注入安全的 execSelf，防止测试进程真的被 syscall.Exec 替换。
-// 启动重启 goroutine 的测试需自行覆盖注入点并在结束前 waitUpgradeDone。
-func setupUpgradeTest(t *testing.T) {
+// legacyUpgradeMsg 旧升级接口的统一失败提示。
+const legacyUpgradeMsg = "此升级方式暂不支持，请使用正式发布的软件包"
+
+// newUpgradeUploadRequest 构造携带升级包的 multipart 上传请求。
+func newUpgradeUploadRequest(t *testing.T, filename string, content []byte) *http.Request {
+	t.Helper()
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	part, err := writer.CreateFormFile("file", filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write(content); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/upgrade", body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	return req
+}
+
+// doUpgrade 经真实 gin 路由投递请求（与生产路由同名路径）。
+func doUpgrade(t *testing.T, api *UpgradeApi, req *http.Request) (upgradeResp, *httptest.ResponseRecorder) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
-	setupDatabase(t)
-
-	upgradeMu.Lock()
-	oldPending, oldInFlight := pendingUpgrade, upgradeInFlight
-	pendingUpgrade, upgradeInFlight = false, false
-	upgradeMu.Unlock()
-
-	// 注入点（restartDelay/execSelf）由各测试自行设置且不做恢复：
-	// confirm 启动的后台重启 goroutine 可能晚于本测试的 Cleanup 才访问它们，
-	// 恢复写入会与之竞争；测试进程独立，注入值不会泄漏到其他测试。
-	oldBlock := global.BlockAllRequests
-	restartDelay = 24 * time.Hour
-	execSelf = func() error { return errors.New("execSelf disabled in test") }
-
-	t.Cleanup(func() {
-		upgradeMu.Lock()
-		pendingUpgrade, upgradeInFlight = oldPending, oldInFlight
-		upgradeMu.Unlock()
-		global.BlockAllRequests = oldBlock
-	})
-}
-
-// TestUpgradeTwoPhaseFlow 验证两段式流程：
-// 上传只暂存不执行，确认后才置 BlockAllRequests 并进入升级中状态；期间并发请求被拒绝。
-func TestUpgradeTwoPhaseFlow(t *testing.T) {
-	setupUpgradeTest(t)
-	// 确认后会启动重启 goroutine：注入短延迟 + 必然失败的 execSelf，
-	// 断言窗口（毫秒级）内 goroutine 尚未执行，测试结束时等待其完成。
-	restartDelay = time.Second
-	execSelf = func() error { return errors.New("exec disabled in test") }
-	api := &UpgradeApi{}
-
-	// 第一次上传：仅暂存，不应触发阻塞
-	resp := doUpgrade(t, api, newUpgradeUploadRequest(t, "sophliteos-linux_arm64.tgz"))
-	if resp.Code != 0 {
-		t.Fatalf("upload resp code = %d, msg=%q; want 0", resp.Code, resp.Msg)
-	}
-	if global.BlockAllRequests {
-		t.Fatal("暂存阶段不应设置 BlockAllRequests")
-	}
-	upgradeMu.Lock()
-	pending := pendingUpgrade
-	upgradeMu.Unlock()
-	if !pending {
-		t.Fatal("上传后应处于待确认（pending）状态")
-	}
-
-	// 确认执行：置 BlockAllRequests，进入升级中
-	req := httptest.NewRequest(http.MethodPost, "/api/upgrade/confirm", nil)
-	resp = doUpgrade(t, api, req)
-	if resp.Code != 0 {
-		t.Fatalf("confirm resp code = %d, msg=%q; want 0", resp.Code, resp.Msg)
-	}
-	if !global.BlockAllRequests {
-		t.Fatal("确认执行后应设置 BlockAllRequests")
-	}
-	upgradeMu.Lock()
-	inflight, pending := upgradeInFlight, pendingUpgrade
-	upgradeMu.Unlock()
-	if !inflight || pending {
-		t.Fatalf("确认后状态: inflight=%v pending=%v; want inflight=true pending=false", inflight, pending)
-	}
-
-	// 升级中：再次上传与再次确认都应被拒绝
-	resp = doUpgrade(t, api, newUpgradeUploadRequest(t, "sophliteos-linux_arm64.tgz"))
-	if resp.Code == 0 {
-		t.Fatalf("升级中上传应被拒绝, msg=%q", resp.Msg)
-	}
-	resp = doUpgrade(t, api, httptest.NewRequest(http.MethodPost, "/api/upgrade/confirm", nil))
-	if resp.Code == 0 {
-		t.Fatalf("升级中二次确认应被拒绝, msg=%q", resp.Msg)
-	}
-
-	// 等待后台重启流程完成（exec 失败回滚），避免遗留 goroutine 影响后续测试
-	waitUpgradeDone(t)
-}
-
-// TestUpgradeConfirmWithoutPending 验证无暂存包时确认被拒绝。
-func TestUpgradeConfirmWithoutPending(t *testing.T) {
-	setupUpgradeTest(t)
-	api := &UpgradeApi{}
-
-	resp := doUpgrade(t, api, httptest.NewRequest(http.MethodPost, "/api/upgrade/confirm", nil))
-	if resp.Code == 0 {
-		t.Fatalf("无暂存包时确认应被拒绝, msg=%q", resp.Msg)
-	}
-	if global.BlockAllRequests {
-		t.Fatal("确认失败不应设置 BlockAllRequests")
-	}
-}
-
-// TestUpgradeConcurrentConfirm 验证并发 confirm：恰好一个成功，其余返回明确错误（幂等）。
-func TestUpgradeConcurrentConfirm(t *testing.T) {
-	setupUpgradeTest(t)
-	// 与 TestUpgradeTwoPhaseFlow 相同：短延迟 + 失败 execSelf，断言后等待完成
-	restartDelay = time.Second
-	execSelf = func() error { return errors.New("exec disabled in test") }
-	api := &UpgradeApi{}
-
-	upgradeMu.Lock()
-	pendingUpgrade = true
-	upgradeMu.Unlock()
-
-	const n = 10
 	router := gin.New()
+	router.POST("/api/upgrade", api.Upgrade)
 	router.POST("/api/upgrade/confirm", api.UpgradeConfirm)
-
-	var wg sync.WaitGroup
-	codes := make([]int, n)
-	for i := 0; i < n; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			w := httptest.NewRecorder()
-			router.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/upgrade/confirm", nil))
-			var resp upgradeResp
-			if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-				t.Errorf("invalid json %q: %v", w.Body.String(), err)
-				return
-			}
-			codes[i] = resp.Code
-		}(i)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body=%q)", w.Code, w.Body.String())
 	}
-	wg.Wait()
+	var resp upgradeResp
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("invalid json %q: %v", w.Body.String(), err)
+	}
+	return resp, w
+}
 
-	success := 0
-	for _, code := range codes {
-		if code == 0 {
-			success++
+// assertLegacyRejected 断言一次旧升级请求被明确拒绝且无副作用。
+func assertLegacyRejected(t *testing.T, resp upgradeResp) {
+	t.Helper()
+	if resp.Code == 0 {
+		t.Fatalf("旧升级接口必须返回非零业务码，实际 code=0 msg=%q（假成功）", resp.Msg)
+	}
+	if !strings.Contains(resp.Msg, "暂不支持") || !strings.Contains(resp.Msg, "正式发布") {
+		t.Fatalf("失败提示不明确: msg=%q, want 含 %q", resp.Msg, legacyUpgradeMsg)
+	}
+	if global.BlockAllRequests {
+		t.Fatal("旧升级接口不得设置 BlockAllRequests（会令全平台 503）")
+	}
+}
+
+// TestLegacyUpgradeRejectedForAnyFile 合法包名/非法包名/任意内容都不得成功，
+// 且 multipart 不被解析、不产生任何临时文件或落盘。
+func TestLegacyUpgradeRejectedForAnyFile(t *testing.T) {
+	setupDatabase(t)
+	gin.SetMode(gin.TestMode)
+	oldBlock := global.BlockAllRequests
+	global.BlockAllRequests = false
+	t.Cleanup(func() { global.BlockAllRequests = oldBlock })
+
+	// multipart 解析把大文件缓冲到 os.TempDir()：指向测试私有目录即可观测是否产生临时文件
+	tmpRoot := t.TempDir()
+	t.Setenv("TMPDIR", tmpRoot)
+
+	api := &UpgradeApi{}
+	cases := []struct {
+		name     string
+		filename string
+		content  []byte
+	}{
+		{"合法包名", "sophliteos-linux_arm64.tgz", []byte("fake upgrade package")},
+		{"非法包名", "evil.sh", []byte("#!/bin/sh\nrm -rf /\n")},
+		{"空内容", "sophliteos-linux_arm64.tgz", nil},
+		{"超长文件名", strings.Repeat("a", 200) + ".tgz", []byte("x")},
+		{"隐藏文件", ".profile", []byte("x")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := newUpgradeUploadRequest(t, tc.filename, tc.content)
+			resp, _ := doUpgrade(t, api, req)
+			assertLegacyRejected(t, resp)
+			if req.MultipartForm != nil {
+				t.Fatal("旧升级接口不得解析 multipart（解析即会把上传内容落到临时目录）")
+			}
+			entries, err := os.ReadDir(tmpRoot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(entries) != 0 {
+				names := make([]string, 0, len(entries))
+				for _, e := range entries {
+					names = append(names, e.Name())
+				}
+				t.Fatalf("旧升级接口残留临时文件: %v", names)
+			}
+		})
+	}
+}
+
+// TestLegacyUpgradeConfirmRejected 确认端点同样明确失败，不置阻塞、不重启。
+func TestLegacyUpgradeConfirmRejected(t *testing.T) {
+	setupDatabase(t)
+	gin.SetMode(gin.TestMode)
+	oldBlock := global.BlockAllRequests
+	global.BlockAllRequests = false
+	t.Cleanup(func() { global.BlockAllRequests = oldBlock })
+
+	api := &UpgradeApi{}
+	resp, _ := doUpgrade(t, api, httptest.NewRequest(http.MethodPost, "/api/upgrade/confirm", nil))
+	assertLegacyRejected(t, resp)
+	// 再确认一次也不能变成成功（幂等拒绝）
+	resp, _ = doUpgrade(t, api, httptest.NewRequest(http.MethodPost, "/api/upgrade/confirm", nil))
+	assertLegacyRejected(t, resp)
+}
+
+// TestLegacyUpgradeLeavesServiceDirUntouched 旧接口不得改动服务目录（默认 /data/sophliteos/）：
+// 目录内既有文件（含与升级包同名的普通文件、二进制本体）保持大小/修改时间不变，
+// 且不新增任何条目 —— 这正是原缺陷（先 O_TRUNC 再校验文件名，可截断服务目录内
+// 任意普通名字文件）的复现路径。
+//
+// 因目标目录是设备上真实的服务目录，默认不执行：万一将来回归，本用例会真的改动
+// 现场文件。验收时以 MYS2885_SERVICE_DIR 显式指定（可指向真实目录或其副本）后运行：
+//
+//	MYS2885_SERVICE_DIR=/data/sophliteos/ go test ./api/v1/system -run TestLegacyUpgradeLeavesServiceDirUntouched -v
+func TestLegacyUpgradeLeavesServiceDirUntouched(t *testing.T) {
+	serviceDir := os.Getenv("MYS2885_SERVICE_DIR")
+	if serviceDir == "" {
+		t.Skip("未设置 MYS2885_SERVICE_DIR：跳过真实服务目录断言（验收时显式指定）")
+	}
+	if !strings.HasSuffix(serviceDir, "/") {
+		serviceDir += "/"
+	}
+	if fi, err := os.Stat(serviceDir); err != nil || !fi.IsDir() {
+		t.Fatalf("%s 不存在或不是目录: %v", serviceDir, err)
+	}
+	before, err := snapshotDir(serviceDir)
+	if err != nil {
+		t.Fatalf("无法读取 %s: %v", serviceDir, err)
+	}
+
+	setupDatabase(t)
+	gin.SetMode(gin.TestMode)
+	oldBlock := global.BlockAllRequests
+	global.BlockAllRequests = false
+	t.Cleanup(func() { global.BlockAllRequests = oldBlock })
+
+	api := &UpgradeApi{}
+	// 目标文件名取服务目录里真实存在的条目：旧实现会先 O_TRUNC 再校验文件名，
+	// 因此这正是原缺陷（截断服务目录内同名文件）的复现路径。
+	victims := make([]string, 0, len(before))
+	for name := range before {
+		if fi, err := os.Stat(serviceDir + name); err == nil && fi.Mode().IsRegular() {
+			victims = append(victims, name)
 		}
 	}
-	if success != 1 {
-		t.Fatalf("并发确认成功次数 = %d, want 1 (codes=%v)", success, codes)
+	victims = append(victims, "sophliteos-linux_arm64.tgz") // 旧实现的标准升级包名
+	for _, name := range victims {
+		resp, _ := doUpgrade(t, api, newUpgradeUploadRequest(t, name, []byte("truncate me")))
+		assertLegacyRejected(t, resp)
 	}
-	if !global.BlockAllRequests {
-		t.Fatal("并发确认后应有一个请求成功设置 BlockAllRequests")
+
+	after, err := snapshotDir(serviceDir)
+	if err != nil {
+		t.Fatalf("读取 %s 失败: %v", serviceDir, err)
 	}
-	// 等待后台重启流程完成（exec 失败回滚），避免遗留 goroutine 影响后续测试
-	waitUpgradeDone(t)
+	for name, want := range before {
+		got, ok := after[name]
+		if !ok {
+			t.Fatalf("服务目录条目 %q 被删除", name)
+		}
+		if got != want {
+			t.Fatalf("服务目录条目 %q 被改动: before=%+v after=%+v", name, want, got)
+		}
+	}
+	for name := range after {
+		if _, ok := before[name]; !ok {
+			t.Fatalf("旧升级接口在服务目录新增条目 %q", name)
+		}
+	}
 }
 
-// TestUpgradeRejectsBadFilename 验证非法升级包名在暂存阶段就被拒绝。
-func TestUpgradeRejectsBadFilename(t *testing.T) {
-	setupUpgradeTest(t)
-	api := &UpgradeApi{}
+// dirEntryState 目录条目快照：大小 + 修改时间 + 是否普通文件。
+type dirEntryState struct {
+	Size  int64
+	MTime int64
+	Mode  os.FileMode
+}
 
-	resp := doUpgrade(t, api, newUpgradeUploadRequest(t, "evil.sh"))
-	if resp.Code == 0 {
-		t.Fatalf("非法文件名上传应被拒绝, msg=%q", resp.Msg)
+func snapshotDir(dir string) (map[string]dirEntryState, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
 	}
-	upgradeMu.Lock()
-	pending := pendingUpgrade
-	upgradeMu.Unlock()
-	if pending {
-		t.Fatal("非法文件名不应进入 pending 状态")
+	out := make(map[string]dirEntryState, len(entries))
+	for _, e := range entries {
+		fi, err := e.Info()
+		if err != nil {
+			return nil, err
+		}
+		out[e.Name()] = dirEntryState{Size: fi.Size(), MTime: fi.ModTime().UnixNano(), Mode: fi.Mode()}
+	}
+	return out, nil
+}
+
+// TestSaveFileStillWorksForOTA 保留的 saveFile（供 sys_ota.go 使用）仍能正常落盘，
+// 并拒绝非法文件名、清理 multipart 临时文件，保证 OTA 上传不被本次改动破坏。
+func TestSaveFileStillWorksForOTA(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "final")
+	tmpRoot := filepath.Join(root, "tmp")
+	if err := os.MkdirAll(tmpRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TMPDIR", tmpRoot)
+
+	req := newUpgradeUploadRequest(t, "firmware.tgz", []byte("payload"))
+	name, err := saveFile(req, dir+"/")
+	if err != nil {
+		t.Fatalf("saveFile 正常包名失败: %v", err)
+	}
+	if name != "firmware.tgz" {
+		t.Fatalf("saveFile name=%q want firmware.tgz", name)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "firmware.tgz"))
+	if err != nil || string(got) != "payload" {
+		t.Fatalf("saveFile 落盘内容不符: %q err=%v", got, err)
+	}
+	if entries, err := os.ReadDir(tmpRoot); err != nil || len(entries) != 0 {
+		t.Fatalf("saveFile 成功路径残留 multipart 临时文件: %v err=%v", entries, err)
+	}
+
+	// 非法文件名：拒绝，且目录内除已保存的那个包外不新增任何条目
+	for _, badName := range []string{"..", ".", ".hidden", `a\b`, strings.Repeat("a", 200)} {
+		req := newUpgradeUploadRequest(t, badName, []byte("payload"))
+		if _, err := saveFile(req, dir+"/"); err == nil {
+			t.Fatalf("saveFile 应拒绝非法文件名 %q", badName)
+		}
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "firmware.tgz" {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Fatalf("非法文件名不应产生条目, 目录内容=%v", names)
+	}
+	if entries, err := os.ReadDir(tmpRoot); err != nil || len(entries) != 0 {
+		t.Fatalf("saveFile 失败路径残留 multipart 临时文件: %v err=%v", entries, err)
 	}
 }
 
-// TestRestartExecFailureRollback 验证 syscall.Exec 失败时回滚 BlockAllRequests 与 in-flight 状态，
-// 平台继续提供服务而非永久 503。
-func TestRestartExecFailureRollback(t *testing.T) {
-	setupUpgradeTest(t)
-
-	upgradeMu.Lock()
-	upgradeInFlight = true
-	upgradeMu.Unlock()
-	global.BlockAllRequests = true
-
-	restartDelay = 0
-	execSelf = func() error { return errors.New("binary replaced or missing") }
-
-	// 同步调用重启流程（生产环境经 go 调用；注入的 execSelf 必然失败）
-	restartUpgradedProgram("sophliteos-linux_arm64.tgz")
-
-	if global.BlockAllRequests {
-		t.Fatal("Exec 失败后应回滚 BlockAllRequests，避免平台永久 503")
+// TestSaveFileNeverEscapesTargetDir 上传名带目录信息时（"a/b" 这类会被 multipart
+// 解析层 filepath.Base 归一化为 "b"），落点必须仍在目标目录内，目标目录之外不得被写入。
+func TestSaveFileNeverEscapesTargetDir(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "final")
+	outside := filepath.Join(root, "outside")
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
 	}
-	upgradeMu.Lock()
-	inflight := upgradeInFlight
-	upgradeMu.Unlock()
-	if inflight {
-		t.Fatal("Exec 失败后应复位 upgradeInFlight，允许后续重新升级")
+	t.Setenv("TMPDIR", outside)
+
+	cases := []string{"a/b", "../escape.tgz", "../../escape.tgz", "/etc/escape.tgz"}
+	for _, raw := range cases {
+		req := newUpgradeUploadRequest(t, raw, []byte("payload"))
+		name, err := saveFile(req, dir+"/")
+		if err != nil {
+			continue // 拒绝也是合法结果
+		}
+		if strings.ContainsAny(name, "/\\") || name == ".." || name == "." {
+			t.Fatalf("saveFile 接受了带路径成分的文件名 %q -> %q", raw, name)
+		}
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			t.Fatalf("saveFile 返回 %q 但目标目录内不存在该文件: %v", name, err)
+		}
+	}
+	// 目标目录之外（root 及其它子目录）不应出现任何 escape* 文件
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			if e.Name() == filepath.Base(dir) {
+				continue // 目标目录本身
+			}
+			sub, err := os.ReadDir(filepath.Join(root, e.Name()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, se := range sub {
+				if strings.HasPrefix(se.Name(), "escape") {
+					t.Fatalf("上传写到目标目录之外: %s/%s", e.Name(), se.Name())
+				}
+			}
+			continue
+		}
+		if strings.HasPrefix(e.Name(), "escape") {
+			t.Fatalf("上传写到目标目录之外: %s", e.Name())
+		}
+	}
+}
+
+// TestSaveFileCleansMultipartTempOnReject 非法文件名被拒时同样要清理 multipart
+// 临时文件（旧实现直接 return，RemoveAll 不可达，临时文件泄漏）。
+func TestSaveFileCleansMultipartTempOnReject(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "final")
+	tmpRoot := filepath.Join(root, "tmp")
+	if err := os.MkdirAll(tmpRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TMPDIR", tmpRoot)
+
+	body := &bytes.Buffer{}
+	w := multipart.NewWriter(body)
+	part, err := w.CreateFormFile("file", ".hidden") // 以 '.' 开头的名字必须被拒绝
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write(bytes.Repeat([]byte("x"), 8192)); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/upgrade", body)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	// 1 字节内存阈值：文件内容必然被缓冲到 os.TempDir()
+	if err := req.ParseMultipartForm(1); err != nil {
+		t.Fatalf("parse multipart: %v", err)
+	}
+	if entries, err := os.ReadDir(tmpRoot); err != nil || len(entries) == 0 {
+		t.Fatalf("前置条件不成立：期望 multipart 已落到临时目录, entries=%v err=%v", entries, err)
+	}
+	if _, err := saveFile(req, dir+"/"); err == nil {
+		t.Fatal("saveFile 应拒绝非法文件名")
+	}
+	if entries, err := os.ReadDir(tmpRoot); err != nil || len(entries) != 0 {
+		t.Fatalf("saveFile 失败路径残留 multipart 临时文件: %v err=%v", entries, err)
 	}
 }

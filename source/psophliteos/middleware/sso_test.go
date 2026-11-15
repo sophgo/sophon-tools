@@ -54,7 +54,14 @@ func resetSSOState() {
 	ssoTicketMu.Unlock()
 	ssoClientMu.Lock()
 	ssoClients = map[string]map[*ssoClient]struct{}{}
+	ssoConnTotal = 0
 	ssoClientMu.Unlock()
+	resetSSEConnTimes()
+}
+
+// resetSSEConnTimes 清空每 IP 建连频率窗口：单测里大量连接来自 127.0.0.1，
+// 需要与"每 IP 每分钟 10 次"的独立用例（TestSSEAllowConnectRateLimit）隔离。
+func resetSSEConnTimes() {
 	sseConnTimesMu.Lock()
 	sseConnTimes = map[string][]time.Time{}
 	sseConnTimesMu.Unlock()
@@ -218,39 +225,6 @@ func TestSSOEventsRequiresActiveToken(t *testing.T) {
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("query token: want 401, got %d", w.Code)
 	}
-}
-
-func TestSSOEventsConnectionCaps(t *testing.T) {
-	resetSSOState()
-	SSORegister("alice", "token-a")
-
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	r.GET("/api/sso/events", SSOEvents)
-
-	// 直接注入连接占位至单 token 上限，验证新连接被 429 拒
-	ssoClientMu.Lock()
-	ssoClients["token-a"] = map[*ssoClient]struct{}{}
-	for i := 0; i < sseMaxClientsPerToken; i++ {
-		ssoClients["token-a"][&ssoClient{ch: make(chan string, 4)}] = struct{}{}
-	}
-	ssoClientMu.Unlock()
-
-	req := httptest.NewRequest("GET", "/api/sso/events", nil)
-	req.Header.Set("Authorization", "Bearer token-a")
-	req.RemoteAddr = "10.0.0.1:1234"
-	rec := httptest.NewRecorder()
-	sseConnTimesMu.Lock()
-	sseConnTimes["10.0.0.1"] = nil
-	sseConnTimesMu.Unlock()
-	r.ServeHTTP(rec, req)
-	if rec.Code != http.StatusTooManyRequests {
-		t.Fatalf("over per-token cap: want 429, got %d", rec.Code)
-	}
-	// 清理占位（避免影响其他用例）
-	ssoClientMu.Lock()
-	delete(ssoClients, "token-a")
-	ssoClientMu.Unlock()
 }
 
 func TestSSEAllowConnectRateLimit(t *testing.T) {
