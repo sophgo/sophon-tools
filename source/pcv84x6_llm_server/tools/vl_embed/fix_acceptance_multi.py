@@ -57,6 +57,11 @@ def main() -> int:
     p.add_argument("--reference", type=Path)
     p.add_argument("--reference-boundary", type=Path)
     p.add_argument("--image-dir", type=Path)
+    p.add_argument("--boundary-dir", type=Path,
+                   help="boundary fixture set; its eval.json pairs case ids with images")
+    p.add_argument("--require-file", type=Path,
+                   help="file listing cases that MUST be compared for the numeric "
+                        "gate to pass")
     p.add_argument("--per-shape", type=int, default=10)
     p.add_argument("--rounds", type=int, default=30)
     p.add_argument("--warmup", type=int, default=2)
@@ -80,6 +85,10 @@ def main() -> int:
             cmd += ["--reference-boundary", str(a.reference_boundary)]
         if a.image_dir:
             cmd += ["--image-dir", str(a.image_dir)]
+        if a.boundary_dir:
+            cmd += ["--boundary-dir", str(a.boundary_dir)]
+        if a.require_file:
+            cmd += ["--require-file", str(a.require_file)]
         if a.skip_reference:
             cmd += ["--skip-reference"]
         print(f"[multi] process {index} ...", file=sys.stderr, flush=True)
@@ -100,10 +109,22 @@ def main() -> int:
     # A process must have done real work: "three processes ran" is worthless if
     # each served four requests.
     for index, run in enumerate(runs):
-        served = sum(shape["calls"] for shape in run["repeat"]["shapes"])
+        repeat = run["repeat"]
+        served = repeat.get("valid_requests") or sum(
+            shape["calls"] for shape in repeat["shapes"])
         if served < MIN_VALID_REQUESTS:
             failures.append(f"process {index}: only {served} valid requests "
                             f"(< {MIN_VALID_REQUESTS})")
+        # Switch equality must actually have been exercised in every process.
+        # A process that repeated each shape in place but never revisited an
+        # earlier one has not tested the transition the field failure needed.
+        if not repeat.get("revisit_requests"):
+            failures.append(f"process {index}: no revisit was issued; "
+                            f"switch equality was not tested")
+        if repeat.get("revisit_failures"):
+            failures.append(f"process {index}: {repeat['revisit_failures']} of "
+                            f"{repeat['revisit_requests']} revisits differed "
+                            f"from their baseline")
         if not run.get("passed", False):
             failures.append(f"process {index}: {len(run.get('failures') or [])} gate "
                             f"failures: {(run.get('failures') or [])[:3]}")
@@ -139,12 +160,15 @@ def main() -> int:
         buckets = run["repeat"]["buckets_seen"]
         served = sum(shape["calls"] for shape in run["repeat"]["shapes"])
         print(f"process {index}: requests={served} buckets={buckets} "
+              f"revisits={run['repeat'].get('revisit_requests')} "
+              f"(failed {run['repeat'].get('revisit_failures')}) "
               f"passed={run.get('passed')}")
         if "numeric" in run:
             numeric = run["numeric"]
             worst = min(v for v in numeric["worst"].values() if v is not None)
             print(f"  reference {numeric['compared']}/{numeric['rows']} compared, "
-                  f"worst cosine {worst:.6f}")
+                  f"worst cosine {worst:.6f}, "
+                  f"required missing {numeric.get('required_missing')}")
     if failures:
         print(f"FAILED ({len(failures)}):", file=sys.stderr)
         for item in failures:
