@@ -31,19 +31,21 @@ test -n "$JPEG" || { echo "libjpeg.so.8 not found" >&2; exit 1; }
 
 echo "== work dir: $WORK"
 rm -rf "$WORK"
-mkdir -p "$WORK/src"
-cp -r "$PKG/native/." "$WORK/src/"
+mkdir -p "$WORK"
+# Keep the package layout (native/src, native/include) so the patch, which is
+# rooted at the package directory, applies with -p1.
+cp -r "$PKG/native" "$WORK/native"
 
 echo "== applying MYS-2913-instrumentation.patch"
-( cd "$WORK/src" && patch -p1 --no-backup-if-mismatch \
+( cd "$WORK" && patch -p1 --no-backup-if-mismatch --batch \
     < "$HERE/MYS-2913-instrumentation.patch" )
 
 echo "== compiling"
 g++ -std=c++17 -O2 -fPIC -shared -Wall -Wextra \
-    -I"$WORK/src/include" -I"$LIBSOPHON/include" \
-    "$WORK/src/src/vl_embed_engine.cpp" \
-    "$WORK/src/src/vl_embed_c_api.cpp" \
-    "$WORK/src/src/vision.cpp" \
+    -I"$WORK/native/include" -I"$LIBSOPHON/include" \
+    "$WORK/native/src/vl_embed_engine.cpp" \
+    "$WORK/native/src/vl_embed_c_api.cpp" \
+    "$WORK/native/src/vision.cpp" \
     -o "$WORK/libcv84x6_vl_diag.so" \
     -L"$LIBSOPHON/lib" -lbmrt -lbmlib -lpthread "$JPEG" -lz \
     -Wl,-rpath,"$LIBSOPHON/lib"
