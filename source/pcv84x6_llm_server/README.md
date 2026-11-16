@@ -13,7 +13,7 @@ Web 管理页 + VLM 图片输入 + 多会话并发 + 多模型/agent 进程管�
 ## 安装（arm64 deb）
 
 ```bash
-sudo apt install ./cv84x6-llm-server_0.6.37_arm64.deb
+sudo apt install ./cv84x6-llm-server_0.6.38_arm64.deb
 ```
 
 一条命令完成解包、Python 检查、数据目录初始化、systemd enable 与启动。包内自带 Web 依赖与引擎库，
@@ -105,13 +105,11 @@ cd source/pcv84x6_llm_server && bash release.sh arm64   # 宿主直接调用（�
   计入根 `output/MANIFEST.txt` 与 `.build-status.txt`。只支持 arm64；`all` 等同 arm64。
 - 引擎库与 qwen3_5 基础配置是**固定输入**（`build/inputs/`，SHA256 校验，来源与重建方式见
   [`build/README.md`](build/README.md)）；Web 控制台从 `web/` 源码 + lockfile 现场构建；
-  vendored Python 依赖按 `requirements-vendor-lock.txt` 锁定（= 官方 v0.6.37 实发版本）。
-- **版本号不变**：包版本仍唯一来自 `app/__init__.py`（0.6.37），不在 sophon-tools 内
-  bump、不覆盖原仓库 release/tag/asset。
-- 与独立仓库同步：本目录是 `zzttzzmyswy/cv84x6-llm-server` 固定提交
-  `fdd109c8b1f49d929fcc7d98f993bf95f4c88e1b`（v0.6.37）的源码快照 + 出包适配。上游有新版本时，
-  用 `git archive` 导出新提交、按 [`build/README.md`](build/README.md) 的适配差异清单重放
-  （排除项 + `build/inputs/` 换新验证输入 + lockfile 重锁），包内 `COMMIT` 随之更新。
+  vendored Python 依赖按 `requirements-vendor-lock.txt` 锁定（= 官方 v0.6.38 实发版本）。
+- **版本号唯一来源**：包版本来自 `app/__init__.py`（0.6.38），`release.sh` 只校验不修改。
+- 源码来源：本目录自 v0.6.38 起就是**本仓库的源码**，不再是私有仓库的快照。
+  `build/source-commit.txt` 记录构建所用提交（指向本仓库 `sophgo/sophon-tools`），
+  包内 `COMMIT` 与之一致；历史上游导入来源见 [`build/README.md`](build/README.md)。
 
 ## 目录
 

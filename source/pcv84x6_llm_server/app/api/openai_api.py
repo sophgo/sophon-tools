@@ -697,6 +697,25 @@ def _first_stop(text: str, stops: list[str]) -> int | None:
 # ---------------------------------------------------------------------------
 # Embeddings
 # ---------------------------------------------------------------------------
+def _embed_record_content(item: dict) -> list[dict]:
+    """The recorded content parts of one multimodal embedding input.
+
+    ``validate_items`` fills an omitted ``text`` with ``""`` so that an
+    image-only item still has the field, and an empty text part is not a
+    renderable part: ``flatten_content`` -- the reader the recorder shares with
+    the prompt renderer -- refuses a text part whose text is falsy, which used
+    to abort the record's whole message walk and lose the image along with it.
+    Emitting only the parts that carry information keeps the record faithful
+    (the picture, plus any real text) without weakening that reader.
+    """
+    parts: list[dict] = []
+    if item.get("image"):
+        parts.append({"type": "image_url", "image_url": {"url": item["image"]}})
+    if item.get("text"):
+        parts.append({"type": "text", "text": item["text"]})
+    return parts
+
+
 def _coerce_embed_input(raw) -> list[str]:
     """OpenAI's ``input`` forms, reduced to the list of texts to embed.
 
@@ -800,10 +819,19 @@ async def embeddings(req: EmbeddingRequest, request: Request,
                 **({"instruction": instruction} if instruction else {})},
         # The record's `messages` is the input itself, in the same shape the
         # chat path uses (one turn per text) so an operator reads it the same way.
-        messages=[{"role": "user", "content": (
-            ([{"type": "image_url", "image_url": {"url": item["image"]}}]
-             if item.get("image") else []) + [{"type": "text", "text": item["text"]}])}
-            for item in items] if items is not None else [
+        #
+        # An image-only item carries `text=""` (validate_items fills it in), and
+        # recording that as a `{"type": "text", "text": ""}` part is not just
+        # noise: the recorder reads content parts through the same
+        # `flatten_content` the prompt renderer uses, which rejects a text part
+        # whose text is falsy (`ValueError: content part type 'text' is not
+        # supported`). That aborted the whole message walk, so the record lost
+        # its image description too and the log filled with tracebacks on every
+        # picture-only request. Omitting an empty text part keeps exactly the
+        # parts that carry information -- the image, and any real text -- and
+        # leaves the illegal-type/field refusals in `flatten_content` untouched.
+        messages=[{"role": "user", "content": _embed_record_content(item)}
+                  for item in items] if items is not None else [
                 {"role": "user", "content": text if multimodal else instruction + text}
                 for text in texts],
     )

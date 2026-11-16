@@ -155,7 +155,17 @@ class Encoder:
 
     def encode(self, text: str = "", png: bytes | None = None,
                instruction: str | None = None, dimensions: int | None = None,
-               keep_vector: bool = False) -> dict:
+               keep_vector: bool = False, ids: list[int] | None = None) -> dict:
+        """One forward. ``ids`` overrides tokenisation with a given prompt.
+
+        ``ids`` exists for the numeric comparison against the pinned FP32
+        reference: that comparison must exercise *the encoder* on the official
+        processor's exact token ids, so a tokenizer difference cannot be
+        mistaken for an encoder difference. The image still goes through this
+        engine's own preprocessing, and the engine rejects the request if the
+        resulting grid disagrees with the ids -- which is how a preprocessing
+        drift surfaces instead of being silently compared.
+        """
         dim = self.hidden if dimensions is None else dimensions
         image = None
         rec = {"kind": "image" if png else "text", "text_chars": len(text or ""),
@@ -173,8 +183,12 @@ class Encoder:
                 image_tokens = gh.value // 2 * (gw.value // 2)
                 rec.update(grid_h=gh.value, grid_w=gw.value,
                            pixels=gh.value * 32 * gw.value * 32)
-            prompt = self.render(text, image_tokens, instruction)
-            ids = self.tokenizer.encode(prompt, add_special_tokens=True).ids
+            if ids is not None:
+                ids = list(ids)
+                prompt = None
+            else:
+                prompt = self.render(text, image_tokens, instruction)
+                ids = self.tokenizer.encode(prompt, add_special_tokens=True).ids
             rec.update(tokens=len(ids), image_tokens=image_tokens, bucket=self.bucket(len(ids)))
             if len(ids) > self.seq:
                 rec.update(ok=False, error=f"{len(ids)} tokens exceed {self.seq}")
