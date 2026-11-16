@@ -1,1 +1,1 @@
-fdd109c8b1f49d929fcc7d98f993bf95f4c88e1b zzttzzmyswy/cv84x6-llm-server
+78b5f0125767e4ffdd097ae2dca781660d1fcab2 sophgo/sophon-tools source/pcv84x6_llm_server/native
