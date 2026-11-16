@@ -37,12 +37,18 @@ def main() -> int:
         except Exception as exc:  # noqa: BLE001
             problems.append(f"unparsable trial file {path}: {exc}")
             continue
-        if "trials" not in data:
+        if (not isinstance(data, dict) or not isinstance(data.get("trials"), list)
+                or not data["trials"]):
             problems.append(f"not a repeat_compare report: {path}")
             continue
         for trial in data["trials"]:
+            if not isinstance(trial, dict):
+                problems.append(f"invalid trial object: {path}")
+                continue
             if trial.get("load_failed"):
                 problems.append(f"{path}: trial load failed: {trial['load_failed']}")
+            elif not trial.get("counts"):
+                problems.append(f"{path}: trial has no observations")
             trials.append(trial)
 
     totals: dict[str, int] = {}

@@ -15,7 +15,7 @@
 buffer → 下一图输入"的连续依赖拷贝时，后一次拷贝可能在第一次拷贝落地前就读源缓冲，
 从而读到尚未写入的内容——表现为整块全零，或（更常见）只是错误的数值。
 
-这是**依赖顺序问题**，与模型、bmodel、量化、显存容量无关。
+无模型复现表明，此完成顺序问题无需加载模型即可触发；尚不能据此排除模型路径上的其他缺陷。
 
 ## 二、无模型最小复现（不依赖 WeMM / 图片 / 模型文件）
 
@@ -41,8 +41,7 @@ B --d2d--> C
 
 失败样本形如 `mismatched=2097152/2097152 zero_bytes=2097152 first_actual=0`，
 即目标块整块保持清零状态，源数据完全没有到达。**每次 API 返回值都检查**；有 mismatch
-时程序退出码为 1（"发现现象"），API 失败为 2–9（"工具失败"）——所以 `exit 0` 不能被
-当作"所有数据正确"。
+时程序退出码为 1（"发现现象"），API 失败为 2–9（"工具失败"）——`exit 0` 只表示本次有限试验逐字节相等，不保证其他负载或生产服务已经修复。
 
 编译/运行：
 
@@ -86,7 +85,7 @@ WeMM 路径每层都有"图输出 → 独立 `hidden` → 下一图输入"的依
   SDK 为何如此调度。
 - **未完成修复后的参考数值与性能验证。** 没有任何"已修复"的结论。
 - 不能用固定 sleep 作为修复，也不移除引擎的 fault 保护。
-- 现场 `driver/bm_api.c:1438` 附近把 CV84X6 的 `core_id` 统一映射为 0，因此
+- 本地 SDK 源码 `driver/bm_api.c:1438` 附近把 CV84X6 的 `core_id` 统一映射为 0，因此
   **不能宣称"core0 同步漏了另外 3 核"**——该说法不成立。
 - 本地 SDK 仅用于核对：libsophon commit `5b8db401a53e1941fa154743ead24d54935243a6`；
   历史 `9579e22e` 的 `bmlib_memory.cpp` CV84X6 分支在 `multi_cores` 后**有**
@@ -106,18 +105,18 @@ WeMM 路径每层都有"图输出 → 独立 `hidden` → 下一图输入"的依
 - `--trials > 1` 逐 trial **独立子进程**（已 fault 的进程内重建 handle 会
   `bmodel loading failed`，同进程多 trial 不独立）。
 - `aggregate.py` 对缺失文件、损坏 JSON、`load_failed` 显式报错并非零退出。
-- 无板卡测试 `test_diag_tools.py`（12 项）：哨兵目录不被改动、下游失败非零、
+- 无板卡测试 `test_diag_tools.py`（含失败路径）：哨兵目录不被改动、下游失败非零、
   分类口径、脚本/Python 语法。
 
-**关于 trace：** 出厂库与诊断库都按 `atoi` 判断 `CV_VLE_TRACE`（patch 已改为
-`getenv && atoi(...) != 0`），`=0` 为关闭。诊断运行一律 `env -u CV_VLE_TRACE`，
+**关于 trace：** 生产库仅判断 `CV_VLE_TRACE` 是否存在，因此 `=0` 仍开启；
+诊断 patch 才改为 `getenv && atoi(...) != 0`，`=0` 为关闭。诊断运行一律 `env -u CV_VLE_TRACE`，
 因为 trace 每层回读会串行化设备、掩盖待测竞态。
 
 ## 七、复现与验收
 
 ```bash
 # 无板卡：工具安全与失败传播
-python3 tools/vl_embed/test_diag_tools.py -v          # 12 passed
+python3 tools/vl_embed/test_diag_tools.py -v          # 全部通过
 
 # 板端：诊断库构建（新临时目录，-Werror，0 警告）
 bash tools/vl_embed/MYS-2913-build-diag.sh <package-root>
@@ -127,6 +126,14 @@ bash tools/vl_embed/copy_chain_build.sh
 <out>/copy-chain --trials 64 --no-fence
 <out>/copy-chain --trials 64 --fence
 ```
+
+### 负责人最终复验
+
+工具收尾后，15项无板卡测试全部通过，含真实脚本的失败退出/清理、单次及独立子进程
+加载失败、空试验拒绝；5个shell脚本语法检查通过。板端在独立临时目录以`-Werror`构建
+诊断库和最小复现程序，均无警告。最终一次无同步64轮与同步64轮均为0错误：
+**该次无同步臂没有复现间歇故障，不撤销此前4/128和独立2/64的失败记录，也不代表修复。**
+本次仅验收诊断工具，不运行修复版生产服务。临时分配/目录已清理，服务与发布版本未改。
 
 ## 八、版本更正记录
 

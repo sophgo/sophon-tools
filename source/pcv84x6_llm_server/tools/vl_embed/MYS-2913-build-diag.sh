@@ -26,11 +26,11 @@ PKG="$(cd "$PKG" && pwd)"
 
 if [ $# -ge 2 ]; then
   WORK="$2"
-  if [ -e "$WORK" ]; then
+  if [ -e "$WORK" ] || [ -L "$WORK" ]; then
     echo "MYS-2913-build-diag: refusing to reuse existing path $WORK" >&2
     exit 1
   fi
-  mkdir -p "$WORK"
+  mkdir -- "$WORK"
 else
   WORK="$(mktemp -d "${TMPDIR:-/tmp}/mys2913-diag-build.XXXXXX")"
 fi

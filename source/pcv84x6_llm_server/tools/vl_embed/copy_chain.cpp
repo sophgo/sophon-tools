@@ -16,8 +16,8 @@
 // wrong; the observed failure is an entire block of zeros, i.e. C still holds
 // its pre-clear contents. With the fence, every byte matches.
 //
-// Every API return value is checked and the process exits non-zero on any
-// failure, so "exit 0" cannot be mistaken for "all data correct". All buffers
+// Each trial API return value is checked and the process exits non-zero on any
+// failure. Exit 0 means only that this finite sample matched byte for byte. All buffers
 // are allocated by this process and freed on every exit path.
 //
 // Build (board, links the installed libsophon) -- see copy_chain_build.sh:
@@ -171,6 +171,6 @@ int main(int argc, char** argv) {
       "summary fence=%d bad_trials=%u/%d zero_blocks=%u total_mismatched=%u\n",
       int(fence), bad_trials, trials, zero_blocks, total_mismatched);
   // A mismatched trial is the finding under test, not a tool failure, but the
-  // exit code must still say so: callers cannot treat 0 as "data was correct".
+  // exit code must still say so rather than hiding mismatches behind exit 0.
   return bad_trials == 0 ? 0 : 1;
 }

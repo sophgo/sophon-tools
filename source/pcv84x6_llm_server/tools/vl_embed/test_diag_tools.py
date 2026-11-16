@@ -138,6 +138,51 @@ class FailurePropagation(unittest.TestCase):
                     "arm", str(self.tmp / "agg.json"), str(trial)])
         self.assertEqual(done.returncode, 0, done.stderr)
 
+    def test_empty_trials_are_not_complete(self):
+        trial = self.tmp / "empty.json"
+        trial.write_text('{"trials": []}')
+        done = run([sys.executable, str(HERE / "aggregate.py"), "arm",
+                    str(self.tmp / "agg.json"), str(trial)])
+        self.assertNotEqual(done.returncode, 0)
+
+    def test_load_failure_exits_nonzero_single_and_isolated(self):
+        for trials in (1, 2):
+            with self.subTest(trials=trials):
+                out = self.tmp / f"load-{trials}.json"
+                done = run([sys.executable, str(HERE / "repeat_compare.py"),
+                            "--library", "/nonexistent/diag.so", "--config", str(self.tmp),
+                            "--model", "/nonexistent/model", "--trials", str(trials),
+                            "--output", str(out)])
+                self.assertNotEqual(done.returncode, 0)
+                self.assertEqual(json.loads(out.read_text())["trials_load_failed"], trials)
+
+    def test_verify_propagates_api_and_control_failures_and_cleans(self):
+        # Exercise the real wrapper with deterministic build/probe executables,
+        # without requiring an NPU or invoking a compiler.
+        fixture = self.tmp / "wrapper"
+        fixture.mkdir()
+        shutil.copy(HERE / "verify.sh", fixture / "verify.sh")
+        (fixture / "MYS-2913-build-diag.sh").write_text(
+            '#!/bin/bash\nmkdir "$2"\nexit "${BUILD_RC:-0}"\n')
+        (fixture / "copy_chain_build.sh").write_text(
+            '#!/bin/bash\nmkdir "$1"\n'
+            'cp "$PROBE_SOURCE" "$1/copy-chain"\nchmod +x "$1/copy-chain"\n')
+        probe = fixture / "probe"
+        probe.write_text('#!/bin/bash\nif [ "$3" = --fence ]; then '
+                         'exit "$CONTROL_RC"; else exit "$BASELINE_RC"; fi\n')
+        scratch = self.tmp / "scratch"
+        scratch.mkdir()
+        for build, baseline, control, expected in ((0, 1, 0, 0), (0, 0, 0, 0),
+                                                  (0, 7, 0, 7), (0, 1, 1, 1),
+                                                  (0, 1, 124, 124), (9, 0, 0, 1)):
+            with self.subTest(build=build, baseline=baseline, control=control):
+                env = dict(os.environ, TMPDIR=str(scratch), PROBE_SOURCE=str(probe),
+                           BUILD_RC=str(build), BASELINE_RC=str(baseline),
+                           CONTROL_RC=str(control))
+                done = run(["bash", str(fixture / "verify.sh"), str(fixture)], env=env)
+                self.assertEqual(done.returncode, expected, done.stdout + done.stderr)
+                self.assertEqual(list(scratch.iterdir()), [])
+
 
 class Classification(unittest.TestCase):
     """Unknown errors must not be relabelled as input rejections."""
@@ -160,6 +205,8 @@ class Classification(unittest.TestCase):
             "refused")
         self.assertFalse(repeat_compare.forward_executed("refused"))
         self.assertTrue(repeat_compare.forward_executed("zero"))
+        self.assertEqual(repeat_compare.classify(
+            {"ok": False, "error": "device copy exceeds graph buffer"}), "other_error")
 
 
 class Syntax(unittest.TestCase):
@@ -172,7 +219,7 @@ class Syntax(unittest.TestCase):
 
     def test_shell_scripts_parse(self):
         for name in ("MYS-2913-build-diag.sh", "run_from_clean.sh",
-                     "sites.sh", "copy_chain_build.sh"):
+                     "sites.sh", "copy_chain_build.sh", "verify.sh"):
             done = run(["bash", "-n", str(HERE / name)])
             self.assertEqual(done.returncode, 0, f"{name}: {done.stderr}")
 

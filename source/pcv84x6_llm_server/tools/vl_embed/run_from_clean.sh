@@ -5,17 +5,18 @@
 #   * Every trial runs in its OWN process. Re-creating an encoder inside a
 #     process that already faulted can fail with "bmodel loading failed" /
 #     "bm free gmem failed"; process isolation removes that confound.
-#   * CV_VLE_TRACE is UNSET, not "=0". Both the shipped and the instrumented
-#     engine test only for the variable's presence, so "=0" would ENABLE tracing,
+#   * CV_VLE_TRACE is UNSET, not "=0". The
+#     production engine tests presence ("=0" enables it); the diagnostic patch
+#     tests its integer value. Unsetting works for both,
 #     and a trace readback per layer serialises the device and hides the race.
 #   * Arms run in a different order each round, so slow drift cannot masquerade
 #     as an arm effect.
 #   * Only one CV_VLE_* factor differs between arms; everything else is fixed.
 #
 #   bash run_from_clean.sh [branch] [workroot]
-set -u
+set -euo pipefail
 BRANCH="${1:-diag/mys2293-wemm-repeat-zero}"
-ROOT="${2:-/data/mys2913-clean}"
+ROOT="${2:-}"
 REPO=https://github.com/sophgo/sophon-tools.git
 export PYTHONPATH=/opt/sophgo/cv84x6_llm_server/vendor
 MODEL=/data/cv84x6_llm_server/models/wemm-embedding-2b/wemm-embedding-2b_w8bf16_seq2048_pixels1310720_cv84x6_4core_buckets_gdnmixed_20261114_091623.bmodel
@@ -29,16 +30,22 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 
 # The work directory must be new: this script never deletes a tree it did not
 # create, so a mistyped path cannot destroy a caller's data.
-if [ -e "$ROOT" ]; then
-  echo "run_from_clean: refusing to reuse existing path $ROOT" >&2
-  echo "run_from_clean: pass a path that does not exist yet" >&2
-  exit 1
+if [ -n "$ROOT" ]; then
+  if [ -e "$ROOT" ] || [ -L "$ROOT" ]; then
+    echo "run_from_clean: refusing to reuse existing path $ROOT" >&2
+    echo "run_from_clean: pass a path that does not exist yet" >&2
+    exit 1
+  fi
+  mkdir -- "$ROOT"
+else
+  ROOT="$(mktemp -d "${TMPDIR:-/tmp}/mys2913-clean.XXXXXX")"
 fi
-mkdir -p "$ROOT/results"
+ROOT="$(cd "$ROOT" && pwd)"
+mkdir "$ROOT/results"
 cd "$ROOT"
 
 echo "== clone $BRANCH"
-if ! git clone --depth 1 --branch "$BRANCH" "$REPO" st >"$ROOT/clone.log" 2>&1; then
+if ! timeout --foreground 180 git clone --depth 1 --branch "$BRANCH" "$REPO" st >"$ROOT/clone.log" 2>&1; then
   echo "run_from_clean: clone failed" >&2
   tail -20 "$ROOT/clone.log" >&2
   exit 1
@@ -50,6 +57,9 @@ if [ ! -d "$PKG" ]; then
 fi
 
 echo "== provenance"
+git -C "$ROOT/st" rev-parse HEAD
+sha256sum "$PKG/tools/vl_embed/MYS-2913-instrumentation.patch" "$SHIPPED" /opt/sophon/libsophon-current/lib/libbmrt.so.1.0 /opt/sophon/libsophon-current/lib/libbmlib.so.0 >"$ROOT/provenance.sha256"
+cat "$ROOT/provenance.sha256"
 echo "commit=$(git -C "$ROOT/st" rev-parse HEAD)"
 echo "patch_sha256=$(sha256sum "$PKG/tools/vl_embed/MYS-2913-instrumentation.patch" | cut -d' ' -f1)"
 echo "shipped_lib_sha256=$(sha256sum "$SHIPPED" | cut -d' ' -f1)"
@@ -58,7 +68,7 @@ echo "bmlib_sha256=$(sha256sum /opt/sophon/libsophon-current/lib/libbmlib.so.0 |
 echo "libsophon=$(dpkg-query -W -f='${Version}' sophon-soc-libsophon 2>/dev/null || echo unknown)"
 
 echo "== build instrumented library from clean source"
-if ! bash "$PKG/tools/vl_embed/MYS-2913-build-diag.sh" "$PKG" "$ROOT/build" \
+if ! timeout --foreground 120 bash "$PKG/tools/vl_embed/MYS-2913-build-diag.sh" "$PKG" "$ROOT/build" \
         >"$ROOT/build.log" 2>&1; then
   echo "run_from_clean: diagnostic build FAILED" >&2
   tail -30 "$ROOT/build.log" >&2
@@ -94,7 +104,7 @@ run_arm() {
   for t in $(seq 0 $((TRIALS - 1))); do
     local out="$ROOT/results/$arm-r$round-t$t.json"
     # One process per trial: a faulted handle must never be reused.
-    if ! env -u CV_VLE_TRACE $envs python3 "$PKG/tools/vl_embed/repeat_compare.py" \
+    if ! timeout --foreground "${TRIAL_TIMEOUT:-900}" env -u CV_VLE_TRACE -u CV_VLE_COPY_SYNC -u CV_VLE_COPY_SYNC_SITE -u CV_VLE_COPY_DELAY_US -u CV_VLE_LAUNCH_SYNC -u CV_VLE_MEMSET_SYNC $envs python3 "$PKG/tools/vl_embed/repeat_compare.py" \
         --library "$lib" --model "$MODEL" --config "$CFG" \
         --calls "$CALLS" --trials 1 $TEXT_ARGS --output "$out" \
         >/dev/null 2>"$ROOT/results/$arm-r$round-t$t.err"; then

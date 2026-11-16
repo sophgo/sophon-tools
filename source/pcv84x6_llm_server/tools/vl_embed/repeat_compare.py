@@ -36,6 +36,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import sys
 from pathlib import Path
 
@@ -75,8 +76,11 @@ def classify(rec: dict) -> str:
     if "non-finite" in error:
         return "nonfinite"
     # These are the only messages produced before any device work.
-    if ("exceed" in error or "image_create failed" in error
-            or "must be a" in error or "needs text or an image" in error):
+    if (re.fullmatch(r"\d+ tokens exceed \d+", error) or error in {
+            "invalid encoder input length or dimensions",
+            "token id outside the model vocabulary", "image grid and prompt do not match",
+            "image placeholder span is invalid", "invalid M-RoPE positions",
+            "M-RoPE position exceeds compiled table", "image_create failed"}):
         return "input_error"
     return "other_error"
 
@@ -212,7 +216,8 @@ def _run_isolated(a) -> int:
         for verdict, count in trial["counts"].items():
             totals[verdict] = totals.get(verdict, 0) + count
     report = {
-        "input": {"text_chars": len(a.text) * (a.long_text_repeats or 1),
+        "input": {"text_chars": len(" ".join([a.text] * a.long_text_repeats)
+                                    if a.long_text_repeats else a.text),
                   "image": a.image},
         "calls_per_trial": a.calls,
         "trials": trials,
@@ -263,6 +268,8 @@ def main() -> int:
                    help="per-trial child timeout in seconds (default 900)")
     p.add_argument("--_child", action="store_true", help=argparse.SUPPRESS)
     a = p.parse_args()
+    if a.calls < 1 or a.trials < 1 or a.timeout <= 0 or a.long_text_repeats < 0:
+        p.error("calls, trials and timeout must be positive; repeats must be nonnegative")
 
     text = (" ".join([a.text] * a.long_text_repeats) if a.long_text_repeats else a.text)
     png = None
@@ -286,7 +293,7 @@ def main() -> int:
             Path(a.output).write_text(json.dumps(report, indent=1) + "\n")
         print(json.dumps({k: v for k, v in report.items() if k != "pairs"},
                          ensure_ascii=False), flush=True)
-        return 0
+        return 1 if report.get("load_failed") else 0
 
     totals = {}
     for trial in trials:
@@ -321,7 +328,7 @@ def main() -> int:
               f"bucket={trial['bucket']} distinct={trial['distinct_vectors']}/"
               f"{trial['successful_vectors']} worst_cos={trial['worst_cosine']} [{detail}]",
               file=sys.stderr)
-    return 0
+    return 1 if report["trials_load_failed"] else 0
 
 
 if __name__ == "__main__":

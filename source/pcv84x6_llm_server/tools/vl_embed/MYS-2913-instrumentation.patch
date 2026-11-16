@@ -6,7 +6,7 @@
  #include <mutex>
 +#include <thread>
  #include <vector>
- 
+
  namespace cv84x6 {
 @@ -25,6 +26,35 @@
    return std::chrono::duration<double, std::milli>(Clock::now() - start).count();
@@ -42,7 +42,7 @@
 +  return s;
 +}
  }  // namespace
- 
+
  struct VlEmbedEngine::Impl {
 @@ -50,7 +80,17 @@
    std::atomic<bool> fault{false};
@@ -60,7 +60,7 @@
 +                          ? std::atoi(std::getenv("CV_VLE_COPY_DELAY_US")) : 0;
 +  bool launch_sync = std::getenv("CV_VLE_LAUNCH_SYNC") != nullptr &&
 +                     std::atoi(std::getenv("CV_VLE_LAUNCH_SYNC")) != 0;
- 
+
    ~Impl() {
      // A failed sync can leave a launch outstanding. Drain before releasing
 @@ -81,22 +121,59 @@

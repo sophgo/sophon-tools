@@ -1,51 +1,26 @@
 #!/bin/bash
-# Board verification for the converged MYS-2913 deliverables.
-#
-#   bash verify.sh <package-root>
-#
-# 1. builds the diagnostic library from a fresh temp dir (-Werror: any format
-#    warning fails the build)
-# 2. builds and runs the model-free A->B->C probe, both arms, 64 trials each
-# Everything is allocated by this run and removed afterwards.
-set -uo pipefail
+# Build diagnostics and run the model-free copy-chain control; no service changes.
+# Usage: bash verify.sh <package-root>
+set -euo pipefail
 PKG="${1:?usage: $0 <package-root>}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/mys2913-verify.XXXXXX")"
+# Remove only this invocation's private directory, including on failures.
+trap 'rm -rf -- "$WORK"' EXIT
 
-echo "== 1. diagnostic library build (fresh dir, -Werror)"
-BUILD_OUT="$(bash "$HERE/MYS-2913-build-diag.sh" "$PKG" 2>&1)"
-BUILD_RC=$?
-echo "$BUILD_OUT" | tail -6
-echo "build_rc=$BUILD_RC"
-if [ "$BUILD_RC" -ne 0 ]; then
-  echo "BUILD FAILED" >&2
-  exit 1
-fi
-# The build script's last line is the .so path; the work dir is its parent.
-WORKDIR="$(dirname "$(echo "$BUILD_OUT" | tail -1)")"
-echo "warnings_in_build=$(echo "$BUILD_OUT" | grep -c 'warning:' || true)"
+timeout --foreground 120 bash "$HERE/MYS-2913-build-diag.sh" "$PKG" "$WORK/diag" \
+  >"$WORK/build.log" 2>&1 || { cat "$WORK/build.log" >&2; exit 1; }
+cat "$WORK/build.log"
+timeout --foreground 120 bash "$HERE/copy_chain_build.sh" "$WORK/chain"
 
-echo
-echo "== 2. model-free A->B->C probe"
-CHAIN_OUT="$(bash "$HERE/copy_chain_build.sh" 2>&1)"
-CHAIN_RC=$?
-echo "$CHAIN_OUT" | tail -3
-if [ "$CHAIN_RC" -ne 0 ]; then
-  echo "CHAIN BUILD FAILED" >&2
-  exit 1
-fi
-BIN="$(echo "$CHAIN_OUT" | tail -1)"
-
-echo "-- arm: no fence (64 trials)"
-"$BIN" --trials 64 --no-fence
-echo "no_fence_rc=$?"
-
-echo "-- arm: fence between copies (64 trials)"
-"$BIN" --trials 64 --fence
-echo "fence_rc=$?"
-
-echo
-echo "== cleanup"
-rm -rf "$WORKDIR" "$(dirname "$BIN")"
-for d in "$WORKDIR" "$(dirname "$BIN")"; do
-  if [ -e "$d" ]; then echo "WARNING: $d still exists" >&2; else echo "removed $d"; fi
-done
+# An intermittent baseline mismatch (rc=1) is a valid observation; API errors
+# and timeouts are tool failures. The synchronized control must match exactly.
+no_fence_rc=0
+timeout --foreground 60 "$WORK/chain/copy-chain" --trials 64 --no-fence || no_fence_rc=$?
+echo "no_fence_rc=$no_fence_rc"
+if [ "$no_fence_rc" -gt 1 ]; then exit "$no_fence_rc"; fi
+fence_rc=0
+timeout --foreground 60 "$WORK/chain/copy-chain" --trials 64 --fence || fence_rc=$?
+echo "fence_rc=$fence_rc"
+if [ "$fence_rc" -ne 0 ]; then exit "$fence_rc"; fi
+echo "Verification complete: tool steps succeeded and the synchronized control matched."

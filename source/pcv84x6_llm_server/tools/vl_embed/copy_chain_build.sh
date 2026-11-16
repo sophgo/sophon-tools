@@ -17,11 +17,11 @@ fi
 
 if [ $# -ge 1 ]; then
   OUT="$1"
-  if [ -e "$OUT" ]; then
+  if [ -e "$OUT" ] || [ -L "$OUT" ]; then
     echo "copy_chain_build: refusing to reuse existing path $OUT" >&2
     exit 1
   fi
-  mkdir -p "$OUT"
+  mkdir -- "$OUT"
 else
   OUT="$(mktemp -d "${TMPDIR:-/tmp}/mys2913-copychain.XXXXXX")"
 fi
