@@ -1,0 +1,65 @@
+{
+ "cases": {
+  "asr_en": {
+   "duration_s": 15.05125,
+   "frames": 1506,
+   "max_abs": 1.415708,
+   "source": "asr_en.wav",
+   "source_bytes": 2172458,
+   "source_sr": 48000,
+   "wave_scale": 1.0
+  },
+  "asr_zh": {
+   "duration_s": 4.203938,
+   "frames": 421,
+   "max_abs": 1.117405,
+   "source": "asr_zh.wav",
+   "source_bytes": 134570,
+   "source_sr": 16000,
+   "wave_scale": 1.0
+  },
+  "resample_22050": {
+   "frames": 200,
+   "in_samples": 44100,
+   "out_samples": 32000,
+   "seconds": 2.0,
+   "seed": 7,
+   "sr_in": 22050
+  },
+  "resample_44100": {
+   "frames": 200,
+   "in_samples": 88200,
+   "out_samples": 32000,
+   "seconds": 2.0,
+   "seed": 7,
+   "sr_in": 44100
+  },
+  "resample_48000": {
+   "frames": 200,
+   "in_samples": 96000,
+   "out_samples": 32000,
+   "seconds": 2.0,
+   "seed": 7,
+   "sr_in": 48000
+  },
+  "resample_8000": {
+   "frames": 200,
+   "in_samples": 16000,
+   "out_samples": 32000,
+   "seconds": 2.0,
+   "seed": 7,
+   "sr_in": 8000
+  },
+  "sine17s": {
+   "duration_s": 17.0,
+   "frames": 1700,
+   "seed": 12
+  },
+  "sine3s": {
+   "duration_s": 3.0,
+   "frames": 300,
+   "seed": 11
+  }
+ },
+ "feature_scale": 8192.0
+}

@@ -1,0 +1,6 @@
+head_len 5
+grid_h 56
+grid_w 56
+max_new 192
+eos_id 2
+seq 2048

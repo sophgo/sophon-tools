@@ -1,0 +1,18 @@
+{
+ "image": "tests/data/ocr/img/table_stats.png",
+ "crop_size": [
+  1240,
+  1400
+ ],
+ "label": "table",
+ "prompt": "Table Recognition:",
+ "stage": "784x784 (grid 56x56, 3136 patches)",
+ "grid": [
+  56,
+  56
+ ],
+ "image_tokens": 784,
+ "prompt_tokens": 797,
+ "head_len": 5,
+ "aspect_deviation": 1.0
+}

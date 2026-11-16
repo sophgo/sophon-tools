@@ -260,8 +260,11 @@ def cv2():
 
 @pytest.fixture(scope="module")
 def prep():
-    if not (PREP_DIR / "patches.f32.gz").is_file():
-        pytest.skip("tests/data/ocr/vl_prep/patches.f32.gz is missing")
+    # Checked in; a missing artefact must fail rather than skip, or the
+    # element-for-element comparison against what the board fed the ViT
+    # disappears from a run that still reports success.
+    path = PREP_DIR / "patches.f32.gz"
+    assert path.is_file(), f"{path} is missing; it is a checked-in fixture"
     return PREP_DIR
 
 
@@ -342,8 +345,7 @@ def test_the_golden_files_are_the_ones_the_docs_quote():
     ids without anyone noticing, so the recorded version is asserted against the
     one this repository's requirements pin.
     """
-    if not GOLDEN.is_file():
-        pytest.skip("the PaddleOCR-VL tokenizer golden is missing")
+    assert GOLDEN.is_file(), f"{GOLDEN} is missing; it is a checked-in fixture"
     payload = json.loads(GOLDEN.read_text(encoding="utf-8"))
     assert payload["generated_by"] == "tools/gen_tokenizer_golden_paddleocr_vl.py"
     assert payload["tokenizers_version"], "the golden must record its generator"

@@ -52,10 +52,11 @@ from app.engine.asr_prompt import (  # noqa: E402
     normalize_language,
 )
 
-pytestmark = pytest.mark.skipif(
-    not (DATA / "features.npz").exists(),
-    reason="tests/data/asr golden missing; run tools/asr/make_golden.py",
-)
+# The ASR feature golden is a checked-in fixture (tests/data/PROVENANCE.md), so
+# its absence is a broken checkout rather than a reason to skip the whole
+# module. Skipping made the file's assertions vanish from a "passing" run.
+assert (DATA / "features.npz").exists(), (
+    f"{DATA / 'features.npz'} is missing; it is a checked-in fixture")
 
 #: Max absolute feature difference the task allows against HF.
 FEATURE_TOL = 1e-4
