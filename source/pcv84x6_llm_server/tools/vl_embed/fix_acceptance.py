@@ -385,9 +385,14 @@ def main() -> int:
 
     print(f"buckets: {report['repeat']['buckets_seen']}")
     for shape in report["repeat"]["shapes"]:
-        print(f"  {shape['shape']:<14} tokens={shape['tokens']} bucket={shape['bucket']} "
-              f"n={shape['calls']} distinct={shape['distinct_digests']} "
-              f"p50={shape['p50_ms']:.1f}ms p95={shape['p95_ms']:.1f}ms")
+        # A shape whose first call failed has no token/bucket figure; printing
+        # the failure is the point of the row, so it must not crash the report.
+        tokens = shape["tokens"] if shape["tokens"] is not None else "?"
+        bucket = shape["bucket"] if shape["bucket"] is not None else "?"
+        timing = (f"p50={shape['p50_ms']:.1f}ms p95={shape['p95_ms']:.1f}ms"
+                  if shape["p50_ms"] is not None else "no successful call")
+        print(f"  {shape['shape']:<14} tokens={tokens} bucket={bucket} "
+              f"n={shape['calls']} distinct={shape['distinct_digests']} {timing}")
     if "numeric" in report:
         numeric = report["numeric"]
         print(f"reference: {numeric['compared']}/{numeric['rows']} compared, "
@@ -396,8 +401,11 @@ def main() -> int:
             print(f"  MRL {dim:>4}: worst cosine {numeric['worst'][str(dim)]} "
                   f"({numeric['worst_case'].get(str(dim))})")
     for shape in report["performance"]["shapes"]:
-        print(f"  perf {shape['shape']:<12} n={shape['n']} "
-              f"p50={shape['total_p50_ms']}ms p95={shape['total_p95_ms']}ms")
+        p50 = shape["total_p50_ms"]
+        p95 = shape["total_p95_ms"]
+        timing = (f"p50={p50}ms p95={p95}ms" if p50 is not None
+                  else "no successful round")
+        print(f"  perf {shape['shape']:<12} n={shape['n']} {timing}")
     if failures:
         print(f"FAILED ({len(failures)}):", file=sys.stderr)
         for item in failures:
