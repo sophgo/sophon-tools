@@ -335,7 +335,8 @@ def _boundary_image_map(fixtures: Path | None) -> dict[str, Path]:
 def reference_comparison(enc: Encoder, reference: Path, boundary: Path | None,
                          image_dir: Path | None,
                          boundary_dir: Path | None = None,
-                         required: Sequence[str] = ()) -> dict:
+                         required: Sequence[str] = (),
+                         extra: Sequence[Path] = ()) -> dict:
     """Re-embed each reference case and compare at all six MRL widths.
 
     The reference rows carry the exact token ids the official processor
@@ -355,10 +356,13 @@ def reference_comparison(enc: Encoder, reference: Path, boundary: Path | None,
            "worst_case": {}, "failures": [], "rejected": [],
            "compared_cases": [], "required_missing": []}
     boundary_images = _boundary_image_map(boundary_dir)
-    for path in [p for p in (reference, boundary) if p]:
+    sources = [p for p in (reference, boundary, *extra) if p]
+    out["reference_files"] = []
+    for path in sources:
         if not path.exists():
             out["skipped"].append(f"{path}: missing")
             continue
+        out["reference_files"].append({"path": str(path), "sha256": _sha(path)})
         for row in _reference_rows(path):
             out["rows"] += 1
             kind = row.get("type") or "?"
@@ -490,6 +494,9 @@ def main() -> int:
     p.add_argument("--model", required=True)
     p.add_argument("--reference", type=Path)
     p.add_argument("--reference-boundary", type=Path)
+    p.add_argument("--reference-extra", type=Path, action="append", default=[],
+                   help="an additional reference file (e.g. the 63/64/65-token "
+                        "set); repeatable")
     p.add_argument("--image-dir", type=Path,
                    help="directory holding the reference set's images")
     p.add_argument("--boundary-dir", type=Path,
@@ -544,7 +551,8 @@ def main() -> int:
                         required.append(line)
             report["numeric"] = reference_comparison(
                 enc, a.reference, a.reference_boundary, a.image_dir,
-                boundary_dir=a.boundary_dir, required=required)
+                boundary_dir=a.boundary_dir, required=required,
+                extra=a.reference_extra)
             report["numeric"]["required"] = required
             # Record what the reference was, so a reader can tell which files
             # produced these numbers rather than trusting a path string.

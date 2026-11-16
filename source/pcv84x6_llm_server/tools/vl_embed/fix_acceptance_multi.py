@@ -56,6 +56,8 @@ def main() -> int:
     p.add_argument("--model", required=True)
     p.add_argument("--reference", type=Path)
     p.add_argument("--reference-boundary", type=Path)
+    p.add_argument("--reference-extra", type=Path, action="append", default=[],
+                   help="additional reference file (e.g. the 63/64/65-token set)")
     p.add_argument("--image-dir", type=Path)
     p.add_argument("--boundary-dir", type=Path,
                    help="boundary fixture set; its eval.json pairs case ids with images")
@@ -83,6 +85,8 @@ def main() -> int:
             cmd += ["--reference", str(a.reference)]
         if a.reference_boundary:
             cmd += ["--reference-boundary", str(a.reference_boundary)]
+        for extra in a.reference_extra:
+            cmd += ["--reference-extra", str(extra)]
         if a.image_dir:
             cmd += ["--image-dir", str(a.image_dir)]
         if a.boundary_dir:

@@ -110,7 +110,11 @@ mkdir -p "$D/scripts" "$D/tools"
 cp scripts/install.sh scripts/uninstall.sh "$D/scripts/"
 cp tools/engine_check.py tools/e2e_check.py tools/cache_check.py tools/cache_e2e.py tools/stress_check.py "$D/tools/"
 mkdir -p "$D/tools/vl_embed"
-cp tools/vl_embed/service_check.py "$D/tools/vl_embed/"
+# Both acceptance tools ship: service_check.py is the fixed-input HTTP check,
+# and package_http_matrix.py is the bucket/switch matrix over the installed
+# package's own HTTP path. The latter must be inside the package to be runnable
+# against it, and it imports nothing outside the package's own app/ and vendor/.
+cp tools/vl_embed/service_check.py tools/vl_embed/package_http_matrix.py "$D/tools/vl_embed/"
 
 # Vendor wheels target the BOARD's interpreter (cp310/aarch64), never the build
 # host's. The unified sophon-tools image ships python3.8 + pip 20.0.2, which
