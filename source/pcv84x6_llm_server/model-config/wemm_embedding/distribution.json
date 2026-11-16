@@ -1,0 +1,19 @@
+{
+  "file": "wemm-embedding-2b_w8bf16_seq2048_pixels1310720_cv84x6_4core_buckets_gdnmixed_20261114_091623.bmodel",
+  "size_bytes": 3121778688,
+  "md5": "2065f4c866be364c0607b705c07f3dc4",
+  "sha256": "480a67420d349c2898816749019785b68e8608cdbe00403e526e8e90179713bd",
+  "dflag": "cv84x6_llm_wemm-embedding-2b",
+  "dfss": "open@sophgo.com:/tools/cv84x6_llm_server/wemm-embedding-2b_w8bf16_seq2048_pixels1310720_cv84x6_4core_buckets_gdnmixed_20261114_091623.bmodel",
+  "config_sha256": {
+    "chat_template.jinja": "273d8e0e683b885071fb17e08d71e5f2a5ddfb5309756181681de4f5a1822d80",
+    "config.json": "f6e5925cba6a907adedb9c86ab61f336947c4010eee3bf8583086cb90067eec2",
+    "embedding_chat_template.jinja": "7c3df2aab83ab9096428ec27b6b99ad87c4790418b830d119957634f28c677ba",
+    "embedding_config.json": "18dbdcb2ed2c07fbe7b692baa043c2a3082329e5284b622c372f5c8d19052e6c",
+    "processor_config.json": "d601e2fe0de1bc11852de3aa843f01a1677ca84f4dc743916c9ce4b8d30fb384",
+    "source_manifest.json": "991b1c41efe99229bc02b45323f2c39427a4fa35b9380fc6b1db2c622e5eb552",
+    "tokenizer.json": "40e444c744512f423da4c8443c47c21e22ff76056ba4e9796a81c04c13a9daf0",
+    "tokenizer_config.json": "35db43580d8c551641a5fe1d1daafb10e73d0a1243db18ff7bc00413a6152ff5",
+    "LICENSE": "e87f02efc35e9bdde65c8cd5cfa26fbd3a8dcb209c5b82ed91b274b2ff643b53"
+  }
+}

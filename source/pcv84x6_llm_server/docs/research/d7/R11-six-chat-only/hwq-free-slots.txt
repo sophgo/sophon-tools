@@ -1,0 +1,19 @@
+=== Global Test Thread Status ===
+Status: STOPPED
+Wakeup Count: 0
+Device Pointer: 0000000000000000
+
+HWQ Index | Free Slots
+---------|------------
+    0     | 16
+    1     | 16
+    2     | 16
+    3     | 15
+    4     | 15
+    5     | 16
+    6     | 16
+    7     | 16
+
+Usage examples:
+echo start > /proc/bmtpu/wakeup_control  # Start global test
+echo stop  > /proc/bmtpu/wakeup_control  # Stop global test

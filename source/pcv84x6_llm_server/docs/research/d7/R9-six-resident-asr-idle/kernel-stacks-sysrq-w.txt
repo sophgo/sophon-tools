@@ -1,0 +1,76 @@
+[  517.829129] sysrq: Show Blocked State
+[  517.832921] task:bm_mbox         state:D stack:14416 pid:  592 ppid:     2 flags:0x00000008
+[  517.832933] Call trace:
+[  517.832943]  __switch_to+0xb0/0xf4
+[  517.832950]  __schedule+0x30c/0x760
+[  517.832953]  schedule+0x70/0x104
+[  517.832956]  schedule_hrtimeout_range_clock+0xa4/0x160
+[  517.832958]  schedule_hrtimeout_range+0x14/0x20
+[  517.832961]  usleep_range+0x84/0xc0
+[  517.833006]  mbox_thread_fn+0x4c/0x84 [bmtpu]
+[  517.833011]  kthread+0x148/0x14c
+[  517.833014]  ret_from_fork+0x10/0x34
+[  517.833072] task:python3.10      state:D stack:13360 pid: 6188 ppid:  1348 flags:0x00000004
+[  517.833080] Call trace:
+[  517.833083]  __switch_to+0xb0/0xf4
+[  517.833085]  __schedule+0x30c/0x760
+[  517.833089]  schedule+0x70/0x104
+[  517.833091]  schedule_timeout+0x80/0xf0
+[  517.833094]  wait_for_completion_timeout+0xa4/0x130
+[  517.833105]  bmdrv_thread_sync_api+0x240/0x560 [bmtpu]
+[  517.833137]  bm_ioctl+0xc84/0x1c5c [bmtpu]
+[  517.833156]  bmdev_ioctl+0x54/0xd0 [bmtpu]
+[  517.833165]  __arm64_sys_ioctl+0x46c/0xbd0
+[  517.833172]  do_el0_svc+0xc0/0x210
+[  517.833178]  el0_svc+0x14/0x20
+[  517.833183]  el0_sync_handler+0xa4/0x140
+[  517.833189]  el0_sync+0x174/0x180
+[  517.833195] task:python3.10      state:D stack:13344 pid: 6296 ppid:  1348 flags:0x00000004
+[  517.833206] Call trace:
+[  517.833209]  __switch_to+0xb0/0xf4
+[  517.833211]  __schedule+0x30c/0x760
+[  517.833214]  schedule+0x70/0x104
+[  517.833217]  schedule_preempt_disabled+0x24/0x40
+[  517.833219]  __mutex_lock.constprop.0+0x380/0x790
+[  517.833222]  __mutex_lock_slowpath+0x14/0x20
+[  517.833225]  mutex_lock+0x64/0x74
+[  517.833235]  bmdrv_send_api+0x16c/0x1b5c [bmtpu]
+[  517.833244]  bm_ioctl+0xcc4/0x1c5c [bmtpu]
+[  517.833254]  bmdev_ioctl+0x54/0xd0 [bmtpu]
+[  517.833256]  __arm64_sys_ioctl+0x46c/0xbd0
+[  517.833259]  do_el0_svc+0xc0/0x210
+[  517.833262]  el0_svc+0x14/0x20
+[  517.833264]  el0_sync_handler+0xa4/0x140
+[  517.833266]  el0_sync+0x174/0x180
+[  517.833276] task:python3.10      state:D stack:13136 pid: 6379 ppid:  1348 flags:0x00000004
+[  517.833283] Call trace:
+[  517.833286]  __switch_to+0xb0/0xf4
+[  517.833288]  __schedule+0x30c/0x760
+[  517.833291]  schedule+0x70/0x104
+[  517.833294]  schedule_timeout+0x80/0xf0
+[  517.833297]  wait_for_completion_timeout+0xa4/0x130
+[  517.833306]  bmdrv_thread_sync_api+0x240/0x560 [bmtpu]
+[  517.833316]  bm_ioctl+0xc84/0x1c5c [bmtpu]
+[  517.833326]  bmdev_ioctl+0x54/0xd0 [bmtpu]
+[  517.833331]  __arm64_sys_ioctl+0x46c/0xbd0
+[  517.833334]  do_el0_svc+0xc0/0x210
+[  517.833337]  el0_svc+0x14/0x20
+[  517.833340]  el0_sync_handler+0xa4/0x140
+[  517.833342]  el0_sync+0x174/0x180
+[  517.833348] task:python3.10      state:D stack:13344 pid: 6454 ppid:  1348 flags:0x0000000c
+[  517.833355] Call trace:
+[  517.833358]  __switch_to+0xb0/0xf4
+[  517.833360]  __schedule+0x30c/0x760
+[  517.833365]  schedule+0x70/0x104
+[  517.833371]  schedule_hrtimeout_range_clock+0xa4/0x160
+[  517.833376]  schedule_hrtimeout_range+0x14/0x20
+[  517.833382]  usleep_range+0x84/0xc0
+[  517.833394]  bmdev_mbox_submit+0x1dc/0x37c [bmtpu]
+[  517.833408]  bmdrv_send_api+0x7dc/0x1b5c [bmtpu]
+[  517.833423]  bm_ioctl+0xcc4/0x1c5c [bmtpu]
+[  517.833435]  bmdev_ioctl+0x54/0xd0 [bmtpu]
+[  517.833441]  __arm64_sys_ioctl+0x46c/0xbd0
+[  517.833446]  do_el0_svc+0xc0/0x210
+[  517.833452]  el0_svc+0x14/0x20
+[  517.833457]  el0_sync_handler+0xa4/0x140
+[  517.833462]  el0_sync+0x174/0x180

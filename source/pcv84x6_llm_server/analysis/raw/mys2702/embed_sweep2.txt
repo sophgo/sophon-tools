@@ -1,0 +1,72 @@
+== static2048     seq=2048  hidden=1024  qwen3-embedding-0.6b_bf16_seq2048_bm1684x2_4core_static_20261108_011851.bmodel
+  static2048       47 tok  median    291.0 ms  min    290.1 ms  first    291.2 ms
+  static2048      247 tok  median    291.6 ms  min    291.1 ms  first    291.8 ms
+  static2048      484 tok  median    291.7 ms  min    290.9 ms  first    291.7 ms
+  static2048     1001 tok  median    293.9 ms  min    291.4 ms  first    291.4 ms
+  static2048     2025 tok  median    293.4 ms  min    293.0 ms  first    293.6 ms
+== dyn8192        seq=8192  hidden=1024  qwen3-embedding-0.6b_bf16_seq8192_bm1684x2_4core_dynamic_20261108_044649.bmodel
+  dyn8192          47 tok  median    193.3 ms  min    193.1 ms  first    193.2 ms
+  dyn8192         247 tok  median    327.8 ms  min    327.2 ms  first    328.2 ms
+  dyn8192         484 tok  median    557.8 ms  min    556.9 ms  first    557.6 ms
+  dyn8192        1001 tok  median   1208.6 ms  min   1207.8 ms  first   1208.0 ms
+  dyn8192        2025 tok  median   3118.8 ms  min   3117.2 ms  first   3117.2 ms
+  dyn8192        4080 tok  median   9380.0 ms  min   9376.4 ms  first   9376.4 ms
+  dyn8192        8160 tok  median  32018.1 ms  min  32016.8 ms  first  32020.5 ms
+== static512      seq=512   hidden=1024  qwen3-embedding-0.6b_bf16_seq512_bm1684x2_4core_static_20261108_045357.bmodel
+  static512        47 tok  median     82.2 ms  min     82.1 ms  first     82.2 ms
+  static512       247 tok  median     82.2 ms  min     81.9 ms  first     82.0 ms
+  static512       484 tok  median     82.6 ms  min     82.6 ms  first     82.7 ms
+== static1024     seq=1024  hidden=1024  qwen3-embedding-0.6b_bf16_seq1024_bm1684x2_4core_static_20261108_011924.bmodel
+  static1024       47 tok  median    136.6 ms  min    136.1 ms  first    136.2 ms
+  static1024      247 tok  median    136.8 ms  min    136.4 ms  first    136.9 ms
+  static1024      484 tok  median    137.0 ms  min    136.4 ms  first    136.7 ms
+  static1024     1001 tok  median    136.9 ms  min    136.5 ms  first    137.0 ms
+== static4096     seq=4096  hidden=1024  qwen3-embedding-0.6b_bf16_seq4096_bm1684x2_4core_static_20261108_045357.bmodel
+  static4096       47 tok  median    841.5 ms  min    839.3 ms  first    844.7 ms
+  static4096      247 tok  median    840.6 ms  min    838.9 ms  first    838.9 ms
+  static4096      484 tok  median    840.0 ms  min    838.7 ms  first    839.4 ms
+  static4096     1001 tok  median    842.1 ms  min    840.2 ms  first    840.2 ms
+  static4096     2025 tok  median    842.2 ms  min    841.3 ms  first    842.1 ms
+  static4096     4080 tok  median    846.3 ms  min    844.8 ms  first    848.0 ms
+== shipped8192    seq=8192  hidden=1024  qwen3-embedding-0.6b_bf16_seq8192_bm1684x2_4core_static_20260920_184312.bmodel
+  shipped8192      47 tok  median   2793.1 ms  min   2785.8 ms  first   2797.7 ms
+  shipped8192     247 tok  median   2791.6 ms  min   2789.0 ms  first   2791.2 ms
+  shipped8192     484 tok  median   2794.8 ms  min   2788.7 ms  first   2802.4 ms
+  shipped8192    1001 tok  median   2794.1 ms  min   2790.5 ms  first   2795.8 ms
+  shipped8192    2025 tok  median   2794.7 ms  min   2785.6 ms  first   2802.9 ms
+  shipped8192    4080 tok  median   2796.1 ms  min   2791.8 ms  first   2814.4 ms
+  shipped8192    8160 tok  median   2806.6 ms  min   2799.1 ms  first   2814.8 ms
+  cos  static2048       47 tok  1.0000000
+  cos  dyn8192          47 tok  0.9998947
+  cos  static512        47 tok  0.9998886
+  cos  static1024       47 tok  1.0000000
+  cos  static4096       47 tok  0.9998886
+  cos  shipped8192      47 tok  0.9998886
+  cos  static2048      247 tok  1.0000000
+  cos  dyn8192         247 tok  0.9998512
+  cos  static512       247 tok  0.9997866
+  cos  static1024      247 tok  1.0000000
+  cos  static4096      247 tok  0.9997866
+  cos  shipped8192     247 tok  0.9997866
+  cos  static2048      484 tok  1.0000000
+  cos  dyn8192         484 tok  0.9997163
+  cos  static512       484 tok  0.9997840
+  cos  static1024      484 tok  1.0000000
+  cos  static4096      484 tok  0.9997840
+  cos  shipped8192     484 tok  0.9997840
+  cos  static2048     1001 tok  1.0000000
+  cos  dyn8192        1001 tok  0.9996598
+  cos  static1024     1001 tok  1.0000000
+  cos  static4096     1001 tok  0.9995517
+  cos  shipped8192    1001 tok  0.9995517
+  cos  static2048     2025 tok  1.0000000
+  cos  dyn8192        2025 tok  0.9995431
+  cos  static4096     2025 tok  0.9996940
+  cos  shipped8192    2025 tok  0.9996940
+  cos  dyn8192        4080 tok  n/a
+  cos  static4096     4080 tok  n/a
+  cos  shipped8192    4080 tok  n/a
+  cos  dyn8192        8160 tok  n/a
+  cos  shipped8192    8160 tok  n/a
+
+== wrote /data/mys2702/embed_sweep.json

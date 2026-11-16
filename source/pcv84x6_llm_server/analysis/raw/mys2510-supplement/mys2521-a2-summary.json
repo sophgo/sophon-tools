@@ -1,0 +1,1114 @@
+{
+ "summary": {
+  "groups": {
+   "ctx-12k": {
+    "requests": 68,
+    "ok": 68,
+    "success_rate": 1.0,
+    "http_status_counts": {
+     "200": 68
+    },
+    "error_types": {},
+    "ttft_s": {
+     "n": 68,
+     "min": 1.6296,
+     "median": 3.5541,
+     "p95": 5.5465,
+     "max": 6.5057
+    },
+    "total_s": {
+     "n": 68,
+     "min": 1.7374,
+     "median": 3.6664,
+     "p95": 5.6619,
+     "max": 6.702
+    },
+    "decode_tps": {
+     "n": 68,
+     "min": 23.8593,
+     "median": 27.026,
+     "p95": 28.8673,
+     "max": 28.9792
+    },
+    "prompt_tokens": {
+     "n": 68,
+     "min": 193.0,
+     "median": 6084.0,
+     "p95": 11320.0,
+     "max": 11321.0
+    },
+    "cached_tokens": {
+     "n": 68,
+     "min": 0.0,
+     "median": 5856.0,
+     "p95": 11196.8,
+     "max": 11264.0
+    },
+    "retrieval_checked": 0,
+    "retrieval_ok": 0,
+    "recall_checked": 5,
+    "recall_ok": 5,
+    "marker_checked": 0,
+    "marker_ok": 0,
+    "tool_protocol_checked": 0,
+    "tool_protocol_ok": 0,
+    "tool_content_checked": 0,
+    "tool_content_ok": 0
+   },
+   "ctx-16k-restart": {
+    "requests": 94,
+    "ok": 94,
+    "success_rate": 1.0,
+    "http_status_counts": {
+     "200": 94
+    },
+    "error_types": {},
+    "ttft_s": {
+     "n": 94,
+     "min": 1.6291,
+     "median": 4.3857,
+     "p95": 7.6612,
+     "max": 100.7892
+    },
+    "total_s": {
+     "n": 94,
+     "min": 1.7373,
+     "median": 4.5022,
+     "p95": 7.7785,
+     "max": 100.9934
+    },
+    "decode_tps": {
+     "n": 94,
+     "min": 24.2463,
+     "median": 24.8697,
+     "p95": 29.0295,
+     "max": 29.151
+    },
+    "prompt_tokens": {
+     "n": 94,
+     "min": 193.0,
+     "median": 8387.0,
+     "p95": 15041.0,
+     "max": 15042.0
+    },
+    "cached_tokens": {
+     "n": 94,
+     "min": 0.0,
+     "median": 8000.0,
+     "p95": 14976.0,
+     "max": 14976.0
+    },
+    "retrieval_checked": 0,
+    "retrieval_ok": 0,
+    "recall_checked": 10,
+    "recall_ok": 10,
+    "marker_checked": 0,
+    "marker_ok": 0,
+    "tool_protocol_checked": 0,
+    "tool_protocol_ok": 0,
+    "tool_content_checked": 0,
+    "tool_content_ok": 0
+   },
+   "ctx-16k-restart-gate": {
+    "requests": 1,
+    "ok": 1,
+    "success_rate": 1.0,
+    "http_status_counts": {
+     "409": 1
+    },
+    "error_types": {
+     "HTTP 409": 1
+    },
+    "ttft_s": {
+     "n": 0,
+     "min": null,
+     "median": null,
+     "p95": null,
+     "max": null
+    },
+    "total_s": {
+     "n": 1,
+     "min": 0.0237,
+     "median": 0.0237,
+     "p95": 0.0237,
+     "max": 0.0237
+    },
+    "decode_tps": {
+     "n": 0,
+     "min": null,
+     "median": null,
+     "p95": null,
+     "max": null
+    },
+    "prompt_tokens": {
+     "n": 0,
+     "min": null,
+     "median": null,
+     "p95": null,
+     "max": null
+    },
+    "cached_tokens": {
+     "n": 0,
+     "min": null,
+     "median": null,
+     "p95": null,
+     "max": null
+    },
+    "retrieval_checked": 0,
+    "retrieval_ok": 0,
+    "recall_checked": 0,
+    "recall_ok": 0,
+    "marker_checked": 0,
+    "marker_ok": 0,
+    "tool_protocol_checked": 0,
+    "tool_protocol_ok": 0,
+    "tool_content_checked": 0,
+    "tool_content_ok": 0
+   },
+   "ctx-2k": {
+    "requests": 32,
+    "ok": 32,
+    "success_rate": 1.0,
+    "http_status_counts": {
+     "200": 32
+    },
+    "error_types": {},
+    "ttft_s": {
+     "n": 32,
+     "min": 1.5817,
+     "median": 2.1292,
+     "p95": 2.9417,
+     "max": 3.0672
+    },
+    "total_s": {
+     "n": 32,
+     "min": 1.7326,
+     "median": 2.2358,
+     "p95": 3.0803,
+     "max": 3.2429
+    },
+    "decode_tps": {
+     "n": 32,
+     "min": 27.9483,
+     "median": 28.777,
+     "p95": 29.1275,
+     "max": 29.1519
+    },
+    "prompt_tokens": {
+     "n": 32,
+     "min": 193.0,
+     "median": 1481.0,
+     "p95": 2107.0,
+     "max": 2107.0
+    },
+    "cached_tokens": {
+     "n": 32,
+     "min": 0.0,
+     "median": 1280.0,
+     "p95": 2048.0,
+     "max": 2048.0
+    },
+    "retrieval_checked": 0,
+    "retrieval_ok": 0,
+    "recall_checked": 10,
+    "recall_ok": 10,
+    "marker_checked": 0,
+    "marker_ok": 0,
+    "tool_protocol_checked": 0,
+    "tool_protocol_ok": 0,
+    "tool_content_checked": 0,
+    "tool_content_ok": 0
+   },
+   "ctx-4k": {
+    "requests": 52,
+    "ok": 52,
+    "success_rate": 1.0,
+    "http_status_counts": {
+     "200": 52
+    },
+    "error_types": {},
+    "ttft_s": {
+     "n": 52,
+     "min": 1.279,
+     "median": 2.4617,
+     "p95": 3.0734,
+     "max": 3.1547
+    },
+    "total_s": {
+     "n": 52,
+     "min": 1.4452,
+     "median": 2.5678,
+     "p95": 3.1822,
+     "max": 3.2617
+    },
+    "decode_tps": {
+     "n": 52,
+     "min": 27.35,
+     "median": 28.4295,
+     "p95": 29.0791,
+     "max": 29.1284
+    },
+    "prompt_tokens": {
+     "n": 52,
+     "min": 193.0,
+     "median": 2363.0,
+     "p95": 3879.0,
+     "max": 3880.0
+    },
+    "cached_tokens": {
+     "n": 52,
+     "min": 0.0,
+     "median": 2144.0,
+     "p95": 3840.0,
+     "max": 3840.0
+    },
+    "retrieval_checked": 0,
+    "retrieval_ok": 0,
+    "recall_checked": 10,
+    "recall_ok": 10,
+    "marker_checked": 0,
+    "marker_ok": 0,
+    "tool_protocol_checked": 0,
+    "tool_protocol_ok": 0,
+    "tool_content_checked": 0,
+    "tool_content_ok": 0
+   },
+   "ctx-8k": {
+    "requests": 94,
+    "ok": 94,
+    "success_rate": 1.0,
+    "http_status_counts": {
+     "200": 94
+    },
+    "error_types": {},
+    "ttft_s": {
+     "n": 94,
+     "min": 1.6266,
+     "median": 2.8213,
+     "p95": 4.29,
+     "max": 4.4717
+    },
+    "total_s": {
+     "n": 94,
+     "min": 1.7333,
+     "median": 2.9285,
+     "p95": 4.4059,
+     "max": 4.5943
+    },
+    "decode_tps": {
+     "n": 94,
+     "min": 25.7489,
+     "median": 27.2434,
+     "p95": 29.0767,
+     "max": 29.1242
+    },
+    "prompt_tokens": {
+     "n": 94,
+     "min": 193.0,
+     "median": 4225.0,
+     "p95": 7599.0,
+     "max": 7600.0
+    },
+    "cached_tokens": {
+     "n": 94,
+     "min": 0.0,
+     "median": 4032.0,
+     "p95": 7552.0,
+     "max": 7552.0
+    },
+    "retrieval_checked": 0,
+    "retrieval_ok": 0,
+    "recall_checked": 10,
+    "recall_ok": 10,
+    "marker_checked": 0,
+    "marker_ok": 0,
+    "tool_protocol_checked": 0,
+    "tool_protocol_ok": 0,
+    "tool_content_checked": 0,
+    "tool_content_ok": 0
+   },
+   "utf8-console": {
+    "requests": 60,
+    "ok": 60,
+    "success_rate": 1.0,
+    "http_status_counts": {
+     "200": 60
+    },
+    "error_types": {},
+    "ttft_s": {
+     "n": 60,
+     "min": 0.2411,
+     "median": 0.2428,
+     "p95": 0.7655,
+     "max": 0.8335
+    },
+    "total_s": {
+     "n": 60,
+     "min": 0.4204,
+     "median": 0.4895,
+     "p95": 0.9479,
+     "max": 1.0211
+    },
+    "decode_tps": {
+     "n": 0,
+     "min": null,
+     "median": null,
+     "p95": null,
+     "max": null
+    },
+    "prompt_tokens": {
+     "n": 60,
+     "min": 28.0,
+     "median": 30.0,
+     "p95": 30.0,
+     "max": 30.0
+    },
+    "cached_tokens": {
+     "n": 60,
+     "min": 0.0,
+     "median": 23.0,
+     "p95": 23.0,
+     "max": 23.0
+    },
+    "retrieval_checked": 0,
+    "retrieval_ok": 0,
+    "recall_checked": 0,
+    "recall_ok": 0,
+    "marker_checked": 0,
+    "marker_ok": 0,
+    "tool_protocol_checked": 0,
+    "tool_protocol_ok": 0,
+    "tool_content_checked": 0,
+    "tool_content_ok": 0
+   },
+   "utf8-nonstream": {
+    "requests": 60,
+    "ok": 60,
+    "success_rate": 1.0,
+    "http_status_counts": {
+     "200": 60
+    },
+    "error_types": {},
+    "ttft_s": {
+     "n": 0,
+     "min": null,
+     "median": null,
+     "p95": null,
+     "max": null
+    },
+    "total_s": {
+     "n": 60,
+     "min": 0.3515,
+     "median": 0.4218,
+     "p95": 0.4258,
+     "max": 0.5346
+    },
+    "decode_tps": {
+     "n": 60,
+     "min": 28.4373,
+     "median": 29.1866,
+     "p95": 29.3882,
+     "max": 29.4378
+    },
+    "prompt_tokens": {
+     "n": 60,
+     "min": 49.0,
+     "median": 51.0,
+     "p95": 51.0,
+     "max": 51.0
+    },
+    "cached_tokens": {
+     "n": 60,
+     "min": 42.0,
+     "median": 44.0,
+     "p95": 44.0,
+     "max": 44.0
+    },
+    "retrieval_checked": 0,
+    "retrieval_ok": 0,
+    "recall_checked": 0,
+    "recall_ok": 0,
+    "marker_checked": 0,
+    "marker_ok": 0,
+    "tool_protocol_checked": 0,
+    "tool_protocol_ok": 0,
+    "tool_content_checked": 0,
+    "tool_content_ok": 0
+   },
+   "utf8-stream": {
+    "requests": 60,
+    "ok": 60,
+    "success_rate": 1.0,
+    "http_status_counts": {
+     "200": 60
+    },
+    "error_types": {},
+    "ttft_s": {
+     "n": 60,
+     "min": 0.2412,
+     "median": 0.2428,
+     "p95": 0.8168,
+     "max": 1.298
+    },
+    "total_s": {
+     "n": 60,
+     "min": 0.3508,
+     "median": 0.4211,
+     "p95": 0.9936,
+     "max": 1.4767
+    },
+    "decode_tps": {
+     "n": 60,
+     "min": 28.3109,
+     "median": 29.1726,
+     "p95": 29.3515,
+     "max": 29.4093
+    },
+    "prompt_tokens": {
+     "n": 60,
+     "min": 49.0,
+     "median": 51.0,
+     "p95": 51.0,
+     "max": 51.0
+    },
+    "cached_tokens": {
+     "n": 60,
+     "min": 0.0,
+     "median": 44.0,
+     "p95": 44.0,
+     "max": 44.0
+    },
+    "retrieval_checked": 0,
+    "retrieval_ok": 0,
+    "recall_checked": 0,
+    "recall_ok": 0,
+    "marker_checked": 0,
+    "marker_ok": 0,
+    "tool_protocol_checked": 0,
+    "tool_protocol_ok": 0,
+    "tool_content_checked": 0,
+    "tool_content_ok": 0
+   }
+  },
+  "dimensions": {
+   "A2": {
+    "label": "连续对话档位（累计 prompt_tokens）",
+    "requests": 341,
+    "ok": 341,
+    "success_rate": 1.0,
+    "http_5xx": 0,
+    "connection_errors": 0,
+    "empty_outputs": 0,
+    "retrieval_checked": 0,
+    "retrieval_ok": 0,
+    "recall_checked": 45,
+    "recall_ok": 45,
+    "tool_protocol_checked": 0,
+    "tool_protocol_ok": 0,
+    "tool_content_checked": 0,
+    "tool_content_ok": 0,
+    "phases": [
+     "ctx-tiers"
+    ]
+   },
+   "U": {
+    "label": "UTF-8 回归（生僻字/emoji）",
+    "requests": 180,
+    "ok": 180,
+    "success_rate": 1.0,
+    "http_5xx": 0,
+    "connection_errors": 0,
+    "empty_outputs": 0,
+    "retrieval_checked": 0,
+    "retrieval_ok": 0,
+    "recall_checked": 0,
+    "recall_ok": 0,
+    "tool_protocol_checked": 0,
+    "tool_protocol_ok": 0,
+    "tool_content_checked": 0,
+    "tool_content_ok": 0,
+    "phases": [
+     "utf8"
+    ]
+   }
+  },
+  "totals": {
+   "requests": 521,
+   "ok": 521,
+   "http_5xx": 0,
+   "http_4xx": 1,
+   "connection_errors": 0,
+   "empty_outputs": 0,
+   "retrieval_checked": 0,
+   "retrieval_ok": 0,
+   "recall_checked": 45,
+   "recall_ok": 45,
+   "cancelled_records": 0,
+   "cache_hits": 0,
+   "records_checked": 460,
+   "records_not_one": 0
+  },
+  "rules": {
+   "success_definition": "status_ok = HTTP 状态等于该阶段预期（409/429 在对应阶段算通过）",
+   "semantic_separate": "检索/回忆/工具内容正确率单列，不参与稳定性判定",
+   "cache_not_correctness": "cached_tokens 只说明复用，不作为答案正确的证据",
+   "no_retry": "任何请求都不重发；失败即证据"
+  },
+  "phases": {
+   "ctx-tiers": {
+    "phase": "ctx-tiers",
+    "started_at": 1793475986.056459,
+    "finished_at": 1793477344.2449484,
+    "s": 1358.19,
+    "requests": 341,
+    "intended": 341,
+    "ok": 341,
+    "support_rows": 0,
+    "support_ok": 0,
+    "sessions": 9,
+    "sessions_reaching": [
+     1,
+     2,
+     3,
+     4,
+     5,
+     6,
+     7,
+     8
+    ],
+    "tiers": [
+     2048,
+     4096,
+     8192,
+     12288,
+     16384
+    ],
+    "restart_session": 8,
+    "restart_tier": 16384,
+    "restart_gate_ok": true,
+    "restart_reload_ok": true,
+    "restart_history_kept": true
+   }
+  }
+ },
+ "verdict": {
+  "dimensions": {
+   "A": {
+    "长 prompt 全部正常结束": {
+     "ok": null,
+     "value": "该维度未执行（阶段未包含）"
+    },
+    "真实 prompt_tokens 与档位一致（±5%）": {
+     "ok": null,
+     "value": "该维度未执行（阶段未包含）"
+    },
+    "超长输入被明确拒绝且未处理任何 token": {
+     "ok": null,
+     "value": "该维度未执行（阶段未包含）"
+    },
+    "同会话长历史无异常": {
+     "ok": null,
+     "value": "该维度未执行（阶段未包含）"
+    },
+    "无 5xx / 连接异常": {
+     "ok": null,
+     "value": "该维度未执行（阶段未包含）"
+    }
+   },
+   "B": {
+    "并发请求全部符合预期": {
+     "ok": null,
+     "value": "该维度未执行（阶段未包含）"
+    },
+    "无串话": {
+     "ok": null,
+     "value": "该维度未执行（阶段未包含）"
+    },
+    "3 路并发在 max_concurrent=2 下排队而非拒绝": {
+     "ok": null,
+     "value": "该维度未执行（阶段未包含）"
+    },
+    "超容量出现 429 且服务恢复": {
+     "ok": null,
+     "value": "该维度未执行（阶段未包含）"
+    },
+    "无 5xx": {
+     "ok": null,
+     "value": "该维度未执行（阶段未包含）"
+    }
+   },
+   "C": {
+    "取消后均留下 cancelled 记录": {
+     "ok": null,
+     "value": "该维度未执行（阶段未包含）"
+    },
+    "每次取消记录恰好一条": {
+     "ok": null,
+     "value": "该维度未执行（阶段未包含）"
+    },
+    "取消时保留已生成的部分输出": {
+     "ok": null,
+     "value": "该维度未执行（阶段未包含）"
+    },
+    "取消后后续请求正常": {
+     "ok": null,
+     "value": "该维度未执行（阶段未包含）"
+    },
+    "协议错误码与预期一致": {
+     "ok": null,
+     "value": "该维度未执行（阶段未包含）"
+    },
+    "SIGTERM 重启后准入仍生效": {
+     "ok": null,
+     "value": "该维度未执行（阶段未包含）"
+    },
+    "重启后重载成功并恢复推理": {
+     "ok": null,
+     "value": "该维度未执行（阶段未包含）"
+    },
+    "重启后推理记录保留": {
+     "ok": null,
+     "value": "该维度未执行（阶段未包含）"
+    },
+    "无 5xx": {
+     "ok": null,
+     "value": "该维度未执行（阶段未包含）"
+    }
+   },
+   "D": {
+    "前缀复用被观测到": {
+     "ok": null,
+     "value": "该维度未执行（阶段未包含）"
+    },
+    "缓存命中时答案仍正确": {
+     "ok": null,
+     "value": "该维度未执行（阶段未包含）"
+    },
+    "无缓存基线答案正确": {
+     "ok": null,
+     "value": "该维度未执行（阶段未包含）"
+    },
+    "TTL 过期后答案仍正确且服务恢复": {
+     "ok": null,
+     "value": "该维度未执行（阶段未包含）"
+    },
+    "生命周期循环均无残留": {
+     "ok": null,
+     "value": "该维度未执行（阶段未包含）"
+    },
+    "生命周期循环数达标": {
+     "ok": null,
+     "value": "该维度未执行（阶段未包含）"
+    },
+    "无 5xx": {
+     "ok": null,
+     "value": "该维度未执行（阶段未包含）"
+    }
+   },
+   "E": {
+    "VLM 请求全部成功": {
+     "ok": null,
+     "value": "该维度未执行（阶段未包含）"
+    },
+    "PNG 驱动超时未复现": {
+     "ok": null,
+     "value": "该维度未执行（阶段未包含）"
+    },
+    "记录只存图片尺寸，不存原始数据": {
+     "ok": null,
+     "value": "该维度未执行（阶段未包含）"
+    },
+    "工具调用协议正确（与内容分开计）": {
+     "ok": null,
+     "value": "该维度未执行（阶段未包含）"
+    },
+    "非法工具定义被明确拒绝（400/422）": {
+     "ok": null,
+     "value": "该维度未执行（阶段未包含）"
+    },
+    "无 5xx": {
+     "ok": null,
+     "value": "该维度未执行（阶段未包含）"
+    }
+   },
+   "F": {
+    "浸泡达到要求时长": {
+     "ok": null,
+     "value": "该维度未执行（阶段未包含）"
+    },
+    "浸泡期间请求全部成功": {
+     "ok": null,
+     "value": "该维度未执行（阶段未包含）"
+    },
+    "无 5xx / 连接异常": {
+     "ok": null,
+     "value": "该维度未执行（阶段未包含）"
+    },
+    "采样覆盖整个浸泡期": {
+     "ok": null,
+     "value": "该维度未执行（阶段未包含）"
+    },
+    "资源增长已标注（>50% 首尾差）": {
+     "ok": null,
+     "value": "该维度未执行（阶段未包含）"
+    }
+   },
+   "A2": {
+    "每一档都有会话到档（±10%）": {
+     "ok": true,
+     "value": "到档档位=2048,4096,8192,12288,16384；会话=1,2,3,4,5,6,7,8"
+    },
+    "连续对话请求全部成功": {
+     "ok": true,
+     "value": "295/295"
+    },
+    "到档会话均完成早期+近期回忆探针": {
+     "ok": true,
+     "value": "8 个到档会话，探针 45 次"
+    },
+    "16k 会话重启后准入/重载/历史保留": {
+     "ok": true,
+     "value": "gate_ok=True reload_ok=True history_kept=True"
+    },
+    "连续对话无 5xx": {
+     "ok": true,
+     "value": "5xx=0"
+    }
+   },
+   "U": {
+    "三接口均无 U+FFFD": {
+     "ok": true,
+     "value": "180/180 输出干净"
+    },
+    "stream / non-stream / console 三接口都覆盖": {
+     "ok": true,
+     "value": "console,nonstream,stream"
+    },
+    "MYS-2510 失败轮重放无 U+FFFD": {
+     "ok": null,
+     "value": "0 轮重放"
+    },
+    "请求无 5xx": {
+     "ok": true,
+     "value": "5xx=0"
+    }
+   }
+  },
+  "passed": false,
+  "criteria_total": 46,
+  "criteria_failed": [],
+  "criteria_unmeasured": [
+   "A:长 prompt 全部正常结束",
+   "A:真实 prompt_tokens 与档位一致（±5%）",
+   "A:超长输入被明确拒绝且未处理任何 token",
+   "A:同会话长历史无异常",
+   "A:无 5xx / 连接异常",
+   "B:并发请求全部符合预期",
+   "B:无串话",
+   "B:3 路并发在 max_concurrent=2 下排队而非拒绝",
+   "B:超容量出现 429 且服务恢复",
+   "B:无 5xx",
+   "C:取消后均留下 cancelled 记录",
+   "C:每次取消记录恰好一条",
+   "C:取消时保留已生成的部分输出",
+   "C:取消后后续请求正常",
+   "C:协议错误码与预期一致",
+   "C:SIGTERM 重启后准入仍生效",
+   "C:重启后重载成功并恢复推理",
+   "C:重启后推理记录保留",
+   "C:无 5xx",
+   "D:前缀复用被观测到",
+   "D:缓存命中时答案仍正确",
+   "D:无缓存基线答案正确",
+   "D:TTL 过期后答案仍正确且服务恢复",
+   "D:生命周期循环均无残留",
+   "D:生命周期循环数达标",
+   "D:无 5xx",
+   "E:VLM 请求全部成功",
+   "E:PNG 驱动超时未复现",
+   "E:记录只存图片尺寸，不存原始数据",
+   "E:工具调用协议正确（与内容分开计）",
+   "E:非法工具定义被明确拒绝（400/422）",
+   "E:无 5xx",
+   "F:浸泡达到要求时长",
+   "F:浸泡期间请求全部成功",
+   "F:无 5xx / 连接异常",
+   "F:采样覆盖整个浸泡期",
+   "F:资源增长已标注（>50% 首尾差）",
+   "U:MYS-2510 失败轮重放无 U+FFFD"
+  ],
+  "records": {
+   "checked": 460,
+   "missing": 0,
+   "duplicates": 0,
+   "source_mismatch": 0,
+   "output_mismatch": 0,
+   "metrics_mismatch": 0,
+   "secret_leaks": 0,
+   "cancelled_ok": 0,
+   "cancelled_bad": 0
+  }
+ },
+ "records": {
+  "checked": 460,
+  "missing": [],
+  "duplicates": [],
+  "source_mismatch": [],
+  "output_mismatch": [],
+  "metrics_mismatch": [],
+  "not_ok": [],
+  "secret_leaks": [],
+  "cancelled_ok": 0,
+  "cancelled_bad": [],
+  "detail_read": 460
+ },
+ "phases": {
+  "ctx-tiers": {
+   "phase": "ctx-tiers",
+   "started_at": 1793475986.056459,
+   "finished_at": 1793477344.2449484,
+   "s": 1358.19,
+   "requests": 341,
+   "intended": 341,
+   "ok": 341,
+   "support_rows": 0,
+   "support_ok": 0,
+   "sessions": 9,
+   "sessions_reaching": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8
+   ],
+   "tiers": [
+    2048,
+    4096,
+    8192,
+    12288,
+    16384
+   ],
+   "restart_session": 8,
+   "restart_tier": 16384,
+   "restart_gate_ok": true,
+   "restart_reload_ok": true,
+   "restart_history_kept": true
+  }
+ },
+ "manifest": {
+  "suite": "comprehensive_stability_suite",
+  "issue": "MYS-2510",
+  "seed": 25102496,
+  "device": "172.26.166.96:10151 (.151)",
+  "version": "v0.6.15",
+  "model": "qwen3.6-35b-a3b-128k",
+  "generated_at": "2026-10-31T19:46:26+00:00",
+  "tokenizer": {
+   "lib": "/opt/sophgo/cv84x6_llm_server/lib/libcv84x6_llm.so",
+   "tokenizer_json": "/opt/sophgo/cv84x6_llm_server/model-config/qwen3_5/tokenizer.json",
+   "available": true,
+   "error": null
+  },
+  "matrix": {
+   "long_tiers_tokens": [
+    16384,
+    32768,
+    65536,
+    98304
+   ],
+   "long_tier_repeats": {
+    "16384": 3,
+    "32768": 2,
+    "65536": 1,
+    "98304": 1
+   },
+   "overflow_tokens": [
+    132000,
+    200000
+   ],
+   "chat_turns_required": 50,
+   "chat_turns_extended": 100,
+   "concurrency_lanes": [
+    2,
+    3
+   ],
+   "concurrency_rounds": 50,
+   "queue_capacity_experiments": [
+    0,
+    1
+   ],
+   "cancel_repeats": 5,
+   "lifecycle_cycles": 20,
+   "vlm_repeats": 20,
+   "tool_calls": 30,
+   "thinking_repeats": 10,
+   "soak_seconds": 7200,
+   "soak_mix": [
+    [
+     "short",
+     60
+    ],
+    [
+     "short",
+     200
+    ],
+    [
+     "mid",
+     2048
+    ],
+    [
+     "long",
+     8192
+    ],
+    [
+     "ctx",
+     4096
+    ]
+   ],
+   "expected_context": 131072,
+   "ctx_tiers_tokens": [
+    2048,
+    4096,
+    8192,
+    12288,
+    16384
+   ],
+   "ctx_tier_sessions": {
+    "2048": 2,
+    "4096": 2,
+    "8192": 2,
+    "12288": 1,
+    "16384": 1
+   },
+   "ctx_tier_tolerance": 0.1,
+   "ctx_early_probes": 3,
+   "ctx_recent_probes": 2,
+   "ctx_restart_tier": 16384,
+   "rare_words": [
+    "门簪",
+    "琴轸",
+    "秤砣",
+    "妆奁"
+   ],
+   "rare_emoji": [
+    "😀",
+    "👍"
+   ],
+   "u1_repeats": 10,
+   "u1_surfaces": [
+    "stream",
+    "nonstream",
+    "console"
+   ],
+   "u1_replay_groups": [
+    [
+     "chat50",
+     [
+      18,
+      29,
+      35,
+      45
+     ]
+    ],
+    [
+     "chat100",
+     [
+      18,
+      29,
+      35,
+      45,
+      68,
+      79,
+      85,
+      95
+     ]
+    ]
+   ]
+  },
+  "params": {
+   "max_tokens": 128,
+   "temperature": 0.0,
+   "top_p": 1.0,
+   "top_k": 1,
+   "repetition_penalty": 1.0,
+   "enable_thinking": false
+  },
+  "system_prompt": "你是严谨的中文助手，只按用户的要求简短作答，不要解释。",
+  "argv": [
+   "--base",
+   "http://127.0.0.1:8000",
+   "--data-dir",
+   "/data/cv84x6_llm_server",
+   "--evidence-dir",
+   "/data/mys2521-run",
+   "--key-name",
+   "MYS-2521-a2u1",
+   "--phases",
+   "ctx,utf8",
+   "--timeout",
+   "3600",
+   "--sample-interval",
+   "15"
+  ],
+  "notes": {
+   "success": "status_ok 是“HTTP 等于该阶段预期”，409/429 在对应阶段算通过",
+   "semantic": "检索/回忆/工具内容正确率单独统计，不进入稳定性判定",
+   "no_retry": "不重发任何请求",
+   "lifecycle_reduction": "生命周期 20 次而非 50 次：每次真实加载约 66 秒",
+   "ctx_tier_definition": "A2 档位以服务返回的会话累计 prompt_tokens 判定，落在目标 ±10% 内才算到档；轮数是结果不是输入",
+   "recall_denominator": "多轮回忆分母只计有回忆预期的行（expected_recall 与 recall_ok 均非空），浸泡的 ctx 轮不计入",
+   "u1_gate": "任一输出含 U+FFFD 即判失败并保留原文，不重试覆盖",
+   "output_mismatch_vs": "记录核对比较 response_content（客户端实际收到的）而非 output_text（含 think 块）"
+  },
+  "finished_at": "2026-10-31T20:19:14+00:00",
+  "requests": 521,
+  "quick": false,
+  "verdict": {
+   "passed": false,
+   "failed": [],
+   "unmeasured": [
+    "A:长 prompt 全部正常结束",
+    "A:真实 prompt_tokens 与档位一致（±5%）",
+    "A:超长输入被明确拒绝且未处理任何 token",
+    "A:同会话长历史无异常",
+    "A:无 5xx / 连接异常",
+    "B:并发请求全部符合预期",
+    "B:无串话",
+    "B:3 路并发在 max_concurrent=2 下排队而非拒绝",
+    "B:超容量出现 429 且服务恢复",
+    "B:无 5xx",
+    "C:取消后均留下 cancelled 记录",
+    "C:每次取消记录恰好一条",
+    "C:取消时保留已生成的部分输出",
+    "C:取消后后续请求正常",
+    "C:协议错误码与预期一致",
+    "C:SIGTERM 重启后准入仍生效",
+    "C:重启后重载成功并恢复推理",
+    "C:重启后推理记录保留",
+    "C:无 5xx",
+    "D:前缀复用被观测到",
+    "D:缓存命中时答案仍正确",
+    "D:无缓存基线答案正确",
+    "D:TTL 过期后答案仍正确且服务恢复",
+    "D:生命周期循环均无残留",
+    "D:生命周期循环数达标",
+    "D:无 5xx",
+    "E:VLM 请求全部成功",
+    "E:PNG 驱动超时未复现",
+    "E:记录只存图片尺寸，不存原始数据",
+    "E:工具调用协议正确（与内容分开计）",
+    "E:非法工具定义被明确拒绝（400/422）",
+    "E:无 5xx",
+    "F:浸泡达到要求时长",
+    "F:浸泡期间请求全部成功",
+    "F:无 5xx / 连接异常",
+    "F:采样覆盖整个浸泡期",
+    "F:资源增长已标注（>50% 首尾差）",
+    "U:MYS-2510 失败轮重放无 U+FFFD"
+   ]
+  }
+ }
+}

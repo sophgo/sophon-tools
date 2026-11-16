@@ -1,0 +1,10 @@
+[engine] FA decode windows: 131072/65536/32768/16384/8192/4096/2048
+[engine] linear state in place: conv 30/30, rec 0/0
+[engine] layers=40 seq=131072 max_input=2048 hidden=2048 kv_bytes=1024 dynamic=1 prefill_mask=0 lm_topk=1 greedy=0 vit=1(2304 patches) history=1
+lib=/opt/sophgo/cv84x6_llm_server/lib/libcv84x6_llm.so layers=40 ctx=131072 max_input=2048 history=1 prompt_tokens=7
+first_token=220 history=7
+warmup 1: 29.86 tok/s
+run 1: 64 tokens in 2.147s = 29.81 tok/s
+run 2: 64 tokens in 2.162s = 29.60 tok/s
+RESULT decode_tps_mean=29.71 spread=29.60-29.81 n_runs=2
+TOKENS 16,13,16,13,16,13,16,13,16,13,16,13,16,13,16,13,16,13,16,13,16,13,16,13,16,13,16,13,16,13,16,13,16,13,16,13,16,13,16,13,16,13,16,13,16,13,16,13,16,13,16,13,16,13,16,13,16,13,16,13,16,13,16,13

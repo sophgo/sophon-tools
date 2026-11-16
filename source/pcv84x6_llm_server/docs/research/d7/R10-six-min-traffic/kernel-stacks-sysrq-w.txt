@@ -1,0 +1,46 @@
+[  496.296423] sysrq: Show Blocked State
+[  496.300252] task:bm_mbox         state:D stack:14416 pid:  517 ppid:     2 flags:0x00000008
+[  496.300264] Call trace:
+[  496.300275]  __switch_to+0xb0/0xf4
+[  496.300281]  __schedule+0x30c/0x760
+[  496.300284]  schedule+0x70/0x104
+[  496.300288]  schedule_hrtimeout_range_clock+0xa4/0x160
+[  496.300290]  schedule_hrtimeout_range+0x14/0x20
+[  496.300293]  usleep_range+0x84/0xc0
+[  496.300319]  mbox_thread_fn+0x4c/0x84 [bmtpu]
+[  496.300324]  kthread+0x148/0x14c
+[  496.300327]  ret_from_fork+0x10/0x34
+[  496.300384] task:python3.10      state:D stack:13056 pid: 5806 ppid:  1307 flags:0x00000004
+[  496.300392] Call trace:
+[  496.300395]  __switch_to+0xb0/0xf4
+[  496.300398]  __schedule+0x30c/0x760
+[  496.300400]  schedule+0x70/0x104
+[  496.300404]  schedule_preempt_disabled+0x24/0x40
+[  496.300407]  __mutex_lock.constprop.0+0x380/0x790
+[  496.300410]  __mutex_lock_slowpath+0x14/0x20
+[  496.300412]  mutex_lock+0x64/0x74
+[  496.300423]  bmdrv_send_api+0x16c/0x1b5c [bmtpu]
+[  496.300433]  bm_ioctl+0xcc4/0x1c5c [bmtpu]
+[  496.300442]  bmdev_ioctl+0x54/0xd0 [bmtpu]
+[  496.300447]  __arm64_sys_ioctl+0x46c/0xbd0
+[  496.300451]  do_el0_svc+0xc0/0x210
+[  496.300455]  el0_svc+0x14/0x20
+[  496.300457]  el0_sync_handler+0xa4/0x140
+[  496.300460]  el0_sync+0x174/0x180
+[  496.300479] task:python3.10      state:D stack:13344 pid: 6095 ppid:  1307 flags:0x0000000c
+[  496.300486] Call trace:
+[  496.300489]  __switch_to+0xb0/0xf4
+[  496.300491]  __schedule+0x30c/0x760
+[  496.300494]  schedule+0x70/0x104
+[  496.300496]  schedule_hrtimeout_range_clock+0xa4/0x160
+[  496.300499]  schedule_hrtimeout_range+0x14/0x20
+[  496.300501]  usleep_range+0x84/0xc0
+[  496.300511]  bmdev_mbox_submit+0x1dc/0x37c [bmtpu]
+[  496.300520]  bmdrv_send_api+0x7dc/0x1b5c [bmtpu]
+[  496.300529]  bm_ioctl+0xcc4/0x1c5c [bmtpu]
+[  496.300539]  bmdev_ioctl+0x54/0xd0 [bmtpu]
+[  496.300542]  __arm64_sys_ioctl+0x46c/0xbd0
+[  496.300545]  do_el0_svc+0xc0/0x210
+[  496.300547]  el0_svc+0x14/0x20
+[  496.300550]  el0_sync_handler+0xa4/0x140
+[  496.300552]  el0_sync+0x174/0x180

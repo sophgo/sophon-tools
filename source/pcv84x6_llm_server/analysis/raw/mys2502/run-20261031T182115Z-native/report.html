@@ -1,0 +1,1302 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MYS-2502 旧版 v0.6.13 模型加载竞态多时机复现报告</title>
+<style>
+:root{--bg:#0f1115;--panel:#171a21;--panel2:#1e222b;--line:#2b3140;--fg:#e6e9ef;
+--dim:#9aa4b2;--accent:#4ea1ff;--ok:#33c48d;--warn:#e8b13a;--bad:#f2585b;--mono:ui-monospace,
+SFMono-Regular,Menlo,Consolas,monospace}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.65 -apple-system,
+BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC","Microsoft YaHei",sans-serif}
+header{padding:28px 32px 18px;border-bottom:1px solid var(--line);background:var(--panel)}
+h1{margin:0 0 6px;font-size:22px;letter-spacing:.3px}
+h2{margin:34px 0 12px;font-size:18px;border-left:4px solid var(--accent);padding-left:10px}
+h3{margin:22px 0 8px;font-size:15px;color:var(--dim);font-weight:600}
+main{padding:0 32px 80px;max-width:1500px}
+.sub{color:var(--dim);font-size:13px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 18px;
+margin:14px 0}
+.grid{display:grid;gap:12px}
+.g2{grid-template-columns:repeat(auto-fit,minmax(340px,1fr))}
+.g3{grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}
+.kpi{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+.kpi .v{font-size:26px;font-weight:700;font-family:var(--mono)}
+.kpi .k{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.6px}
+.kpi.ok .v{color:var(--ok)}.kpi.bad .v{color:var(--bad)}.kpi.warn .v{color:var(--warn)}
+table{border-collapse:collapse;width:100%;font-size:13px;margin:8px 0}
+th,td{border:1px solid var(--line);padding:6px 9px;text-align:left;vertical-align:top}
+th{background:var(--panel2);color:var(--dim);font-weight:600;position:sticky;top:0;z-index:1}
+tbody tr:nth-child(2n){background:rgba(255,255,255,.017)}
+code,.mono{font-family:var(--mono);font-size:12px}
+pre{background:#0b0d11;border:1px solid var(--line);border-radius:8px;padding:12px;
+overflow:auto;max-height:420px;font-family:var(--mono);font-size:12px;white-space:pre-wrap;
+word-break:break-word}
+.tag{display:inline-block;padding:1px 7px;border-radius:999px;font-size:11px;font-weight:600;
+font-family:var(--mono)}
+.t-refused{background:rgba(51,196,141,.16);color:var(--ok)}
+.t-summary{background:rgba(78,161,255,.16);color:var(--accent)}
+.t-summary_suspect{background:rgba(232,177,58,.18);color:var(--warn)}
+.t-garbage{background:rgba(242,88,91,.18);color:var(--bad)}
+.t-empty{background:rgba(242,88,91,.18);color:var(--bad)}
+.t-hang{background:rgba(242,88,91,.26);color:var(--bad)}
+.t-http_error{background:rgba(232,177,58,.18);color:var(--warn)}
+.note{border-left:3px solid var(--accent);background:var(--panel2);padding:10px 14px;
+border-radius:0 8px 8px 0;margin:10px 0}
+.warnbox{border-left:3px solid var(--warn);background:rgba(232,177,58,.07);padding:10px 14px;
+border-radius:0 8px 8px 0;margin:10px 0}
+.badbox{border-left:3px solid var(--bad);background:rgba(242,88,91,.08);padding:10px 14px;
+border-radius:0 8px 8px 0;margin:10px 0}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 0}
+input[type=search],select{background:var(--panel2);border:1px solid var(--line);
+color:var(--fg);border-radius:7px;padding:6px 10px;font-size:13px}
+.chart{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px;
+overflow-x:auto}
+.bar{display:inline-block;height:9px;border-radius:3px;vertical-align:middle}
+.scroll{max-height:620px;overflow:auto;border:1px solid var(--line);border-radius:8px}
+details{background:var(--panel2);border:1px solid var(--line);border-radius:8px;
+padding:8px 12px;margin:8px 0}
+summary{cursor:pointer;font-weight:600}
+footer{color:var(--dim);font-size:12px;padding:20px 32px;border-top:1px solid var(--line)}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin:12px 0}
+.tabs button{background:var(--panel2);border:1px solid var(--line);color:var(--dim);
+padding:7px 14px;border-radius:8px;cursor:pointer;font-size:13px}
+.tabs button[aria-selected=true]{background:rgba(78,161,255,.16);color:var(--accent);
+border-color:var(--accent)}
+.tabpane[hidden]{display:none}
+</style></head><body>
+<header>
+<h1>MYS-2502 · 旧版 v0.6.13「模型未完全加载即推理」多时机复现</h1>
+<div class="sub">设备 <code>.151</code> · SN <code>SN = HQDZCVEBFJIJA0027</code> ·
+模型 <code>qwen3.6-35b-a3b-128k</code> · 模式 <b>native</b> ·
+生成于 2026-10-31T18:43:35.422Z</div>
+<div class="sub">固定输入 444 字，
+SHA-256 <code>ac9764aab4bf94329051348ab1671c630d366dab5301eb6653d00018f9667631</code></div>
+</header><main><h2>① 整体结论与复现答案</h2>
+<div class="note">
+<b>复现判定：</b>窗口内 18 次请求全部被拒绝（18 次 409），没有一次进入半初始化 worker。
+</div>
+<div class="grid g3">
+<div class="kpi "><div class="k">加载窗口内请求数</div><div class="v">18</div></div>
+<div class="kpi ok"><div class="k">窗口内被拒绝 (409)</div><div class="v">18</div></div>
+<div class="kpi ok"><div class="k">窗口内被放行</div><div class="v">0</div></div>
+<div class="kpi ok"><div class="k">窗口内异常/空/挂起</div><div class="v">0</div></div>
+<div class="kpi "><div class="k">ready 对照组请求数</div><div class="v">6</div></div>
+<div class="kpi ok"><div class="k">TPU hang (dmesg)</div><div class="v">否</div></div>
+</div>
+<div class="card"><h3>窗口内 / 窗口后 逐分类计数</h3>
+<table><thead><tr><th>分类</th><th>含义</th><th>窗口内</th><th>窗口后（对照）</th></tr></thead>
+<tbody><tr><td><span class="tag t-refused">refused</span></td><td>HTTP 409，服务明确拒绝（模型未加载）</td><td><b>18</b></td><td>0</td></tr><tr><td><span class="tag t-summary">summary</span></td><td>2xx，输出是正常摘要</td><td><b>0</b></td><td>6</td></tr><tr><td><span class="tag t-summary_suspect">summary_suspect</span></td><td>2xx，摘要形但含 U+FFFD（已知解码缺陷）</td><td><b>0</b></td><td>0</td></tr><tr><td><span class="tag t-garbage">garbage</span></td><td>2xx，输出不像摘要（退化/复读/碎片）</td><td><b>0</b></td><td>0</td></tr><tr><td><span class="tag t-empty">empty</span></td><td>2xx，无任何输出文本</td><td><b>0</b></td><td>0</td></tr><tr><td><span class="tag t-hang">hang</span></td><td>超时或连接中断，无响应</td><td><b>0</b></td><td>0</td></tr><tr><td><span class="tag t-http_error">http_error</span></td><td>其他非 2xx（500/503/429/连接被拒）</td><td><b>0</b></td><td>0</td></tr><tr><td colspan="2"><b>合计</b></td>
+<td><b>18</b></td><td><b>6</b></td></tr>
+</tbody></table></div><div class="card"><h3>直白回答（本模式）</h3><p>在 18 次窗口内请求上，v0.6.13 全部以 409 拒绝，没有一次进入半初始化的 worker；窗口后的 6 次对照请求中 6 次返回正常摘要。也就是说：<b>在这个模型、这组时机上，未加载完毕时推理不会得到异常输出，而是直接被拒绝</b>。现场「两个女生约好一起出门……」那类异常输出，本轮没有在本设备复现，不能据此宣称已复现根因。</p></div><div class="card"><h3>原生 + 插桩：两半合起来的结论</h3>
+<p>这个问题在原生发布包上<b>测不到</b>：窗口只有几毫秒，比一次 admin 轮询还窄。
+所以结论必须由两个实验共同给出，缺一半都不能下判断。</p>
+<table><thead><tr><th>实验</th><th>窗口内尝试</th><th>409 拒绝</th>
+<th>被放行</th><th>被放行后的输出</th></tr></thead><tbody>
+<tr><td><b>原生</b>（发布包原样）</td>
+<td>18</td><td>18</td>
+<td><b>0</b></td>
+<td>全部正常摘要</td></tr>
+<tr><td><b>插桩</b>（窗口人为放大）</td>
+<td>6</td><td>3</td>
+<td><b>3</b></td>
+<td>全部正常摘要</td></tr>
+</tbody></table>
+<p><b>结论一（缺陷真实存在）</b>：插桩实验里窗口被放大后，三个接口
+<b>3</b> 次请求全部被<b>放行</b>并进入了 worker
+（发送瞬间模型自报 <code>loaded=true, operation=loading</code>）。
+这证明「模型已发布 loaded、但能力探测尚未结束」这个状态确实可以被未加准入门控的旧版放行——
+不是推测，是实测。</p>
+<p><b>结论二（原生条件下几乎打不中）</b>：原生实验里窗口内
+<b>18</b> 次请求全部得到 409，放行 0 次。
+原因不是门控存在（v0.6.13 并没有 v0.6.14 的 <code>require_ready</code>），
+而是这个窗口本身只有
+<b>7.04 ms</b>（8 个时机实测
+6、5.2、5.3、10.1、6.7、5.2、11.7、6.1）：
+<code>loaded=true</code> 发布后紧接着就是能力探测的两次本机 RPC，
+期间 <code>operation</code> 仍为 <code>loading</code>，而 <code>_resolve_model</code>
+只检查 <code>loaded</code>——所以「能不能进」取决于请求是否恰好落在这几毫秒里。</p>
+<p><b>原生 `edge` 时机的实测边界</b>：本次运行确实<b>观测到了</b> <code>loaded=true, operation=loading</code> 这个状态，窗口宽 <b>23.0 ms</b>。但三个接口的请求发出时，窗口已经关闭 <b>+3.4、+8.6、+12.4 ms</b>（负值表示早于关闭时刻；这里是正值，即已关闭之后）。因此它们全部落在窗口之后、得到 200 正常摘要，放行计数仍为 0——这是<b>边界未命中</b>，不是「窗口拦住了」。窗口内实际被放行的次数见上表的插桩实验。</p>
+<p><b>结论三（放行后的输出没有异常）</b>：被放行的 3
+次请求，输出与 ready 对照组<b>逐字相同</b>（同一 prompt、同一 token 数）。
+原因在 worker 侧：它<b>先把权重载入 NPU、再 <code>sched.start()</code>、最后才
+<code>start_server()</code> 打开 socket</b>，并且 <code>sched.start()</code> 是
+<code>create_task</code> 不阻塞。所以服务端「loaded」与「socket 已开」是同一时刻，
+能进 worker 的请求，其引擎与调度器都已在跑。这就是「被放行但输出正常」的机制解释。</p>
+<p><b>因此，现场那一次异常输出不能用这条竞态解释。</b>本轮没有复现
+「两个女生约好一起出门……」同款异常，也没有任何证据把它归因到加载竞态。
+样本量与其它可能原因见「局限」。</p>
+</div><div class="card"><h3>窗口内每一次请求的完整结果</h3>
+<p class="sub">按时间排序。「距 load POST」是请求发出时刻相对 load 请求发出的秒数，
+不是目标延迟——两者不同正是这张表的意义。
+「距窗口开启/关闭」只对 <code>edge</code> 时机、且只在真的观测到窗口时才有值：
+负的「距窗口开启」表示请求在窗口打开前就发出，正的「距窗口关闭」表示窗口已经关上之后才发出。</p>
+<div class="scroll"><table><thead><tr>
+<th>时机</th><th>接口</th><th>目标延迟</th><th>距 load POST(s)</th><th>发送时状态</th>
+<th>距窗口开启(ms)</th><th>距窗口关闭(ms)</th><th>HTTP</th><th>分类</th><th>输出字数</th>
+<th>U+FFFD</th><th>记录</th><th>说明</th></tr></thead><tbody><tr>
+<td><code>delay-0p1s</code></td><td>stream</td>
+<td>0.1</td>
+<td><code>0.126</code></td>
+<td><code>False/loading</code></td>
+<td><code>—</code></td>
+<td><code>—</code></td>
+<td>409</td><td><span class="tag t-refused">refused</span></td>
+<td>0</td><td>0</td>
+<td>—</td>
+<td class="sub">HTTP 409: {&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</td></tr><tr>
+<td><code>delay-0p1s</code></td><td>nonstream</td>
+<td>0.1</td>
+<td><code>0.131</code></td>
+<td><code>False/loading</code></td>
+<td><code>—</code></td>
+<td><code>—</code></td>
+<td>409</td><td><span class="tag t-refused">refused</span></td>
+<td>0</td><td>0</td>
+<td>—</td>
+<td class="sub">HTTP 409: {&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</td></tr><tr>
+<td><code>delay-0p1s</code></td><td>console</td>
+<td>0.1</td>
+<td><code>0.136</code></td>
+<td><code>False/loading</code></td>
+<td><code>—</code></td>
+<td><code>—</code></td>
+<td>409</td><td><span class="tag t-refused">refused</span></td>
+<td>0</td><td>0</td>
+<td>—</td>
+<td class="sub">HTTP 409: {&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</td></tr><tr>
+<td><code>delay-15s</code></td><td>stream</td>
+<td>15.0</td>
+<td><code>15.025</code></td>
+<td><code>False/loading</code></td>
+<td><code>—</code></td>
+<td><code>—</code></td>
+<td>409</td><td><span class="tag t-refused">refused</span></td>
+<td>0</td><td>0</td>
+<td>—</td>
+<td class="sub">HTTP 409: {&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</td></tr><tr>
+<td><code>delay-15s</code></td><td>nonstream</td>
+<td>15.0</td>
+<td><code>15.027</code></td>
+<td><code>False/loading</code></td>
+<td><code>—</code></td>
+<td><code>—</code></td>
+<td>409</td><td><span class="tag t-refused">refused</span></td>
+<td>0</td><td>0</td>
+<td>—</td>
+<td class="sub">HTTP 409: {&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</td></tr><tr>
+<td><code>delay-15s</code></td><td>console</td>
+<td>15.0</td>
+<td><code>15.051</code></td>
+<td><code>False/loading</code></td>
+<td><code>—</code></td>
+<td><code>—</code></td>
+<td>409</td><td><span class="tag t-refused">refused</span></td>
+<td>0</td><td>0</td>
+<td>—</td>
+<td class="sub">HTTP 409: {&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</td></tr><tr>
+<td><code>delay-30s</code></td><td>stream</td>
+<td>30.0</td>
+<td><code>30.023</code></td>
+<td><code>False/loading</code></td>
+<td><code>—</code></td>
+<td><code>—</code></td>
+<td>409</td><td><span class="tag t-refused">refused</span></td>
+<td>0</td><td>0</td>
+<td>—</td>
+<td class="sub">HTTP 409: {&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</td></tr><tr>
+<td><code>delay-30s</code></td><td>nonstream</td>
+<td>30.0</td>
+<td><code>30.026</code></td>
+<td><code>False/loading</code></td>
+<td><code>—</code></td>
+<td><code>—</code></td>
+<td>409</td><td><span class="tag t-refused">refused</span></td>
+<td>0</td><td>0</td>
+<td>—</td>
+<td class="sub">HTTP 409: {&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</td></tr><tr>
+<td><code>delay-30s</code></td><td>console</td>
+<td>30.0</td>
+<td><code>30.042</code></td>
+<td><code>False/loading</code></td>
+<td><code>—</code></td>
+<td><code>—</code></td>
+<td>409</td><td><span class="tag t-refused">refused</span></td>
+<td>0</td><td>0</td>
+<td>—</td>
+<td class="sub">HTTP 409: {&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</td></tr><tr>
+<td><code>delay-45s</code></td><td>stream</td>
+<td>45.0</td>
+<td><code>45.023</code></td>
+<td><code>False/loading</code></td>
+<td><code>—</code></td>
+<td><code>—</code></td>
+<td>409</td><td><span class="tag t-refused">refused</span></td>
+<td>0</td><td>0</td>
+<td>—</td>
+<td class="sub">HTTP 409: {&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</td></tr><tr>
+<td><code>delay-45s</code></td><td>nonstream</td>
+<td>45.0</td>
+<td><code>45.019</code></td>
+<td><code>False/loading</code></td>
+<td><code>—</code></td>
+<td><code>—</code></td>
+<td>409</td><td><span class="tag t-refused">refused</span></td>
+<td>0</td><td>0</td>
+<td>—</td>
+<td class="sub">HTTP 409: {&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</td></tr><tr>
+<td><code>delay-45s</code></td><td>console</td>
+<td>45.0</td>
+<td><code>45.035</code></td>
+<td><code>False/loading</code></td>
+<td><code>—</code></td>
+<td><code>—</code></td>
+<td>409</td><td><span class="tag t-refused">refused</span></td>
+<td>0</td><td>0</td>
+<td>—</td>
+<td class="sub">HTTP 409: {&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</td></tr><tr>
+<td><code>delay-5s</code></td><td>stream</td>
+<td>5.0</td>
+<td><code>5.025</code></td>
+<td><code>False/loading</code></td>
+<td><code>—</code></td>
+<td><code>—</code></td>
+<td>409</td><td><span class="tag t-refused">refused</span></td>
+<td>0</td><td>0</td>
+<td>—</td>
+<td class="sub">HTTP 409: {&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</td></tr><tr>
+<td><code>delay-5s</code></td><td>nonstream</td>
+<td>5.0</td>
+<td><code>5.022</code></td>
+<td><code>False/loading</code></td>
+<td><code>—</code></td>
+<td><code>—</code></td>
+<td>409</td><td><span class="tag t-refused">refused</span></td>
+<td>0</td><td>0</td>
+<td>—</td>
+<td class="sub">HTTP 409: {&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</td></tr><tr>
+<td><code>delay-5s</code></td><td>console</td>
+<td>5.0</td>
+<td><code>5.044</code></td>
+<td><code>False/loading</code></td>
+<td><code>—</code></td>
+<td><code>—</code></td>
+<td>409</td><td><span class="tag t-refused">refused</span></td>
+<td>0</td><td>0</td>
+<td>—</td>
+<td class="sub">HTTP 409: {&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</td></tr><tr>
+<td><code>delay-60s</code></td><td>stream</td>
+<td>60.0</td>
+<td><code>60.028</code></td>
+<td><code>False/loading</code></td>
+<td><code>—</code></td>
+<td><code>—</code></td>
+<td>409</td><td><span class="tag t-refused">refused</span></td>
+<td>0</td><td>0</td>
+<td>—</td>
+<td class="sub">HTTP 409: {&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</td></tr><tr>
+<td><code>delay-60s</code></td><td>nonstream</td>
+<td>60.0</td>
+<td><code>60.031</code></td>
+<td><code>False/loading</code></td>
+<td><code>—</code></td>
+<td><code>—</code></td>
+<td>409</td><td><span class="tag t-refused">refused</span></td>
+<td>0</td><td>0</td>
+<td>—</td>
+<td class="sub">HTTP 409: {&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</td></tr><tr>
+<td><code>delay-60s</code></td><td>console</td>
+<td>60.0</td>
+<td><code>60.035</code></td>
+<td><code>False/loading</code></td>
+<td><code>—</code></td>
+<td><code>—</code></td>
+<td>409</td><td><span class="tag t-refused">refused</span></td>
+<td>0</td><td>0</td>
+<td>—</td>
+<td class="sub">HTTP 409: {&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</td></tr></tbody></table></div></div><h2>② 每次实验时间线</h2>
+<p class="sub">一次实验 = 一次完整 unload → load → 在指定延迟发送请求。
+下表把每次实验与它内部的每次请求按真实时间排在一起。</p>
+<div class="scroll"><table><thead><tr><th>时间 (UTC)</th><th>对象</th>
+<th>实际发生</th><th>错误</th></tr></thead><tbody><tr><td><code>2026-10-31T18:21:15.619Z</code></td><td><code>delay-0p1s</code></td><td>unload=200 load=200 in 66.4s loaded_at=2026-10-31T18:22:23.080Z</td><td class='sub'></td></tr><tr><td><code>2026-10-31T18:21:16.816Z</code></td><td><code>delay-0p1s/stream</code></td><td>delay=0.13s HTTP=409 refused chars=0 state=False/loading</td><td class='sub'>{&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</td></tr><tr><td><code>2026-10-31T18:21:16.821Z</code></td><td><code>delay-0p1s/nonstream</code></td><td>delay=0.13s HTTP=409 refused chars=0 state=False/loading</td><td class='sub'>{&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</td></tr><tr><td><code>2026-10-31T18:21:16.826Z</code></td><td><code>delay-0p1s/console</code></td><td>delay=0.14s HTTP=409 refused chars=0 state=False/loading</td><td class='sub'>{&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</td></tr><tr><td><code>2026-10-31T18:22:23.319Z</code></td><td><code>delay-5s</code></td><td>unload=200 load=200 in 66.41s loaded_at=2026-10-31T18:23:30.894Z</td><td class='sub'></td></tr><tr><td><code>2026-10-31T18:22:29.516Z</code></td><td><code>delay-5s/nonstream</code></td><td>delay=5.02s HTTP=409 refused chars=0 state=False/loading</td><td class='sub'>{&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</td></tr><tr><td><code>2026-10-31T18:22:29.520Z</code></td><td><code>delay-5s/stream</code></td><td>delay=5.03s HTTP=409 refused chars=0 state=False/loading</td><td class='sub'>{&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</td></tr><tr><td><code>2026-10-31T18:22:29.539Z</code></td><td><code>delay-5s/console</code></td><td>delay=5.04s HTTP=409 refused chars=0 state=False/loading</td><td class='sub'>{&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</td></tr><tr><td><code>2026-10-31T18:23:31.091Z</code></td><td><code>delay-15s</code></td><td>unload=200 load=200 in 66.38s loaded_at=2026-10-31T18:24:38.649Z</td><td class='sub'></td></tr><tr><td><code>2026-10-31T18:23:47.297Z</code></td><td><code>delay-15s/stream</code></td><td>delay=15.02s HTTP=409 refused chars=0 state=False/loading</td><td class='sub'>{&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</td></tr><tr><td><code>2026-10-31T18:23:47.300Z</code></td><td><code>delay-15s/nonstream</code></td><td>delay=15.03s HTTP=409 refused chars=0 state=False/loading</td><td class='sub'>{&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</td></tr><tr><td><code>2026-10-31T18:23:47.323Z</code></td><td><code>delay-15s/console</code></td><td>delay=15.05s HTTP=409 refused chars=0 state=False/loading</td><td class='sub'>{&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</td></tr><tr><td><code>2026-10-31T18:24:38.849Z</code></td><td><code>delay-30s</code></td><td>unload=200 load=200 in 67.39s loaded_at=2026-10-31T18:25:47.415Z</td><td class='sub'></td></tr><tr><td><code>2026-10-31T18:25:10.049Z</code></td><td><code>delay-30s/stream</code></td><td>delay=30.02s HTTP=409 refused chars=0 state=False/loading</td><td class='sub'>{&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</td></tr><tr><td><code>2026-10-31T18:25:10.052Z</code></td><td><code>delay-30s/nonstream</code></td><td>delay=30.03s HTTP=409 refused chars=0 state=False/loading</td><td class='sub'>{&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</td></tr><tr><td><code>2026-10-31T18:25:10.068Z</code></td><td><code>delay-30s/console</code></td><td>delay=30.04s HTTP=409 refused chars=0 state=False/loading</td><td class='sub'>{&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</td></tr><tr><td><code>2026-10-31T18:25:47.624Z</code></td><td><code>delay-45s</code></td><td>unload=200 load=200 in 66.38s loaded_at=2026-10-31T18:26:55.173Z</td><td class='sub'></td></tr><tr><td><code>2026-10-31T18:26:33.826Z</code></td><td><code>delay-45s/nonstream</code></td><td>delay=45.02s HTTP=409 refused chars=0 state=False/loading</td><td class='sub'>{&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</td></tr><tr><td><code>2026-10-31T18:26:33.830Z</code></td><td><code>delay-45s/stream</code></td><td>delay=45.02s HTTP=409 refused chars=0 state=False/loading</td><td class='sub'>{&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</td></tr><tr><td><code>2026-10-31T18:26:33.843Z</code></td><td><code>delay-45s/console</code></td><td>delay=45.04s HTTP=409 refused chars=0 state=False/loading</td><td class='sub'>{&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</td></tr><tr><td><code>2026-10-31T18:26:55.466Z</code></td><td><code>delay-60s</code></td><td>unload=200 load=200 in 65.85s loaded_at=2026-10-31T18:28:02.498Z</td><td class='sub'></td></tr><tr><td><code>2026-10-31T18:27:56.687Z</code></td><td><code>delay-60s/stream</code></td><td>delay=60.03s HTTP=409 refused chars=0 state=False/loading</td><td class='sub'>{&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</td></tr><tr><td><code>2026-10-31T18:27:56.690Z</code></td><td><code>delay-60s/nonstream</code></td><td>delay=60.03s HTTP=409 refused chars=0 state=False/loading</td><td class='sub'>{&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</td></tr><tr><td><code>2026-10-31T18:27:56.694Z</code></td><td><code>delay-60s/console</code></td><td>delay=60.04s HTTP=409 refused chars=0 state=False/loading</td><td class='sub'>{&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</td></tr><tr><td><code>2026-10-31T18:28:02.763Z</code></td><td><code>edge-settle</code></td><td>unload=200 load=200 in 66.54s loaded_at=2026-10-31T18:29:10.475Z</td><td class='sub'></td></tr><tr><td><code>2026-10-31T18:29:10.508Z</code></td><td><code>edge-settle/nonstream</code></td><td>delay=66.56s HTTP=200 summary chars=206 state=True/None</td><td class='sub'></td></tr><tr><td><code>2026-10-31T18:29:10.513Z</code></td><td><code>edge-settle/stream</code></td><td>delay=66.57s HTTP=200 summary chars=206 state=True/None</td><td class='sub'></td></tr><tr><td><code>2026-10-31T18:29:10.517Z</code></td><td><code>edge-settle/console</code></td><td>delay=66.57s HTTP=200 summary chars=206 state=True/None</td><td class='sub'></td></tr><tr><td><code>2026-10-31T18:29:26.913Z</code></td><td><code>ready-control</code></td><td>unload=200 load=200 in 65.84s loaded_at=2026-10-31T18:30:33.936Z</td><td class='sub'></td></tr><tr><td><code>2026-10-31T18:30:34.037Z</code></td><td><code>ready-control/nonstream</code></td><td>delay=65.93s HTTP=200 summary chars=206 state=True/None</td><td class='sub'></td></tr><tr><td><code>2026-10-31T18:30:34.042Z</code></td><td><code>ready-control/stream</code></td><td>delay=65.94s HTTP=200 summary chars=206 state=True/None</td><td class='sub'></td></tr><tr><td><code>2026-10-31T18:30:34.047Z</code></td><td><code>ready-control/console</code></td><td>delay=65.94s HTTP=200 summary chars=206 state=True/None</td><td class='sub'></td></tr></tbody></table></div><h3>每次加载的时序采样</h3><div class="scroll"><table><thead><tr><th>时机</th><th>类型</th><th>目标延迟(s)</th><th>实际延迟(s)</th><th>load HTTP</th><th>加载耗时(s)</th><th>观测到的窗口宽度(s)</th><th>发送时 loaded/operation</th><th>就绪差(s)</th><th>新 worker 推理次数</th><th>记录 Δ</th><th>备注</th></tr></thead><tbody><tr><td><code>delay-0p1s</code></td>
+<td>按秒数猜</td>
+<td>0.1</td>
+<td><code>[0.126, 0.131, 0.136]</code></td>
+<td>200</td><td>66.4</td>
+<td><code>未观测到</code></td>
+<td><code>[&#39;False/loading&#39;, &#39;False/loading&#39;, &#39;False/loading&#39;]</code></td>
+<td><code>[66.264, 66.258, 66.254]</code></td>
+<td>0</td><td>0</td>
+<td class="sub"></td>
+</tr><tr><td><code>delay-15s</code></td>
+<td>按秒数猜</td>
+<td>15.0</td>
+<td><code>[15.025, 15.027, 15.051]</code></td>
+<td>200</td><td>66.38</td>
+<td><code>未观测到</code></td>
+<td><code>[&#39;False/loading&#39;, &#39;False/loading&#39;, &#39;False/loading&#39;]</code></td>
+<td><code>[51.351, 51.349, 51.325]</code></td>
+<td>0</td><td>0</td>
+<td class="sub"></td>
+</tr><tr><td><code>delay-30s</code></td>
+<td>按秒数猜</td>
+<td>30.0</td>
+<td><code>[30.023, 30.026, 30.042]</code></td>
+<td>200</td><td>67.39</td>
+<td><code>未观测到</code></td>
+<td><code>[&#39;False/loading&#39;, &#39;False/loading&#39;, &#39;False/loading&#39;]</code></td>
+<td><code>[37.366, 37.363, 37.347]</code></td>
+<td>0</td><td>0</td>
+<td class="sub"></td>
+</tr><tr><td><code>delay-45s</code></td>
+<td>按秒数猜</td>
+<td>45.0</td>
+<td><code>[45.023, 45.019, 45.035]</code></td>
+<td>200</td><td>66.38</td>
+<td><code>未观测到</code></td>
+<td><code>[&#39;False/loading&#39;, &#39;False/loading&#39;, &#39;False/loading&#39;]</code></td>
+<td><code>[21.343, 21.347, 21.33]</code></td>
+<td>0</td><td>0</td>
+<td class="sub"></td>
+</tr><tr><td><code>delay-5s</code></td>
+<td>按秒数猜</td>
+<td>5.0</td>
+<td><code>[5.025, 5.022, 5.044]</code></td>
+<td>200</td><td>66.41</td>
+<td><code>未观测到</code></td>
+<td><code>[&#39;False/loading&#39;, &#39;False/loading&#39;, &#39;False/loading&#39;]</code></td>
+<td><code>[61.375, 61.378, 61.356]</code></td>
+<td>0</td><td>0</td>
+<td class="sub"></td>
+</tr><tr><td><code>delay-60s</code></td>
+<td>按秒数猜</td>
+<td>60.0</td>
+<td><code>[60.028, 60.031, 60.035]</code></td>
+<td>200</td><td>65.85</td>
+<td><code>未观测到</code></td>
+<td><code>[&#39;False/loading&#39;, &#39;False/loading&#39;, &#39;False/loading&#39;]</code></td>
+<td><code>[5.812, 5.808, 5.805]</code></td>
+<td>0</td><td>0</td>
+<td class="sub"></td>
+</tr><tr><td><code>edge-settle</code></td>
+<td>命中 published-not-settled</td>
+<td>ready</td>
+<td><code>[66.569, 66.564, 66.573]</code></td>
+<td>200</td><td>66.54</td>
+<td><code>0.023</code></td>
+<td><code>[&#39;True/None&#39;, &#39;True/None&#39;, &#39;True/None&#39;]</code></td>
+<td><code>[-0.039, -0.034, -0.043]</code></td>
+<td>3</td><td>3</td>
+<td class="sub"></td>
+</tr><tr><td><code>ready-control</code></td>
+<td>就绪后对照</td>
+<td>ready</td>
+<td><code>[65.939, 65.934, 65.944]</code></td>
+<td>200</td><td>65.84</td>
+<td><code>未观测到</code></td>
+<td><code>[&#39;True/None&#39;, &#39;True/None&#39;, &#39;True/None&#39;]</code></td>
+<td><code>[-0.105, -0.1, -0.11]</code></td>
+<td>3</td><td>3</td>
+<td class="sub"></td>
+</tr></tbody></table></div><h2>③ 加载时机与结果</h2><div class="card"><h3>每个时机的延迟与结果</h3><p class="sub">横条长度 = 实际延迟（相对 load POST）；右侧是该时机的三个接口结果。</p><div style="margin:9px 0">
+<div class="mono" style="font-size:12px;color:var(--dim)">
+delay-0p1s · 目标 0.1s
+· 实际 0.14s · 加载 66.4s</div>
+<span class="bar" style="width:2.0%;background:var(--ok)"></span>
+<div style="margin-top:3px"><span class="tag t-refused">refused</span> <span class="tag t-refused">refused</span> <span class="tag t-refused">refused</span></div></div><div style="margin:9px 0">
+<div class="mono" style="font-size:12px;color:var(--dim)">
+delay-15s · 目标 15.0s
+· 实际 15.05s · 加载 66.38s</div>
+<span class="bar" style="width:22.6%;background:var(--ok)"></span>
+<div style="margin-top:3px"><span class="tag t-refused">refused</span> <span class="tag t-refused">refused</span> <span class="tag t-refused">refused</span></div></div><div style="margin:9px 0">
+<div class="mono" style="font-size:12px;color:var(--dim)">
+delay-30s · 目标 30.0s
+· 实际 30.04s · 加载 67.39s</div>
+<span class="bar" style="width:45.1%;background:var(--ok)"></span>
+<div style="margin-top:3px"><span class="tag t-refused">refused</span> <span class="tag t-refused">refused</span> <span class="tag t-refused">refused</span></div></div><div style="margin:9px 0">
+<div class="mono" style="font-size:12px;color:var(--dim)">
+delay-45s · 目标 45.0s
+· 实际 45.03s · 加载 66.38s</div>
+<span class="bar" style="width:67.6%;background:var(--ok)"></span>
+<div style="margin-top:3px"><span class="tag t-refused">refused</span> <span class="tag t-refused">refused</span> <span class="tag t-refused">refused</span></div></div><div style="margin:9px 0">
+<div class="mono" style="font-size:12px;color:var(--dim)">
+delay-5s · 目标 5.0s
+· 实际 5.04s · 加载 66.41s</div>
+<span class="bar" style="width:7.6%;background:var(--ok)"></span>
+<div style="margin-top:3px"><span class="tag t-refused">refused</span> <span class="tag t-refused">refused</span> <span class="tag t-refused">refused</span></div></div><div style="margin:9px 0">
+<div class="mono" style="font-size:12px;color:var(--dim)">
+delay-60s · 目标 60.0s
+· 实际 60.03s · 加载 65.85s</div>
+<span class="bar" style="width:90.2%;background:var(--ok)"></span>
+<div style="margin-top:3px"><span class="tag t-refused">refused</span> <span class="tag t-refused">refused</span> <span class="tag t-refused">refused</span></div></div><div style="margin:9px 0">
+<div class="mono" style="font-size:12px;color:var(--dim)">
+edge-settle · 目标 ready 后s
+· 实际 66.57s · 加载 66.54s</div>
+<span class="bar" style="width:100.0%;background:var(--accent)"></span>
+<div style="margin-top:3px"><span class="tag t-summary">summary</span> <span class="tag t-summary">summary</span> <span class="tag t-summary">summary</span></div></div><div style="margin:9px 0">
+<div class="mono" style="font-size:12px;color:var(--dim)">
+ready-control · 目标 ready 后s
+· 实际 65.94s · 加载 65.84s</div>
+<span class="bar" style="width:99.1%;background:var(--accent)"></span>
+<div style="margin-top:3px"><span class="tag t-summary">summary</span> <span class="tag t-summary">summary</span> <span class="tag t-summary">summary</span></div></div></div><div class="card"><h3>逐接口的窗口内结果</h3><table><thead><tr><th>接口</th><th>窗口内尝试</th><th>409</th><th>被放行</th><th>挂起</th><th>延迟中位数(s)</th><th>TTFT 中位数(s)</th><th>对照组尝试</th><th>对照组正常摘要</th></tr></thead><tbody><tr><td><code>stream</code></td>
+<td>6</td><td>6</td><td>0</td>
+<td>0</td>
+<td>0.019</td>
+<td>—</td>
+<td>2</td><td>2</td>
+</tr><tr><td><code>nonstream</code></td>
+<td>6</td><td>6</td><td>0</td>
+<td>0</td>
+<td>0.024</td>
+<td>—</td>
+<td>2</td><td>2</td>
+</tr><tr><td><code>console</code></td>
+<td>6</td><td>6</td><td>0</td>
+<td>0</td>
+<td>0.01</td>
+<td>—</td>
+<td>2</td><td>2</td>
+</tr></tbody></table></div><div class="card"><h3>已知解码缺陷（U+FFFD）单独统计</h3><div class="grid g3">
+<div class="kpi "><div class="k">窗口内含 U+FFFD 的行</div><div class="v">0</div></div>
+<div class="kpi "><div class="k">对照组合 U+FFFD 的行</div><div class="v">0</div></div>
+<div class="kpi "><div class="k">全部行合计</div><div class="v">0</div></div>
+</div>
+<p>v0.6.13/v0.6.14 都存在流式逐 token 解码缺陷：被拆到两个 token 的字符会输出
+<code>\ufffd</code>（证据见 MYS-2510：<code>门簪</code> → <code>门\ufffd\ufffd</code>）。
+本表把它与「加载竞态导致的异常」分开：只有当对照组的输出干净、而窗口内出现异常时，
+才可把异常归因于竞态。本轮如果两组都出现 <code>\ufffd</code>，那是既有缺陷，与加载无关。
+修复在 MYS-2520 并行进行，本任务不改产品代码。</p></div><h2>④ 完整数据、原始输出与证据</h2><div class="toolbar"><input type="search" id="q" placeholder="过滤：时机/接口/分类/HTTP…" size="34"><select id="fc"><option value="">全部分类</option><option value="refused">refused</option><option value="summary">summary</option></select><span class="sub" id="cnt"></span></div><div class="scroll"><table id="allrows"><thead><tr><th>时机</th><th>接口</th><th>窗口内</th><th>目标(s)</th><th>实际(s)</th><th>HTTP</th><th>分类</th><th>输出字数</th><th>U+FFFD</th><th>finish</th><th>prompt_tok</th><th>compl_tok</th><th>TTFT(s)</th><th>总耗时(s)</th><th>req_id</th><th>原始文件</th></tr></thead><tbody><tr data-class="refused">
+<td><code>delay-0p1s</code></td><td>stream</td>
+<td>是</td>
+<td>0.1</td>
+<td><code>0.126</code></td>
+<td>409</td><td><span class="tag t-refused">refused</span></td>
+<td>0</td><td>0</td>
+<td></td><td></td>
+<td></td><td></td>
+<td>0.048</td>
+<td><code>—</code></td>
+<td><code>delay-0p1s-stream-stream.sse</code></td></tr><tr data-class="refused">
+<td><code>delay-0p1s</code></td><td>nonstream</td>
+<td>是</td>
+<td>0.1</td>
+<td><code>0.131</code></td>
+<td>409</td><td><span class="tag t-refused">refused</span></td>
+<td>0</td><td>0</td>
+<td></td><td></td>
+<td></td><td></td>
+<td>0.045</td>
+<td><code>—</code></td>
+<td><code>delay-0p1s-nonstream-nonstream.json</code></td></tr><tr data-class="refused">
+<td><code>delay-0p1s</code></td><td>console</td>
+<td>是</td>
+<td>0.1</td>
+<td><code>0.136</code></td>
+<td>409</td><td><span class="tag t-refused">refused</span></td>
+<td>0</td><td>0</td>
+<td></td><td></td>
+<td></td><td></td>
+<td>0.043</td>
+<td><code>—</code></td>
+<td><code>delay-0p1s-console-console.sse</code></td></tr><tr data-class="refused">
+<td><code>delay-15s</code></td><td>stream</td>
+<td>是</td>
+<td>15.0</td>
+<td><code>15.025</code></td>
+<td>409</td><td><span class="tag t-refused">refused</span></td>
+<td>0</td><td>0</td>
+<td></td><td></td>
+<td></td><td></td>
+<td>0.018</td>
+<td><code>—</code></td>
+<td><code>delay-15s-stream-stream.sse</code></td></tr><tr data-class="refused">
+<td><code>delay-15s</code></td><td>nonstream</td>
+<td>是</td>
+<td>15.0</td>
+<td><code>15.027</code></td>
+<td>409</td><td><span class="tag t-refused">refused</span></td>
+<td>0</td><td>0</td>
+<td></td><td></td>
+<td></td><td></td>
+<td>0.027</td>
+<td><code>—</code></td>
+<td><code>delay-15s-nonstream-nonstream.json</code></td></tr><tr data-class="refused">
+<td><code>delay-15s</code></td><td>console</td>
+<td>是</td>
+<td>15.0</td>
+<td><code>15.051</code></td>
+<td>409</td><td><span class="tag t-refused">refused</span></td>
+<td>0</td><td>0</td>
+<td></td><td></td>
+<td></td><td></td>
+<td>0.01</td>
+<td><code>—</code></td>
+<td><code>delay-15s-console-console.sse</code></td></tr><tr data-class="refused">
+<td><code>delay-30s</code></td><td>stream</td>
+<td>是</td>
+<td>30.0</td>
+<td><code>30.023</code></td>
+<td>409</td><td><span class="tag t-refused">refused</span></td>
+<td>0</td><td>0</td>
+<td></td><td></td>
+<td></td><td></td>
+<td>0.015</td>
+<td><code>—</code></td>
+<td><code>delay-30s-stream-stream.sse</code></td></tr><tr data-class="refused">
+<td><code>delay-30s</code></td><td>nonstream</td>
+<td>是</td>
+<td>30.0</td>
+<td><code>30.026</code></td>
+<td>409</td><td><span class="tag t-refused">refused</span></td>
+<td>0</td><td>0</td>
+<td></td><td></td>
+<td></td><td></td>
+<td>0.017</td>
+<td><code>—</code></td>
+<td><code>delay-30s-nonstream-nonstream.json</code></td></tr><tr data-class="refused">
+<td><code>delay-30s</code></td><td>console</td>
+<td>是</td>
+<td>30.0</td>
+<td><code>30.042</code></td>
+<td>409</td><td><span class="tag t-refused">refused</span></td>
+<td>0</td><td>0</td>
+<td></td><td></td>
+<td></td><td></td>
+<td>0.008</td>
+<td><code>—</code></td>
+<td><code>delay-30s-console-console.sse</code></td></tr><tr data-class="refused">
+<td><code>delay-45s</code></td><td>stream</td>
+<td>是</td>
+<td>45.0</td>
+<td><code>45.023</code></td>
+<td>409</td><td><span class="tag t-refused">refused</span></td>
+<td>0</td><td>0</td>
+<td></td><td></td>
+<td></td><td></td>
+<td>0.015</td>
+<td><code>—</code></td>
+<td><code>delay-45s-stream-stream.sse</code></td></tr><tr data-class="refused">
+<td><code>delay-45s</code></td><td>nonstream</td>
+<td>是</td>
+<td>45.0</td>
+<td><code>45.019</code></td>
+<td>409</td><td><span class="tag t-refused">refused</span></td>
+<td>0</td><td>0</td>
+<td></td><td></td>
+<td></td><td></td>
+<td>0.01</td>
+<td><code>—</code></td>
+<td><code>delay-45s-nonstream-nonstream.json</code></td></tr><tr data-class="refused">
+<td><code>delay-45s</code></td><td>console</td>
+<td>是</td>
+<td>45.0</td>
+<td><code>45.035</code></td>
+<td>409</td><td><span class="tag t-refused">refused</span></td>
+<td>0</td><td>0</td>
+<td></td><td></td>
+<td></td><td></td>
+<td>0.011</td>
+<td><code>—</code></td>
+<td><code>delay-45s-console-console.sse</code></td></tr><tr data-class="refused">
+<td><code>delay-5s</code></td><td>stream</td>
+<td>是</td>
+<td>5.0</td>
+<td><code>5.025</code></td>
+<td>409</td><td><span class="tag t-refused">refused</span></td>
+<td>0</td><td>0</td>
+<td></td><td></td>
+<td></td><td></td>
+<td>0.02</td>
+<td><code>—</code></td>
+<td><code>delay-5s-stream-stream.sse</code></td></tr><tr data-class="refused">
+<td><code>delay-5s</code></td><td>nonstream</td>
+<td>是</td>
+<td>5.0</td>
+<td><code>5.022</code></td>
+<td>409</td><td><span class="tag t-refused">refused</span></td>
+<td>0</td><td>0</td>
+<td></td><td></td>
+<td></td><td></td>
+<td>0.025</td>
+<td><code>—</code></td>
+<td><code>delay-5s-nonstream-nonstream.json</code></td></tr><tr data-class="refused">
+<td><code>delay-5s</code></td><td>console</td>
+<td>是</td>
+<td>5.0</td>
+<td><code>5.044</code></td>
+<td>409</td><td><span class="tag t-refused">refused</span></td>
+<td>0</td><td>0</td>
+<td></td><td></td>
+<td></td><td></td>
+<td>0.009</td>
+<td><code>—</code></td>
+<td><code>delay-5s-console-console.sse</code></td></tr><tr data-class="refused">
+<td><code>delay-60s</code></td><td>stream</td>
+<td>是</td>
+<td>60.0</td>
+<td><code>60.028</code></td>
+<td>409</td><td><span class="tag t-refused">refused</span></td>
+<td>0</td><td>0</td>
+<td></td><td></td>
+<td></td><td></td>
+<td>0.022</td>
+<td><code>—</code></td>
+<td><code>delay-60s-stream-stream.sse</code></td></tr><tr data-class="refused">
+<td><code>delay-60s</code></td><td>nonstream</td>
+<td>是</td>
+<td>60.0</td>
+<td><code>60.031</code></td>
+<td>409</td><td><span class="tag t-refused">refused</span></td>
+<td>0</td><td>0</td>
+<td></td><td></td>
+<td></td><td></td>
+<td>0.022</td>
+<td><code>—</code></td>
+<td><code>delay-60s-nonstream-nonstream.json</code></td></tr><tr data-class="refused">
+<td><code>delay-60s</code></td><td>console</td>
+<td>是</td>
+<td>60.0</td>
+<td><code>60.035</code></td>
+<td>409</td><td><span class="tag t-refused">refused</span></td>
+<td>0</td><td>0</td>
+<td></td><td></td>
+<td></td><td></td>
+<td>0.021</td>
+<td><code>—</code></td>
+<td><code>delay-60s-console-console.sse</code></td></tr><tr data-class="summary">
+<td><code>edge-settle</code></td><td>stream</td>
+<td>否</td>
+<td>ready</td>
+<td><code>66.569</code></td>
+<td>200</td><td><span class="tag t-summary">summary</span></td>
+<td>206</td><td>0</td>
+<td>length</td><td>266</td>
+<td>128</td><td>2.461</td>
+<td>11.395</td>
+<td><code>45d74945aedd497abbc74a435fb582db</code></td>
+<td><code>edge-settle-stream-stream.sse</code></td></tr><tr data-class="summary">
+<td><code>edge-settle</code></td><td>nonstream</td>
+<td>否</td>
+<td>ready</td>
+<td><code>66.564</code></td>
+<td>200</td><td><span class="tag t-summary">summary</span></td>
+<td>206</td><td>0</td>
+<td>length</td><td>266</td>
+<td>128</td><td></td>
+<td>11.125</td>
+<td><code>5efc3a744eaa4f55839c8a88a16e6ccb</code></td>
+<td><code>edge-settle-nonstream-nonstream.json</code></td></tr><tr data-class="summary">
+<td><code>edge-settle</code></td><td>console</td>
+<td>否</td>
+<td>ready</td>
+<td><code>66.573</code></td>
+<td>200</td><td><span class="tag t-summary">summary</span></td>
+<td>206</td><td>0</td>
+<td>length</td><td>266</td>
+<td>128</td><td>11.691</td>
+<td>16.092</td>
+<td><code>—</code></td>
+<td><code>edge-settle-console-console.sse</code></td></tr><tr data-class="summary">
+<td><code>ready-control</code></td><td>stream</td>
+<td>否</td>
+<td>ready</td>
+<td><code>65.939</code></td>
+<td>200</td><td><span class="tag t-summary">summary</span></td>
+<td>206</td><td>0</td>
+<td>length</td><td>266</td>
+<td>128</td><td>2.444</td>
+<td>11.395</td>
+<td><code>34e5fe0227d84ea79d0ff40480d211da</code></td>
+<td><code>ready-control-stream-stream.sse</code></td></tr><tr data-class="summary">
+<td><code>ready-control</code></td><td>nonstream</td>
+<td>否</td>
+<td>ready</td>
+<td><code>65.934</code></td>
+<td>200</td><td><span class="tag t-summary">summary</span></td>
+<td>206</td><td>0</td>
+<td>length</td><td>266</td>
+<td>128</td><td></td>
+<td>11.12</td>
+<td><code>2202919a4e7c44d48508694659326d6b</code></td>
+<td><code>ready-control-nonstream-nonstream.json</code></td></tr><tr data-class="summary">
+<td><code>ready-control</code></td><td>console</td>
+<td>否</td>
+<td>ready</td>
+<td><code>65.944</code></td>
+<td>200</td><td><span class="tag t-summary">summary</span></td>
+<td>206</td><td>0</td>
+<td>length</td><td>266</td>
+<td>128</td><td>11.689</td>
+<td>16.071</td>
+<td><code>—</code></td>
+<td><code>ready-control-console-console.sse</code></td></tr></tbody></table></div><h3>每次请求的完整输出与状态</h3><details><summary>delay-0p1s / stream
+— refused · HTTP 409
+· 0 字</summary>
+<table><tbody>
+<tr><th style="width:190px">发送时模型状态</th><td><code>{&quot;loaded&quot;: false, &quot;operation&quot;: &quot;loading&quot;, &quot;loaded_at&quot;: null, &quot;load_error&quot;: null, &quot;pid&quot;: 2614230, &quot;port&quot;: 39655}</code></td></tr>
+<tr><th>实际延迟 / 窗口内偏移</th><td><code>0.126s after
+load POST ·  ms after window opened ·
+ ms after it closed</code></td></tr>
+<tr><th>HTTP / finish_reason</th><td><code>409 /
+</code></td></tr>
+<tr><th>token (prompt/completion/cached)</th><td><code> /
+ / </code></td></tr>
+<tr><th>错误</th><td><code>{&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</code></td></tr>
+<tr><th>错误帧</th><td><code>[]</code></td></tr>
+<tr><th>U+FFFD 位置</th><td><code>[]</code></td></tr>
+<tr><th>推理记录</th><td><code>null</code></td></tr>
+</tbody></table>
+<h3 style="margin-top:12px">输出全文</h3>
+<pre>（空）</pre>
+<h3 style="margin-top:12px">记录里的 output_text</h3>
+<pre>（无记录）</pre>
+</details><details><summary>delay-0p1s / nonstream
+— refused · HTTP 409
+· 0 字</summary>
+<table><tbody>
+<tr><th style="width:190px">发送时模型状态</th><td><code>{&quot;loaded&quot;: false, &quot;operation&quot;: &quot;loading&quot;, &quot;loaded_at&quot;: null, &quot;load_error&quot;: null, &quot;pid&quot;: 2614230, &quot;port&quot;: 39655}</code></td></tr>
+<tr><th>实际延迟 / 窗口内偏移</th><td><code>0.131s after
+load POST ·  ms after window opened ·
+ ms after it closed</code></td></tr>
+<tr><th>HTTP / finish_reason</th><td><code>409 /
+</code></td></tr>
+<tr><th>token (prompt/completion/cached)</th><td><code> /
+ / </code></td></tr>
+<tr><th>错误</th><td><code>{&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</code></td></tr>
+<tr><th>错误帧</th><td><code>[]</code></td></tr>
+<tr><th>U+FFFD 位置</th><td><code>[]</code></td></tr>
+<tr><th>推理记录</th><td><code>null</code></td></tr>
+</tbody></table>
+<h3 style="margin-top:12px">输出全文</h3>
+<pre>（空）</pre>
+<h3 style="margin-top:12px">记录里的 output_text</h3>
+<pre>（无记录）</pre>
+</details><details><summary>delay-0p1s / console
+— refused · HTTP 409
+· 0 字</summary>
+<table><tbody>
+<tr><th style="width:190px">发送时模型状态</th><td><code>{&quot;loaded&quot;: false, &quot;operation&quot;: &quot;loading&quot;, &quot;loaded_at&quot;: null, &quot;load_error&quot;: null, &quot;pid&quot;: 2614230, &quot;port&quot;: 39655}</code></td></tr>
+<tr><th>实际延迟 / 窗口内偏移</th><td><code>0.136s after
+load POST ·  ms after window opened ·
+ ms after it closed</code></td></tr>
+<tr><th>HTTP / finish_reason</th><td><code>409 /
+</code></td></tr>
+<tr><th>token (prompt/completion/cached)</th><td><code> /
+ / </code></td></tr>
+<tr><th>错误</th><td><code>{&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</code></td></tr>
+<tr><th>错误帧</th><td><code>[]</code></td></tr>
+<tr><th>U+FFFD 位置</th><td><code>[]</code></td></tr>
+<tr><th>推理记录</th><td><code>null</code></td></tr>
+</tbody></table>
+<h3 style="margin-top:12px">输出全文</h3>
+<pre>（空）</pre>
+<h3 style="margin-top:12px">记录里的 output_text</h3>
+<pre>（无记录）</pre>
+</details><details><summary>delay-15s / stream
+— refused · HTTP 409
+· 0 字</summary>
+<table><tbody>
+<tr><th style="width:190px">发送时模型状态</th><td><code>{&quot;loaded&quot;: false, &quot;operation&quot;: &quot;loading&quot;, &quot;loaded_at&quot;: null, &quot;load_error&quot;: null, &quot;pid&quot;: 2619847, &quot;port&quot;: 54409}</code></td></tr>
+<tr><th>实际延迟 / 窗口内偏移</th><td><code>15.025s after
+load POST ·  ms after window opened ·
+ ms after it closed</code></td></tr>
+<tr><th>HTTP / finish_reason</th><td><code>409 /
+</code></td></tr>
+<tr><th>token (prompt/completion/cached)</th><td><code> /
+ / </code></td></tr>
+<tr><th>错误</th><td><code>{&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</code></td></tr>
+<tr><th>错误帧</th><td><code>[]</code></td></tr>
+<tr><th>U+FFFD 位置</th><td><code>[]</code></td></tr>
+<tr><th>推理记录</th><td><code>null</code></td></tr>
+</tbody></table>
+<h3 style="margin-top:12px">输出全文</h3>
+<pre>（空）</pre>
+<h3 style="margin-top:12px">记录里的 output_text</h3>
+<pre>（无记录）</pre>
+</details><details><summary>delay-15s / nonstream
+— refused · HTTP 409
+· 0 字</summary>
+<table><tbody>
+<tr><th style="width:190px">发送时模型状态</th><td><code>{&quot;loaded&quot;: false, &quot;operation&quot;: &quot;loading&quot;, &quot;loaded_at&quot;: null, &quot;load_error&quot;: null, &quot;pid&quot;: 2619847, &quot;port&quot;: 54409}</code></td></tr>
+<tr><th>实际延迟 / 窗口内偏移</th><td><code>15.027s after
+load POST ·  ms after window opened ·
+ ms after it closed</code></td></tr>
+<tr><th>HTTP / finish_reason</th><td><code>409 /
+</code></td></tr>
+<tr><th>token (prompt/completion/cached)</th><td><code> /
+ / </code></td></tr>
+<tr><th>错误</th><td><code>{&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</code></td></tr>
+<tr><th>错误帧</th><td><code>[]</code></td></tr>
+<tr><th>U+FFFD 位置</th><td><code>[]</code></td></tr>
+<tr><th>推理记录</th><td><code>null</code></td></tr>
+</tbody></table>
+<h3 style="margin-top:12px">输出全文</h3>
+<pre>（空）</pre>
+<h3 style="margin-top:12px">记录里的 output_text</h3>
+<pre>（无记录）</pre>
+</details><details><summary>delay-15s / console
+— refused · HTTP 409
+· 0 字</summary>
+<table><tbody>
+<tr><th style="width:190px">发送时模型状态</th><td><code>{&quot;loaded&quot;: false, &quot;operation&quot;: &quot;loading&quot;, &quot;loaded_at&quot;: null, &quot;load_error&quot;: null, &quot;pid&quot;: 2619847, &quot;port&quot;: 54409}</code></td></tr>
+<tr><th>实际延迟 / 窗口内偏移</th><td><code>15.051s after
+load POST ·  ms after window opened ·
+ ms after it closed</code></td></tr>
+<tr><th>HTTP / finish_reason</th><td><code>409 /
+</code></td></tr>
+<tr><th>token (prompt/completion/cached)</th><td><code> /
+ / </code></td></tr>
+<tr><th>错误</th><td><code>{&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</code></td></tr>
+<tr><th>错误帧</th><td><code>[]</code></td></tr>
+<tr><th>U+FFFD 位置</th><td><code>[]</code></td></tr>
+<tr><th>推理记录</th><td><code>null</code></td></tr>
+</tbody></table>
+<h3 style="margin-top:12px">输出全文</h3>
+<pre>（空）</pre>
+<h3 style="margin-top:12px">记录里的 output_text</h3>
+<pre>（无记录）</pre>
+</details><details><summary>delay-30s / stream
+— refused · HTTP 409
+· 0 字</summary>
+<table><tbody>
+<tr><th style="width:190px">发送时模型状态</th><td><code>{&quot;loaded&quot;: false, &quot;operation&quot;: &quot;loading&quot;, &quot;loaded_at&quot;: null, &quot;load_error&quot;: null, &quot;pid&quot;: 2622721, &quot;port&quot;: 41319}</code></td></tr>
+<tr><th>实际延迟 / 窗口内偏移</th><td><code>30.023s after
+load POST ·  ms after window opened ·
+ ms after it closed</code></td></tr>
+<tr><th>HTTP / finish_reason</th><td><code>409 /
+</code></td></tr>
+<tr><th>token (prompt/completion/cached)</th><td><code> /
+ / </code></td></tr>
+<tr><th>错误</th><td><code>{&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</code></td></tr>
+<tr><th>错误帧</th><td><code>[]</code></td></tr>
+<tr><th>U+FFFD 位置</th><td><code>[]</code></td></tr>
+<tr><th>推理记录</th><td><code>null</code></td></tr>
+</tbody></table>
+<h3 style="margin-top:12px">输出全文</h3>
+<pre>（空）</pre>
+<h3 style="margin-top:12px">记录里的 output_text</h3>
+<pre>（无记录）</pre>
+</details><details><summary>delay-30s / nonstream
+— refused · HTTP 409
+· 0 字</summary>
+<table><tbody>
+<tr><th style="width:190px">发送时模型状态</th><td><code>{&quot;loaded&quot;: false, &quot;operation&quot;: &quot;loading&quot;, &quot;loaded_at&quot;: null, &quot;load_error&quot;: null, &quot;pid&quot;: 2622721, &quot;port&quot;: 41319}</code></td></tr>
+<tr><th>实际延迟 / 窗口内偏移</th><td><code>30.026s after
+load POST ·  ms after window opened ·
+ ms after it closed</code></td></tr>
+<tr><th>HTTP / finish_reason</th><td><code>409 /
+</code></td></tr>
+<tr><th>token (prompt/completion/cached)</th><td><code> /
+ / </code></td></tr>
+<tr><th>错误</th><td><code>{&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</code></td></tr>
+<tr><th>错误帧</th><td><code>[]</code></td></tr>
+<tr><th>U+FFFD 位置</th><td><code>[]</code></td></tr>
+<tr><th>推理记录</th><td><code>null</code></td></tr>
+</tbody></table>
+<h3 style="margin-top:12px">输出全文</h3>
+<pre>（空）</pre>
+<h3 style="margin-top:12px">记录里的 output_text</h3>
+<pre>（无记录）</pre>
+</details><details><summary>delay-30s / console
+— refused · HTTP 409
+· 0 字</summary>
+<table><tbody>
+<tr><th style="width:190px">发送时模型状态</th><td><code>{&quot;loaded&quot;: false, &quot;operation&quot;: &quot;loading&quot;, &quot;loaded_at&quot;: null, &quot;load_error&quot;: null, &quot;pid&quot;: 2622721, &quot;port&quot;: 41319}</code></td></tr>
+<tr><th>实际延迟 / 窗口内偏移</th><td><code>30.042s after
+load POST ·  ms after window opened ·
+ ms after it closed</code></td></tr>
+<tr><th>HTTP / finish_reason</th><td><code>409 /
+</code></td></tr>
+<tr><th>token (prompt/completion/cached)</th><td><code> /
+ / </code></td></tr>
+<tr><th>错误</th><td><code>{&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</code></td></tr>
+<tr><th>错误帧</th><td><code>[]</code></td></tr>
+<tr><th>U+FFFD 位置</th><td><code>[]</code></td></tr>
+<tr><th>推理记录</th><td><code>null</code></td></tr>
+</tbody></table>
+<h3 style="margin-top:12px">输出全文</h3>
+<pre>（空）</pre>
+<h3 style="margin-top:12px">记录里的 output_text</h3>
+<pre>（无记录）</pre>
+</details><details><summary>delay-45s / stream
+— refused · HTTP 409
+· 0 字</summary>
+<table><tbody>
+<tr><th style="width:190px">发送时模型状态</th><td><code>{&quot;loaded&quot;: false, &quot;operation&quot;: &quot;loading&quot;, &quot;loaded_at&quot;: null, &quot;load_error&quot;: null, &quot;pid&quot;: 2625613, &quot;port&quot;: 60899}</code></td></tr>
+<tr><th>实际延迟 / 窗口内偏移</th><td><code>45.023s after
+load POST ·  ms after window opened ·
+ ms after it closed</code></td></tr>
+<tr><th>HTTP / finish_reason</th><td><code>409 /
+</code></td></tr>
+<tr><th>token (prompt/completion/cached)</th><td><code> /
+ / </code></td></tr>
+<tr><th>错误</th><td><code>{&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</code></td></tr>
+<tr><th>错误帧</th><td><code>[]</code></td></tr>
+<tr><th>U+FFFD 位置</th><td><code>[]</code></td></tr>
+<tr><th>推理记录</th><td><code>null</code></td></tr>
+</tbody></table>
+<h3 style="margin-top:12px">输出全文</h3>
+<pre>（空）</pre>
+<h3 style="margin-top:12px">记录里的 output_text</h3>
+<pre>（无记录）</pre>
+</details><details><summary>delay-45s / nonstream
+— refused · HTTP 409
+· 0 字</summary>
+<table><tbody>
+<tr><th style="width:190px">发送时模型状态</th><td><code>{&quot;loaded&quot;: false, &quot;operation&quot;: &quot;loading&quot;, &quot;loaded_at&quot;: null, &quot;load_error&quot;: null, &quot;pid&quot;: 2625613, &quot;port&quot;: 60899}</code></td></tr>
+<tr><th>实际延迟 / 窗口内偏移</th><td><code>45.019s after
+load POST ·  ms after window opened ·
+ ms after it closed</code></td></tr>
+<tr><th>HTTP / finish_reason</th><td><code>409 /
+</code></td></tr>
+<tr><th>token (prompt/completion/cached)</th><td><code> /
+ / </code></td></tr>
+<tr><th>错误</th><td><code>{&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</code></td></tr>
+<tr><th>错误帧</th><td><code>[]</code></td></tr>
+<tr><th>U+FFFD 位置</th><td><code>[]</code></td></tr>
+<tr><th>推理记录</th><td><code>null</code></td></tr>
+</tbody></table>
+<h3 style="margin-top:12px">输出全文</h3>
+<pre>（空）</pre>
+<h3 style="margin-top:12px">记录里的 output_text</h3>
+<pre>（无记录）</pre>
+</details><details><summary>delay-45s / console
+— refused · HTTP 409
+· 0 字</summary>
+<table><tbody>
+<tr><th style="width:190px">发送时模型状态</th><td><code>{&quot;loaded&quot;: false, &quot;operation&quot;: &quot;loading&quot;, &quot;loaded_at&quot;: null, &quot;load_error&quot;: null, &quot;pid&quot;: 2625613, &quot;port&quot;: 60899}</code></td></tr>
+<tr><th>实际延迟 / 窗口内偏移</th><td><code>45.035s after
+load POST ·  ms after window opened ·
+ ms after it closed</code></td></tr>
+<tr><th>HTTP / finish_reason</th><td><code>409 /
+</code></td></tr>
+<tr><th>token (prompt/completion/cached)</th><td><code> /
+ / </code></td></tr>
+<tr><th>错误</th><td><code>{&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</code></td></tr>
+<tr><th>错误帧</th><td><code>[]</code></td></tr>
+<tr><th>U+FFFD 位置</th><td><code>[]</code></td></tr>
+<tr><th>推理记录</th><td><code>null</code></td></tr>
+</tbody></table>
+<h3 style="margin-top:12px">输出全文</h3>
+<pre>（空）</pre>
+<h3 style="margin-top:12px">记录里的 output_text</h3>
+<pre>（无记录）</pre>
+</details><details><summary>delay-5s / stream
+— refused · HTTP 409
+· 0 字</summary>
+<table><tbody>
+<tr><th style="width:190px">发送时模型状态</th><td><code>{&quot;loaded&quot;: false, &quot;operation&quot;: &quot;loading&quot;, &quot;loaded_at&quot;: null, &quot;load_error&quot;: null, &quot;pid&quot;: 2617060, &quot;port&quot;: 38917}</code></td></tr>
+<tr><th>实际延迟 / 窗口内偏移</th><td><code>5.025s after
+load POST ·  ms after window opened ·
+ ms after it closed</code></td></tr>
+<tr><th>HTTP / finish_reason</th><td><code>409 /
+</code></td></tr>
+<tr><th>token (prompt/completion/cached)</th><td><code> /
+ / </code></td></tr>
+<tr><th>错误</th><td><code>{&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</code></td></tr>
+<tr><th>错误帧</th><td><code>[]</code></td></tr>
+<tr><th>U+FFFD 位置</th><td><code>[]</code></td></tr>
+<tr><th>推理记录</th><td><code>null</code></td></tr>
+</tbody></table>
+<h3 style="margin-top:12px">输出全文</h3>
+<pre>（空）</pre>
+<h3 style="margin-top:12px">记录里的 output_text</h3>
+<pre>（无记录）</pre>
+</details><details><summary>delay-5s / nonstream
+— refused · HTTP 409
+· 0 字</summary>
+<table><tbody>
+<tr><th style="width:190px">发送时模型状态</th><td><code>{&quot;loaded&quot;: false, &quot;operation&quot;: &quot;loading&quot;, &quot;loaded_at&quot;: null, &quot;load_error&quot;: null, &quot;pid&quot;: 2617060, &quot;port&quot;: 38917}</code></td></tr>
+<tr><th>实际延迟 / 窗口内偏移</th><td><code>5.022s after
+load POST ·  ms after window opened ·
+ ms after it closed</code></td></tr>
+<tr><th>HTTP / finish_reason</th><td><code>409 /
+</code></td></tr>
+<tr><th>token (prompt/completion/cached)</th><td><code> /
+ / </code></td></tr>
+<tr><th>错误</th><td><code>{&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</code></td></tr>
+<tr><th>错误帧</th><td><code>[]</code></td></tr>
+<tr><th>U+FFFD 位置</th><td><code>[]</code></td></tr>
+<tr><th>推理记录</th><td><code>null</code></td></tr>
+</tbody></table>
+<h3 style="margin-top:12px">输出全文</h3>
+<pre>（空）</pre>
+<h3 style="margin-top:12px">记录里的 output_text</h3>
+<pre>（无记录）</pre>
+</details><details><summary>delay-5s / console
+— refused · HTTP 409
+· 0 字</summary>
+<table><tbody>
+<tr><th style="width:190px">发送时模型状态</th><td><code>{&quot;loaded&quot;: false, &quot;operation&quot;: &quot;loading&quot;, &quot;loaded_at&quot;: null, &quot;load_error&quot;: null, &quot;pid&quot;: 2617060, &quot;port&quot;: 38917}</code></td></tr>
+<tr><th>实际延迟 / 窗口内偏移</th><td><code>5.044s after
+load POST ·  ms after window opened ·
+ ms after it closed</code></td></tr>
+<tr><th>HTTP / finish_reason</th><td><code>409 /
+</code></td></tr>
+<tr><th>token (prompt/completion/cached)</th><td><code> /
+ / </code></td></tr>
+<tr><th>错误</th><td><code>{&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</code></td></tr>
+<tr><th>错误帧</th><td><code>[]</code></td></tr>
+<tr><th>U+FFFD 位置</th><td><code>[]</code></td></tr>
+<tr><th>推理记录</th><td><code>null</code></td></tr>
+</tbody></table>
+<h3 style="margin-top:12px">输出全文</h3>
+<pre>（空）</pre>
+<h3 style="margin-top:12px">记录里的 output_text</h3>
+<pre>（无记录）</pre>
+</details><details><summary>delay-60s / stream
+— refused · HTTP 409
+· 0 字</summary>
+<table><tbody>
+<tr><th style="width:190px">发送时模型状态</th><td><code>{&quot;loaded&quot;: false, &quot;operation&quot;: &quot;loading&quot;, &quot;loaded_at&quot;: null, &quot;load_error&quot;: null, &quot;pid&quot;: 2628641, &quot;port&quot;: 46985}</code></td></tr>
+<tr><th>实际延迟 / 窗口内偏移</th><td><code>60.028s after
+load POST ·  ms after window opened ·
+ ms after it closed</code></td></tr>
+<tr><th>HTTP / finish_reason</th><td><code>409 /
+</code></td></tr>
+<tr><th>token (prompt/completion/cached)</th><td><code> /
+ / </code></td></tr>
+<tr><th>错误</th><td><code>{&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</code></td></tr>
+<tr><th>错误帧</th><td><code>[]</code></td></tr>
+<tr><th>U+FFFD 位置</th><td><code>[]</code></td></tr>
+<tr><th>推理记录</th><td><code>null</code></td></tr>
+</tbody></table>
+<h3 style="margin-top:12px">输出全文</h3>
+<pre>（空）</pre>
+<h3 style="margin-top:12px">记录里的 output_text</h3>
+<pre>（无记录）</pre>
+</details><details><summary>delay-60s / nonstream
+— refused · HTTP 409
+· 0 字</summary>
+<table><tbody>
+<tr><th style="width:190px">发送时模型状态</th><td><code>{&quot;loaded&quot;: false, &quot;operation&quot;: &quot;loading&quot;, &quot;loaded_at&quot;: null, &quot;load_error&quot;: null, &quot;pid&quot;: 2628641, &quot;port&quot;: 46985}</code></td></tr>
+<tr><th>实际延迟 / 窗口内偏移</th><td><code>60.031s after
+load POST ·  ms after window opened ·
+ ms after it closed</code></td></tr>
+<tr><th>HTTP / finish_reason</th><td><code>409 /
+</code></td></tr>
+<tr><th>token (prompt/completion/cached)</th><td><code> /
+ / </code></td></tr>
+<tr><th>错误</th><td><code>{&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</code></td></tr>
+<tr><th>错误帧</th><td><code>[]</code></td></tr>
+<tr><th>U+FFFD 位置</th><td><code>[]</code></td></tr>
+<tr><th>推理记录</th><td><code>null</code></td></tr>
+</tbody></table>
+<h3 style="margin-top:12px">输出全文</h3>
+<pre>（空）</pre>
+<h3 style="margin-top:12px">记录里的 output_text</h3>
+<pre>（无记录）</pre>
+</details><details><summary>delay-60s / console
+— refused · HTTP 409
+· 0 字</summary>
+<table><tbody>
+<tr><th style="width:190px">发送时模型状态</th><td><code>{&quot;loaded&quot;: false, &quot;operation&quot;: &quot;loading&quot;, &quot;loaded_at&quot;: null, &quot;load_error&quot;: null, &quot;pid&quot;: 2628641, &quot;port&quot;: 46985}</code></td></tr>
+<tr><th>实际延迟 / 窗口内偏移</th><td><code>60.035s after
+load POST ·  ms after window opened ·
+ ms after it closed</code></td></tr>
+<tr><th>HTTP / finish_reason</th><td><code>409 /
+</code></td></tr>
+<tr><th>token (prompt/completion/cached)</th><td><code> /
+ / </code></td></tr>
+<tr><th>错误</th><td><code>{&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</code></td></tr>
+<tr><th>错误帧</th><td><code>[]</code></td></tr>
+<tr><th>U+FFFD 位置</th><td><code>[]</code></td></tr>
+<tr><th>推理记录</th><td><code>null</code></td></tr>
+</tbody></table>
+<h3 style="margin-top:12px">输出全文</h3>
+<pre>（空）</pre>
+<h3 style="margin-top:12px">记录里的 output_text</h3>
+<pre>（无记录）</pre>
+</details><details><summary>edge-settle / stream
+— summary · HTTP 200
+· 206 字</summary>
+<table><tbody>
+<tr><th style="width:190px">发送时模型状态</th><td><code>{&quot;loaded&quot;: true, &quot;operation&quot;: null, &quot;loaded_at&quot;: 1793471350.475168, &quot;load_error&quot;: null, &quot;pid&quot;: 2631667, &quot;port&quot;: 43615}</code></td></tr>
+<tr><th>实际延迟 / 窗口内偏移</th><td><code>66.569s after
+load POST · 31.1 ms after window opened ·
+8.6 ms after it closed</code></td></tr>
+<tr><th>HTTP / finish_reason</th><td><code>200 /
+length</code></td></tr>
+<tr><th>token (prompt/completion/cached)</th><td><code>266 /
+128 / 256</code></td></tr>
+<tr><th>错误</th><td><code>—</code></td></tr>
+<tr><th>错误帧</th><td><code>[]</code></td></tr>
+<tr><th>U+FFFD 位置</th><td><code>[]</code></td></tr>
+<tr><th>推理记录</th><td><code>null</code></td></tr>
+</tbody></table>
+<h3 style="margin-top:12px">输出全文</h3>
+<pre>这篇文章主要讲述了一起因使用餐厅免费围裙而引发的尴尬误会，具体内容总结如下：
+
+1.  **事件起因**：两位女生在吃牛油火锅时，为了防油溅弄脏自己得体的抹胸连衣裙，顺手拿起了餐厅提供的免费大版型围裙穿上。
+2.  **误会产生**：由于围裙版型过大且上沿位置过高，完全遮挡了抹胸裙的上半部分，导致视觉上只露出肩膀和脖颈，给旁人造成了“未穿衣服”的错觉。
+3.  **现场反应**：其他食客投来异样目光并私下议论</pre>
+<h3 style="margin-top:12px">记录里的 output_text</h3>
+<pre>（无记录）</pre>
+</details><details><summary>edge-settle / nonstream
+— summary · HTTP 200
+· 206 字</summary>
+<table><tbody>
+<tr><th style="width:190px">发送时模型状态</th><td><code>{&quot;loaded&quot;: true, &quot;operation&quot;: null, &quot;loaded_at&quot;: 1793471350.475168, &quot;load_error&quot;: null, &quot;pid&quot;: 2631667, &quot;port&quot;: 43615}</code></td></tr>
+<tr><th>实际延迟 / 窗口内偏移</th><td><code>66.564s after
+load POST · 25.9 ms after window opened ·
+3.4 ms after it closed</code></td></tr>
+<tr><th>HTTP / finish_reason</th><td><code>200 /
+length</code></td></tr>
+<tr><th>token (prompt/completion/cached)</th><td><code>266 /
+128 / </code></td></tr>
+<tr><th>错误</th><td><code>—</code></td></tr>
+<tr><th>错误帧</th><td><code>[]</code></td></tr>
+<tr><th>U+FFFD 位置</th><td><code>[]</code></td></tr>
+<tr><th>推理记录</th><td><code>null</code></td></tr>
+</tbody></table>
+<h3 style="margin-top:12px">输出全文</h3>
+<pre>这篇文章主要讲述了一起因使用餐厅免费围裙而引发的尴尬误会，具体内容总结如下：
+
+1.  **事件起因**：两位女生在吃牛油火锅时，为了防油溅弄脏自己得体的抹胸连衣裙，顺手拿起了餐厅提供的免费大版型围裙穿上。
+2.  **误会产生**：由于围裙版型过大且上沿位置过高，完全遮挡了抹胸裙的上半部分，导致视觉上只露出肩膀和脖颈，给旁人造成了“未穿衣服”的错觉。
+3.  **现场反应**：其他食客投来异样目光并私下议论</pre>
+<h3 style="margin-top:12px">记录里的 output_text</h3>
+<pre>（无记录）</pre>
+</details><details><summary>edge-settle / console
+— summary · HTTP 200
+· 206 字</summary>
+<table><tbody>
+<tr><th style="width:190px">发送时模型状态</th><td><code>{&quot;loaded&quot;: true, &quot;operation&quot;: null, &quot;loaded_at&quot;: 1793471350.475168, &quot;load_error&quot;: null, &quot;pid&quot;: 2631667, &quot;port&quot;: 43615}</code></td></tr>
+<tr><th>实际延迟 / 窗口内偏移</th><td><code>66.573s after
+load POST · 34.9 ms after window opened ·
+12.4 ms after it closed</code></td></tr>
+<tr><th>HTTP / finish_reason</th><td><code>200 /
+length</code></td></tr>
+<tr><th>token (prompt/completion/cached)</th><td><code>266 /
+128 / 256</code></td></tr>
+<tr><th>错误</th><td><code>—</code></td></tr>
+<tr><th>错误帧</th><td><code>[]</code></td></tr>
+<tr><th>U+FFFD 位置</th><td><code>[]</code></td></tr>
+<tr><th>推理记录</th><td><code>null</code></td></tr>
+</tbody></table>
+<h3 style="margin-top:12px">输出全文</h3>
+<pre>这篇文章主要讲述了一起因使用餐厅免费围裙而引发的尴尬误会，具体内容总结如下：
+
+1.  **事件起因**：两位女生在吃牛油火锅时，为了防油溅弄脏自己得体的抹胸连衣裙，顺手拿起了餐厅提供的免费大版型围裙穿上。
+2.  **误会产生**：由于围裙版型过大且上沿位置过高，完全遮挡了抹胸裙的上半部分，导致视觉上只露出肩膀和脖颈，给旁人造成了“未穿衣服”的错觉。
+3.  **现场反应**：其他食客投来异样目光并私下议论</pre>
+<h3 style="margin-top:12px">记录里的 output_text</h3>
+<pre>（无记录）</pre>
+</details><details><summary>ready-control / stream
+— summary · HTTP 200
+· 206 字</summary>
+<table><tbody>
+<tr><th style="width:190px">发送时模型状态</th><td><code>{&quot;loaded&quot;: true, &quot;operation&quot;: null, &quot;loaded_at&quot;: 1793471433.9369555, &quot;load_error&quot;: null, &quot;pid&quot;: 2635574, &quot;port&quot;: 46155}</code></td></tr>
+<tr><th>实际延迟 / 窗口内偏移</th><td><code>65.939s after
+load POST ·  ms after window opened ·
+ ms after it closed</code></td></tr>
+<tr><th>HTTP / finish_reason</th><td><code>200 /
+length</code></td></tr>
+<tr><th>token (prompt/completion/cached)</th><td><code>266 /
+128 / 256</code></td></tr>
+<tr><th>错误</th><td><code>—</code></td></tr>
+<tr><th>错误帧</th><td><code>[]</code></td></tr>
+<tr><th>U+FFFD 位置</th><td><code>[]</code></td></tr>
+<tr><th>推理记录</th><td><code>null</code></td></tr>
+</tbody></table>
+<h3 style="margin-top:12px">输出全文</h3>
+<pre>这篇文章主要讲述了一起因使用餐厅免费围裙而引发的尴尬误会，具体内容总结如下：
+
+1.  **事件起因**：两位女生在吃牛油火锅时，为了防油溅弄脏自己得体的抹胸连衣裙，顺手拿起了餐厅提供的免费大版型围裙穿上。
+2.  **误会产生**：由于围裙版型过大且上沿位置过高，完全遮挡了抹胸裙的上半部分，导致视觉上只露出肩膀和脖颈，给旁人造成了“未穿衣服”的错觉。
+3.  **现场反应**：其他食客投来异样目光并私下议论</pre>
+<h3 style="margin-top:12px">记录里的 output_text</h3>
+<pre>（无记录）</pre>
+</details><details><summary>ready-control / nonstream
+— summary · HTTP 200
+· 206 字</summary>
+<table><tbody>
+<tr><th style="width:190px">发送时模型状态</th><td><code>{&quot;loaded&quot;: true, &quot;operation&quot;: null, &quot;loaded_at&quot;: 1793471433.9369555, &quot;load_error&quot;: null, &quot;pid&quot;: 2635574, &quot;port&quot;: 46155}</code></td></tr>
+<tr><th>实际延迟 / 窗口内偏移</th><td><code>65.934s after
+load POST ·  ms after window opened ·
+ ms after it closed</code></td></tr>
+<tr><th>HTTP / finish_reason</th><td><code>200 /
+length</code></td></tr>
+<tr><th>token (prompt/completion/cached)</th><td><code>266 /
+128 / </code></td></tr>
+<tr><th>错误</th><td><code>—</code></td></tr>
+<tr><th>错误帧</th><td><code>[]</code></td></tr>
+<tr><th>U+FFFD 位置</th><td><code>[]</code></td></tr>
+<tr><th>推理记录</th><td><code>null</code></td></tr>
+</tbody></table>
+<h3 style="margin-top:12px">输出全文</h3>
+<pre>这篇文章主要讲述了一起因使用餐厅免费围裙而引发的尴尬误会，具体内容总结如下：
+
+1.  **事件起因**：两位女生在吃牛油火锅时，为了防油溅弄脏自己得体的抹胸连衣裙，顺手拿起了餐厅提供的免费大版型围裙穿上。
+2.  **误会产生**：由于围裙版型过大且上沿位置过高，完全遮挡了抹胸裙的上半部分，导致视觉上只露出肩膀和脖颈，给旁人造成了“未穿衣服”的错觉。
+3.  **现场反应**：其他食客投来异样目光并私下议论</pre>
+<h3 style="margin-top:12px">记录里的 output_text</h3>
+<pre>（无记录）</pre>
+</details><details><summary>ready-control / console
+— summary · HTTP 200
+· 206 字</summary>
+<table><tbody>
+<tr><th style="width:190px">发送时模型状态</th><td><code>{&quot;loaded&quot;: true, &quot;operation&quot;: null, &quot;loaded_at&quot;: 1793471433.9369555, &quot;load_error&quot;: null, &quot;pid&quot;: 2635574, &quot;port&quot;: 46155}</code></td></tr>
+<tr><th>实际延迟 / 窗口内偏移</th><td><code>65.944s after
+load POST ·  ms after window opened ·
+ ms after it closed</code></td></tr>
+<tr><th>HTTP / finish_reason</th><td><code>200 /
+length</code></td></tr>
+<tr><th>token (prompt/completion/cached)</th><td><code>266 /
+128 / 256</code></td></tr>
+<tr><th>错误</th><td><code>—</code></td></tr>
+<tr><th>错误帧</th><td><code>[]</code></td></tr>
+<tr><th>U+FFFD 位置</th><td><code>[]</code></td></tr>
+<tr><th>推理记录</th><td><code>null</code></td></tr>
+</tbody></table>
+<h3 style="margin-top:12px">输出全文</h3>
+<pre>这篇文章主要讲述了一起因使用餐厅免费围裙而引发的尴尬误会，具体内容总结如下：
+
+1.  **事件起因**：两位女生在吃牛油火锅时，为了防油溅弄脏自己得体的抹胸连衣裙，顺手拿起了餐厅提供的免费大版型围裙穿上。
+2.  **误会产生**：由于围裙版型过大且上沿位置过高，完全遮挡了抹胸裙的上半部分，导致视觉上只露出肩膀和脖颈，给旁人造成了“未穿衣服”的错觉。
+3.  **现场反应**：其他食客投来异样目光并私下议论</pre>
+<h3 style="margin-top:12px">记录里的 output_text</h3>
+<pre>（无记录）</pre>
+</details><div class="card"><h3>证据清单</h3><table><tbody><tr><th style='width:220px'>证据目录</th><td><code>/data/readiness-evidence/run-20261031T182115Z-native</code></td></tr><tr><th>原始响应文件</th><td><code>raw/</code> 共 24 个</td></tr><tr><th>NDJSON 导出</th><td><code>{&#39;note&#39;: &#39;见各 run 目录的 records-export.ndjson&#39;}</code></td></tr><tr><th>SQLite 直读核对</th><td><code>{&#39;db&#39;: &#39;/data/cv84x6-readiness-v0613/state/inference_records.sqlite3&#39;, &#39;exists&#39;: True, &#39;requested&#39;: 4, &#39;found&#39;: 4, &#39;missing&#39;: []}</code></td></tr><tr><th>.bmodel</th><td><code>{&#39;path&#39;: None, &#39;md5&#39;: None, &#39;pid&#39;: None}</code></td></tr><tr><th>deb 校验</th><td><code>{}</code></td></tr><tr><th>worker 日志</th><td><code>8 个</code>（worker-delay-0p1s.log, worker-delay-15s.log, worker-delay-30s.log…）</td></tr><tr><th>服务 journal</th><td><code>8 个</code>（journal-delay-0p1s.txt, journal-delay-15s.txt, journal-delay-30s.txt…）</td></tr></tbody></table></div><div class="card"><h3>设备与环境</h3><table><tbody><tr><th style='width:200px'>hostname</th><td><code>sophon</code></td></tr><tr><th style='width:200px'>oem_sn</th><td><code>SN = HQDZCVEBFJIJA0027</code></td></tr><tr><th style='width:200px'>uname</th><td><code>Linux sophon 5.10.4-9c6431d06-sophon-custom-00610-g9c6431d06798 #1 SMP Tue Oct 27 05:11:06 CST 2026 aarch64 aarch64 aarch64 GNU/Linux</code></td></tr><tr><th style='width:200px'>uptime</th><td><code>02:21:15 up 18:52,  0 users,  load average: 0.43, 0.32, 0.77</code></td></tr><tr><th style='width:200px'>date_utc</th><td><code>Sat Oct 31 18:21:15 UTC 2026</code></td></tr><tr><th style='width:200px'>meminfo_head</th><td><code>MemTotal:        3995000 kB
+MemFree:          301380 kB
+MemAvailable:    3145932 kB</code></td></tr><tr><th style='width:200px'>free_m</th><td><code>total        used        free      shared  buff/cache   available
+Mem:            3901         398         294           2        3209        3071
+Swap:              0           0           0</code></td></tr><tr><th style='width:200px'>df_data</th><td><code>Filesystem      Size  Used Avail Use% Mounted on
+/dev/mmcblk0p6   46G   39G  6.4G  86% /data</code></td></tr><tr><th style='width:200px'>df_root</th><td><code>Filesystem      Size  Used Avail Use% Mounted on
+overlay         7.8G  880M  6.6G  12% /</code></td></tr><tr><th style='width:200px'>installed_version</th><td><code>0.6.13</code></td></tr><tr><th style='width:200px'>installed_commit</th><td><code>d63c17a4a4b09ce73641e9b01aeb27a3b5c70285</code></td></tr><tr><th style='width:200px'>service_unit</th><td><code>ExecMainPID=2614036
+ActiveState=active
+SubState=running</code></td></tr><tr><th style='width:200px'>dmesg_vpp</th><td><code>[    7.254929] soc mode: vppreserved_addr = 0x17e0a00000, vppreserved_size=0x1f400000
+[    8.842099] bm-tpu 20000000.bmtpu: TPU Shared Memory Final: phys=0x1080000000, size=1048576 (4KB aligned)</code></td></tr><tr><th style='width:200px'>python</th><td><code>3.10.12</code></td></tr><tr><th>dmesg NPU 错误</th><td><code>[]</code></td></tr></tbody></table></div><div class="card"><h3>局限与不声称的事</h3><ul>
+<li><b>模式</b>：<b>原生模式</b>：直接打 v0.6.13 发布包，服务端没有任何改动或人造延迟。窗口宽度完全由服务自身决定；因此 <code>edge</code> 时机能否命中取决于一次 admin 轮询能否落进那个窗口，未命中的行在表中如实标注为「窗口内=否」。</li>
+<li><b>样本量</b>：每个时机每个接口只发一次请求。这不是统计意义上的采样，
+而是「该时机下这一次发生了什么」的事实记录。多次重复会占用数十小时的设备时间。</li>
+<li><b>时机与阶段的关系</b>：目标延迟只是「请求发出的时刻」，不是「模型处于哪个初始化阶段」。
+真实阶段由表中「发送时模型状态」与「就绪差」说明，报告不把延迟名称当成阶段名称。</li>
+<li><b>轮询分辨率</b>：`edge` 时机依赖对 `/api/models` 的轮询，分辨率受 admin GET 往返时间限制。
+观测到的窗口宽度写在「每次加载的时序采样」表里；如果窗口比一次轮询还窄，
+报告会明说「从未观测到」，而不是假装命中。</li>
+<li><b>复现边界</b>：现场异常发生在另一台设备的 v0.6.12 上，且当时没有留下任何请求/回复内容。
+本报告测的是同一代码路径在 v0.6.13 上的行为，不等于复现了那一台设备的那一次。</li>
+<li><b>解码缺陷</b>：U+FFFD 是已知的独立缺陷（MYS-2510/MYS-2520），已单列，
+不参与加载竞态的判定。</li>
+</ul></div></main><footer>
+单文件自包含报告：无外部 CSS/JS/字体/图片引用。所有模型输出均经 HTML 转义。
+本文件不含任何 API key、cookie 或 admin 密码。
+</footer><script>
+(function(){
+  var q=document.getElementById('q'), fc=document.getElementById('fc'),
+      table=document.getElementById('allrows'), cnt=document.getElementById('cnt');
+  if(!table) return;
+  var rows=Array.prototype.slice.call(table.tBodies[0].rows);
+  function apply(){
+    var needle=(q.value||'').toLowerCase(), cl=fc.value, shown=0;
+    rows.forEach(function(tr){
+      var text=tr.textContent.toLowerCase();
+      var ok=(!needle||text.indexOf(needle)>=0)&&(!cl||tr.dataset.class===cl);
+      tr.style.display=ok?'':'none'; if(ok) shown++;
+    });
+    cnt.textContent=shown+' / '+rows.length+' 行';
+  }
+  q.addEventListener('input',apply); fc.addEventListener('change',apply); apply();
+})();
+</script></body></html>

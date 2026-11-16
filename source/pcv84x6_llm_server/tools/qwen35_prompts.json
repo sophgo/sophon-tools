@@ -1,0 +1,55 @@
+[
+ {
+  "id": "zh-explain",
+  "text": "用三句话解释什么是混合专家模型（MoE），以及它和稠密模型在推理成本上的区别。"
+ },
+ {
+  "id": "zh-poem",
+  "text": "写一首四句的五言绝句，主题是秋天的山寺。只写诗，不要解释。"
+ },
+ {
+  "id": "zh-code",
+  "text": "用 Python 写一个函数 merge_intervals(intervals)，合并所有重叠区间并返回按起点排序的结果。只给代码。"
+ },
+ {
+  "id": "zh-math",
+  "text": "一个水池有两个进水管和一个出水管。甲管单独注满需要 6 小时，乙管需要 4 小时，出水管排空满池需要 12 小时。三管同时打开，多少小时注满？给出计算过程。"
+ },
+ {
+  "id": "zh-table",
+  "text": "把下面的数据整理成 Markdown 表格，列为：城市、最高气温、最低气温。北京 32/21，上海 29/24，广州 34/26，成都 27/19。"
+ },
+ {
+  "id": "en-explain",
+  "text": "Explain in three sentences why KV cache memory grows linearly with sequence length, and name one technique that reduces it."
+ },
+ {
+  "id": "en-code",
+  "text": "Write a C function that reverses a singly linked list in place. Give the struct definition and the function only."
+ },
+ {
+  "id": "en-list",
+  "text": "List exactly five differences between TCP and UDP, one short sentence each, numbered 1 to 5."
+ },
+ {
+  "id": "en-json",
+  "text": "Return a JSON object describing a book with fields title, author, year and tags (an array of three strings). Output JSON only."
+ },
+ {
+  "id": "zh-json",
+  "text": "把这句话转成 JSON：张伟，男，1990 年出生，职业是软件工程师。字段用英文，输出 JSON 即可。"
+ },
+ {
+  "id": "zh-cot",
+  "text": "小明有 15 个苹果，给了小红三分之一，又买了 8 个，然后吃掉 2 个。他现在有几个苹果？先写算式再给答案。"
+ },
+ {
+  "id": "mix-long",
+  "text": "Read the following and answer in Chinese: The transformer architecture replaced recurrence with self-attention, which lets every position attend to every other in one layer. 这句话说的核心变化是什么？它对长文本推理有什么影响？"
+ },
+ {
+  "id": "zh-image",
+  "text": "<image>\n请描述这张图片的内容，包括主要物体和它们的位置关系。",
+  "image": "test.jpg"
+ }
+]

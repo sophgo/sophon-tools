@@ -1,5 +1,6 @@
 # Distribution / packaging
 build/
+!source/pcv84x6_llm_server/build/
 build_soc/
 data/
 images/

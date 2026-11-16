@@ -1,0 +1,26 @@
+=== decode_bench cross-check: real shipped engine, single-stream baseline ===
+# Not part of board_2026-10-29.log: collected earlier in the same session
+# (~12:26 CST), before the sibling task MYS-2468 (decode quantum A/B) started
+# its engine.worker and took the TPU. Reproduced here verbatim so the
+# cross-check in docs/bmrt-queue-depth.md section 2.3 is traceable.
+#
+# lib  = /opt/sophgo/cv84x6_llm_server/lib/libcv84x6_llm.so  (the shipped .so,
+#        not a probe build -- so these numbers describe the released engine)
+# tok  = /opt/sophgo/cv84x6_llm_server/model-config/qwen3_5/tokenizer.json
+# prompt "What is the capital of France?" padded to 64 tokens, decode 64, 2 runs
+
+[engine] FA decode windows: 131072/65536/32768/16384/8192/4096/2048
+[engine] linear state in place: conv 30/30, rec 0/0
+[engine] layers=40 seq=131072 max_input=2048 hidden=2048 kv_bytes=1024 dynamic=1 prefill_mask=0 lm_topk=1 greedy=0 vit=1(2304 patches) history=1
+lib=/opt/sophgo/cv84x6_llm_server/lib/libcv84x6_llm.so layers=40 ctx=131072 max_input=2048 history=1 prompt_tokens=69
+first_token=760 history=69
+warmup 1: 29.89 tok/s
+run 1: 64 tokens in 2.141s = 29.89 tok/s
+run 2: 64 tokens in 2.140s = 29.91 tok/s
+RESULT decode_tps_mean=29.90 spread=29.89-29.91 n_runs=2
+
+# 29.90 tok/s = 33.4 ms/token. token_shape measured 34.35 ms/token for the same
+# 40-graph + lm_head shape at the same decode stage (2048 window), so the probe
+# tracks the shipped engine to ~1 ms. That ~1 ms gap is the host-side work a
+# probe does not do: mask/position upload, token readback, sampling, scheduling
+# (MYS-2457 measured those at ~0.05 ms, the rest is Python/dispatch overhead).

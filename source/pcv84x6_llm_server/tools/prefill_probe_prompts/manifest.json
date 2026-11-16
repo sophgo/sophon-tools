@@ -1,0 +1,89 @@
+{
+  "corpus": "corpus.txt",
+  "files": {
+    "delta-16.txt": {
+      "kind": "extend",
+      "sha256": "0bc2437c9e5c533f77f5edc041f696f9df3e782437d47b206cce88a1389809ff",
+      "source": "leading tokens of the next turn's template chunk; delta-48 is the whole chunk",
+      "tokens": 16
+    },
+    "delta-17.txt": {
+      "kind": "extend",
+      "sha256": "44e9ddcfa9b403264571d9ab5b342c90a1a7d1893dd5723497fcfc730c4352e7",
+      "source": "leading tokens of the next turn's template chunk; delta-48 is the whole chunk",
+      "tokens": 17
+    },
+    "delta-32.txt": {
+      "kind": "extend",
+      "sha256": "f560289272d10b1736744eeda85e541d9d2ef44d813883e2a170dbe6c50fa7c0",
+      "source": "leading tokens of the next turn's template chunk; delta-48 is the whole chunk",
+      "tokens": 32
+    },
+    "delta-33.txt": {
+      "kind": "extend",
+      "sha256": "533e81b6a23a157629729982e4471705dae7352c2eb1f239bd57d262e8fc9840",
+      "source": "leading tokens of the next turn's template chunk; delta-48 is the whole chunk",
+      "tokens": 33
+    },
+    "delta-48.txt": {
+      "kind": "extend",
+      "sha256": "9a17bf8e3675d1c2e197442ee567ab8e1b231d7325a8318f2be59f1cdbf717ed",
+      "source": "leading tokens of the next turn's template chunk; delta-48 is the whole chunk",
+      "tokens": 48
+    },
+    "delta-5.txt": {
+      "kind": "extend",
+      "sha256": "fef7dcaca04a05456b938ba3fa69b1749263e5d83608f7459679d4df335c729e",
+      "source": "leading tokens of the next turn's template chunk; delta-48 is the whole chunk",
+      "tokens": 5
+    },
+    "fresh-200.txt": {
+      "kind": "fresh",
+      "sha256": "3bc5179a9590dbdcf408050622b270d89684b7790cecd97f548530f93e1a7500",
+      "source": "one user turn rendered by the chat template, ending at the generating header",
+      "tokens": 200
+    },
+    "fresh-63.txt": {
+      "kind": "fresh",
+      "sha256": "35d570ed274382c0104cbbcbbc69d8b0904bde417564ca774b412e026047f27f",
+      "source": "one user turn rendered by the chat template, ending at the generating header",
+      "tokens": 63
+    },
+    "turn-1000.txt": {
+      "kind": "history",
+      "sha256": "2e973b01bf4cb3dd384fa9cfe766af352273ae35f573bd0bb6f959d2f0fd629e",
+      "source": "same shape as fresh, used as the history of an extend run",
+      "tokens": 1000
+    },
+    "turn-2048.txt": {
+      "kind": "history",
+      "sha256": "cf59745449a15b7e1bf167f5bce46a1d5093950de87307dd717ad1d88d5904e8",
+      "source": "same shape as fresh, used as the history of an extend run",
+      "tokens": 2048
+    },
+    "turn-8192.txt": {
+      "kind": "history",
+      "sha256": "c0d8e49f3b02277f4cf61cb94605db7599996e032fd8d861a816372a5b3136a0",
+      "source": "same shape as fresh, used as the history of an extend run",
+      "tokens": 8192
+    }
+  },
+  "header_ids": [
+    248045,
+    74455,
+    198,
+    248068,
+    271,
+    248069,
+    271
+  ],
+  "next_question": "Thanks. Can you say a little more about the third point?",
+  "next_turn_ids": [
+    248046,
+    198,
+    248045,
+    846,
+    198
+  ],
+  "question": "Please summarise the following notes in one paragraph."
+}

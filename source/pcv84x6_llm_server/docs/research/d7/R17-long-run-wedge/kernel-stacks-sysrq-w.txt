@@ -1,0 +1,57 @@
+[ 8405.541841] sysrq: Show Blocked State
+[ 8405.545682] task:bm_mbox         state:D stack:14416 pid:  509 ppid:     2 flags:0x00000008
+[ 8405.545693] Call trace:
+[ 8405.545703]  __switch_to+0xb0/0xf4
+[ 8405.545710]  __schedule+0x30c/0x760
+[ 8405.545713]  schedule+0x70/0x104
+[ 8405.545716]  schedule_hrtimeout_range_clock+0xa4/0x160
+[ 8405.545718]  schedule_hrtimeout_range+0x14/0x20
+[ 8405.545721]  usleep_range+0x84/0xc0
+[ 8405.545748]  mbox_thread_fn+0x4c/0x84 [bmtpu]
+[ 8405.545752]  kthread+0x148/0x14c
+[ 8405.545755]  ret_from_fork+0x10/0x34
+[ 8405.545806] task:python3.10      state:D stack:13328 pid: 6071 ppid:  1296 flags:0x00000004
+[ 8405.545814] Call trace:
+[ 8405.545817]  __switch_to+0xb0/0xf4
+[ 8405.545820]  __schedule+0x30c/0x760
+[ 8405.545823]  schedule+0x70/0x104
+[ 8405.545825]  schedule_timeout+0x80/0xf0
+[ 8405.545828]  wait_for_completion_timeout+0xa4/0x130
+[ 8405.545838]  bmdrv_thread_sync_api+0x240/0x560 [bmtpu]
+[ 8405.545848]  bm_ioctl+0xc84/0x1c5c [bmtpu]
+[ 8405.545857]  bmdev_ioctl+0x54/0xd0 [bmtpu]
+[ 8405.545863]  __arm64_sys_ioctl+0x46c/0xbd0
+[ 8405.545867]  do_el0_svc+0xc0/0x210
+[ 8405.545870]  el0_svc+0x14/0x20
+[ 8405.545873]  el0_sync_handler+0xa4/0x140
+[ 8405.545875]  el0_sync+0x174/0x180
+[ 8405.545881] task:python3.10      state:D stack:13344 pid: 6241 ppid:  1296 flags:0x00000004
+[ 8405.545888] Call trace:
+[ 8405.545891]  __switch_to+0xb0/0xf4
+[ 8405.545894]  __schedule+0x30c/0x760
+[ 8405.545897]  schedule+0x70/0x104
+[ 8405.545899]  schedule_timeout+0x80/0xf0
+[ 8405.545902]  wait_for_completion_timeout+0xa4/0x130
+[ 8405.545911]  bmdrv_thread_sync_api+0x240/0x560 [bmtpu]
+[ 8405.545920]  bm_ioctl+0xc84/0x1c5c [bmtpu]
+[ 8405.545930]  bmdev_ioctl+0x54/0xd0 [bmtpu]
+[ 8405.545933]  __arm64_sys_ioctl+0x46c/0xbd0
+[ 8405.545935]  do_el0_svc+0xc0/0x210
+[ 8405.545938]  el0_svc+0x14/0x20
+[ 8405.545941]  el0_sync_handler+0xa4/0x140
+[ 8405.545943]  el0_sync+0x174/0x180
+[ 8405.545949] task:python3.10      state:D stack:13392 pid: 6265 ppid:  1296 flags:0x00000004
+[ 8405.545957] Call trace:
+[ 8405.545959]  __switch_to+0xb0/0xf4
+[ 8405.545962]  __schedule+0x30c/0x760
+[ 8405.545965]  schedule+0x70/0x104
+[ 8405.545967]  schedule_timeout+0x80/0xf0
+[ 8405.545970]  wait_for_completion_timeout+0xa4/0x130
+[ 8405.545980]  bmdrv_thread_sync_api+0x240/0x560 [bmtpu]
+[ 8405.545990]  bm_ioctl+0xc84/0x1c5c [bmtpu]
+[ 8405.545999]  bmdev_ioctl+0x54/0xd0 [bmtpu]
+[ 8405.546002]  __arm64_sys_ioctl+0x46c/0xbd0
+[ 8405.546005]  do_el0_svc+0xc0/0x210
+[ 8405.546007]  el0_svc+0x14/0x20
+[ 8405.546010]  el0_sync_handler+0xa4/0x140
+[ 8405.546013]  el0_sync+0x174/0x180

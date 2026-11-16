@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MYS-2502 旧版 v0.6.13 模型加载竞态多时机复现报告</title>
+<style>
+:root{--bg:#0f1115;--panel:#171a21;--panel2:#1e222b;--line:#2b3140;--fg:#e6e9ef;
+--dim:#9aa4b2;--accent:#4ea1ff;--ok:#33c48d;--warn:#e8b13a;--bad:#f2585b;--mono:ui-monospace,
+SFMono-Regular,Menlo,Consolas,monospace}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.65 -apple-system,
+BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC","Microsoft YaHei",sans-serif}
+header{padding:28px 32px 18px;border-bottom:1px solid var(--line);background:var(--panel)}
+h1{margin:0 0 6px;font-size:22px;letter-spacing:.3px}
+h2{margin:34px 0 12px;font-size:18px;border-left:4px solid var(--accent);padding-left:10px}
+h3{margin:22px 0 8px;font-size:15px;color:var(--dim);font-weight:600}
+main{padding:0 32px 80px;max-width:1500px}
+.sub{color:var(--dim);font-size:13px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 18px;
+margin:14px 0}
+.grid{display:grid;gap:12px}
+.g2{grid-template-columns:repeat(auto-fit,minmax(340px,1fr))}
+.g3{grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}
+.kpi{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+.kpi .v{font-size:26px;font-weight:700;font-family:var(--mono)}
+.kpi .k{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.6px}
+.kpi.ok .v{color:var(--ok)}.kpi.bad .v{color:var(--bad)}.kpi.warn .v{color:var(--warn)}
+table{border-collapse:collapse;width:100%;font-size:13px;margin:8px 0}
+th,td{border:1px solid var(--line);padding:6px 9px;text-align:left;vertical-align:top}
+th{background:var(--panel2);color:var(--dim);font-weight:600;position:sticky;top:0;z-index:1}
+tbody tr:nth-child(2n){background:rgba(255,255,255,.017)}
+code,.mono{font-family:var(--mono);font-size:12px}
+pre{background:#0b0d11;border:1px solid var(--line);border-radius:8px;padding:12px;
+overflow:auto;max-height:420px;font-family:var(--mono);font-size:12px;white-space:pre-wrap;
+word-break:break-word}
+.tag{display:inline-block;padding:1px 7px;border-radius:999px;font-size:11px;font-weight:600;
+font-family:var(--mono)}
+.t-refused{background:rgba(51,196,141,.16);color:var(--ok)}
+.t-summary{background:rgba(78,161,255,.16);color:var(--accent)}
+.t-summary_suspect{background:rgba(232,177,58,.18);color:var(--warn)}
+.t-garbage{background:rgba(242,88,91,.18);color:var(--bad)}
+.t-empty{background:rgba(242,88,91,.18);color:var(--bad)}
+.t-hang{background:rgba(242,88,91,.26);color:var(--bad)}
+.t-http_error{background:rgba(232,177,58,.18);color:var(--warn)}
+.note{border-left:3px solid var(--accent);background:var(--panel2);padding:10px 14px;
+border-radius:0 8px 8px 0;margin:10px 0}
+.warnbox{border-left:3px solid var(--warn);background:rgba(232,177,58,.07);padding:10px 14px;
+border-radius:0 8px 8px 0;margin:10px 0}
+.badbox{border-left:3px solid var(--bad);background:rgba(242,88,91,.08);padding:10px 14px;
+border-radius:0 8px 8px 0;margin:10px 0}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 0}
+input[type=search],select{background:var(--panel2);border:1px solid var(--line);
+color:var(--fg);border-radius:7px;padding:6px 10px;font-size:13px}
+.chart{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px;
+overflow-x:auto}
+.bar{display:inline-block;height:9px;border-radius:3px;vertical-align:middle}
+.scroll{max-height:620px;overflow:auto;border:1px solid var(--line);border-radius:8px}
+details{background:var(--panel2);border:1px solid var(--line);border-radius:8px;
+padding:8px 12px;margin:8px 0}
+summary{cursor:pointer;font-weight:600}
+footer{color:var(--dim);font-size:12px;padding:20px 32px;border-top:1px solid var(--line)}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin:12px 0}
+.tabs button{background:var(--panel2);border:1px solid var(--line);color:var(--dim);
+padding:7px 14px;border-radius:8px;cursor:pointer;font-size:13px}
+.tabs button[aria-selected=true]{background:rgba(78,161,255,.16);color:var(--accent);
+border-color:var(--accent)}
+.tabpane[hidden]{display:none}
+</style></head><body>
+<header>
+<h1>MYS-2502 · 旧版 v0.6.13「模型未完全加载即推理」多时机复现</h1>
+<div class="sub">设备 <code>.151</code> · SN <code>SN = HQDZCVEBFJIJA0027</code> ·
+模型 <code>qwen3.6-35b-a3b-128k</code> · 模式 <b>instrumented</b> ·
+生成于 2026-10-31T18:35:27.485Z</div>
+<div class="sub">固定输入 444 字，
+SHA-256 <code>ac9764aab4bf94329051348ab1671c630d366dab5301eb6653d00018f9667631</code></div>
+</header><main><h2>① 整体结论与复现答案</h2>
+<div class="warnbox">
+<b>复现判定：</b>窗口内出现被放行的请求，但输出看起来是正常摘要；未能复现现场异常，只能说明该时机下没出问题。
+</div>
+<div class="grid g3">
+<div class="kpi "><div class="k">加载窗口内请求数</div><div class="v">6</div></div>
+<div class="kpi ok"><div class="k">窗口内被拒绝 (409)</div><div class="v">3</div></div>
+<div class="kpi bad"><div class="k">窗口内被放行</div><div class="v">3</div></div>
+<div class="kpi ok"><div class="k">窗口内异常/空/挂起</div><div class="v">0</div></div>
+<div class="kpi "><div class="k">ready 对照组请求数</div><div class="v">3</div></div>
+<div class="kpi ok"><div class="k">TPU hang (dmesg)</div><div class="v">否</div></div>
+</div>
+<div class="card"><h3>窗口内 / 窗口后 逐分类计数</h3>
+<table><thead><tr><th>分类</th><th>含义</th><th>窗口内</th><th>窗口后（对照）</th></tr></thead>
+<tbody><tr><td><span class="tag t-refused">refused</span></td><td>HTTP 409，服务明确拒绝（模型未加载）</td><td><b>3</b></td><td>0</td></tr><tr><td><span class="tag t-summary">summary</span></td><td>2xx，输出是正常摘要</td><td><b>3</b></td><td>3</td></tr><tr><td><span class="tag t-summary_suspect">summary_suspect</span></td><td>2xx，摘要形但含 U+FFFD（已知解码缺陷）</td><td><b>0</b></td><td>0</td></tr><tr><td><span class="tag t-garbage">garbage</span></td><td>2xx，输出不像摘要（退化/复读/碎片）</td><td><b>0</b></td><td>0</td></tr><tr><td><span class="tag t-empty">empty</span></td><td>2xx，无任何输出文本</td><td><b>0</b></td><td>0</td></tr><tr><td><span class="tag t-hang">hang</span></td><td>超时或连接中断，无响应</td><td><b>0</b></td><td>0</td></tr><tr><td><span class="tag t-http_error">http_error</span></td><td>其他非 2xx（500/503/429/连接被拒）</td><td><b>0</b></td><td>0</td></tr><tr><td colspan="2"><b>合计</b></td>
+<td><b>6</b></td><td><b>3</b></td></tr>
+</tbody></table></div><div class="card"><h3>直白回答（本模式）</h3><p>窗口内 3 次请求被放行，输出都是正常摘要。被放行这一点本身是旧版准入缺陷的实证，但这几次没有产生异常输出——异常输出依赖更细的时序，本轮时机未命中。</p></div><div class="card"><h3>窗口内每一次请求的完整结果</h3>
+<p class="sub">按时间排序。「距 load POST」是请求发出时刻相对 load 请求发出的秒数，
+不是目标延迟——两者不同正是这张表的意义。「就绪差」为负表示请求在服务发布
+loaded 之前发出。</p>
+<div class="scroll"><table><thead><tr>
+<th>时机</th><th>接口</th><th>目标延迟</th><th>距 load POST</th><th>发送时状态</th>
+<th>发送时 loaded_at?</th><th>就绪差(s)</th><th>HTTP</th><th>分类</th><th>输出字数</th>
+<th>U+FFFD</th><th>记录</th><th>说明</th></tr></thead><tbody><tr>
+<td><code>edge-settle</code></td><td>stream</td>
+<td>ready</td>
+<td><code>66.576</code></td>
+<td><code>True/loading</code></td>
+<td><code>2026-10-31T18:32:30.519Z</code></td>
+<td><code>-0.034</code></td>
+<td>200</td><td><span class="tag t-summary">summary</span></td>
+<td>206</td><td>0</td>
+<td>有</td>
+<td class="sub">topical words: 火锅, 围裙, 女生, 尴尬, 误会, 遮挡</td></tr><tr>
+<td><code>edge-settle</code></td><td>nonstream</td>
+<td>ready</td>
+<td><code>66.574</code></td>
+<td><code>True/loading</code></td>
+<td><code>2026-10-31T18:32:30.519Z</code></td>
+<td><code>-0.032</code></td>
+<td>200</td><td><span class="tag t-summary">summary</span></td>
+<td>206</td><td>0</td>
+<td>有</td>
+<td class="sub">topical words: 火锅, 围裙, 女生, 尴尬, 误会, 遮挡</td></tr><tr>
+<td><code>edge-settle</code></td><td>console</td>
+<td>ready</td>
+<td><code>66.604</code></td>
+<td><code>True/loading</code></td>
+<td><code>2026-10-31T18:32:30.519Z</code></td>
+<td><code>-0.062</code></td>
+<td>200</td><td><span class="tag t-summary">summary</span></td>
+<td>206</td><td>0</td>
+<td>有</td>
+<td class="sub">topical words: 火锅, 围裙, 女生, 尴尬, 误会, 遮挡</td></tr><tr>
+<td><code>delay-5s</code></td><td>stream</td>
+<td>5.0</td>
+<td><code>5.034</code></td>
+<td><code>False/loading</code></td>
+<td><code>—</code></td>
+<td><code>60.863</code></td>
+<td>409</td><td><span class="tag t-refused">refused</span></td>
+<td>0</td><td>0</td>
+<td>—</td>
+<td class="sub">HTTP 409: {&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</td></tr><tr>
+<td><code>delay-5s</code></td><td>nonstream</td>
+<td>5.0</td>
+<td><code>5.022</code></td>
+<td><code>False/loading</code></td>
+<td><code>—</code></td>
+<td><code>60.875</code></td>
+<td>409</td><td><span class="tag t-refused">refused</span></td>
+<td>0</td><td>0</td>
+<td>—</td>
+<td class="sub">HTTP 409: {&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</td></tr><tr>
+<td><code>delay-5s</code></td><td>console</td>
+<td>5.0</td>
+<td><code>5.039</code></td>
+<td><code>False/loading</code></td>
+<td><code>—</code></td>
+<td><code>60.858</code></td>
+<td>409</td><td><span class="tag t-refused">refused</span></td>
+<td>0</td><td>0</td>
+<td>—</td>
+<td class="sub">HTTP 409: {&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</td></tr></tbody></table></div></div><h2>② 每次实验时间线</h2>
+<p class="sub">一次实验 = 一次完整 unload → load → 在指定延迟发送请求。
+下表把每次实验与它内部的每次请求按真实时间排在一起。</p>
+<div class="scroll"><table><thead><tr><th>时间 (UTC)</th><th>对象</th>
+<th>实际发生</th><th>错误</th></tr></thead><tbody><tr><td><code>2026-10-31T18:31:22.909Z</code></td><td><code>edge-settle</code></td><td>unload=200 load=200 in 71.56s loaded_at=2026-10-31T18:32:30.519Z</td><td class='sub'></td></tr><tr><td><code>2026-10-31T18:32:30.551Z</code></td><td><code>edge-settle/nonstream</code></td><td>delay=66.57s HTTP=200 summary chars=206 state=True/loading</td><td class='sub'></td></tr><tr><td><code>2026-10-31T18:32:30.553Z</code></td><td><code>edge-settle/stream</code></td><td>delay=66.58s HTTP=200 summary chars=206 state=True/loading</td><td class='sub'></td></tr><tr><td><code>2026-10-31T18:32:30.581Z</code></td><td><code>edge-settle/console</code></td><td>delay=66.6s HTTP=200 summary chars=206 state=True/loading</td><td class='sub'></td></tr><tr><td><code>2026-10-31T18:32:46.847Z</code></td><td><code>ready-control</code></td><td>unload=200 load=200 in 70.81s loaded_at=2026-10-31T18:33:53.834Z</td><td class='sub'></td></tr><tr><td><code>2026-10-31T18:33:58.866Z</code></td><td><code>ready-control/stream</code></td><td>delay=70.84s HTTP=200 summary chars=206 state=True/None</td><td class='sub'></td></tr><tr><td><code>2026-10-31T18:33:58.869Z</code></td><td><code>ready-control/nonstream</code></td><td>delay=70.84s HTTP=200 summary chars=206 state=True/None</td><td class='sub'></td></tr><tr><td><code>2026-10-31T18:33:58.879Z</code></td><td><code>ready-control/console</code></td><td>delay=70.85s HTTP=200 summary chars=206 state=True/None</td><td class='sub'></td></tr><tr><td><code>2026-10-31T18:34:15.119Z</code></td><td><code>delay-5s</code></td><td>unload=200 load=200 in 70.9s loaded_at=2026-10-31T18:35:22.202Z</td><td class='sub'></td></tr><tr><td><code>2026-10-31T18:34:21.327Z</code></td><td><code>delay-5s/nonstream</code></td><td>delay=5.02s HTTP=409 refused chars=0 state=False/loading</td><td class='sub'>{&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</td></tr><tr><td><code>2026-10-31T18:34:21.339Z</code></td><td><code>delay-5s/stream</code></td><td>delay=5.03s HTTP=409 refused chars=0 state=False/loading</td><td class='sub'>{&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</td></tr><tr><td><code>2026-10-31T18:34:21.344Z</code></td><td><code>delay-5s/console</code></td><td>delay=5.04s HTTP=409 refused chars=0 state=False/loading</td><td class='sub'>{&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</td></tr></tbody></table></div><h3>每次加载的时序采样</h3><div class="scroll"><table><thead><tr><th>时机</th><th>类型</th><th>目标延迟(s)</th><th>实际延迟(s)</th><th>load HTTP</th><th>加载耗时(s)</th><th>观测到的窗口宽度(s)</th><th>发送时 loaded/operation</th><th>就绪差(s)</th><th>新 worker 推理次数</th><th>记录 Δ</th><th>备注</th></tr></thead><tbody><tr><td><code>edge-settle</code></td>
+<td>命中 published-not-settled</td>
+<td>ready</td>
+<td><code>[66.576, 66.574, 66.604]</code></td>
+<td>200</td><td>71.56</td>
+<td><code>5.01</code></td>
+<td><code>[&#39;True/loading&#39;, &#39;True/loading&#39;, &#39;True/loading&#39;]</code></td>
+<td><code>[-0.034, -0.032, -0.062]</code></td>
+<td>3</td><td>3</td>
+<td class="sub"></td>
+</tr><tr><td><code>ready-control</code></td>
+<td>就绪后对照</td>
+<td>ready</td>
+<td><code>[70.838, 70.84, 70.85]</code></td>
+<td>200</td><td>70.81</td>
+<td><code>未观测到</code></td>
+<td><code>[&#39;True/None&#39;, &#39;True/None&#39;, &#39;True/None&#39;]</code></td>
+<td><code>[-5.033, -5.035, -5.045]</code></td>
+<td>3</td><td>3</td>
+<td class="sub"></td>
+</tr><tr><td><code>delay-5s</code></td>
+<td>按秒数猜</td>
+<td>5.0</td>
+<td><code>[5.034, 5.022, 5.039]</code></td>
+<td>200</td><td>70.9</td>
+<td><code>未观测到</code></td>
+<td><code>[&#39;False/loading&#39;, &#39;False/loading&#39;, &#39;False/loading&#39;]</code></td>
+<td><code>[60.863, 60.875, 60.858]</code></td>
+<td>0</td><td>0</td>
+<td class="sub"></td>
+</tr></tbody></table></div><h2>③ 加载时机与结果</h2><div class="card"><h3>每个时机的延迟与结果</h3><p class="sub">横条长度 = 实际延迟（相对 load POST）；右侧是该时机的三个接口结果。</p><div style="margin:9px 0">
+<div class="mono" style="font-size:12px;color:var(--dim)">
+edge-settle · 目标 ready 后s
+· 实际 66.6s · 加载 71.56s</div>
+<span class="bar" style="width:94.0%;background:var(--accent)"></span>
+<div style="margin-top:3px"><span class="tag t-summary">summary</span> <span class="tag t-summary">summary</span> <span class="tag t-summary">summary</span></div></div><div style="margin:9px 0">
+<div class="mono" style="font-size:12px;color:var(--dim)">
+ready-control · 目标 ready 后s
+· 实际 70.85s · 加载 70.81s</div>
+<span class="bar" style="width:100.0%;background:var(--accent)"></span>
+<div style="margin-top:3px"><span class="tag t-summary">summary</span> <span class="tag t-summary">summary</span> <span class="tag t-summary">summary</span></div></div><div style="margin:9px 0">
+<div class="mono" style="font-size:12px;color:var(--dim)">
+delay-5s · 目标 5.0s
+· 实际 5.04s · 加载 70.9s</div>
+<span class="bar" style="width:7.1%;background:var(--ok)"></span>
+<div style="margin-top:3px"><span class="tag t-refused">refused</span> <span class="tag t-refused">refused</span> <span class="tag t-refused">refused</span></div></div></div><div class="card"><h3>逐接口的窗口内结果</h3><table><thead><tr><th>接口</th><th>窗口内尝试</th><th>409</th><th>被放行</th><th>挂起</th><th>延迟中位数(s)</th><th>TTFT 中位数(s)</th><th>对照组尝试</th><th>对照组正常摘要</th></tr></thead><tbody><tr><td><code>stream</code></td>
+<td>2</td><td>1</td><td>1</td>
+<td>0</td>
+<td>5.735</td>
+<td>2.487</td>
+<td>1</td><td>1</td>
+</tr><tr><td><code>nonstream</code></td>
+<td>2</td><td>1</td><td>1</td>
+<td>0</td>
+<td>5.595</td>
+<td>—</td>
+<td>1</td><td>1</td>
+</tr><tr><td><code>console</code></td>
+<td>2</td><td>1</td><td>1</td>
+<td>0</td>
+<td>8.06</td>
+<td>11.717</td>
+<td>1</td><td>1</td>
+</tr></tbody></table></div><div class="card"><h3>已知解码缺陷（U+FFFD）单独统计</h3><div class="grid g3">
+<div class="kpi "><div class="k">窗口内含 U+FFFD 的行</div><div class="v">0</div></div>
+<div class="kpi "><div class="k">对照组合 U+FFFD 的行</div><div class="v">0</div></div>
+<div class="kpi "><div class="k">全部行合计</div><div class="v">0</div></div>
+</div>
+<p>v0.6.13/v0.6.14 都存在流式逐 token 解码缺陷：被拆到两个 token 的字符会输出
+<code>\ufffd</code>（证据见 MYS-2510：<code>门簪</code> → <code>门\ufffd\ufffd</code>）。
+本表把它与「加载竞态导致的异常」分开：只有当对照组的输出干净、而窗口内出现异常时，
+才可把异常归因于竞态。本轮如果两组都出现 <code>\ufffd</code>，那是既有缺陷，与加载无关。
+修复在 MYS-2520 并行进行，本任务不改产品代码。</p></div><h2>④ 完整数据、原始输出与证据</h2><div class="toolbar"><input type="search" id="q" placeholder="过滤：时机/接口/分类/HTTP…" size="34"><select id="fc"><option value="">全部分类</option><option value="refused">refused</option><option value="summary">summary</option></select><span class="sub" id="cnt"></span></div><div class="scroll"><table id="allrows"><thead><tr><th>时机</th><th>接口</th><th>窗口内</th><th>目标(s)</th><th>实际(s)</th><th>HTTP</th><th>分类</th><th>输出字数</th><th>U+FFFD</th><th>finish</th><th>prompt_tok</th><th>compl_tok</th><th>TTFT(s)</th><th>总耗时(s)</th><th>req_id</th><th>原始文件</th></tr></thead><tbody><tr data-class="summary">
+<td><code>edge-settle</code></td><td>stream</td>
+<td>是</td>
+<td>ready</td>
+<td><code>66.576</code></td>
+<td>200</td><td><span class="tag t-summary">summary</span></td>
+<td>206</td><td>0</td>
+<td>length</td><td>266</td>
+<td>128</td><td>2.487</td>
+<td>11.445</td>
+<td><code>a6ebb9b0093f4f7787db0123654e22c3</code></td>
+<td><code>edge-settle-stream-stream.sse</code></td></tr><tr data-class="summary">
+<td><code>edge-settle</code></td><td>nonstream</td>
+<td>是</td>
+<td>ready</td>
+<td><code>66.574</code></td>
+<td>200</td><td><span class="tag t-summary">summary</span></td>
+<td>206</td><td>0</td>
+<td>length</td><td>266</td>
+<td>128</td><td></td>
+<td>11.169</td>
+<td><code>9e641bb19600439283c384e3fcb84435</code></td>
+<td><code>edge-settle-nonstream-nonstream.json</code></td></tr><tr data-class="summary">
+<td><code>edge-settle</code></td><td>console</td>
+<td>是</td>
+<td>ready</td>
+<td><code>66.604</code></td>
+<td>200</td><td><span class="tag t-summary">summary</span></td>
+<td>206</td><td>0</td>
+<td>length</td><td>266</td>
+<td>128</td><td>11.717</td>
+<td>16.102</td>
+<td><code>—</code></td>
+<td><code>edge-settle-console-console.sse</code></td></tr><tr data-class="summary">
+<td><code>ready-control</code></td><td>stream</td>
+<td>否</td>
+<td>ready</td>
+<td><code>70.838</code></td>
+<td>200</td><td><span class="tag t-summary">summary</span></td>
+<td>206</td><td>0</td>
+<td>length</td><td>266</td>
+<td>128</td><td>2.184</td>
+<td>11.119</td>
+<td><code>899cfa22304c44c497b9a053eb01833d</code></td>
+<td><code>ready-control-stream-stream.sse</code></td></tr><tr data-class="summary">
+<td><code>ready-control</code></td><td>nonstream</td>
+<td>否</td>
+<td>ready</td>
+<td><code>70.84</code></td>
+<td>200</td><td><span class="tag t-summary">summary</span></td>
+<td>206</td><td>0</td>
+<td>length</td><td>266</td>
+<td>128</td><td></td>
+<td>11.407</td>
+<td><code>ba622aebe4b747bca889539e37a0d5de</code></td>
+<td><code>ready-control-nonstream-nonstream.json</code></td></tr><tr data-class="summary">
+<td><code>ready-control</code></td><td>console</td>
+<td>否</td>
+<td>ready</td>
+<td><code>70.85</code></td>
+<td>200</td><td><span class="tag t-summary">summary</span></td>
+<td>206</td><td>0</td>
+<td>length</td><td>266</td>
+<td>128</td><td>11.696</td>
+<td>16.077</td>
+<td><code>—</code></td>
+<td><code>ready-control-console-console.sse</code></td></tr><tr data-class="refused">
+<td><code>delay-5s</code></td><td>stream</td>
+<td>是</td>
+<td>5.0</td>
+<td><code>5.034</code></td>
+<td>409</td><td><span class="tag t-refused">refused</span></td>
+<td>0</td><td>0</td>
+<td></td><td></td>
+<td></td><td></td>
+<td>0.025</td>
+<td><code>—</code></td>
+<td><code>delay-5s-stream-stream.sse</code></td></tr><tr data-class="refused">
+<td><code>delay-5s</code></td><td>nonstream</td>
+<td>是</td>
+<td>5.0</td>
+<td><code>5.022</code></td>
+<td>409</td><td><span class="tag t-refused">refused</span></td>
+<td>0</td><td>0</td>
+<td></td><td></td>
+<td></td><td></td>
+<td>0.021</td>
+<td><code>—</code></td>
+<td><code>delay-5s-nonstream-nonstream.json</code></td></tr><tr data-class="refused">
+<td><code>delay-5s</code></td><td>console</td>
+<td>是</td>
+<td>5.0</td>
+<td><code>5.039</code></td>
+<td>409</td><td><span class="tag t-refused">refused</span></td>
+<td>0</td><td>0</td>
+<td></td><td></td>
+<td></td><td></td>
+<td>0.018</td>
+<td><code>—</code></td>
+<td><code>delay-5s-console-console.sse</code></td></tr></tbody></table></div><h3>每次请求的完整输出与状态</h3><details><summary>edge-settle / stream
+— summary · HTTP 200
+· 206 字</summary>
+<table><tbody>
+<tr><th style="width:190px">发送时模型状态</th><td><code>{&quot;loaded&quot;: true, &quot;operation&quot;: &quot;loading&quot;, &quot;loaded_at&quot;: 1793471550.519742, &quot;load_error&quot;: null, &quot;pid&quot;: 2641282, &quot;port&quot;: 49871}</code></td></tr>
+<tr><th>实际延迟 / 就绪差</th><td><code>66.576s /
+-0.034s</code></td></tr>
+<tr><th>HTTP / finish_reason</th><td><code>200 /
+length</code></td></tr>
+<tr><th>token (prompt/completion/cached)</th><td><code>266 /
+128 / 256</code></td></tr>
+<tr><th>错误</th><td><code>—</code></td></tr>
+<tr><th>错误帧</th><td><code>[]</code></td></tr>
+<tr><th>U+FFFD 位置</th><td><code>[]</code></td></tr>
+<tr><th>推理记录</th><td><code>{&quot;id&quot;: &quot;a6ebb9b0093f4f7787db0123654e22c3&quot;, &quot;source&quot;: &quot;/v1/chat/completions&quot;, &quot;status&quot;: &quot;ok&quot;, &quot;finish_reason&quot;: &quot;length&quot;, &quot;output_chars&quot;: 206, &quot;prompt_tokens&quot;: 266, &quot;completion_tokens&quot;: 128, &quot;decode_tps&quot;: 14.297487095077898, &quot;first_token_latency_s&quot;: 2.4353866249875864}</code></td></tr>
+</tbody></table>
+<h3 style="margin-top:12px">输出全文</h3>
+<pre>这篇文章主要讲述了一起因使用餐厅免费围裙而引发的尴尬误会，具体内容总结如下：
+
+1.  **事件起因**：两位女生在吃牛油火锅时，为了防油溅弄脏自己得体的抹胸连衣裙，顺手拿起了餐厅提供的免费大版型围裙穿上。
+2.  **误会产生**：由于围裙版型过大且上沿位置过高，完全遮挡了抹胸裙的上半部分，导致视觉上只露出肩膀和脖颈，给旁人造成了“未穿衣服”的错觉。
+3.  **现场反应**：其他食客投来异样目光并私下议论</pre>
+<h3 style="margin-top:12px">记录里的 output_text</h3>
+<pre>这篇文章主要讲述了一起因使用餐厅免费围裙而引发的尴尬误会，具体内容总结如下：
+
+1.  **事件起因**：两位女生在吃牛油火锅时，为了防油溅弄脏自己得体的抹胸连衣裙，顺手拿起了餐厅提供的免费大版型围裙穿上。
+2.  **误会产生**：由于围裙版型过大且上沿位置过高，完全遮挡了抹胸裙的上半部分，导致视觉上只露出肩膀和脖颈，给旁人造成了“未穿衣服”的错觉。
+3.  **现场反应**：其他食客投来异样目光并私下议论</pre>
+</details><details><summary>edge-settle / nonstream
+— summary · HTTP 200
+· 206 字</summary>
+<table><tbody>
+<tr><th style="width:190px">发送时模型状态</th><td><code>{&quot;loaded&quot;: true, &quot;operation&quot;: &quot;loading&quot;, &quot;loaded_at&quot;: 1793471550.519742, &quot;load_error&quot;: null, &quot;pid&quot;: 2641282, &quot;port&quot;: 49871}</code></td></tr>
+<tr><th>实际延迟 / 就绪差</th><td><code>66.574s /
+-0.032s</code></td></tr>
+<tr><th>HTTP / finish_reason</th><td><code>200 /
+length</code></td></tr>
+<tr><th>token (prompt/completion/cached)</th><td><code>266 /
+128 / </code></td></tr>
+<tr><th>错误</th><td><code>—</code></td></tr>
+<tr><th>错误帧</th><td><code>[]</code></td></tr>
+<tr><th>U+FFFD 位置</th><td><code>[]</code></td></tr>
+<tr><th>推理记录</th><td><code>{&quot;id&quot;: &quot;9e641bb19600439283c384e3fcb84435&quot;, &quot;source&quot;: &quot;/v1/chat/completions&quot;, &quot;status&quot;: &quot;ok&quot;, &quot;finish_reason&quot;: &quot;length&quot;, &quot;output_chars&quot;: 206, &quot;prompt_tokens&quot;: 266, &quot;completion_tokens&quot;: 128, &quot;decode_tps&quot;: 14.305294940746773, &quot;first_token_latency_s&quot;: 2.164165113994386}</code></td></tr>
+</tbody></table>
+<h3 style="margin-top:12px">输出全文</h3>
+<pre>这篇文章主要讲述了一起因使用餐厅免费围裙而引发的尴尬误会，具体内容总结如下：
+
+1.  **事件起因**：两位女生在吃牛油火锅时，为了防油溅弄脏自己得体的抹胸连衣裙，顺手拿起了餐厅提供的免费大版型围裙穿上。
+2.  **误会产生**：由于围裙版型过大且上沿位置过高，完全遮挡了抹胸裙的上半部分，导致视觉上只露出肩膀和脖颈，给旁人造成了“未穿衣服”的错觉。
+3.  **现场反应**：其他食客投来异样目光并私下议论</pre>
+<h3 style="margin-top:12px">记录里的 output_text</h3>
+<pre>这篇文章主要讲述了一起因使用餐厅免费围裙而引发的尴尬误会，具体内容总结如下：
+
+1.  **事件起因**：两位女生在吃牛油火锅时，为了防油溅弄脏自己得体的抹胸连衣裙，顺手拿起了餐厅提供的免费大版型围裙穿上。
+2.  **误会产生**：由于围裙版型过大且上沿位置过高，完全遮挡了抹胸裙的上半部分，导致视觉上只露出肩膀和脖颈，给旁人造成了“未穿衣服”的错觉。
+3.  **现场反应**：其他食客投来异样目光并私下议论</pre>
+</details><details><summary>edge-settle / console
+— summary · HTTP 200
+· 206 字</summary>
+<table><tbody>
+<tr><th style="width:190px">发送时模型状态</th><td><code>{&quot;loaded&quot;: true, &quot;operation&quot;: &quot;loading&quot;, &quot;loaded_at&quot;: 1793471550.519742, &quot;load_error&quot;: null, &quot;pid&quot;: 2641282, &quot;port&quot;: 49871}</code></td></tr>
+<tr><th>实际延迟 / 就绪差</th><td><code>66.604s /
+-0.062s</code></td></tr>
+<tr><th>HTTP / finish_reason</th><td><code>200 /
+length</code></td></tr>
+<tr><th>token (prompt/completion/cached)</th><td><code>266 /
+128 / 256</code></td></tr>
+<tr><th>错误</th><td><code>—</code></td></tr>
+<tr><th>错误帧</th><td><code>[]</code></td></tr>
+<tr><th>U+FFFD 位置</th><td><code>[]</code></td></tr>
+<tr><th>推理记录</th><td><code>{&quot;id&quot;: &quot;cfcf6e418e5c4320b3c9aa1332c4b8b1&quot;, &quot;source&quot;: &quot;/api/chat/stream&quot;, &quot;status&quot;: &quot;ok&quot;, &quot;finish_reason&quot;: &quot;length&quot;, &quot;output_chars&quot;: 206, &quot;prompt_tokens&quot;: 266, &quot;completion_tokens&quot;: 128, &quot;decode_tps&quot;: 29.24843566132296, &quot;first_token_latency_s&quot;: 11.667161590987234}</code></td></tr>
+</tbody></table>
+<h3 style="margin-top:12px">输出全文</h3>
+<pre>这篇文章主要讲述了一起因使用餐厅免费围裙而引发的尴尬误会，具体内容总结如下：
+
+1.  **事件起因**：两位女生在吃牛油火锅时，为了防油溅弄脏自己得体的抹胸连衣裙，顺手拿起了餐厅提供的免费大版型围裙穿上。
+2.  **误会产生**：由于围裙版型过大且上沿位置过高，完全遮挡了抹胸裙的上半部分，导致视觉上只露出肩膀和脖颈，给旁人造成了“未穿衣服”的错觉。
+3.  **现场反应**：其他食客投来异样目光并私下议论</pre>
+<h3 style="margin-top:12px">记录里的 output_text</h3>
+<pre>（无记录）</pre>
+</details><details><summary>ready-control / stream
+— summary · HTTP 200
+· 206 字</summary>
+<table><tbody>
+<tr><th style="width:190px">发送时模型状态</th><td><code>{&quot;loaded&quot;: true, &quot;operation&quot;: null, &quot;loaded_at&quot;: 1793471633.8341808, &quot;load_error&quot;: null, &quot;pid&quot;: 2644919, &quot;port&quot;: 58739}</code></td></tr>
+<tr><th>实际延迟 / 就绪差</th><td><code>70.838s /
+-5.033s</code></td></tr>
+<tr><th>HTTP / finish_reason</th><td><code>200 /
+length</code></td></tr>
+<tr><th>token (prompt/completion/cached)</th><td><code>266 /
+128 / </code></td></tr>
+<tr><th>错误</th><td><code>—</code></td></tr>
+<tr><th>错误帧</th><td><code>[]</code></td></tr>
+<tr><th>U+FFFD 位置</th><td><code>[]</code></td></tr>
+<tr><th>推理记录</th><td><code>{&quot;id&quot;: &quot;899cfa22304c44c497b9a053eb01833d&quot;, &quot;source&quot;: &quot;/v1/chat/completions&quot;, &quot;status&quot;: &quot;ok&quot;, &quot;finish_reason&quot;: &quot;length&quot;, &quot;output_chars&quot;: 206, &quot;prompt_tokens&quot;: 266, &quot;completion_tokens&quot;: 128, &quot;decode_tps&quot;: 14.3356707639843, &quot;first_token_latency_s&quot;: 2.155514961996232}</code></td></tr>
+</tbody></table>
+<h3 style="margin-top:12px">输出全文</h3>
+<pre>这篇文章主要讲述了一起因使用餐厅免费围裙而引发的尴尬误会，具体内容总结如下：
+
+1.  **事件起因**：两位女生在吃牛油火锅时，为了防油溅弄脏自己得体的抹胸连衣裙，顺手拿起了餐厅提供的免费大版型围裙穿上。
+2.  **误会产生**：由于围裙版型过大且上沿位置过高，完全遮挡了抹胸裙的上半部分，导致视觉上只露出肩膀和脖颈，给旁人造成了“未穿衣服”的错觉。
+3.  **现场反应**：其他食客投来异样目光并私下议论</pre>
+<h3 style="margin-top:12px">记录里的 output_text</h3>
+<pre>这篇文章主要讲述了一起因使用餐厅免费围裙而引发的尴尬误会，具体内容总结如下：
+
+1.  **事件起因**：两位女生在吃牛油火锅时，为了防油溅弄脏自己得体的抹胸连衣裙，顺手拿起了餐厅提供的免费大版型围裙穿上。
+2.  **误会产生**：由于围裙版型过大且上沿位置过高，完全遮挡了抹胸裙的上半部分，导致视觉上只露出肩膀和脖颈，给旁人造成了“未穿衣服”的错觉。
+3.  **现场反应**：其他食客投来异样目光并私下议论</pre>
+</details><details><summary>ready-control / nonstream
+— summary · HTTP 200
+· 206 字</summary>
+<table><tbody>
+<tr><th style="width:190px">发送时模型状态</th><td><code>{&quot;loaded&quot;: true, &quot;operation&quot;: null, &quot;loaded_at&quot;: 1793471633.8341808, &quot;load_error&quot;: null, &quot;pid&quot;: 2644919, &quot;port&quot;: 58739}</code></td></tr>
+<tr><th>实际延迟 / 就绪差</th><td><code>70.84s /
+-5.035s</code></td></tr>
+<tr><th>HTTP / finish_reason</th><td><code>200 /
+length</code></td></tr>
+<tr><th>token (prompt/completion/cached)</th><td><code>266 /
+128 / 256</code></td></tr>
+<tr><th>错误</th><td><code>—</code></td></tr>
+<tr><th>错误帧</th><td><code>[]</code></td></tr>
+<tr><th>U+FFFD 位置</th><td><code>[]</code></td></tr>
+<tr><th>推理记录</th><td><code>{&quot;id&quot;: &quot;ba622aebe4b747bca889539e37a0d5de&quot;, &quot;source&quot;: &quot;/v1/chat/completions&quot;, &quot;status&quot;: &quot;ok&quot;, &quot;finish_reason&quot;: &quot;length&quot;, &quot;output_chars&quot;: 206, &quot;prompt_tokens&quot;: 266, &quot;completion_tokens&quot;: 128, &quot;decode_tps&quot;: 14.326926078744815, &quot;first_token_latency_s&quot;: 2.428743459007819}</code></td></tr>
+</tbody></table>
+<h3 style="margin-top:12px">输出全文</h3>
+<pre>这篇文章主要讲述了一起因使用餐厅免费围裙而引发的尴尬误会，具体内容总结如下：
+
+1.  **事件起因**：两位女生在吃牛油火锅时，为了防油溅弄脏自己得体的抹胸连衣裙，顺手拿起了餐厅提供的免费大版型围裙穿上。
+2.  **误会产生**：由于围裙版型过大且上沿位置过高，完全遮挡了抹胸裙的上半部分，导致视觉上只露出肩膀和脖颈，给旁人造成了“未穿衣服”的错觉。
+3.  **现场反应**：其他食客投来异样目光并私下议论</pre>
+<h3 style="margin-top:12px">记录里的 output_text</h3>
+<pre>这篇文章主要讲述了一起因使用餐厅免费围裙而引发的尴尬误会，具体内容总结如下：
+
+1.  **事件起因**：两位女生在吃牛油火锅时，为了防油溅弄脏自己得体的抹胸连衣裙，顺手拿起了餐厅提供的免费大版型围裙穿上。
+2.  **误会产生**：由于围裙版型过大且上沿位置过高，完全遮挡了抹胸裙的上半部分，导致视觉上只露出肩膀和脖颈，给旁人造成了“未穿衣服”的错觉。
+3.  **现场反应**：其他食客投来异样目光并私下议论</pre>
+</details><details><summary>ready-control / console
+— summary · HTTP 200
+· 206 字</summary>
+<table><tbody>
+<tr><th style="width:190px">发送时模型状态</th><td><code>{&quot;loaded&quot;: true, &quot;operation&quot;: null, &quot;loaded_at&quot;: 1793471633.8341808, &quot;load_error&quot;: null, &quot;pid&quot;: 2644919, &quot;port&quot;: 58739}</code></td></tr>
+<tr><th>实际延迟 / 就绪差</th><td><code>70.85s /
+-5.045s</code></td></tr>
+<tr><th>HTTP / finish_reason</th><td><code>200 /
+length</code></td></tr>
+<tr><th>token (prompt/completion/cached)</th><td><code>266 /
+128 / 256</code></td></tr>
+<tr><th>错误</th><td><code>—</code></td></tr>
+<tr><th>错误帧</th><td><code>[]</code></td></tr>
+<tr><th>U+FFFD 位置</th><td><code>[]</code></td></tr>
+<tr><th>推理记录</th><td><code>{&quot;id&quot;: &quot;cfcf6e418e5c4320b3c9aa1332c4b8b1&quot;, &quot;source&quot;: &quot;/api/chat/stream&quot;, &quot;status&quot;: &quot;ok&quot;, &quot;finish_reason&quot;: &quot;length&quot;, &quot;output_chars&quot;: 206, &quot;prompt_tokens&quot;: 266, &quot;completion_tokens&quot;: 128, &quot;decode_tps&quot;: 29.24843566132296, &quot;first_token_latency_s&quot;: 11.667161590987234}</code></td></tr>
+</tbody></table>
+<h3 style="margin-top:12px">输出全文</h3>
+<pre>这篇文章主要讲述了一起因使用餐厅免费围裙而引发的尴尬误会，具体内容总结如下：
+
+1.  **事件起因**：两位女生在吃牛油火锅时，为了防油溅弄脏自己得体的抹胸连衣裙，顺手拿起了餐厅提供的免费大版型围裙穿上。
+2.  **误会产生**：由于围裙版型过大且上沿位置过高，完全遮挡了抹胸裙的上半部分，导致视觉上只露出肩膀和脖颈，给旁人造成了“未穿衣服”的错觉。
+3.  **现场反应**：其他食客投来异样目光并私下议论</pre>
+<h3 style="margin-top:12px">记录里的 output_text</h3>
+<pre>（无记录）</pre>
+</details><details><summary>delay-5s / stream
+— refused · HTTP 409
+· 0 字</summary>
+<table><tbody>
+<tr><th style="width:190px">发送时模型状态</th><td><code>{&quot;loaded&quot;: false, &quot;operation&quot;: &quot;loading&quot;, &quot;loaded_at&quot;: null, &quot;load_error&quot;: null, &quot;pid&quot;: 2648761, &quot;port&quot;: 47673}</code></td></tr>
+<tr><th>实际延迟 / 就绪差</th><td><code>5.034s /
+60.863s</code></td></tr>
+<tr><th>HTTP / finish_reason</th><td><code>409 /
+</code></td></tr>
+<tr><th>token (prompt/completion/cached)</th><td><code> /
+ / </code></td></tr>
+<tr><th>错误</th><td><code>{&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</code></td></tr>
+<tr><th>错误帧</th><td><code>[]</code></td></tr>
+<tr><th>U+FFFD 位置</th><td><code>[]</code></td></tr>
+<tr><th>推理记录</th><td><code>null</code></td></tr>
+</tbody></table>
+<h3 style="margin-top:12px">输出全文</h3>
+<pre>（空）</pre>
+<h3 style="margin-top:12px">记录里的 output_text</h3>
+<pre>（无记录）</pre>
+</details><details><summary>delay-5s / nonstream
+— refused · HTTP 409
+· 0 字</summary>
+<table><tbody>
+<tr><th style="width:190px">发送时模型状态</th><td><code>{&quot;loaded&quot;: false, &quot;operation&quot;: &quot;loading&quot;, &quot;loaded_at&quot;: null, &quot;load_error&quot;: null, &quot;pid&quot;: 2648761, &quot;port&quot;: 47673}</code></td></tr>
+<tr><th>实际延迟 / 就绪差</th><td><code>5.022s /
+60.875s</code></td></tr>
+<tr><th>HTTP / finish_reason</th><td><code>409 /
+</code></td></tr>
+<tr><th>token (prompt/completion/cached)</th><td><code> /
+ / </code></td></tr>
+<tr><th>错误</th><td><code>{&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</code></td></tr>
+<tr><th>错误帧</th><td><code>[]</code></td></tr>
+<tr><th>U+FFFD 位置</th><td><code>[]</code></td></tr>
+<tr><th>推理记录</th><td><code>null</code></td></tr>
+</tbody></table>
+<h3 style="margin-top:12px">输出全文</h3>
+<pre>（空）</pre>
+<h3 style="margin-top:12px">记录里的 output_text</h3>
+<pre>（无记录）</pre>
+</details><details><summary>delay-5s / console
+— refused · HTTP 409
+· 0 字</summary>
+<table><tbody>
+<tr><th style="width:190px">发送时模型状态</th><td><code>{&quot;loaded&quot;: false, &quot;operation&quot;: &quot;loading&quot;, &quot;loaded_at&quot;: null, &quot;load_error&quot;: null, &quot;pid&quot;: 2648761, &quot;port&quot;: 47673}</code></td></tr>
+<tr><th>实际延迟 / 就绪差</th><td><code>5.039s /
+60.858s</code></td></tr>
+<tr><th>HTTP / finish_reason</th><td><code>409 /
+</code></td></tr>
+<tr><th>token (prompt/completion/cached)</th><td><code> /
+ / </code></td></tr>
+<tr><th>错误</th><td><code>{&quot;detail&quot;:&quot;model &#39;qwen3.6-35b-a3b-128k&#39; is not loaded; load it from the web console first&quot;}</code></td></tr>
+<tr><th>错误帧</th><td><code>[]</code></td></tr>
+<tr><th>U+FFFD 位置</th><td><code>[]</code></td></tr>
+<tr><th>推理记录</th><td><code>null</code></td></tr>
+</tbody></table>
+<h3 style="margin-top:12px">输出全文</h3>
+<pre>（空）</pre>
+<h3 style="margin-top:12px">记录里的 output_text</h3>
+<pre>（无记录）</pre>
+</details><div class="card"><h3>证据清单</h3><table><tbody><tr><th style='width:220px'>证据目录</th><td><code>/data/readiness-evidence/run-20261031T183122Z-instrumented</code></td></tr><tr><th>原始响应文件</th><td><code>raw/</code> 共 9 个</td></tr><tr><th>NDJSON 导出</th><td><code>{&#39;status&#39;: 200, &#39;lines&#39;: 33, &#39;bytes&#39;: 114251}</code></td></tr><tr><th>SQLite 直读核对</th><td><code>{&#39;db&#39;: &#39;/data/cv84x6-readiness-v0613/state/inference_records.sqlite3&#39;, &#39;exists&#39;: True, &#39;requested&#39;: 4, &#39;found&#39;: 4, &#39;missing&#39;: []}</code></td></tr><tr><th>.bmodel</th><td><code>{&#39;path&#39;: None, &#39;md5&#39;: None, &#39;pid&#39;: None}</code></td></tr><tr><th>deb 校验</th><td><code>{&quot;v0.6.13&quot;: {&quot;file&quot;: &quot;cv84x6-llm-server_0.6.13_arm64.deb&quot;, &quot;sha256&quot;: &quot;d613c1b41c72390a3df395f094a72c1ce5038c569d4ed7b541d659763588d6fd&quot;}, &quot;v0.6.14&quot;: {&quot;file&quot;: &quot;cv84x6-llm-server_0.6.14_arm64.deb&quot;, &quot;sha256&quot;: &quot;2cbd366301ba6fc90d88649931901807cbc4ff646b53258f0ee48b4f7c1b1c00&quot;}}</code></td></tr><tr><th>worker 日志</th><td><code>3 个</code>（worker-edge-settle.log, worker-ready-control.log, worker-delay-5s.log）</td></tr><tr><th>服务 journal</th><td><code>3 个</code>（journal-edge-settle.txt, journal-ready-control.txt, journal-delay-5s.txt）</td></tr></tbody></table></div><div class="card"><h3>设备与环境</h3><table><tbody><tr><th style='width:200px'>hostname</th><td><code>sophon</code></td></tr><tr><th style='width:200px'>oem_sn</th><td><code>SN = HQDZCVEBFJIJA0027</code></td></tr><tr><th style='width:200px'>uname</th><td><code>Linux sophon 5.10.4-9c6431d06-sophon-custom-00610-g9c6431d06798 #1 SMP Tue Oct 27 05:11:06 CST 2026 aarch64 aarch64 aarch64 GNU/Linux</code></td></tr><tr><th style='width:200px'>uptime</th><td><code>02:31:22 up 19:02,  0 users,  load average: 1.56, 1.78, 1.39</code></td></tr><tr><th style='width:200px'>date_utc</th><td><code>Sat Oct 31 18:31:22 UTC 2026</code></td></tr><tr><th style='width:200px'>meminfo_head</th><td><code>MemTotal:        3995000 kB
+MemFree:          349900 kB
+MemAvailable:    3152620 kB</code></td></tr><tr><th style='width:200px'>free_m</th><td><code>total        used        free      shared  buff/cache   available
+Mem:            3901         392         341           2        3167        3078
+Swap:              0           0           0</code></td></tr><tr><th style='width:200px'>df_data</th><td><code>Filesystem      Size  Used Avail Use% Mounted on
+/dev/mmcblk0p6   46G   39G  6.4G  86% /data</code></td></tr><tr><th style='width:200px'>df_root</th><td><code>Filesystem      Size  Used Avail Use% Mounted on
+overlay         7.8G  899M  6.6G  12% /</code></td></tr><tr><th style='width:200px'>installed_version</th><td><code>0.6.13</code></td></tr><tr><th style='width:200px'>installed_commit</th><td><code>d63c17a4a4b09ce73641e9b01aeb27a3b5c70285</code></td></tr><tr><th style='width:200px'>service_unit</th><td><code>ExecMainPID=2641070
+ActiveState=active
+SubState=running</code></td></tr><tr><th style='width:200px'>dmesg_vpp</th><td><code>[    7.254929] soc mode: vppreserved_addr = 0x17e0a00000, vppreserved_size=0x1f400000
+[    8.842099] bm-tpu 20000000.bmtpu: TPU Shared Memory Final: phys=0x1080000000, size=1048576 (4KB aligned)</code></td></tr><tr><th style='width:200px'>python</th><td><code>3.10.12</code></td></tr><tr><th>dmesg NPU 错误</th><td><code>[]</code></td></tr></tbody></table></div><div class="card"><h3>局限与不声称的事</h3><ul>
+<li><b>模式</b>：<b>插桩（测试构建）模式</b>：同一发布包，以 <code>sitecustomize.py</code> 延迟 <code>WorkerClient.health</code> 8.0 秒启动。该调用在 v0.6.13 中只有一个调用方——<code>_load_locked</code> 的能力探测，位于 <code>loaded</code> 发布之后、<code>operation</code> 清空之前。因此放大的是状态机自己的「已发布未就绪」窗口，其它任何路径（<code>/api/models</code>、<code>/api/stats</code>、readiness 握手）都不经过它。<b>其结论只描述窗口被放大后的旧版行为，不能当作原生时序证据</b>；原生行为请看 native 报告。</li>
+<li><b>样本量</b>：每个时机每个接口只发一次请求。这不是统计意义上的采样，
+而是「该时机下这一次发生了什么」的事实记录。多次重复会占用数十小时的设备时间。</li>
+<li><b>时机与阶段的关系</b>：目标延迟只是「请求发出的时刻」，不是「模型处于哪个初始化阶段」。
+真实阶段由表中「发送时模型状态」与「就绪差」说明，报告不把延迟名称当成阶段名称。</li>
+<li><b>轮询分辨率</b>：`edge` 时机依赖对 `/api/models` 的轮询，分辨率受 admin GET 往返时间限制。
+观测到的窗口宽度写在「每次加载的时序采样」表里；如果窗口比一次轮询还窄，
+报告会明说「从未观测到」，而不是假装命中。</li>
+<li><b>复现边界</b>：现场异常发生在另一台设备的 v0.6.12 上，且当时没有留下任何请求/回复内容。
+本报告测的是同一代码路径在 v0.6.13 上的行为，不等于复现了那一台设备的那一次。</li>
+<li><b>解码缺陷</b>：U+FFFD 是已知的独立缺陷（MYS-2510/MYS-2520），已单列，
+不参与加载竞态的判定。</li>
+</ul></div></main><footer>
+单文件自包含报告：无外部 CSS/JS/字体/图片引用。所有模型输出均经 HTML 转义。
+本文件不含任何 API key、cookie 或 admin 密码。
+</footer><script>
+(function(){
+  var q=document.getElementById('q'), fc=document.getElementById('fc'),
+      table=document.getElementById('allrows'), cnt=document.getElementById('cnt');
+  if(!table) return;
+  var rows=Array.prototype.slice.call(table.tBodies[0].rows);
+  function apply(){
+    var needle=(q.value||'').toLowerCase(), cl=fc.value, shown=0;
+    rows.forEach(function(tr){
+      var text=tr.textContent.toLowerCase();
+      var ok=(!needle||text.indexOf(needle)>=0)&&(!cl||tr.dataset.class===cl);
+      tr.style.display=ok?'':'none'; if(ok) shown++;
+    });
+    cnt.textContent=shown+' / '+rows.length+' 行';
+  }
+  q.addEventListener('input',apply); fc.addEventListener('change',apply); apply();
+})();
+</script></body></html>

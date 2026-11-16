@@ -1,0 +1,25 @@
+{
+  "model_type": "wemm_embedding",
+  "kind": "embedding",
+  "supports_vision": true,
+  "vector_family": "tencent/WeMM-Embedding-2B",
+  "hidden_size": 2048,
+  "seq_length": 2048,
+  "max_pixels": 1310720,
+  "min_pixels": 65536,
+  "quantize": "w8bf16",
+  "source_revision": "bbd6cd4bf52cfc6716f752a2df80b2706720bd95",
+  "chip": "bm1684x2",
+  "cores": 4,
+  "prefill": "buckets",
+  "buckets": [
+    128,
+    512,
+    1024,
+    2048
+  ],
+  "default_instruction": "",
+  "gdn_implementation": "static_primitives_v2",
+  "gdn_precision": "fp32_state_fp16_matmul",
+  "full_attention_codegen": "static_ungrouped"
+}

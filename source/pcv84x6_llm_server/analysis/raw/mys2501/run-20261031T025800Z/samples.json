@@ -1,0 +1,583 @@
+[
+ {
+  "at": 1793415482.0942724,
+  "ok": true,
+  "http": 200,
+  "cpu_percent": 1.8,
+  "load_average": [
+   0.36,
+   0.34,
+   0.36
+  ],
+  "mem_total": 4090880000,
+  "mem_available": 3086979072,
+  "mem_used": 1003900928,
+  "tpu_util": 0,
+  "npu_mem_used": 23925358592,
+  "npu_mem_total": 27938258944,
+  "temperatures": [
+   {
+    "zone": "thermal_zone0",
+    "name": "soc_thermal_0",
+    "celsius": 25.7
+   },
+   {
+    "zone": "thermal_zone1",
+    "name": "soc_thermal_1",
+    "celsius": 26.4
+   },
+   {
+    "zone": "thermal_zone2",
+    "name": "soc_thermal_2",
+    "celsius": 26.0
+   }
+  ],
+  "service_requests": 2209,
+  "service_prompt_tokens": 1043803,
+  "worker": {
+   "model": "qwen3.6-35b-a3b-128k",
+   "active": 0,
+   "queued": 0,
+   "total_requests": 1,
+   "failed_requests": 0,
+   "cancelled_requests": 0,
+   "rejected_requests": 0,
+   "memory_waits": 0,
+   "cache_entries": 2,
+   "cache_bytes": 68341760,
+   "prompt_tokens": 59,
+   "completion_tokens": 2
+  }
+ },
+ {
+  "at": 1793415487.122118,
+  "ok": true,
+  "http": 200,
+  "cpu_percent": 10.1,
+  "load_average": [
+   0.42,
+   0.35,
+   0.36
+  ],
+  "mem_total": 4090880000,
+  "mem_available": 3148918784,
+  "mem_used": 941961216,
+  "tpu_util": 0,
+  "npu_mem_used": 1325400064,
+  "npu_mem_total": 27938258944,
+  "temperatures": [
+   {
+    "zone": "thermal_zone0",
+    "name": "soc_thermal_0",
+    "celsius": 25.7
+   },
+   {
+    "zone": "thermal_zone1",
+    "name": "soc_thermal_1",
+    "celsius": 26.8
+   },
+   {
+    "zone": "thermal_zone2",
+    "name": "soc_thermal_2",
+    "celsius": 26.0
+   }
+  ],
+  "service_requests": 2209,
+  "service_prompt_tokens": 1043803,
+  "worker": {}
+ },
+ {
+  "at": 1793415492.1460133,
+  "ok": true,
+  "http": 200,
+  "cpu_percent": 9.4,
+  "load_average": [
+   0.62,
+   0.39,
+   0.38
+  ],
+  "mem_total": 4090880000,
+  "mem_available": 3146641408,
+  "mem_used": 944238592,
+  "tpu_util": 0,
+  "npu_mem_used": 3360686080,
+  "npu_mem_total": 27938258944,
+  "temperatures": [
+   {
+    "zone": "thermal_zone0",
+    "name": "soc_thermal_0",
+    "celsius": 25.7
+   },
+   {
+    "zone": "thermal_zone1",
+    "name": "soc_thermal_1",
+    "celsius": 26.8
+   },
+   {
+    "zone": "thermal_zone2",
+    "name": "soc_thermal_2",
+    "celsius": 26.0
+   }
+  ],
+  "service_requests": 2209,
+  "service_prompt_tokens": 1043803,
+  "worker": {}
+ },
+ {
+  "at": 1793415497.168096,
+  "ok": true,
+  "http": 200,
+  "cpu_percent": 9.4,
+  "load_average": [
+   0.81,
+   0.44,
+   0.39
+  ],
+  "mem_total": 4090880000,
+  "mem_available": 3146985472,
+  "mem_used": 943894528,
+  "tpu_util": 0,
+  "npu_mem_used": 4680843264,
+  "npu_mem_total": 27938258944,
+  "temperatures": [
+   {
+    "zone": "thermal_zone0",
+    "name": "soc_thermal_0",
+    "celsius": 25.7
+   },
+   {
+    "zone": "thermal_zone1",
+    "name": "soc_thermal_1",
+    "celsius": 26.8
+   },
+   {
+    "zone": "thermal_zone2",
+    "name": "soc_thermal_2",
+    "celsius": 26.0
+   }
+  ],
+  "service_requests": 2209,
+  "service_prompt_tokens": 1043803,
+  "worker": {}
+ },
+ {
+  "at": 1793415502.190165,
+  "ok": true,
+  "http": 200,
+  "cpu_percent": 9.5,
+  "load_average": [
+   0.83,
+   0.45,
+   0.39
+  ],
+  "mem_total": 4090880000,
+  "mem_available": 3147620352,
+  "mem_used": 943259648,
+  "tpu_util": 0,
+  "npu_mem_used": 6285164544,
+  "npu_mem_total": 27938258944,
+  "temperatures": [
+   {
+    "zone": "thermal_zone0",
+    "name": "soc_thermal_0",
+    "celsius": 25.7
+   },
+   {
+    "zone": "thermal_zone1",
+    "name": "soc_thermal_1",
+    "celsius": 26.8
+   },
+   {
+    "zone": "thermal_zone2",
+    "name": "soc_thermal_2",
+    "celsius": 26.0
+   }
+  ],
+  "service_requests": 2209,
+  "service_prompt_tokens": 1043803,
+  "worker": {}
+ },
+ {
+  "at": 1793415507.2124615,
+  "ok": true,
+  "http": 200,
+  "cpu_percent": 9.5,
+  "load_average": [
+   1.32,
+   0.56,
+   0.43
+  ],
+  "mem_total": 4090880000,
+  "mem_available": 3158958080,
+  "mem_used": 931921920,
+  "tpu_util": 0,
+  "npu_mem_used": 8327790592,
+  "npu_mem_total": 27938258944,
+  "temperatures": [
+   {
+    "zone": "thermal_zone0",
+    "name": "soc_thermal_0",
+    "celsius": 25.7
+   },
+   {
+    "zone": "thermal_zone1",
+    "name": "soc_thermal_1",
+    "celsius": 26.8
+   },
+   {
+    "zone": "thermal_zone2",
+    "name": "soc_thermal_2",
+    "celsius": 26.0
+   }
+  ],
+  "service_requests": 2209,
+  "service_prompt_tokens": 1043803,
+  "worker": {}
+ },
+ {
+  "at": 1793415512.235371,
+  "ok": true,
+  "http": 200,
+  "cpu_percent": 9.1,
+  "load_average": [
+   1.38,
+   0.58,
+   0.44
+  ],
+  "mem_total": 4090880000,
+  "mem_available": 3155501056,
+  "mem_used": 935378944,
+  "tpu_util": 0,
+  "npu_mem_used": 10370416640,
+  "npu_mem_total": 27938258944,
+  "temperatures": [
+   {
+    "zone": "thermal_zone0",
+    "name": "soc_thermal_0",
+    "celsius": 25.7
+   },
+   {
+    "zone": "thermal_zone1",
+    "name": "soc_thermal_1",
+    "celsius": 26.8
+   },
+   {
+    "zone": "thermal_zone2",
+    "name": "soc_thermal_2",
+    "celsius": 26.0
+   }
+  ],
+  "service_requests": 2209,
+  "service_prompt_tokens": 1043803,
+  "worker": {}
+ },
+ {
+  "at": 1793415517.2658215,
+  "ok": true,
+  "http": 200,
+  "cpu_percent": 9.5,
+  "load_average": [
+   1.51,
+   0.62,
+   0.45
+  ],
+  "mem_total": 4090880000,
+  "mem_available": 3152019456,
+  "mem_used": 938860544,
+  "tpu_util": 0,
+  "npu_mem_used": 11972640768,
+  "npu_mem_total": 27938258944,
+  "temperatures": [
+   {
+    "zone": "thermal_zone0",
+    "name": "soc_thermal_0",
+    "celsius": 25.7
+   },
+   {
+    "zone": "thermal_zone1",
+    "name": "soc_thermal_1",
+    "celsius": 26.8
+   },
+   {
+    "zone": "thermal_zone2",
+    "name": "soc_thermal_2",
+    "celsius": 26.0
+   }
+  ],
+  "service_requests": 2209,
+  "service_prompt_tokens": 1043803,
+  "worker": {}
+ },
+ {
+  "at": 1793415522.287923,
+  "ok": true,
+  "http": 200,
+  "cpu_percent": 9.9,
+  "load_average": [
+   1.55,
+   0.64,
+   0.46
+  ],
+  "mem_total": 4090880000,
+  "mem_available": 3148763136,
+  "mem_used": 942116864,
+  "tpu_util": 0,
+  "npu_mem_used": 14015266816,
+  "npu_mem_total": 27938258944,
+  "temperatures": [
+   {
+    "zone": "thermal_zone0",
+    "name": "soc_thermal_0",
+    "celsius": 25.7
+   },
+   {
+    "zone": "thermal_zone1",
+    "name": "soc_thermal_1",
+    "celsius": 26.8
+   },
+   {
+    "zone": "thermal_zone2",
+    "name": "soc_thermal_2",
+    "celsius": 26.0
+   }
+  ],
+  "service_requests": 2209,
+  "service_prompt_tokens": 1043803,
+  "worker": {}
+ },
+ {
+  "at": 1793415527.310918,
+  "ok": true,
+  "http": 200,
+  "cpu_percent": 9.1,
+  "load_average": [
+   1.58,
+   0.67,
+   0.47
+  ],
+  "mem_total": 4090880000,
+  "mem_available": 3148259328,
+  "mem_used": 942620672,
+  "tpu_util": 0,
+  "npu_mem_used": 15350104064,
+  "npu_mem_total": 27938258944,
+  "temperatures": [
+   {
+    "zone": "thermal_zone0",
+    "name": "soc_thermal_0",
+    "celsius": 25.7
+   },
+   {
+    "zone": "thermal_zone1",
+    "name": "soc_thermal_1",
+    "celsius": 26.8
+   },
+   {
+    "zone": "thermal_zone2",
+    "name": "soc_thermal_2",
+    "celsius": 26.0
+   }
+  ],
+  "service_requests": 2209,
+  "service_prompt_tokens": 1043803,
+  "worker": {}
+ },
+ {
+  "at": 1793415532.3356318,
+  "ok": true,
+  "http": 200,
+  "cpu_percent": 9.3,
+  "load_average": [
+   1.62,
+   0.69,
+   0.48
+  ],
+  "mem_total": 4090880000,
+  "mem_available": 3147616256,
+  "mem_used": 943263744,
+  "tpu_util": 0,
+  "npu_mem_used": 17392730112,
+  "npu_mem_total": 27938258944,
+  "temperatures": [
+   {
+    "zone": "thermal_zone0",
+    "name": "soc_thermal_0",
+    "celsius": 25.7
+   },
+   {
+    "zone": "thermal_zone1",
+    "name": "soc_thermal_1",
+    "celsius": 26.8
+   },
+   {
+    "zone": "thermal_zone2",
+    "name": "soc_thermal_2",
+    "celsius": 26.0
+   }
+  ],
+  "service_requests": 2209,
+  "service_prompt_tokens": 1043803,
+  "worker": {}
+ },
+ {
+  "at": 1793415537.3575156,
+  "ok": true,
+  "http": 200,
+  "cpu_percent": 9.8,
+  "load_average": [
+   1.73,
+   0.73,
+   0.49
+  ],
+  "mem_total": 4090880000,
+  "mem_available": 3148587008,
+  "mem_used": 942292992,
+  "tpu_util": 0,
+  "npu_mem_used": 19435356160,
+  "npu_mem_total": 27938258944,
+  "temperatures": [
+   {
+    "zone": "thermal_zone0",
+    "name": "soc_thermal_0",
+    "celsius": 26.1
+   },
+   {
+    "zone": "thermal_zone1",
+    "name": "soc_thermal_1",
+    "celsius": 26.8
+   },
+   {
+    "zone": "thermal_zone2",
+    "name": "soc_thermal_2",
+    "celsius": 26.0
+   }
+  ],
+  "service_requests": 2209,
+  "service_prompt_tokens": 1043803,
+  "worker": {}
+ },
+ {
+  "at": 1793415542.3793106,
+  "ok": true,
+  "http": 200,
+  "cpu_percent": 9.2,
+  "load_average": [
+   1.75,
+   0.75,
+   0.5
+  ],
+  "mem_total": 4090880000,
+  "mem_available": 3150004224,
+  "mem_used": 940875776,
+  "tpu_util": 0,
+  "npu_mem_used": 21024997376,
+  "npu_mem_total": 27938258944,
+  "temperatures": [
+   {
+    "zone": "thermal_zone0",
+    "name": "soc_thermal_0",
+    "celsius": 25.7
+   },
+   {
+    "zone": "thermal_zone1",
+    "name": "soc_thermal_1",
+    "celsius": 26.8
+   },
+   {
+    "zone": "thermal_zone2",
+    "name": "soc_thermal_2",
+    "celsius": 26.0
+   }
+  ],
+  "service_requests": 2209,
+  "service_prompt_tokens": 1043803,
+  "worker": {}
+ },
+ {
+  "at": 1793415547.4054613,
+  "ok": true,
+  "http": 200,
+  "cpu_percent": 9.9,
+  "load_average": [
+   1.69,
+   0.75,
+   0.5
+  ],
+  "mem_total": 4090880000,
+  "mem_available": 3148599296,
+  "mem_used": 942280704,
+  "tpu_util": 0,
+  "npu_mem_used": 23067623424,
+  "npu_mem_total": 27938258944,
+  "temperatures": [
+   {
+    "zone": "thermal_zone0",
+    "name": "soc_thermal_0",
+    "celsius": 25.7
+   },
+   {
+    "zone": "thermal_zone1",
+    "name": "soc_thermal_1",
+    "celsius": 26.8
+   },
+   {
+    "zone": "thermal_zone2",
+    "name": "soc_thermal_2",
+    "celsius": 26.0
+   }
+  ],
+  "service_requests": 2209,
+  "service_prompt_tokens": 1043803,
+  "worker": {}
+ },
+ {
+  "at": 1793415552.43054,
+  "ok": true,
+  "http": 200,
+  "cpu_percent": 6.5,
+  "load_average": [
+   1.63,
+   0.76,
+   0.51
+  ],
+  "mem_total": 4090880000,
+  "mem_available": 3092013056,
+  "mem_used": 998866944,
+  "tpu_util": 0,
+  "npu_mem_used": 23857201152,
+  "npu_mem_total": 27938258944,
+  "temperatures": [
+   {
+    "zone": "thermal_zone0",
+    "name": "soc_thermal_0",
+    "celsius": 26.1
+   },
+   {
+    "zone": "thermal_zone1",
+    "name": "soc_thermal_1",
+    "celsius": 26.8
+   },
+   {
+    "zone": "thermal_zone2",
+    "name": "soc_thermal_2",
+    "celsius": 26.0
+   }
+  ],
+  "service_requests": 2210,
+  "service_prompt_tokens": 1043862,
+  "worker": {
+   "model": "qwen3.6-35b-a3b-128k",
+   "active": 0,
+   "queued": 0,
+   "total_requests": 1,
+   "failed_requests": 0,
+   "cancelled_requests": 0,
+   "rejected_requests": 0,
+   "memory_waits": 0,
+   "cache_entries": 2,
+   "cache_bytes": 68341760,
+   "prompt_tokens": 59,
+   "completion_tokens": 2
+  }
+ }
+]

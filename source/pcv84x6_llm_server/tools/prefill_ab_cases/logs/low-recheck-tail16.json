@@ -1,0 +1,158 @@
+{
+  "align": 64,
+  "exact_tail": 16,
+  "device": "sophon",
+  "dev": 0,
+  "lib": "/opt/sophgo/cv84x6_llm_server/lib/libcv84x6_llm.so",
+  "lib_md5": "073d0e86333988b155a019d93a08bb83",
+  "model": "/data/cv84x6_llm_server/models/qwen3.6-35b-32k/model.bmodel",
+  "model_md5": "1178646a93a3ec0786e9de77ba57d6dd",
+  "cases_file": "tools/prefill_ab_cases/low/cases.json",
+  "max_decode": 64,
+  "stop_ids": [
+    248044,
+    248046
+  ],
+  "cases": [
+    {
+      "id": "a01",
+      "type": "A",
+      "n_prompt": 67,
+      "n_delta": 0,
+      "ttft_s": 1.5839,
+      "prefill_s": null,
+      "text": "\n\n<think>\n\n</think>\n\n210",
+      "tokens": [
+        271,
+        248068,
+        271,
+        248069,
+        271,
+        17,
+        16,
+        15
+      ],
+      "pass": true,
+      "rc": 0
+    },
+    {
+      "id": "a07",
+      "type": "A",
+      "n_prompt": 128,
+      "n_delta": 0,
+      "ttft_s": 2.199,
+      "prefill_s": null,
+      "text": "\n\n<think>\n\n</think>\n\nShakespeare",
+      "tokens": [
+        271,
+        248068,
+        271,
+        248069,
+        271,
+        1948,
+        35650
+      ],
+      "pass": true,
+      "rc": 0
+    },
+    {
+      "id": "a08",
+      "type": "A",
+      "n_prompt": 128,
+      "n_delta": 0,
+      "ttft_s": 2.1933,
+      "prefill_s": null,
+      "text": "\n\n<think>\n\n</think>\n\nCanberra",
+      "tokens": [
+        271,
+        248068,
+        271,
+        248069,
+        271,
+        6503,
+        60241
+      ],
+      "pass": true,
+      "rc": 0
+    },
+    {
+      "id": "a12",
+      "type": "A",
+      "n_prompt": 69,
+      "n_delta": 0,
+      "ttft_s": 1.6282,
+      "prefill_s": null,
+      "text": "\n\n<think>\n\n</think>\n\n100",
+      "tokens": [
+        271,
+        248068,
+        271,
+        248069,
+        271,
+        16,
+        15,
+        15
+      ],
+      "pass": true,
+      "rc": 0
+    },
+    {
+      "id": "a15",
+      "type": "A",
+      "n_prompt": 128,
+      "n_delta": 0,
+      "ttft_s": 2.1982,
+      "prefill_s": null,
+      "text": "\n\n<think>\n\n</think>\n\n8",
+      "tokens": [
+        271,
+        248068,
+        271,
+        248069,
+        271,
+        23
+      ],
+      "pass": true,
+      "rc": 0
+    },
+    {
+      "id": "c03",
+      "type": "C",
+      "n_prompt": 265,
+      "n_delta": 64,
+      "ttft_s": 1.5013,
+      "prefill_s": 1.5188,
+      "text": "Aveline",
+      "tokens": [
+        32,
+        861,
+        472
+      ],
+      "pass": false,
+      "rc": 0
+    }
+  ],
+  "summary": {
+    "overall": {
+      "cases": 6,
+      "passed": 5,
+      "ttft_median_s": 1.9107,
+      "failures": [
+        "c03"
+      ],
+      "errors": []
+    },
+    "by_type": {
+      "A": {
+        "cases": 5,
+        "passed": 5,
+        "ttft_median_s": 2.1933
+      },
+      "C": {
+        "cases": 1,
+        "passed": 0,
+        "ttft_median_s": 1.5013
+      }
+    }
+  }
+}

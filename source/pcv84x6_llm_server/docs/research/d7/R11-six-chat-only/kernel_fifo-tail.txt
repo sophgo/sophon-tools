@@ -1,0 +1,259 @@
+=== kernel fifo history ===
+total=6327 showing=64 capacity=64
+
+[000] seq=6264 age=354036ms api=0x90000003(LAUNCH_FUNC) api_seq=6264 mode=SYNC hwq=3
+      outbox packet=0x0060198000000022 packet_addr=0x8 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[001] seq=6265 age=354036ms api=0x90000003(LAUNCH_FUNC) api_seq=6265 mode=SYNC hwq=3
+      outbox packet=0x0060198000000032 packet_addr=0xc group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[002] seq=6266 age=354036ms api=0x90000003(LAUNCH_FUNC) api_seq=6266 mode=SYNC hwq=3
+      outbox packet=0x0060198000000042 packet_addr=0x10 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[003] seq=6267 age=354032ms api=0x90000003(LAUNCH_FUNC) api_seq=6267 mode=SYNC hwq=3
+      outbox packet=0x0060198000000052 packet_addr=0x14 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[004] seq=6268 age=354032ms api=0x90000003(LAUNCH_FUNC) api_seq=6268 mode=SYNC hwq=3
+      outbox packet=0x0060198000000062 packet_addr=0x18 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[005] seq=6269 age=354032ms api=0x90000003(LAUNCH_FUNC) api_seq=6269 mode=SYNC hwq=3
+      outbox packet=0x0060198000000072 packet_addr=0x1c group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[006] seq=6270 age=354032ms api=0x90000003(LAUNCH_FUNC) api_seq=6270 mode=SYNC hwq=3
+      outbox packet=0x0060198000000082 packet_addr=0x20 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[007] seq=6271 age=354032ms api=0x90000003(LAUNCH_FUNC) api_seq=6271 mode=SYNC hwq=3
+      outbox packet=0x0060198000000002 packet_addr=0x0 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[008] seq=6272 age=354032ms api=0x90000003(LAUNCH_FUNC) api_seq=6272 mode=SYNC hwq=3
+      outbox packet=0x0060198000000012 packet_addr=0x4 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[009] seq=6273 age=354032ms api=0x90000003(LAUNCH_FUNC) api_seq=6273 mode=SYNC hwq=3
+      outbox packet=0x0060198000000022 packet_addr=0x8 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[010] seq=6274 age=354028ms api=0x90000003(LAUNCH_FUNC) api_seq=6274 mode=SYNC hwq=3
+      outbox packet=0x0060198000000032 packet_addr=0xc group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[011] seq=6275 age=354028ms api=0x90000003(LAUNCH_FUNC) api_seq=6275 mode=SYNC hwq=3
+      outbox packet=0x0060198000000042 packet_addr=0x10 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[012] seq=6276 age=354028ms api=0x90000003(LAUNCH_FUNC) api_seq=6276 mode=SYNC hwq=3
+      outbox packet=0x0060198000000052 packet_addr=0x14 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[013] seq=6277 age=354028ms api=0x90000003(LAUNCH_FUNC) api_seq=6277 mode=SYNC hwq=3
+      outbox packet=0x0060198000000062 packet_addr=0x18 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[014] seq=6278 age=354028ms api=0x90000003(LAUNCH_FUNC) api_seq=6278 mode=SYNC hwq=3
+      outbox packet=0x0060198000000072 packet_addr=0x1c group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[015] seq=6279 age=354028ms api=0x90000003(LAUNCH_FUNC) api_seq=6279 mode=SYNC hwq=3
+      outbox packet=0x0060198000000082 packet_addr=0x20 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[016] seq=6280 age=354024ms api=0x90000003(LAUNCH_FUNC) api_seq=6280 mode=SYNC hwq=3
+      outbox packet=0x0060198000000002 packet_addr=0x0 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[017] seq=6281 age=354024ms api=0x90000003(LAUNCH_FUNC) api_seq=6281 mode=SYNC hwq=3
+      outbox packet=0x0060198000000012 packet_addr=0x4 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[018] seq=6282 age=354024ms api=0x90000003(LAUNCH_FUNC) api_seq=6282 mode=SYNC hwq=3
+      outbox packet=0x0060198000000022 packet_addr=0x8 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[019] seq=6283 age=354024ms api=0x90000003(LAUNCH_FUNC) api_seq=6283 mode=SYNC hwq=3
+      outbox packet=0x0060198000000032 packet_addr=0xc group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[020] seq=6284 age=354020ms api=0x90000003(LAUNCH_FUNC) api_seq=6284 mode=SYNC hwq=3
+      outbox packet=0x0000018000000002 packet_addr=0x0 group=0 block=0 group_idx=0
+      start_core=0 send_core_num=0 phase=2
+
+[021] seq=6285 age=354020ms api=0x90000003(LAUNCH_FUNC) api_seq=6285 mode=SYNC hwq=3
+      outbox packet=0x0060198000000002 packet_addr=0x0 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[022] seq=6286 age=354020ms api=0x90000003(LAUNCH_FUNC) api_seq=6286 mode=SYNC hwq=3
+      outbox packet=0x0060198000000012 packet_addr=0x4 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[023] seq=6287 age=354020ms api=0x90000003(LAUNCH_FUNC) api_seq=6287 mode=SYNC hwq=3
+      outbox packet=0x0060198000000022 packet_addr=0x8 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[024] seq=6288 age=354020ms api=0x90000003(LAUNCH_FUNC) api_seq=6288 mode=SYNC hwq=3
+      outbox packet=0x0060198000000032 packet_addr=0xc group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[025] seq=6289 age=354020ms api=0x90000003(LAUNCH_FUNC) api_seq=6289 mode=SYNC hwq=3
+      outbox packet=0x0060198000000042 packet_addr=0x10 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[026] seq=6290 age=354020ms api=0x90000003(LAUNCH_FUNC) api_seq=6290 mode=SYNC hwq=3
+      outbox packet=0x0060198000000052 packet_addr=0x14 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[027] seq=6291 age=354020ms api=0x90000003(LAUNCH_FUNC) api_seq=6291 mode=SYNC hwq=3
+      outbox packet=0x0060198000000062 packet_addr=0x18 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[028] seq=6292 age=354020ms api=0x90000003(LAUNCH_FUNC) api_seq=6292 mode=SYNC hwq=3
+      outbox packet=0x0060198000000072 packet_addr=0x1c group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[029] seq=6293 age=354020ms api=0x90000003(LAUNCH_FUNC) api_seq=6293 mode=SYNC hwq=3
+      outbox packet=0x0060198000000082 packet_addr=0x20 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[030] seq=6294 age=354020ms api=0x90000003(LAUNCH_FUNC) api_seq=6294 mode=SYNC hwq=3
+      outbox packet=0x0060198000000002 packet_addr=0x0 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[031] seq=6295 age=354016ms api=0x90000003(LAUNCH_FUNC) api_seq=6295 mode=SYNC hwq=3
+      outbox packet=0x0060198000000012 packet_addr=0x4 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[032] seq=6296 age=354016ms api=0x90000003(LAUNCH_FUNC) api_seq=6296 mode=SYNC hwq=3
+      outbox packet=0x0060198000000022 packet_addr=0x8 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[033] seq=6297 age=354016ms api=0x90000003(LAUNCH_FUNC) api_seq=6297 mode=SYNC hwq=3
+      outbox packet=0x0060198000000032 packet_addr=0xc group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[034] seq=6298 age=354016ms api=0x90000003(LAUNCH_FUNC) api_seq=6298 mode=SYNC hwq=3
+      outbox packet=0x0060198000000042 packet_addr=0x10 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[035] seq=6299 age=354016ms api=0x90000003(LAUNCH_FUNC) api_seq=6299 mode=SYNC hwq=3
+      outbox packet=0x0060198000000052 packet_addr=0x14 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[036] seq=6300 age=354016ms api=0x90000003(LAUNCH_FUNC) api_seq=6300 mode=SYNC hwq=3
+      outbox packet=0x0060198000000062 packet_addr=0x18 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[037] seq=6301 age=354016ms api=0x90000003(LAUNCH_FUNC) api_seq=6301 mode=SYNC hwq=3
+      outbox packet=0x0060198000000072 packet_addr=0x1c group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[038] seq=6302 age=354012ms api=0x90000003(LAUNCH_FUNC) api_seq=6302 mode=SYNC hwq=3
+      outbox packet=0x0060198000000082 packet_addr=0x20 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[039] seq=6303 age=354012ms api=0x90000003(LAUNCH_FUNC) api_seq=6303 mode=SYNC hwq=3
+      outbox packet=0x0060198000000002 packet_addr=0x0 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[040] seq=6304 age=354012ms api=0x90000003(LAUNCH_FUNC) api_seq=6304 mode=SYNC hwq=3
+      outbox packet=0x0060198000000012 packet_addr=0x4 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[041] seq=6305 age=354012ms api=0x90000003(LAUNCH_FUNC) api_seq=6305 mode=SYNC hwq=3
+      outbox packet=0x0060198000000022 packet_addr=0x8 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[042] seq=6306 age=354012ms api=0x90000003(LAUNCH_FUNC) api_seq=6306 mode=SYNC hwq=3
+      outbox packet=0x0060198000000032 packet_addr=0xc group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[043] seq=6307 age=354012ms api=0x90000003(LAUNCH_FUNC) api_seq=6307 mode=SYNC hwq=3
+      outbox packet=0x0060198000000042 packet_addr=0x10 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[044] seq=6308 age=354012ms api=0x90000003(LAUNCH_FUNC) api_seq=6308 mode=SYNC hwq=3
+      outbox packet=0x0060198000000052 packet_addr=0x14 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[045] seq=6309 age=354008ms api=0x90000003(LAUNCH_FUNC) api_seq=6309 mode=SYNC hwq=3
+      outbox packet=0x0060198000000062 packet_addr=0x18 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[046] seq=6310 age=354008ms api=0x90000003(LAUNCH_FUNC) api_seq=6310 mode=SYNC hwq=3
+      outbox packet=0x0060198000000072 packet_addr=0x1c group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[047] seq=6311 age=354008ms api=0x90000003(LAUNCH_FUNC) api_seq=6311 mode=SYNC hwq=3
+      outbox packet=0x0060198000000082 packet_addr=0x20 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[048] seq=6312 age=354008ms api=0x90000003(LAUNCH_FUNC) api_seq=6312 mode=SYNC hwq=3
+      outbox packet=0x0060198000000002 packet_addr=0x0 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[049] seq=6313 age=354008ms api=0x90000003(LAUNCH_FUNC) api_seq=6313 mode=SYNC hwq=3
+      outbox packet=0x0060198000000012 packet_addr=0x4 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[050] seq=6314 age=354008ms api=0x90000003(LAUNCH_FUNC) api_seq=6314 mode=SYNC hwq=3
+      outbox packet=0x0060198000000022 packet_addr=0x8 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[051] seq=6315 age=354008ms api=0x90000003(LAUNCH_FUNC) api_seq=6315 mode=SYNC hwq=3
+      outbox packet=0x0060198000000032 packet_addr=0xc group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[052] seq=6316 age=354004ms api=0x90000003(LAUNCH_FUNC) api_seq=6316 mode=SYNC hwq=3
+      outbox packet=0x0060198000000042 packet_addr=0x10 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[053] seq=6317 age=354004ms api=0x90000003(LAUNCH_FUNC) api_seq=6317 mode=SYNC hwq=3
+      outbox packet=0x0060198000000052 packet_addr=0x14 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[054] seq=6318 age=354004ms api=0x90000003(LAUNCH_FUNC) api_seq=6318 mode=SYNC hwq=3
+      outbox packet=0x0060198000000062 packet_addr=0x18 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[055] seq=6319 age=354004ms api=0x90000003(LAUNCH_FUNC) api_seq=6319 mode=SYNC hwq=3
+      outbox packet=0x0060198000000072 packet_addr=0x1c group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[056] seq=6320 age=354004ms api=0x90000003(LAUNCH_FUNC) api_seq=6320 mode=SYNC hwq=3
+      outbox packet=0x0060198000000082 packet_addr=0x20 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[057] seq=6321 age=354004ms api=0x90000003(LAUNCH_FUNC) api_seq=6321 mode=SYNC hwq=3
+      outbox packet=0x0060198000000002 packet_addr=0x0 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[058] seq=6322 age=354004ms api=0x90000003(LAUNCH_FUNC) api_seq=6322 mode=SYNC hwq=3
+      outbox packet=0x0060198000000012 packet_addr=0x4 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[059] seq=6323 age=354000ms api=0x90000003(LAUNCH_FUNC) api_seq=6323 mode=SYNC hwq=3
+      outbox packet=0x0060198000000022 packet_addr=0x8 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[060] seq=6324 age=354000ms api=0x90000003(LAUNCH_FUNC) api_seq=6324 mode=SYNC hwq=3
+      outbox packet=0x0060198000000032 packet_addr=0xc group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[061] seq=6325 age=353996ms api=0x90000003(LAUNCH_FUNC) api_seq=6325 mode=SYNC hwq=3
+      outbox packet=0x0060198000000002 packet_addr=0x0 group=0 block=3 group_idx=0
+      start_core=0 send_core_num=3 phase=2
+
+[062] seq=6326 age=353988ms api=0x90000003(LAUNCH_FUNC) api_seq=6326 mode=SYNC hwq=3
+      outbox packet=0x0000018000000002 packet_addr=0x0 group=0 block=0 group_idx=0
+      start_core=0 send_core_num=0 phase=2
+
+[063] seq=6327 age=45432ms api=0x90000003(LAUNCH_FUNC) api_seq=6327 mode=SYNC hwq=4
+      outbox packet=0x0000020000000012 packet_addr=0x4 group=0 block=0 group_idx=0
+      start_core=0 send_core_num=0 phase=2
+

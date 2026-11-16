@@ -1,0 +1,102 @@
+{
+ "suite": "comprehensive_stability_suite",
+ "issue": "MYS-2510",
+ "seed": 25102496,
+ "device": "172.26.166.96:10151 (.151)",
+ "version": "v0.6.14",
+ "model": "qwen3.6-35b-a3b-128k",
+ "generated_at": "2026-10-31T09:38:38+00:00",
+ "tokenizer": {
+  "lib": "/opt/sophgo/cv84x6_llm_server/lib/libcv84x6_llm.so",
+  "tokenizer_json": "/opt/sophgo/cv84x6_llm_server/model-config/qwen3_5/tokenizer.json",
+  "available": true,
+  "error": null
+ },
+ "matrix": {
+  "long_tiers_tokens": [
+   16384,
+   32768,
+   65536,
+   98304
+  ],
+  "long_tier_repeats": {
+   "16384": 3,
+   "32768": 2,
+   "65536": 1,
+   "98304": 1
+  },
+  "overflow_tokens": [
+   132000,
+   200000
+  ],
+  "chat_turns_required": 50,
+  "chat_turns_extended": 100,
+  "concurrency_lanes": [
+   2,
+   3
+  ],
+  "concurrency_rounds": 50,
+  "queue_capacity_experiments": [
+   0,
+   1
+  ],
+  "cancel_repeats": 5,
+  "lifecycle_cycles": 20,
+  "vlm_repeats": 20,
+  "tool_calls": 30,
+  "thinking_repeats": 10,
+  "soak_seconds": 7200,
+  "soak_mix": [
+   [
+    "short",
+    60
+   ],
+   [
+    "short",
+    200
+   ],
+   [
+    "mid",
+    2048
+   ],
+   [
+    "long",
+    8192
+   ],
+   [
+    "ctx",
+    4096
+   ]
+  ],
+  "expected_context": 131072
+ },
+ "params": {
+  "max_tokens": 128,
+  "temperature": 0.0,
+  "top_p": 1.0,
+  "top_k": 1,
+  "repetition_penalty": 1.0,
+  "enable_thinking": false
+ },
+ "system_prompt": "你是严谨的中文助手，只按用户的要求简短作答，不要解释。",
+ "argv": [
+  "--evidence-dir",
+  "./full2",
+  "--key-name",
+  "MYS-2510-matrix2"
+ ],
+ "notes": {
+  "success": "status_ok 是“HTTP 等于该阶段预期”，409/429 在对应阶段算通过",
+  "semantic": "检索/回忆/工具内容正确率单独统计，不进入稳定性判定",
+  "no_retry": "不重发任何请求",
+  "lifecycle_reduction": "生命周期 20 次而非 50 次：每次真实加载约 66 秒"
+ },
+ "finished_at": "2026-10-31T13:33:04+00:00",
+ "requests": 1240,
+ "quick": false,
+ "verdict": {
+  "passed": true,
+  "failed": [],
+  "unmeasured": []
+ }
+}

@@ -1,0 +1,24 @@
+Oct 30 23:06:03 sophon python3.10[318133]: INFO:     127.0.0.1:38360 - "GET /api/inference-records/status HTTP/1.1" 200 OK
+Oct 30 23:06:03 sophon systemd[1]: Stopping CV84X6 offline LLM service (OpenAI-compatible, web console)...
+Oct 30 23:06:03 sophon python3.10[318133]: INFO:     Shutting down
+Oct 30 23:06:03 sophon python3.10[318133]: INFO:     Waiting for application shutdown.
+Oct 30 23:06:03 sophon python3.10[318133]: 2026-10-30 23:06:03,798 INFO cv84x6: shut down
+Oct 30 23:06:03 sophon python3.10[318133]: INFO:     Application shutdown complete.
+Oct 30 23:06:03 sophon python3.10[318133]: INFO:     Finished server process [318133]
+Oct 30 23:06:03 sophon systemd[1]: cv84x6-llm.service: Deactivated successfully.
+Oct 30 23:06:03 sophon systemd[1]: Stopped CV84X6 offline LLM service (OpenAI-compatible, web console).
+Oct 30 23:06:03 sophon systemd[1]: cv84x6-llm.service: Consumed 36.637s CPU time.
+Oct 30 23:06:03 sophon systemd[1]: Started CV84X6 offline LLM service (OpenAI-compatible, web console).
+Oct 30 23:06:05 sophon python3.10[338984]: /opt/sophgo/cv84x6_llm_server/vendor/uvicorn/protocols/websockets/websockets_impl.py:41: UvicornDeprecationWarning: The `websockets` implementation is deprecated, and `--ws websockets` will point at the `websockets-sansio` implementation in a future release. Use `--ws websockets-sansio` or `--ws auto` to switch now.
+Oct 30 23:06:05 sophon python3.10[338984]:   warnings.warn(
+Oct 30 23:06:05 sophon python3.10[338984]: INFO:     Started server process [338984]
+Oct 30 23:06:05 sophon python3.10[338984]: INFO:     Waiting for application startup.
+Oct 30 23:06:05 sophon python3.10[338984]: 2026-10-30 23:06:05,542 INFO cv84x6: CV84X6 LLM service 0.6.13 starting
+Oct 30 23:06:05 sophon python3.10[338984]: INFO:     Application startup complete.
+Oct 30 23:06:05 sophon python3.10[338984]: INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+Oct 30 23:06:06 sophon python3.10[338984]: INFO:     127.0.0.1:38364 - "GET /healthz HTTP/1.1" 200 OK
+Oct 30 23:06:06 sophon python3.10[338984]: INFO:     127.0.0.1:38366 - "POST /api/login HTTP/1.1" 200 OK
+Oct 30 23:06:54 sophon python3.10[338984]: INFO:     127.0.0.1:38560 - "GET /healthz HTTP/1.1" 200 OK
+Oct 30 23:07:11 sophon python3.10[338984]: 2026-10-30 23:07:11,850 INFO app.core.models: loaded qwen3.6-35b-a3b-32k on port 56875 in 64.8s
+Oct 30 23:07:11 sophon python3.10[338984]: INFO:     127.0.0.1:38368 - "POST /api/models/qwen3.6-35b-a3b-32k/load HTTP/1.1" 200 OK
+Oct 30 23:07:11 sophon python3.10[338984]: INFO:     127.0.0.1:38634 - "GET /api/inference-records?limit=1 HTTP/1.1" 200 OK

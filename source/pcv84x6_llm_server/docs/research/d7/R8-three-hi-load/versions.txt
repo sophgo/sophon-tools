@@ -1,0 +1,58 @@
+===== uname
+Linux sophon 5.10.4-75e6993a7-sophon-custom-00613-g75e6993a7975 #1 SMP Tue Nov 3 05:09:38 CST 2026 aarch64 aarch64 aarch64 GNU/Linux
+===== os-release
+PRETTY_NAME="Ubuntu 22.04.5 LTS"
+NAME="Ubuntu"
+VERSION_ID="22.04"
+VERSION="22.04.5 LTS (Jammy Jellyfish)"
+VERSION_CODENAME=jammy
+ID=ubuntu
+ID_LIKE=debian
+HOME_URL="https://www.ubuntu.com/"
+SUPPORT_URL="https://help.ubuntu.com/"
+BUG_REPORT_URL="https://bugs.launchpad.net/ubuntu/"
+PRIVACY_POLICY_URL="https://www.ubuntu.com/legal/terms-and-policies/privacy-policy"
+UBUNTU_CODENAME=jammy
+===== libsophon
+drwxr-xr-x 6 root   root   4096 Nov  3 05:31 libsophon-0.4.15
+lrwxrwxrwx 1 root   root     28 Nov  3 05:31 libsophon-current -> /opt/sophon/libsophon-0.4.15
+===== sophon packages
+ii  bmssm                                  2.3.18                                  arm64        bmssm - Sophon System Management
+ii  memory-edit                            2.12.3                                  arm64        Memory layout configuration tool for Sophon SoCs
+ii  sophon-media-soc-sophon-ffmpeg         2.3.0                                   arm64        Sophon multimedia library
+ii  sophon-media-soc-sophon-gstreamer      2.3.0                                   arm64        Sophon multimedia library
+ii  sophon-media-soc-sophon-opencv         2.3.0                                   arm64        Sophon multimedia library
+ii  sophon-media-soc-sophon-sample         2.3.0                                   arm64        Sophon multimedia library
+ii  sophon-soc-libsophon                   0.4.15                                  arm64        libsophon built using CMake
+ii  sophon-soc-libsophon-dev               0.4.15                                  arm64        libsophon built using CMake
+===== service package
+ii  cv84x6-llm-server                      0.6.29                                  arm64        offline OpenAI-compatible LLM service for CV84X6 (web console)
+===== installed VERSION
+0.6.29
+===== installed COMMIT
+2605adea2097f3ea9fca804b5693c40f44cef5cb
+===== libcv84x6_llm.so
+aedc9061aa33b872abafb1d404a1c85f  /opt/sophgo/cv84x6_llm_server/lib/libcv84x6_llm.so
+===== bmtpu module
+bmtpu                2686976  8
+===== boot id
+b2d73ef0-8b7a-4398-a99e-567428d9fb0c
+===== uptime
+ 08:14:48 up 11 min,  0 users,  load average: 4.06, 3.67, 2.08
+===== firmware (scaler cores)
+  Firmware: FIRMWARE_VERSION=f6175ad
+BUILD_TIME=2026-10-30 17:38:09
+--
+  Firmware: FIRMWARE_VERSION=f6175ad
+BUILD_TIME=2026-10-30 17:38:54
+--
+  Firmware: FIRMWARE_VERSION=f6175ad
+BUILD_TIME=2026-10-30 17:39:39
+--
+  Firmware: FIRMWARE_VERSION=f6175ad
+BUILD_TIME=2026-10-30 17:40:24
+===== DTB shm base
+[    9.550700] bm-tpu 20000000.bmtpu: Original physical address from DTS: 0x1080000000
+[    9.550710] bmtpu: bmdev_shared_mem_init:206: BMDev shared memory init: physical base 0x1080000000, size 1048576 bytes
+===== bmrt version
+Version: 0.4.15

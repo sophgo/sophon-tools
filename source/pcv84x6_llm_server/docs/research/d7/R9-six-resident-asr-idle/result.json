@@ -1,0 +1,679 @@
+{
+ "run": "R9-six-resident-asr-idle",
+ "started": "2026-11-08T08:21:32",
+ "config": {
+  "models": "chat,embed,rerank,asr,ocr,vl",
+  "load": "chat:2,embed:1,rerank:1,ocr:1,vl:1",
+  "minutes": 20.0,
+  "pre": "",
+  "stall_s": 150.0
+ },
+ "boot_id": "81732401-79e8-4557-a6d7-9f04f718796b",
+ "uptime": "08:21:32 up 0 min,  0 users,  load average: 0.93, 0.26, 0.09",
+ "dmesg_before": {
+  "wait_api_timeout": 0,
+  "mbox_submit_timeout": 0,
+  "wait_free_slots": 0,
+  "npu_fault": 0,
+  "recursive_fault": 0,
+  "oops": 0,
+  "lines": 654
+ },
+ "loaded": {
+  "bge-reranker-v2-m3": {
+   "loaded": true,
+   "pid": 5333
+  },
+  "paddleocr-vl-1.5": {
+   "loaded": true,
+   "pid": 5859
+  },
+  "ppocrv6-medium": {
+   "loaded": true,
+   "pid": 5832
+  },
+  "qwen3-asr-0.6b": {
+   "loaded": true,
+   "pid": 5553
+  },
+  "qwen3-embedding-0.6b": {
+   "loaded": true,
+   "pid": 5062
+  },
+  "qwen3.6-35b-a3b-128k": {
+   "loaded": true,
+   "pid": 2683
+  }
+ },
+ "probe_before": {
+  "chat": 200,
+  "embed": 200,
+  "rerank": 200,
+  "asr": 200,
+  "ocr": 200,
+  "vl": 200
+ },
+ "heaps_before": {
+  "npu": 30440,
+  "vpp": 256
+ },
+ "t_start": "2026-11-08T08:23:16",
+ "clean_end": false,
+ "duration_s": 370.4,
+ "probe_after": "skipped (hang detected)",
+ "heaps_after": {
+  "npu": 30664,
+  "vpp": 256
+ },
+ "dmesg_after": {
+  "wait_api_timeout": 6,
+  "mbox_submit_timeout": 1,
+  "wait_free_slots": 0,
+  "npu_fault": 0,
+  "recursive_fault": 0,
+  "oops": 0,
+  "lines": 783
+ },
+ "hang": {
+  "detected": true,
+  "kind": "dmesg_timeout",
+  "elapsed_s": 135.9,
+  "dmesg": {
+   "wait_api_timeout": 5,
+   "mbox_submit_timeout": 0,
+   "wait_free_slots": 0,
+   "npu_fault": 0,
+   "recursive_fault": 0,
+   "oops": 0,
+   "lines": 659
+  },
+  "inflight": {
+   "1": [
+    "chat",
+    135.7
+   ],
+   "2": [
+    "chat",
+    135.7
+   ],
+   "10": [
+    "rerank",
+    127.7
+   ]
+  },
+  "last_ok_age_s": 124.8,
+  "after_wait_s": 180,
+  "still_inflight": {
+   "1": {
+    "kind": "chat",
+    "age_s": 320.5
+   },
+   "2": {
+    "kind": "chat",
+    "age_s": 320.5
+   },
+   "12": {
+    "kind": "embed",
+    "age_s": 183.8
+   },
+   "13": {
+    "kind": "vl",
+    "age_s": 182.8
+   },
+   "14": {
+    "kind": "ocr",
+    "age_s": 182.8
+   },
+   "15": {
+    "kind": "rerank",
+    "age_s": 49.3
+   }
+  },
+  "probe_after_wait": "exc:ReadTimeout"
+ },
+ "captures": [
+  {
+   "tag": "confirmed",
+   "rc": 0,
+   "stdout": "capturing into /data/mys2693/runs/R9-six-resident-asr-idle/captures/d7cap-20261108T002532Z-confirmed\n  dmesg            0.0s\n  sysfs            0.1s\n  proc_bmtpu       0.2s\n  threads          0.4s\n  blocked          3.1s\n  workers          0.0s\n  bmsmi            0.0s\n  stats            0.1s\n  models           0.0s\n  records          0.1s\n  worker_logs      0.0s\n  platform_log     0.0s\n  versions         0.2s\n{\"wait_api_timeout\": 5, \"mbox_submit_timeout\": 0, \"wait_free_slots\": 0, \"npu_fault\": 0, \"recursive_fault\": 0, \"oops\": 0, \"dmesg_lines\": 659, \"blocked_tasks\": 3, \"blocked_lines\": 46, \"threads_D\": 2, \"threads_total\": 65}\nfailed sections: none\ncapture complete in 4.2s -> /data/mys2693/runs/R9-six-resident-asr-idle/captures/d7cap-20261108T002532Z-confirmed\n",
+   "stderr": ""
+  },
+  {
+   "tag": "post",
+   "rc": 0,
+   "stdout": "capturing into /data/mys2693/runs/R9-six-resident-asr-idle/captures/d7cap-20261108T002922Z-post\n  dmesg            0.0s\n  sysfs            0.1s\n  proc_bmtpu       0.2s\n  threads          0.3s\n  blocked          3.1s\n  workers          0.0s\n  bmsmi            0.0s\n  stats            0.0s\n  models           0.0s\n  records          0.1s\n  worker_logs      0.0s\n  platform_log     0.0s\n  versions         0.1s\n{\"wait_api_timeout\": 6, \"mbox_submit_timeout\": 1, \"wait_free_slots\": 0, \"npu_fault\": 0, \"recursive_fault\": 0, \"oops\": 0, \"dmesg_lines\": 707, \"blocked_tasks\": 5, \"blocked_lines\": 76, \"threads_D\": 4, \"threads_total\": 65}\nfailed sections: none\ncapture complete in 4.1s -> /data/mys2693/runs/R9-six-resident-asr-idle/captures/d7cap-20261108T002922Z-post\n",
+   "stderr": ""
+  }
+ ],
+ "outcomes": {
+  "ocr": {
+   "200": 1,
+   "503": 1
+  },
+  "rerank": {
+   "200": 2,
+   "503": 1
+  },
+  "embed": {
+   "200": 2,
+   "503": 1
+  },
+  "vl": {
+   "503": 1
+  }
+ },
+ "n_requests": 9,
+ "n_ok": 5,
+ "samples": [
+  {
+   "t": "08:23:31",
+   "elapsed_s": 15.0,
+   "heaps": {
+    "npu": 30664,
+    "vpp": 256
+   },
+   "tpu": {
+    "percent": 25.0,
+    "cores": [
+     100.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "dmesg": {
+    "wait_api_timeout": 0,
+    "mbox_submit_timeout": 0,
+    "wait_free_slots": 0,
+    "npu_fault": 0,
+    "recursive_fault": 0,
+    "oops": 0,
+    "lines": 654
+   },
+   "n_requests": 5,
+   "n_ok": 5,
+   "inflight": {
+    "1": [
+     "chat",
+     14.8
+    ],
+    "2": [
+     "chat",
+     14.8
+    ],
+    "4": [
+     "vl",
+     14.8
+    ],
+    "9": [
+     "ocr",
+     7.6
+    ],
+    "10": [
+     "rerank",
+     6.8
+    ],
+    "11": [
+     "embed",
+     1.9
+    ]
+   },
+   "last_ok_age_s": 3.9
+  },
+  {
+   "t": "08:23:46",
+   "elapsed_s": 30.1,
+   "heaps": {
+    "npu": 30664,
+    "vpp": 256
+   },
+   "tpu": {
+    "percent": 25.0,
+    "cores": [
+     100.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "dmesg": {
+    "wait_api_timeout": 0,
+    "mbox_submit_timeout": 0,
+    "wait_free_slots": 0,
+    "npu_fault": 0,
+    "recursive_fault": 0,
+    "oops": 0,
+    "lines": 654
+   },
+   "n_requests": 5,
+   "n_ok": 5,
+   "inflight": {
+    "1": [
+     "chat",
+     30.0
+    ],
+    "2": [
+     "chat",
+     29.9
+    ],
+    "4": [
+     "vl",
+     29.9
+    ],
+    "9": [
+     "ocr",
+     22.7
+    ],
+    "10": [
+     "rerank",
+     21.9
+    ],
+    "11": [
+     "embed",
+     17.0
+    ]
+   },
+   "last_ok_age_s": 19.0
+  },
+  {
+   "t": "08:24:02",
+   "elapsed_s": 45.2,
+   "heaps": {
+    "npu": 30664,
+    "vpp": 256
+   },
+   "tpu": {
+    "percent": 25.0,
+    "cores": [
+     100.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "dmesg": {
+    "wait_api_timeout": 0,
+    "mbox_submit_timeout": 0,
+    "wait_free_slots": 0,
+    "npu_fault": 0,
+    "recursive_fault": 0,
+    "oops": 0,
+    "lines": 654
+   },
+   "n_requests": 5,
+   "n_ok": 5,
+   "inflight": {
+    "1": [
+     "chat",
+     45.1
+    ],
+    "2": [
+     "chat",
+     45.1
+    ],
+    "4": [
+     "vl",
+     45.1
+    ],
+    "9": [
+     "ocr",
+     37.8
+    ],
+    "10": [
+     "rerank",
+     37.0
+    ],
+    "11": [
+     "embed",
+     32.1
+    ]
+   },
+   "last_ok_age_s": 34.1
+  },
+  {
+   "t": "08:24:17",
+   "elapsed_s": 60.3,
+   "heaps": {
+    "npu": 30664,
+    "vpp": 256
+   },
+   "tpu": {
+    "percent": 25.0,
+    "cores": [
+     100.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "dmesg": {
+    "wait_api_timeout": 0,
+    "mbox_submit_timeout": 0,
+    "wait_free_slots": 0,
+    "npu_fault": 0,
+    "recursive_fault": 0,
+    "oops": 0,
+    "lines": 654
+   },
+   "n_requests": 5,
+   "n_ok": 5,
+   "inflight": {
+    "1": [
+     "chat",
+     60.2
+    ],
+    "2": [
+     "chat",
+     60.2
+    ],
+    "4": [
+     "vl",
+     60.2
+    ],
+    "9": [
+     "ocr",
+     52.9
+    ],
+    "10": [
+     "rerank",
+     52.1
+    ],
+    "11": [
+     "embed",
+     47.2
+    ]
+   },
+   "last_ok_age_s": 49.2
+  },
+  {
+   "t": "08:24:32",
+   "elapsed_s": 75.4,
+   "heaps": {
+    "npu": 30664,
+    "vpp": 256
+   },
+   "tpu": {
+    "percent": 25.0,
+    "cores": [
+     100.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "dmesg": {
+    "wait_api_timeout": 0,
+    "mbox_submit_timeout": 0,
+    "wait_free_slots": 0,
+    "npu_fault": 0,
+    "recursive_fault": 0,
+    "oops": 0,
+    "lines": 654
+   },
+   "n_requests": 5,
+   "n_ok": 5,
+   "inflight": {
+    "1": [
+     "chat",
+     75.3
+    ],
+    "2": [
+     "chat",
+     75.3
+    ],
+    "4": [
+     "vl",
+     75.3
+    ],
+    "9": [
+     "ocr",
+     68.0
+    ],
+    "10": [
+     "rerank",
+     67.2
+    ],
+    "11": [
+     "embed",
+     62.3
+    ]
+   },
+   "last_ok_age_s": 64.3
+  },
+  {
+   "t": "08:24:47",
+   "elapsed_s": 90.5,
+   "heaps": {
+    "npu": 30664,
+    "vpp": 256
+   },
+   "tpu": {
+    "percent": 25.0,
+    "cores": [
+     100.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "dmesg": {
+    "wait_api_timeout": 0,
+    "mbox_submit_timeout": 0,
+    "wait_free_slots": 0,
+    "npu_fault": 0,
+    "recursive_fault": 0,
+    "oops": 0,
+    "lines": 654
+   },
+   "n_requests": 5,
+   "n_ok": 5,
+   "inflight": {
+    "1": [
+     "chat",
+     90.4
+    ],
+    "2": [
+     "chat",
+     90.4
+    ],
+    "4": [
+     "vl",
+     90.4
+    ],
+    "9": [
+     "ocr",
+     83.1
+    ],
+    "10": [
+     "rerank",
+     82.3
+    ],
+    "11": [
+     "embed",
+     77.4
+    ]
+   },
+   "last_ok_age_s": 79.4
+  },
+  {
+   "t": "08:25:02",
+   "elapsed_s": 105.6,
+   "heaps": {
+    "npu": 30664,
+    "vpp": 256
+   },
+   "tpu": {
+    "percent": 25.0,
+    "cores": [
+     100.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "dmesg": {
+    "wait_api_timeout": 0,
+    "mbox_submit_timeout": 0,
+    "wait_free_slots": 0,
+    "npu_fault": 0,
+    "recursive_fault": 0,
+    "oops": 0,
+    "lines": 654
+   },
+   "n_requests": 5,
+   "n_ok": 5,
+   "inflight": {
+    "1": [
+     "chat",
+     105.5
+    ],
+    "2": [
+     "chat",
+     105.5
+    ],
+    "4": [
+     "vl",
+     105.5
+    ],
+    "9": [
+     "ocr",
+     98.2
+    ],
+    "10": [
+     "rerank",
+     97.4
+    ],
+    "11": [
+     "embed",
+     92.5
+    ]
+   },
+   "last_ok_age_s": 94.5
+  },
+  {
+   "t": "08:25:17",
+   "elapsed_s": 120.8,
+   "heaps": {
+    "npu": 30664,
+    "vpp": 256
+   },
+   "tpu": {
+    "percent": 25.0,
+    "cores": [
+     100.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "dmesg": {
+    "wait_api_timeout": 0,
+    "mbox_submit_timeout": 0,
+    "wait_free_slots": 0,
+    "npu_fault": 0,
+    "recursive_fault": 0,
+    "oops": 0,
+    "lines": 654
+   },
+   "n_requests": 5,
+   "n_ok": 5,
+   "inflight": {
+    "1": [
+     "chat",
+     120.6
+    ],
+    "2": [
+     "chat",
+     120.6
+    ],
+    "4": [
+     "vl",
+     120.6
+    ],
+    "9": [
+     "ocr",
+     113.3
+    ],
+    "10": [
+     "rerank",
+     112.6
+    ],
+    "11": [
+     "embed",
+     107.6
+    ]
+   },
+   "last_ok_age_s": 109.6
+  },
+  {
+   "t": "08:25:32",
+   "elapsed_s": 135.9,
+   "heaps": {
+    "npu": 30664,
+    "vpp": 256
+   },
+   "tpu": {
+    "percent": 25.0,
+    "cores": [
+     100.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "dmesg": {
+    "wait_api_timeout": 5,
+    "mbox_submit_timeout": 0,
+    "wait_free_slots": 0,
+    "npu_fault": 0,
+    "recursive_fault": 0,
+    "oops": 0,
+    "lines": 659
+   },
+   "n_requests": 8,
+   "n_ok": 5,
+   "inflight": {
+    "1": [
+     "chat",
+     135.7
+    ],
+    "2": [
+     "chat",
+     135.7
+    ],
+    "10": [
+     "rerank",
+     127.7
+    ]
+   },
+   "last_ok_age_s": 124.8
+  }
+ ],
+ "ended": "2026-11-08T08:29:27",
+ "inflight_at_end": {
+  "1": {
+   "kind": "chat",
+   "age_s": 370.3
+  },
+  "2": {
+   "kind": "chat",
+   "age_s": 370.3
+  },
+  "12": {
+   "kind": "embed",
+   "age_s": 233.6
+  },
+  "13": {
+   "kind": "vl",
+   "age_s": 232.6
+  },
+  "14": {
+   "kind": "ocr",
+   "age_s": 232.6
+  },
+  "15": {
+   "kind": "rerank",
+   "age_s": 99.2
+  }
+ }
+}

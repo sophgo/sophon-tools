@@ -1,0 +1,6 @@
+{"at": 1793415482.0937002, "iso": "2026-10-31T02:58:02.093Z", "kind": "phase", "label": "沿用上一轮请求证据", "detail": "从 run-20261031T002142Z-core-ok-readiness-aborted 接管 2100 条请求行；本轮只运行缺失的阶段", "group": null, "count": 2100}
+{"at": 1793415483.9501972, "iso": "2026-10-31T02:58:03.950Z", "kind": "note", "label": "补全沿用行的 prompt 原文", "detail": "命中 manifest 2100 条，缺失 0 条，hash 不符 0 条", "group": null, "count": 2100}
+{"at": 1793415484.1110976, "iso": "2026-10-31T02:58:04.111Z", "kind": "phase", "label": "环境采集完成", "detail": "模型 qwen3.6-35b-a3b-128k，版本 0.6.14", "group": null, "count": null}
+{"at": 1793415484.1130672, "iso": "2026-10-31T02:58:04.113Z", "kind": "phase", "label": "开始 readiness 专项", "detail": "正常停止 / 重新加载 128k 模型，加载窗口内持续探测", "group": "readiness", "count": null}
+{"at": 1793415552.4897935, "iso": "2026-10-31T02:59:12.489Z", "kind": "phase", "label": "readiness 专项结束", "detail": "加载窗口内 657 次探测，加载完成后短请求 HTTP 200", "group": "readiness", "count": 657}
+{"at": 1793415552.4904964, "iso": "2026-10-31T02:59:12.490Z", "kind": "phase", "label": "请求阶段结束", "detail": "共 2758 条记录", "group": null, "count": null}

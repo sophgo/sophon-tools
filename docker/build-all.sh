@@ -13,7 +13,7 @@
 #     ARCH:    arm64 | amd64 | all（默认按子项目）
 #     env OUTPUT_DIR: 覆盖产物目录（默认 <repo>/output/<子项目>/）
 #
-# 范围: 16 个子项目（pmulti_video_qt 已按 MYSWY 决定排除；psoph_phytool /
+# 范围: 17 个子项目（pmulti_video_qt 已按 MYSWY 决定排除；psoph_phytool /
 # pspacc_efuse_demo 默认不发版，2026-08-30）
 #
 # 用法:
@@ -80,6 +80,7 @@ DEFAULT_ARCH[pqt_batch_deployment]=all
 DEFAULT_ARCH[pqt_memory_edit]=all
 DEFAULT_ARCH[pSophUI]=arm64
 DEFAULT_ARCH[se-rag-core]=all
+DEFAULT_ARCH[pcv84x6_llm_server]=arm64
 DEFAULT_ARCH[psewriter]=windows      # SE写卡工具: 默认只出 Windows, 不带内置镜像
 # pmulti_video_qt: 按 MYSWY 决定（2026-08-08）不需要做，从统一构建范围排除
 # psoph_phytool / pspacc_efuse_demo: 按 MYSWY 决定（2026-08-30）默认不发版——不注册
@@ -103,6 +104,7 @@ PLATFORMS[pqt_batch_deployment]="linux(单文件) + windows(单文件, Go+Fyne)"
 PLATFORMS[pqt_memory_edit]="amd64(linux AppImage) + windows"
 PLATFORMS[pSophUI]="arm64(交叉Qt)"
 PLATFORMS[se-rag-core]="arm64/amd64(Go静态)"
+PLATFORMS[pcv84x6_llm_server]="arm64(deb, 引擎库与基础配置为固定输入; Web 现场构建)"
 PLATFORMS[psewriter]="windows(386/amd64; 默认不带内置镜像)"
 PLATFORMS[psoph_phytool]="通用脚本"
 PLATFORMS[pspacc_efuse_demo]="amd64/arm64"
@@ -124,6 +126,11 @@ EXTRA_ENV[pdfss_cpp]="export PATH=/env/loongson-gnu-toolchain-8.3-x86_64-loongar
 EXTRA_ENV[pqt_batch_deployment]="export PATH=/opt/go/bin:\$PATH"
 EXTRA_ENV[pqt_memory_edit]="export PQT_INPLACE=1"
 EXTRA_ENV[psewriter]="export PATH=/opt/go/bin:\$PATH"
+# pcv84x6_llm_server: 镜像内 python3 是 3.8，而 vendor wheel 面向板上 cp310。
+# pip 20.0.2 在 --platform/--python-version 组合下有 tag 误筛 bug，且 host requires-python
+# 会拦住为 3.10 构建的 wheel——package.sh 内先用 --user 升级 pip 24 并以
+# --abi cp310 --ignore-requires-python 规避（见 source/pcv84x6_llm_server/scripts/package.sh）。
+EXTRA_ENV[pcv84x6_llm_server]="export PATH=/root/.local/bin:\$PATH"
 
 # 子项目 -> 构建依赖（先构建依赖方，再构建本项目）
 # pbmsec 的 socbak.zip 取自 psocbak（release.sh 会优先复用其产物，缺失时现场打包），
@@ -132,7 +139,7 @@ declare -A DEPENDS
 DEPENDS[pbmsec]=psocbak
 
 if [[ "${LIST_ONLY:-0}" = "1" ]]; then
-  echo "=== sophon-tools 16 子项目构建清单（pmulti_video_qt/phytool/spacc 已排除，单镜像 ${IMAGE}） ==="
+  echo "=== sophon-tools 17 子项目构建清单（pmulti_video_qt/phytool/spacc 已排除，单镜像 ${IMAGE}） ==="
   for p in $(echo "${!DEFAULT_ARCH[@]}" | tr ' ' '\n' | sort); do
     printf "  %-22s 平台: %-40s 镜像: %s\n" "$p" "${PLATFORMS[$p]}" "${IMAGE}"
   done

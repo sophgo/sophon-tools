@@ -1,0 +1,57 @@
+# /proc/<pid>/task/<tid>/stack available on this kernel: False (CONFIG_STACKTRACE); use blocked.txt (sysrq-w) for kernel backtraces
+
+
+===== main pid=1305
+cmdline: /usr/bin/python3.10 -m app.main --host 0.0.0.0 --port 8000 --backend native --data-root /data/cv84x6_llm_server --env-file /opt/sophgo/cv84x6_llm_server/etc/server.env --install-dir /opt/sophgo/cv84x6_llm_server
+  tid=1305 state=S comm=python3.10 wchan=do_epoll_wait
+  tid=1394 state=S comm=python3.10 wchan=futex_wait_queue_me
+  tid=1395 state=S comm=python3.10 wchan=futex_wait_queue_me
+  tid=1396 state=S comm=python3.10 wchan=futex_wait_queue_me
+  tid=1397 state=S comm=python3.10 wchan=futex_wait_queue_me
+  tid=1398 state=S comm=python3.10 wchan=futex_wait_queue_me
+  tid=1399 state=S comm=python3.10 wchan=futex_wait_queue_me
+  tid=1400 state=S comm=python3.10 wchan=futex_wait_queue_me
+  tid=1431 state=S comm=python3.10 wchan=do_wait
+  tid=2274 state=S comm=python3.10 wchan=do_wait
+  tid=4728 state=S comm=python3.10 wchan=do_wait
+  tid=4978 state=S comm=python3.10 wchan=do_wait
+  tid=8556 state=S comm=python3.10 wchan=futex_wait_queue_me
+
+===== paddleocr-vl-1.5 pid=4727
+cmdline: /usr/bin/python3.10 -m app.engine.worker --model-id paddleocr-vl-1.5 --port 59697 --backend native --kind ocr_vl --model-path /data/cv84x6_llm_server/models/paddleocr-vl-1.5/paddleocr-vl-1.5_bf16_seq2048_bm1684x2_4core_static_20261103.bmodel --config-path /opt/sophgo/cv84x6_llm_server/model-config/paddleocr_vl_1_5 --max-concurrent 2 --cache-entries 32 --device-kv-budget-mb 2048 --cache-ttl-min 120 --max-queue 12 --exact-tail 64 --decode-delay-ms 0.0 --mem-limit-mb 2496 --mem-static-mb 2128 --native-lib /opt/sophgo/cv84x6_llm_server/lib/libcv84x6_llm.so
+  tid=4727 state=S comm=python3.10 wchan=do_epoll_wait
+  tid=5339 state=D comm=python3.10 wchan=bmdrv_thread_sync_api
+  tid=5340 state=S comm=python3.10 wchan=futex_wait_queue_me
+  tid=5341 state=S comm=python3.10 wchan=futex_wait_queue_me
+  tid=5342 state=S comm=python3.10 wchan=futex_wait_queue_me
+  tid=5343 state=S comm=python3.10 wchan=futex_wait_queue_me
+  tid=5344 state=S comm=python3.10 wchan=futex_wait_queue_me
+  tid=5345 state=S comm=python3.10 wchan=futex_wait_queue_me
+  tid=5346 state=S comm=python3.10 wchan=futex_wait_queue_me
+  tid=5349 state=S comm=python3.10 wchan=futex_wait_queue_me
+  tid=5350 state=S comm=python3.10 wchan=futex_wait_queue_me
+  tid=5351 state=S comm=python3.10 wchan=futex_wait_queue_me
+  tid=5352 state=S comm=python3.10 wchan=futex_wait_queue_me
+  tid=5353 state=S comm=python3.10 wchan=futex_wait_queue_me
+  tid=5354 state=S comm=python3.10 wchan=futex_wait_queue_me
+  tid=5355 state=S comm=python3.10 wchan=futex_wait_queue_me
+  tid=5425 state=S comm=python3.10 wchan=futex_wait_queue_me
+
+===== qwen3-asr-0.6b pid=4977
+cmdline: /usr/bin/python3.10 -m app.engine.worker --model-id qwen3-asr-0.6b --port 45533 --backend native --kind asr --model-path /data/cv84x6_llm_server/models/qwen3-asr-0.6b/qwen3-asr-0.6b_bf16_seq1024_bm1684x2_4core_static_20261103_120455.bmodel --config-path /opt/sophgo/cv84x6_llm_server/model-config/qwen3_asr --max-concurrent 2 --cache-entries 32 --device-kv-budget-mb 2048 --cache-ttl-min 120 --max-queue 12 --exact-tail 64 --decode-delay-ms 0.0 --mem-limit-mb 1792 --mem-static-mb 1531 --native-lib /opt/sophgo/cv84x6_llm_server/lib/libcv84x6_llm.so
+  tid=4977 state=S comm=python3.10 wchan=do_epoll_wait
+  tid=4983 state=S comm=python3.10 wchan=futex_wait_queue_me
+  tid=4984 state=S comm=python3.10 wchan=futex_wait_queue_me
+  tid=4985 state=S comm=python3.10 wchan=futex_wait_queue_me
+  tid=4986 state=S comm=python3.10 wchan=futex_wait_queue_me
+  tid=4987 state=S comm=python3.10 wchan=futex_wait_queue_me
+  tid=4988 state=S comm=python3.10 wchan=futex_wait_queue_me
+  tid=4989 state=S comm=python3.10 wchan=futex_wait_queue_me
+  tid=5446 state=S comm=python3.10 wchan=futex_wait_queue_me
+  tid=5487 state=D comm=python3.10 wchan=bmdev_mbox_submit
+
+===== qwen3.6-35b-a3b-128k pid=2273
+cmdline: /usr/bin/python3.10 -m app.engine.worker --model-id qwen3.6-35b-a3b-128k --port 58457 --backend native --kind chat --model-path /data/cv84x6_llm_server/models/qwen3.6-35b-a3b-128k/qwen3.6-35b-a3b-int4-autoround_w4bf16_seq131072_bm1684x2_4core_history_dynamic_20261025_051759.bmodel --config-path /opt/sophgo/cv84x6_llm_server/model-config/qwen3_5 --max-concurrent 2 --cache-entries 32 --device-kv-budget-mb 2048 --cache-ttl-min 120 --max-queue 12 --exact-tail 64 --decode-delay-ms 0.0 --mem-limit-mb 20608 --mem-static-mb 20122 --native-lib /opt/sophgo/cv84x6_llm_server/lib/libcv84x6_llm.so
+  tid=2273 state=S comm=python3.10 wchan=do_epoll_wait
+  tid=5281 state=S comm=python3.10 wchan=futex_wait_queue_me
+  tid=5692 state=D comm=python3.10 wchan=bmdrv_send_api

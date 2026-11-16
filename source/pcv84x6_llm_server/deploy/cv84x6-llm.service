@@ -1,0 +1,48 @@
+# Template: scripts/install.sh fills in the @...@ fields.
+[Unit]
+Description=CV84X6 offline LLM service (OpenAI-compatible, web console)
+After=network.target bmrt_loadko.service
+
+[Service]
+Type=simple
+User=@USER@
+Group=@GROUP@
+WorkingDirectory=@PREFIX@
+# Where the data lives, the port and the interpreter: all in one file the
+# console can rewrite when the operator moves the data directory. Everything
+# below is a function of it or of the install tree.
+EnvironmentFile=@ENV_FILE@
+Environment=PYTHONPATH=@PYTHONPATH@
+Environment=CV84X6_BACKEND=native
+Environment=CV84X6_ENV_FILE=@ENV_FILE@
+Environment=CV84X6_LLM_LIB=@PREFIX@/lib/libcv84x6_llm.so
+Environment=CV84X6_DEFAULT_CONFIG=@PREFIX@/model-config/qwen3_5
+Environment=LD_LIBRARY_PATH=/opt/sophon/libsophon-current/lib
+ExecStart=@PYTHON@ -m app.main --host ${CV84X6_HOST} --port ${CV84X6_PORT} --backend native --data-root ${CV84X6_DATA_DIR} --env-file ${CV84X6_ENV_FILE} --install-dir @PREFIX@
+Restart=on-failure
+RestartSec=5
+# Only the service process, never the inference workers.
+#
+# A normal stop or restart does not rely on systemd for the workers at all: the
+# service's own shutdown SIGTERMs each one and waits for it, which is the only
+# way the NPU heap is released in order (sessions, then caches, then the engine)
+# instead of being reclaimed by process death. systemd's job here is the main
+# process alone.
+#
+# The reason it must not be `mixed`: workers are started in their own session so
+# they can outlive the service, and that is what makes takeover work -- a
+# restarted service finds them, proves they are its own, and reattaches instead
+# of loading a second 20 GB copy of the weights. `mixed` SIGKILLs them the
+# moment the main process dies, so takeover never had anything to take over and
+# a crash during inference killed a worker mid-launch -- which on this chip
+# wedges the TPU until the board is rebooted (`bmdrv_thread_sync_api` timeouts,
+# then a recursive fault in the kernel).
+KillMode=process
+# Time the graceful shutdown is given before the main process is SIGKILLed. The
+# service stops its workers first (each unload is a SIGTERM and a wait), so this
+# has to cover the slowest unload plus the rest of the shutdown; the model
+# worker's own grace is 120 s, and unloading the 35B is a few seconds.
+TimeoutStopSec=180
+
+[Install]
+WantedBy=multi-user.target

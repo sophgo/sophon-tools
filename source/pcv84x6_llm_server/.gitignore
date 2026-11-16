@@ -1,0 +1,58 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+# Runtime state and models live on the device, not in git.
+/data/
+/models/
+*.log
+# The built console IS committed: the board has no node toolchain, so the
+# deployable artifact has to be in the tree.
+web/node_modules/
+web/tsconfig.tsbuildinfo
+refs-LLM-TPU/
+native/build/
+refs-sail/
+/dist/
+# Browser-acceptance artefacts (screenshots, results.json) are produced per run.
+/acceptance-out/
+# Likewise the design-review sweeps: shots.py / states_shots.py / audit_metrics.py
+# write here, so a run's evidence never lands in the tree.
+/shots/
+/states/
+/dl-shots/
+/kind-shots/
+/compare/
+
+# Screenshots the two probe scripts write; they are evidence for an issue, not
+# part of the deployable tree.
+/*.png
+
+# Packaging scratch: the engine library and tokenizer config are built on the
+# board and passed to scripts/package.sh / package_deb.sh by path, never
+# committed. .board-before/ is the captured state of the test board.
+/.build/
+/.board-before/
+
+# Layout comparison output (tools/ocr/compare_layout.py --out)
+.compare-layout.json
+
+# vl_native build output (build.sh regenerates it; cross-compiled binaries
+# do not belong in the tree).
+tools/ocr/vl_native/out/
+
+# The offline documentation check's screenshots and results
+# (tools/check_admin_docs_offline.py --out) and the console regression's
+# (tools/check_console_against_mock.py --out). Evidence for a review comment,
+# not repository content.
+/docs-offline/
+
+# sophon-tools build artefacts (not part of the imported source snapshot).
+# npm ci/build inside the container writes these as root; never commit them.
+# The root package-lock.json ignore above is OVERRIDDEN for the console: the
+# unified build runs `npm ci`, which needs the committed lockfile to pin the
+# toolchain exactly.
+web/node_modules/
+web/tsconfig.tsbuildinfo
+/dist/
+!web/package-lock.json

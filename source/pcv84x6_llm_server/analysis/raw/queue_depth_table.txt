@@ -1,0 +1,25 @@
+# From analysis/raw/board_2026-10-29.log, 'per-launch submit time vs backlog depth'.
+# One graph launched n times with no sync in between, then one sync.
+# 'total' = submit + sync = wall time for n layers.
+# 'ms/layer' is the quantity a deeper queue is supposed to improve.
+
+  n   submit_ms  sync_ms  total_ms  ms/layer   queue state
+  1     0.055    0.598     0.653    0.6530   not full
+  4     0.229    2.214     2.443    0.6108   not full
+  8     0.489    4.366     4.855    0.6069   not full
+ 12     0.735    6.511     7.246    0.6038   not full
+ 16     0.967    8.692     9.659    0.6037   not full
+ 17     1.090    9.173    10.263    0.6037   not full
+ 18     1.435    9.429    10.864    0.6036   full, CPU stalls
+ 20     2.612    9.385    11.997    0.5998   full, CPU stalls
+ 24     4.970    9.408    14.378    0.5991   full, CPU stalls
+ 32     9.668    9.407    19.075    0.5961   full, CPU stalls
+ 40    14.403    9.404    23.807    0.5952   full, CPU stalls
+ 48    19.154    9.398    28.552    0.5948   full, CPU stalls
+ 64    28.570    9.406    37.976    0.5934   full, CPU stalls
+
+# ms/layer is ~0.60 whether the queue never fills (n<=17) or is permanently
+# full (n=64). If the 585us stalls were CPU overhead a deeper queue could
+# remove, ms/layer would DROP once the queue stopped filling. It does not:
+# n=64 (0.593) is at or below n=1 (0.651, which still carries fixed per-run
+# overhead). The stall is TPU service time, already inside the per-layer cost.

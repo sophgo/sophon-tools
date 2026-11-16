@@ -1,0 +1,833 @@
+{
+ "device": "172.26.166.96:10151 (.151)",
+ "captured_at": "2026-10-31T19:46:25+00:00",
+ "stats": {
+  "device": {
+   "ts": 1793475985.9611726,
+   "cpu_percent": 11.1,
+   "load_average": [
+    1.25,
+    0.81,
+    0.47
+   ],
+   "memory": {
+    "total_bytes": 4090880000,
+    "available_bytes": 3063595008,
+    "used_bytes": 1027284992
+   },
+   "temperatures": [
+    {
+     "zone": "thermal_zone0",
+     "name": "soc_thermal_0",
+     "celsius": 26.1
+    },
+    {
+     "zone": "thermal_zone1",
+     "name": "soc_thermal_1",
+     "celsius": 26.8
+    },
+    {
+     "zone": "thermal_zone2",
+     "name": "soc_thermal_2",
+     "celsius": 26.0
+    }
+   ],
+   "npu": {
+    "total_percent": 0.0,
+    "cores": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "heap": {},
+    "smi": {
+     "tpu_min_clock_mhz": 25,
+     "tpu_max_clock_mhz": 1000,
+     "tpu_util_percent": 0,
+     "mem_used_bytes": 24226299904,
+     "mem_total_bytes": 27938258944
+    }
+   },
+   "vpu_percent": null,
+   "clocks": {
+    "tpu_hz": null,
+    "cpu_hz": null
+   },
+   "tpu_freq": {
+    "mhz": 2000,
+    "source": "sysfs",
+    "unit": "MHz",
+    "min_mhz": 25,
+    "max_mhz": 1000,
+    "debugfs_hz": null
+   },
+   "disk": {
+    "path": "/data",
+    "total_bytes": 48824676352,
+    "free_bytes": 6777630720,
+    "used_bytes": 42047045632
+   }
+  },
+  "usage": {
+   "prompt_tokens": 4793052,
+   "completion_tokens": 32002,
+   "cached_tokens": 1393468,
+   "requests": 4510,
+   "tps_history": [
+    [
+     1793452273.9057198,
+     28.4
+    ],
+    [
+     1793452321.2919414,
+     24.8
+    ],
+    [
+     1793452321.773972,
+     29.22
+    ],
+    [
+     1793452322.8934574,
+     29.24
+    ],
+    [
+     1793452324.009539,
+     29.07
+    ],
+    [
+     1793452335.7683775,
+     28.53
+    ],
+    [
+     1793452383.1066027,
+     24.52
+    ],
+    [
+     1793452384.3379025,
+     28.52
+    ],
+    [
+     1793452385.456136,
+     29.27
+    ],
+    [
+     1793452386.5795896,
+     29.18
+    ],
+    [
+     1793452397.9644027,
+     28.4
+    ],
+    [
+     1793452445.2812874,
+     24.85
+    ],
+    [
+     1793452446.8780136,
+     29.09
+    ],
+    [
+     1793452448.0006506,
+     29.32
+    ],
+    [
+     1793452449.1208377,
+     29.14
+    ],
+    [
+     1793452460.898875,
+     28.52
+    ],
+    [
+     1793452508.2299998,
+     24.62
+    ],
+    [
+     1793452508.7172267,
+     28.21
+    ],
+    [
+     1793452509.8371596,
+     29.22
+    ],
+    [
+     1793452510.9566674,
+     29.14
+    ],
+    [
+     1793452522.7303553,
+     28.31
+    ],
+    [
+     1793452570.1332877,
+     24.81
+    ],
+    [
+     1793452571.3619251,
+     29.08
+    ],
+    [
+     1793452572.4850707,
+     29.06
+    ],
+    [
+     1793452573.6048577,
+     29.27
+    ],
+    [
+     1793452584.9690084,
+     28.2
+    ],
+    [
+     1793452632.37374,
+     24.88
+    ],
+    [
+     1793452633.9745357,
+     28.92
+    ],
+    [
+     1793452635.096821,
+     28.92
+    ],
+    [
+     1793452636.2153964,
+     29.08
+    ],
+    [
+     1793452647.9445846,
+     28.01
+    ],
+    [
+     1793452695.350798,
+     24.78
+    ],
+    [
+     1793452695.8318655,
+     29.18
+    ],
+    [
+     1793452696.9593577,
+     28.57
+    ],
+    [
+     1793452698.0792568,
+     28.94
+    ],
+    [
+     1793452709.8282106,
+     28.45
+    ],
+    [
+     1793452757.2348607,
+     24.55
+    ],
+    [
+     1793452758.4692142,
+     28.26
+    ],
+    [
+     1793452759.5943546,
+     28.8
+    ],
+    [
+     1793452760.713655,
+     28.91
+    ],
+    [
+     1793452772.4592986,
+     28.56
+    ],
+    [
+     1793452819.8262334,
+     24.55
+    ],
+    [
+     1793452821.424324,
+     28.91
+    ],
+    [
+     1793452822.5459383,
+     29.09
+    ],
+    [
+     1793452823.6659367,
+     29.22
+    ],
+    [
+     1793452835.4134119,
+     28.44
+    ],
+    [
+     1793452882.7881827,
+     24.86
+    ],
+    [
+     1793452883.271766,
+     29.22
+    ],
+    [
+     1793452884.3891618,
+     29.36
+    ],
+    [
+     1793452885.5087852,
+     29.3
+    ],
+    [
+     1793452897.262488,
+     28.22
+    ],
+    [
+     1793452944.664666,
+     24.8
+    ],
+    [
+     1793452945.8952856,
+     28.75
+    ],
+    [
+     1793452947.0151632,
+     29.11
+    ],
+    [
+     1793452948.1323905,
+     29.21
+    ],
+    [
+     1793452959.8956885,
+     28.12
+    ],
+    [
+     1793453007.282557,
+     24.38
+    ],
+    [
+     1793453008.8836956,
+     28.31
+    ],
+    [
+     1793453010.0083985,
+     28.73
+    ],
+    [
+     1793453011.1272237,
+     29.17
+    ],
+    [
+     1793453022.498551,
+     28.52
+    ],
+    [
+     1793453069.854296,
+     24.76
+    ],
+    [
+     1793453070.336329,
+     29.03
+    ],
+    [
+     1793453071.4541628,
+     29.25
+    ],
+    [
+     1793453072.573852,
+     29.12
+    ],
+    [
+     1793453084.295359,
+     28.42
+    ],
+    [
+     1793453131.7354667,
+     24.92
+    ],
+    [
+     1793453132.9651217,
+     29.11
+    ],
+    [
+     1793453134.085195,
+     29.38
+    ],
+    [
+     1793453135.2032707,
+     29.26
+    ],
+    [
+     1793453146.9399173,
+     28.51
+    ],
+    [
+     1793453194.3434434,
+     24.82
+    ],
+    [
+     1793453195.9432082,
+     29.16
+    ],
+    [
+     1793453197.0623255,
+     29.21
+    ],
+    [
+     1793453198.1806219,
+     29.19
+    ],
+    [
+     1793453209.5453813,
+     28.51
+    ],
+    [
+     1793453256.888482,
+     24.75
+    ],
+    [
+     1793453257.3726,
+     28.88
+    ],
+    [
+     1793453258.4966104,
+     29.15
+    ],
+    [
+     1793453259.6174664,
+     29.05
+    ],
+    [
+     1793453271.3450835,
+     28.59
+    ],
+    [
+     1793453318.7507894,
+     24.68
+    ],
+    [
+     1793453319.9853592,
+     29.16
+    ],
+    [
+     1793453321.115751,
+     28.89
+    ],
+    [
+     1793453322.2400951,
+     29.19
+    ],
+    [
+     1793453333.9750462,
+     27.56
+    ],
+    [
+     1793453381.3803039,
+     24.58
+    ],
+    [
+     1793453382.9829404,
+     29.11
+    ],
+    [
+     1793453384.1062756,
+     28.99
+    ],
+    [
+     1793453385.335702,
+     29.35
+    ],
+    [
+     1793453396.7288828,
+     28.22
+    ],
+    [
+     1793453444.0925214,
+     24.92
+    ],
+    [
+     1793453444.5767906,
+     28.34
+    ],
+    [
+     1793453445.7012053,
+     28.99
+    ],
+    [
+     1793453446.8225148,
+     29.12
+    ],
+    [
+     1793453458.559576,
+     28.41
+    ],
+    [
+     1793453505.8786957,
+     24.69
+    ],
+    [
+     1793453507.1142242,
+     28.77
+    ],
+    [
+     1793453508.2343564,
+     29.18
+    ],
+    [
+     1793453509.3536134,
+     29.27
+    ],
+    [
+     1793453521.1059155,
+     28.59
+    ],
+    [
+     1793453568.508206,
+     24.44
+    ],
+    [
+     1793474854.9809017,
+     29.27
+    ],
+    [
+     1793475395.0559666,
+     29.02
+    ],
+    [
+     1793475397.6714077,
+     29.02
+    ],
+    [
+     1793475399.82115,
+     28.47
+    ],
+    [
+     1793475401.5577385,
+     28.98
+    ],
+    [
+     1793475404.0512793,
+     29.09
+    ],
+    [
+     1793475406.3626137,
+     28.82
+    ],
+    [
+     1793475408.190242,
+     29.02
+    ],
+    [
+     1793475410.764409,
+     29.1
+    ],
+    [
+     1793475413.156906,
+     29.12
+    ],
+    [
+     1793475415.2672296,
+     29.11
+    ],
+    [
+     1793475418.2216942,
+     29.0
+    ],
+    [
+     1793475421.4596734,
+     28.38
+    ],
+    [
+     1793475423.221942,
+     28.35
+    ],
+    [
+     1793475424.9881792,
+     28.27
+    ],
+    [
+     1793475426.7395825,
+     28.18
+    ],
+    [
+     1793475428.492766,
+     28.0
+    ],
+    [
+     1793475910.2858396,
+     21.12
+    ]
+   ],
+   "cache_hit_rate": 0.2252426242863516
+  },
+  "models": [
+   {
+    "id": "qwen3.6-35b-a3b-128k",
+    "display_name": "qwen3.6-35b-a3b-128k",
+    "path": "/data/cv84x6_llm_server/models/qwen3.6-35b-a3b-128k",
+    "size_bytes": 20638679040,
+    "bmodel_files": [
+     "qwen3.6-35b-a3b-int4-autoround_w4bf16_seq131072_bm1684x2_4core_history_dynamic_20261025_051759.bmodel"
+    ],
+    "has_config": true,
+    "context_length": 131072,
+    "supports_vision": true,
+    "supports_sampling": false,
+    "loaded": true,
+    "port": 41401,
+    "pid": 2809972,
+    "load_error": null,
+    "load_seconds": 65.3,
+    "loaded_at": 1793475801.0193493,
+    "operation": null,
+    "operation_since": null,
+    "conflict": null,
+    "adopted": false
+   },
+   {
+    "id": "qwen3.6-35b-a3b-32k",
+    "display_name": "qwen3.6-35b-a3b-32k",
+    "path": "/data/cv84x6_llm_server/models/qwen3.6-35b-a3b-32k",
+    "size_bytes": 20510543872,
+    "bmodel_files": [
+     "qwen3.6-35b-a3b-int4-autoround_w4bf16_seq32768_cv84x6_4core_history_dynamic_20261025_014034.bmodel"
+    ],
+    "has_config": true,
+    "context_length": 32768,
+    "supports_vision": false,
+    "supports_sampling": true,
+    "loaded": false,
+    "port": null,
+    "pid": null,
+    "load_error": null,
+    "load_seconds": null,
+    "loaded_at": null,
+    "operation": null,
+    "operation_since": null,
+    "conflict": null,
+    "adopted": false
+   }
+  ],
+  "max_loaded_models": 2,
+  "kv_cache": {
+   "qwen3.6-35b-a3b-128k": {
+    "entries": 1,
+    "location": "device",
+    "enabled": true,
+    "bytes": 368967680,
+    "max_bytes": 2147483648,
+    "max_entries": 32,
+    "ttl_s": 7200.0,
+    "expirations": 0,
+    "hit_rate": 0.0,
+    "tokens_reused": 0,
+    "tokens_prompted": 26689,
+    "evictions": 0
+   }
+  },
+  "workers": {
+   "qwen3.6-35b-a3b-128k": {
+    "op": "stats",
+    "req_id": "__stats_7a4ab829__",
+    "active": 0,
+    "queued": 0,
+    "max_concurrent": 2,
+    "max_queue": 16,
+    "decode_quantum": 8,
+    "rejected_requests": 0,
+    "kv_budget_bytes": 3544186880,
+    "kv_reserved_bytes": 0,
+    "waiting_for_memory": false,
+    "memory_waits": 0,
+    "supports_sampling": false,
+    "total_requests": 2,
+    "failed_requests": 0,
+    "cancelled_requests": 1,
+    "prompt_tokens": 16449,
+    "completion_tokens": 7,
+    "avg_decode_tps": 24.859223725276983,
+    "cache": {
+     "entries": 1,
+     "location": "device",
+     "enabled": true,
+     "bytes": 368967680,
+     "max_bytes": 2147483648,
+     "max_entries": 32,
+     "ttl_s": 7200.0,
+     "expirations": 0,
+     "hit_rate": 0.0,
+     "tokens_reused": 0,
+     "tokens_prompted": 26689,
+     "evictions": 0
+    },
+    "fault": false
+   }
+  },
+  "disk": {
+   "total_bytes": 48824676352,
+   "used_bytes": 41533992960,
+   "free_bytes": 6777630720,
+   "models_bytes": 41149222912,
+   "models_root": "/data/cv84x6_llm_server/models"
+  }
+ },
+ "mem_total_bytes": 4090880000,
+ "npu_smi": {
+  "tpu_min_clock_mhz": 25,
+  "tpu_max_clock_mhz": 1000,
+  "tpu_util_percent": 0,
+  "mem_used_bytes": 24226299904,
+  "mem_total_bytes": 27938258944
+ },
+ "tpu_freq": {
+  "mhz": 2000,
+  "source": "sysfs",
+  "unit": "MHz",
+  "min_mhz": 25,
+  "max_mhz": 1000,
+  "debugfs_hz": null
+ },
+ "disk": {
+  "path": "/data",
+  "total_bytes": 48824676352,
+  "free_bytes": 6777630720,
+  "used_bytes": 42047045632
+ },
+ "models": [
+  {
+   "id": "qwen3.6-35b-a3b-128k",
+   "display_name": "qwen3.6-35b-a3b-128k",
+   "path": "/data/cv84x6_llm_server/models/qwen3.6-35b-a3b-128k",
+   "size_bytes": 20638679040,
+   "bmodel_files": [
+    "qwen3.6-35b-a3b-int4-autoround_w4bf16_seq131072_bm1684x2_4core_history_dynamic_20261025_051759.bmodel"
+   ],
+   "has_config": true,
+   "context_length": 131072,
+   "supports_vision": true,
+   "supports_sampling": false,
+   "loaded": true,
+   "port": 41401,
+   "pid": 2809972,
+   "load_error": null,
+   "load_seconds": 65.3,
+   "loaded_at": 1793475801.0193493,
+   "operation": null,
+   "operation_since": null,
+   "conflict": null,
+   "adopted": false
+  },
+  {
+   "id": "qwen3.6-35b-a3b-32k",
+   "display_name": "qwen3.6-35b-a3b-32k",
+   "path": "/data/cv84x6_llm_server/models/qwen3.6-35b-a3b-32k",
+   "size_bytes": 20510543872,
+   "bmodel_files": [
+    "qwen3.6-35b-a3b-int4-autoround_w4bf16_seq32768_cv84x6_4core_history_dynamic_20261025_014034.bmodel"
+   ],
+   "has_config": true,
+   "context_length": 32768,
+   "supports_vision": false,
+   "supports_sampling": true,
+   "loaded": false,
+   "port": null,
+   "pid": null,
+   "load_error": null,
+   "load_seconds": null,
+   "loaded_at": null,
+   "operation": null,
+   "operation_since": null,
+   "conflict": null,
+   "adopted": false
+  }
+ ],
+ "settings": {
+  "max_concurrent_per_model": 2,
+  "max_concurrency_limit": 3,
+  "max_loaded_models": 2,
+  "prefix_cache_entries": 32,
+  "prefix_cache_max_mb": 2048,
+  "prefix_cache_ttl_min": 120,
+  "max_queue": 16,
+  "prefill_exact_tail": 64,
+  "require_api_key": true,
+  "inference_logging_enabled": true,
+  "inference_log_retention_count": 10000,
+  "inference_log_retention_days": 30
+ },
+ "version": "0.6.15",
+ "record_log": {
+  "path": "/data/cv84x6_llm_server/state/inference_records.sqlite3",
+  "enabled": true,
+  "total": 4631,
+  "bytes": 31288856,
+  "schema_version": 1,
+  "retention_count": 10000,
+  "retention_days": 30,
+  "readable": true,
+  "moving": false,
+  "last_error": null,
+  "last_error_at": null
+ },
+ "tokenizer": {
+  "lib": "/opt/sophgo/cv84x6_llm_server/lib/libcv84x6_llm.so",
+  "tokenizer_json": "/opt/sophgo/cv84x6_llm_server/model-config/qwen3_5/tokenizer.json",
+  "available": true,
+  "error": null
+ },
+ "data_dir": "/data/cv84x6_llm_server",
+ "kernel": "Linux sophon 5.10.4-9c6431d06-sophon-custom-00610-g9c6431d06798 #1 SMP Tue Oct 27 05:11:06 CST 2026 aarch64 aarch64 aarch64 GNU/Linux",
+ "sampler": {
+  "samples": 129,
+  "interval_s": 15.0,
+  "errors": 0,
+  "drift": {
+   "npu_mem_used": {
+    "key": "npu_mem_used",
+    "n": 129,
+    "head": 25599934464.0,
+    "tail": 25813843968.0,
+    "delta": 213909504.0,
+    "growth": 0.0084
+   },
+   "record_bytes": {
+    "key": "record_bytes",
+    "n": 129,
+    "head": 32108736.0,
+    "tail": 40782488.0,
+    "delta": 8673752.0,
+    "growth": 0.2701
+   },
+   "record_total": {
+    "key": "record_total",
+    "n": 129,
+    "head": 4667.0,
+    "tail": 5162.0,
+    "delta": 495.0,
+    "growth": 0.1061
+   },
+   "mem_available": {
+    "key": "mem_available",
+    "n": 129,
+    "head": 3060111360.0,
+    "tail": 3064320000.0,
+    "delta": 4208640.0,
+    "growth": 0.0014
+   },
+   "disk_free": {
+    "key": "disk_free",
+    "n": 0,
+    "head": null,
+    "tail": null,
+    "delta": null,
+    "growth": null
+   },
+   "cpu_percent": {
+    "key": "cpu_percent",
+    "n": 129,
+    "head": 3.35,
+    "tail": 1.1,
+    "delta": -2.25,
+    "growth": -0.6716
+   }
+  }
+ }
+}

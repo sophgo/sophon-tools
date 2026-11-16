@@ -1,0 +1,1084 @@
+{
+ "device": {
+  "ts": 1794096178.1044304,
+  "cpu_percent": 13.8,
+  "load_average": [
+   7.06,
+   4.99,
+   2.34
+  ],
+  "memory": {
+   "total_bytes": 29753458688,
+   "available_bytes": 27032612864,
+   "used_bytes": 2720845824
+  },
+  "temperatures": [
+   {
+    "zone": "thermal_zone0",
+    "name": "soc_thermal_0",
+    "celsius": 23.3
+   },
+   {
+    "zone": "thermal_zone1",
+    "name": "soc_thermal_1",
+    "celsius": 24.9
+   },
+   {
+    "zone": "thermal_zone2",
+    "name": "soc_thermal_2",
+    "celsius": 22.8
+   }
+  ],
+  "device_mem": {
+   "total_bytes": 36505124864,
+   "used_bytes": 32422686720,
+   "free_bytes": 4082438144,
+   "max_block_bytes": 4024434688,
+   "heaps": [
+    {
+     "name": "npu",
+     "total_bytes": 32212254720,
+     "used_bytes": 32154251264,
+     "free_bytes": 58003456
+    },
+    {
+     "name": "vpp",
+     "total_bytes": 4292870144,
+     "used_bytes": 268435456,
+     "free_bytes": 4024434688
+    }
+   ],
+   "source": "bmlib"
+  },
+  "tpu_usage": {
+   "percent": 25.0,
+   "cores": [
+    100.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "source": "sysfs"
+  },
+  "npu": {
+   "total_percent": 25.0,
+   "cores": [
+    100.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "heap": {},
+   "smi": {
+    "tpu_min_clock_mhz": 25,
+    "tpu_max_clock_mhz": 1000,
+    "tpu_util_percent": 0,
+    "mem_used_bytes": 32153534464,
+    "mem_total_bytes": 32212254720
+   },
+   "deprecated": true,
+   "use": "device_mem"
+  },
+  "tpu_freq": {
+   "mhz": null,
+   "source": "none",
+   "unit": "MHz",
+   "deprecated": true,
+   "use": "tpu_usage"
+  },
+  "vpu_percent": null,
+  "clocks": {
+   "cpu_hz": null
+  },
+  "disk": {
+   "path": "/data",
+   "total_bytes": 48824676352,
+   "free_bytes": 11762929664,
+   "used_bytes": 37061746688
+  }
+ },
+ "vpp_reserve": {
+  "requested_bytes": 268435456,
+  "held_bytes": 268435456,
+  "acquired": true,
+  "reason": null,
+  "env": "CV84X6_VPP_RESERVE_MB"
+ },
+ "usage": {
+  "prompt_tokens": 482486,
+  "completion_tokens": 147304,
+  "cached_tokens": 33301,
+  "requests": 2791,
+  "tps_history": [
+   [
+    1794095421.5582228,
+    11.73
+   ],
+   [
+    1794095423.7230322,
+    15.04
+   ],
+   [
+    1794095425.1173768,
+    11.77
+   ],
+   [
+    1794095425.538625,
+    17.14
+   ],
+   [
+    1794095429.950542,
+    9.17
+   ],
+   [
+    1794095430.4569962,
+    12.13
+   ],
+   [
+    1794095435.190415,
+    9.16
+   ],
+   [
+    1794095435.695004,
+    13.07
+   ],
+   [
+    1794095440.1515398,
+    9.16
+   ],
+   [
+    1794095440.63863,
+    11.73
+   ],
+   [
+    1794095444.7047908,
+    10.28
+   ],
+   [
+    1794095445.5902915,
+    11.95
+   ],
+   [
+    1794095445.8560297,
+    15.91
+   ],
+   [
+    1794095448.4288125,
+    15.25
+   ],
+   [
+    1794095449.1272223,
+    21.01
+   ],
+   [
+    1794095453.3583183,
+    9.29
+   ],
+   [
+    1794095454.1777453,
+    16.58
+   ],
+   [
+    1794095458.423606,
+    9.57
+   ],
+   [
+    1794095458.9334602,
+    12.37
+   ],
+   [
+    1794095462.9551914,
+    10.37
+   ],
+   [
+    1794095463.839298,
+    11.99
+   ],
+   [
+    1794095467.794747,
+    10.63
+   ],
+   [
+    1794095468.3084397,
+    14.15
+   ],
+   [
+    1794095469.1899931,
+    14.81
+   ],
+   [
+    1794095471.9386883,
+    11.73
+   ],
+   [
+    1794095472.3638818,
+    17.87
+   ],
+   [
+    1794095477.0966334,
+    8.44
+   ],
+   [
+    1794095477.6114314,
+    9.7
+   ],
+   [
+    1794095481.8758914,
+    9.68
+   ],
+   [
+    1794095482.5281029,
+    11.84
+   ],
+   [
+    1794095486.3829746,
+    10.69
+   ],
+   [
+    1794095486.8934116,
+    14.15
+   ],
+   [
+    1794095491.3480053,
+    10.08
+   ],
+   [
+    1794095491.8599205,
+    13.96
+   ],
+   [
+    1794095492.4519668,
+    14.86
+   ],
+   [
+    1794095495.5226276,
+    11.58
+   ],
+   [
+    1794095495.9422238,
+    16.52
+   ],
+   [
+    1794095500.80829,
+    8.21
+   ],
+   [
+    1794095501.3007147,
+    9.45
+   ],
+   [
+    1794095505.2619905,
+    10.62
+   ],
+   [
+    1794095506.216307,
+    12.03
+   ],
+   [
+    1794095510.0763786,
+    10.75
+   ],
+   [
+    1794095510.5911086,
+    14.19
+   ],
+   [
+    1794095515.017668,
+    9.27
+   ],
+   [
+    1794095515.5101717,
+    14.19
+   ],
+   [
+    1794095515.5802414,
+    15.0
+   ],
+   [
+    1794095518.7100441,
+    13.13
+   ],
+   [
+    1794095519.4088643,
+    17.19
+   ],
+   [
+    1794095523.5169437,
+    9.61
+   ],
+   [
+    1794095525.3397605,
+    10.86
+   ],
+   [
+    1794095527.8400278,
+    14.01
+   ],
+   [
+    1794095530.1633,
+    12.28
+   ],
+   [
+    1794095532.7080212,
+    13.77
+   ],
+   [
+    1794095534.562096,
+    14.73
+   ],
+   [
+    1794095537.5522013,
+    11.71
+   ],
+   [
+    1794095539.205696,
+    14.57
+   ],
+   [
+    1794095539.3482726,
+    14.89
+   ],
+   [
+    1794095541.0735013,
+    20.31
+   ],
+   [
+    1794095543.4479651,
+    14.75
+   ],
+   [
+    1794095545.8436115,
+    12.53
+   ],
+   [
+    1794095548.7837665,
+    11.92
+   ],
+   [
+    1794095550.6487267,
+    14.5
+   ],
+   [
+    1794095553.1279771,
+    14.13
+   ],
+   [
+    1794095555.4544256,
+    12.28
+   ],
+   [
+    1794095557.9613185,
+    13.97
+   ],
+   [
+    1794095560.306745,
+    12.11
+   ],
+   [
+    1794095562.7690604,
+    14.23
+   ],
+   [
+    1794095563.2001677,
+    14.27
+   ],
+   [
+    1794095564.3066027,
+    17.0
+   ],
+   [
+    1794095566.4169443,
+    16.6
+   ],
+   [
+    1794095568.1463761,
+    20.26
+   ],
+   [
+    1794095572.2094011,
+    8.62
+   ],
+   [
+    1794095573.0288107,
+    13.8
+   ],
+   [
+    1794095576.9766645,
+    10.41
+   ],
+   [
+    1794095577.6246665,
+    13.07
+   ],
+   [
+    1794095581.7712314,
+    10.71
+   ],
+   [
+    1794095582.2595758,
+    14.43
+   ],
+   [
+    1794095586.662678,
+    14.71
+   ],
+   [
+    1794095586.7010148,
+    9.26
+   ],
+   [
+    1794095587.1131313,
+    14.57
+   ],
+   [
+    1794095590.689905,
+    11.76
+   ],
+   [
+    1794095591.1153548,
+    14.91
+   ],
+   [
+    1794095596.168222,
+    7.84
+   ],
+   [
+    1794095596.7539387,
+    11.89
+   ],
+   [
+    1794095600.6801372,
+    10.49
+   ],
+   [
+    1794095601.1694093,
+    14.12
+   ],
+   [
+    1794095605.6268787,
+    10.51
+   ],
+   [
+    1794095606.1430833,
+    14.05
+   ],
+   [
+    1794095609.5558097,
+    15.2
+   ],
+   [
+    1794095610.3373945,
+    9.82
+   ],
+   [
+    1794095610.761971,
+    15.97
+   ],
+   [
+    1794095614.322444,
+    11.78
+   ],
+   [
+    1794095615.342879,
+    11.9
+   ],
+   [
+    1794095619.6961465,
+    9.8
+   ],
+   [
+    1794095620.4361737,
+    11.79
+   ],
+   [
+    1794095624.3522985,
+    10.51
+   ],
+   [
+    1794095624.856647,
+    13.91
+   ],
+   [
+    1794095629.3344142,
+    9.95
+   ],
+   [
+    1794095629.8270462,
+    13.84
+   ],
+   [
+    1794095632.6094282,
+    15.01
+   ],
+   [
+    1794095633.9319255,
+    10.14
+   ],
+   [
+    1794095634.354374,
+    17.16
+   ],
+   [
+    1794095637.711206,
+    12.65
+   ],
+   [
+    1794095639.1970878,
+    10.92
+   ],
+   [
+    1794095643.164743,
+    10.35
+   ],
+   [
+    1794095643.6806576,
+    13.72
+   ],
+   [
+    1794095648.1427834,
+    10.05
+   ],
+   [
+    1794095648.6516857,
+    13.91
+   ],
+   [
+    1794095653.0936506,
+    9.24
+   ],
+   [
+    1794095653.5803225,
+    14.22
+   ],
+   [
+    1794095655.4754632,
+    15.24
+   ],
+   [
+    1794095657.4773407,
+    10.76
+   ],
+   [
+    1794095657.8984556,
+    14.81
+   ],
+   [
+    1794095661.9630194,
+    10.08
+   ],
+   [
+    1794095662.4743776,
+    11.93
+   ],
+   [
+    1794095663.9823763,
+    25.88
+   ],
+   [
+    1794095667.4520268,
+    43.32
+   ],
+   [
+    1794095669.2355359,
+    65.81
+   ],
+   [
+    1794095844.976944,
+    30.04
+   ],
+   [
+    1794095853.2881866,
+    64.44
+   ]
+  ],
+  "cache_hit_rate": 0.06456347290645169
+ },
+ "models": [
+  {
+   "id": "bge-reranker-v2-m3",
+   "display_name": "bge-reranker-v2-m3",
+   "path": "/data/cv84x6_llm_server/models/bge-reranker-v2-m3",
+   "kind": "rerank",
+   "size_bytes": 1144569856,
+   "bmodel_files": [
+    "bge-reranker-v2-m3_bf16_seq2048_cv84x6_4core_static_20261009_110923.bmodel"
+   ],
+   "has_config": true,
+   "context_length": 2048,
+   "supports_vision": false,
+   "hidden_size": 1024,
+   "supports_sampling": true,
+   "loaded": true,
+   "port": 37629,
+   "pid": 5672,
+   "load_error": null,
+   "load_seconds": 6.0,
+   "loaded_at": 1794095827.2178495,
+   "operation": null,
+   "operation_since": null,
+   "conflict": null,
+   "adopted": false,
+   "downloading": false,
+   "last_used_at": 1794095861.7480614,
+   "unloaded_reason": null,
+   "idle_unload_at": null,
+   "settings": {
+    "idle_unload_min": null,
+    "auto_load": null,
+    "mem_limit_mb": null
+   },
+   "effective": {
+    "idle_unload_min": 0,
+    "auto_load": false,
+    "mem_limit_bytes": 1409286144
+   },
+   "mem_limit_default_bytes": 1409286144,
+   "mem_static_bytes": 1222037504,
+   "mem_used_bytes": 1356255232,
+   "inflight": 1
+  },
+  {
+   "id": "paddleocr-vl-1.5",
+   "display_name": "paddleocr-vl-1.5",
+   "path": "/data/cv84x6_llm_server/models/paddleocr-vl-1.5",
+   "kind": "ocr_vl",
+   "size_bytes": 2268594176,
+   "bmodel_files": [
+    "paddleocr-vl-1.5_bf16_seq2048_bm1684x2_4core_static_20261103.bmodel"
+   ],
+   "has_config": true,
+   "context_length": 2048,
+   "supports_vision": true,
+   "hidden_size": null,
+   "supports_sampling": false,
+   "loaded": true,
+   "port": 54621,
+   "pid": 6204,
+   "load_error": null,
+   "load_seconds": 7.5,
+   "loaded_at": 1794095843.375779,
+   "operation": null,
+   "operation_since": null,
+   "conflict": null,
+   "adopted": false,
+   "downloading": false,
+   "last_used_at": 1794095987.693111,
+   "unloaded_reason": null,
+   "idle_unload_at": null,
+   "settings": {
+    "idle_unload_min": null,
+    "auto_load": null,
+    "mem_limit_mb": null
+   },
+   "effective": {
+    "idle_unload_min": 0,
+    "auto_load": false,
+    "mem_limit_bytes": 2617245696
+   },
+   "mem_limit_default_bytes": 2617245696,
+   "mem_static_bytes": 2232055936,
+   "mem_used_bytes": 2269804672,
+   "inflight": 1
+  },
+  {
+   "id": "ppocrv6-medium",
+   "display_name": "ppocrv6-medium",
+   "path": "/data/cv84x6_llm_server/models/ppocrv6-medium",
+   "kind": "ocr",
+   "size_bytes": 241172480,
+   "bmodel_files": [
+    "ppocrv6-medium-det_f16_736_bm1684x2_static_20261103.bmodel",
+    "ppdoclayout-m_f16_640_bm1684x2_static_20261104.bmodel",
+    "ppocrv6-medium-rec_f16_48x1600_bm1684x2_static_20261103.bmodel",
+    "ppocrv6-medium-rec_f16_48x320_bm1684x2_static_20261103.bmodel",
+    "ppocrv6-medium-rec_f16_48x640_bm1684x2_static_20261103.bmodel"
+   ],
+   "has_config": true,
+   "context_length": 736,
+   "supports_vision": false,
+   "hidden_size": null,
+   "supports_sampling": true,
+   "loaded": true,
+   "port": 39149,
+   "pid": 6173,
+   "load_error": null,
+   "load_seconds": 1.0,
+   "loaded_at": 1794095835.812802,
+   "operation": null,
+   "operation_since": null,
+   "conflict": null,
+   "adopted": false,
+   "downloading": false,
+   "last_used_at": 1794095987.7204695,
+   "unloaded_reason": null,
+   "idle_unload_at": null,
+   "settings": {
+    "idle_unload_min": null,
+    "auto_load": null,
+    "mem_limit_mb": null
+   },
+   "effective": {
+    "idle_unload_min": 0,
+    "auto_load": false,
+    "mem_limit_bytes": 536870912
+   },
+   "mem_limit_default_bytes": 536870912,
+   "mem_static_bytes": 342815488,
+   "mem_used_bytes": 510587648,
+   "inflight": 1
+  },
+  {
+   "id": "qwen3-asr-0.6b",
+   "display_name": "qwen3-asr-0.6b",
+   "path": "/data/cv84x6_llm_server/models/qwen3-asr-0.6b",
+   "kind": "asr",
+   "size_bytes": 1588723712,
+   "bmodel_files": [
+    "qwen3-asr-0.6b_bf16_seq1024_bm1684x2_4core_static_20261103_120455.bmodel"
+   ],
+   "has_config": true,
+   "context_length": 512,
+   "supports_vision": false,
+   "hidden_size": 1024,
+   "supports_sampling": true,
+   "loaded": true,
+   "port": 55469,
+   "pid": 5888,
+   "load_error": null,
+   "load_seconds": 7.5,
+   "loaded_at": 1794095834.7745671,
+   "operation": null,
+   "operation_since": null,
+   "conflict": null,
+   "adopted": false,
+   "downloading": false,
+   "last_used_at": 1794095864.3689513,
+   "unloaded_reason": null,
+   "idle_unload_at": null,
+   "settings": {
+    "idle_unload_min": null,
+    "auto_load": null,
+    "mem_limit_mb": null
+   },
+   "effective": {
+    "idle_unload_min": 0,
+    "auto_load": false,
+    "mem_limit_bytes": 1946157056
+   },
+   "mem_limit_default_bytes": 1946157056,
+   "mem_static_bytes": 1719508992,
+   "mem_used_bytes": 1920835584,
+   "inflight": 1
+  },
+  {
+   "id": "qwen3-asr-1.7b",
+   "display_name": "qwen3-asr-1.7b",
+   "path": "/data/cv84x6_llm_server/models/qwen3-asr-1.7b",
+   "kind": "asr",
+   "size_bytes": 4099940352,
+   "bmodel_files": [
+    "qwen3-asr-1.7b_bf16_seq1024_bm1684x2_4core_static_20261103_120829.bmodel"
+   ],
+   "has_config": true,
+   "context_length": 1024,
+   "supports_vision": false,
+   "hidden_size": null,
+   "supports_sampling": true,
+   "loaded": false,
+   "port": null,
+   "pid": null,
+   "load_error": null,
+   "load_seconds": null,
+   "loaded_at": null,
+   "operation": null,
+   "operation_since": null,
+   "conflict": null,
+   "adopted": false,
+   "downloading": false,
+   "last_used_at": null,
+   "unloaded_reason": null,
+   "idle_unload_at": null,
+   "settings": {
+    "idle_unload_min": null,
+    "auto_load": null,
+    "mem_limit_mb": null
+   },
+   "effective": {
+    "idle_unload_min": 0,
+    "auto_load": false,
+    "mem_limit_bytes": 4362076160
+   },
+   "mem_limit_default_bytes": 4362076160,
+   "mem_static_bytes": 4130280064,
+   "mem_used_bytes": null
+  },
+  {
+   "id": "qwen3-embedding-0.6b",
+   "display_name": "qwen3-embedding-0.6b",
+   "path": "/data/cv84x6_llm_server/models/qwen3-embedding-0.6b",
+   "kind": "embedding",
+   "size_bytes": 1356795904,
+   "bmodel_files": [
+    "qwen3-embedding-0.6b_bf16_seq8192_bm1684x2_4core_static_20260920_184312.bmodel"
+   ],
+   "has_config": true,
+   "context_length": 8192,
+   "supports_vision": false,
+   "hidden_size": 1024,
+   "supports_sampling": true,
+   "loaded": true,
+   "port": 42267,
+   "pid": 5447,
+   "load_error": null,
+   "load_seconds": 6.5,
+   "loaded_at": 1794095821.167906,
+   "operation": null,
+   "operation_since": null,
+   "conflict": null,
+   "adopted": false,
+   "downloading": false,
+   "last_used_at": 1794096174.030284,
+   "unloaded_reason": null,
+   "idle_unload_at": null,
+   "settings": {
+    "idle_unload_min": null,
+    "auto_load": null,
+    "mem_limit_mb": null
+   },
+   "effective": {
+    "idle_unload_min": 0,
+    "auto_load": false,
+    "mem_limit_bytes": 2885681152
+   },
+   "mem_limit_default_bytes": 2885681152,
+   "mem_static_bytes": 2731720704,
+   "mem_used_bytes": 2832384000,
+   "inflight": 2
+  },
+  {
+   "id": "qwen3.6-35b-a3b-128k",
+   "display_name": "qwen3.6-35b-a3b-128k",
+   "path": "/data/cv84x6_llm_server/models/qwen3.6-35b-a3b-128k",
+   "kind": "chat",
+   "size_bytes": 20638679040,
+   "bmodel_files": [
+    "qwen3.6-35b-a3b-int4-autoround_w4bf16_seq131072_bm1684x2_4core_history_dynamic_20261025_051759.bmodel"
+   ],
+   "has_config": true,
+   "context_length": 131072,
+   "supports_vision": true,
+   "hidden_size": null,
+   "supports_sampling": false,
+   "loaded": true,
+   "port": 59539,
+   "pid": 3028,
+   "load_error": null,
+   "load_seconds": 65.5,
+   "loaded_at": 1794095814.6064086,
+   "operation": null,
+   "operation_since": null,
+   "conflict": null,
+   "adopted": false,
+   "downloading": false,
+   "last_used_at": 1794095853.612646,
+   "unloaded_reason": null,
+   "idle_unload_at": null,
+   "settings": {
+    "idle_unload_min": null,
+    "auto_load": null,
+    "mem_limit_mb": null
+   },
+   "effective": {
+    "idle_unload_min": 0,
+    "auto_load": false,
+    "mem_limit_bytes": 24360517632
+   },
+   "mem_limit_default_bytes": 24360517632,
+   "mem_static_bytes": 23857410048,
+   "mem_used_bytes": 23925239808,
+   "inflight": 2
+  }
+ ],
+ "max_loaded_models": 0,
+ "kv_cache": {
+  "paddleocr-vl-1.5": {
+   "entries": 0,
+   "location": "n/a",
+   "enabled": false,
+   "bytes": 0,
+   "max_bytes": 385875968,
+   "max_entries": 32,
+   "ttl_s": 7200.0,
+   "expirations": 0,
+   "hit_rate": 0.0,
+   "tokens_reused": 0,
+   "tokens_prompted": 1594,
+   "evictions": 0
+  },
+  "qwen3.6-35b-a3b-128k": {
+   "entries": 0,
+   "location": "device",
+   "enabled": true,
+   "bytes": 0,
+   "max_bytes": 509607936,
+   "max_entries": 32,
+   "ttl_s": 7200.0,
+   "expirations": 0,
+   "hit_rate": 0.0,
+   "tokens_reused": 0,
+   "tokens_prompted": 57,
+   "evictions": 0
+  }
+ },
+ "workers": {
+  "bge-reranker-v2-m3": {
+   "op": "stats",
+   "req_id": "__stats_55ac669d__",
+   "max_concurrent": 1,
+   "inflight": 1,
+   "queued": 0,
+   "kv_used_bytes": 134217728,
+   "completed": 0,
+   "cancelled": 0,
+   "cache_entries": 0,
+   "cache_bytes": 0,
+   "cache_hits": 0,
+   "cache_misses": 0,
+   "kind": "rerank",
+   "fault": false
+  },
+  "paddleocr-vl-1.5": {
+   "op": "stats",
+   "req_id": "__stats_62592d19__",
+   "active": 1,
+   "inflight": 1,
+   "queued": 0,
+   "max_concurrent": 1,
+   "max_queue": 12,
+   "decode_quantum": 8,
+   "rejected_requests": 0,
+   "kv_budget_bytes": 385875968,
+   "kv_reserved_bytes": 0,
+   "kv_used_bytes": 37748736,
+   "waiting_for_memory": false,
+   "memory_waits": 0,
+   "supports_sampling": false,
+   "total_requests": 3,
+   "failed_requests": 1,
+   "cancelled_requests": 0,
+   "prompt_tokens": 1594,
+   "completion_tokens": 99,
+   "avg_decode_tps": 9.986679228900178,
+   "cache": {
+    "entries": 0,
+    "location": "n/a",
+    "enabled": false,
+    "bytes": 0,
+    "max_bytes": 385875968,
+    "max_entries": 32,
+    "ttl_s": 7200.0,
+    "expirations": 0,
+    "hit_rate": 0.0,
+    "tokens_reused": 0,
+    "tokens_prompted": 1594,
+    "evictions": 0
+   },
+   "kind": "ocr_vl",
+   "fault": false
+  },
+  "ppocrv6-medium": {
+   "op": "stats",
+   "req_id": "__stats_d13756e7__",
+   "max_concurrent": 1,
+   "inflight": 1,
+   "queued": 0,
+   "kv_used_bytes": 167772160,
+   "completed": 0,
+   "cancelled": 0,
+   "cache_entries": 0,
+   "cache_bytes": 0,
+   "cache_hits": 0,
+   "cache_misses": 0,
+   "kind": "ocr",
+   "fault": false
+  },
+  "qwen3-asr-0.6b": {
+   "op": "stats",
+   "req_id": "__stats_7acae9a2__",
+   "max_concurrent": 1,
+   "inflight": 1,
+   "queued": 0,
+   "kv_used_bytes": 201326592,
+   "completed": 0,
+   "cancelled": 0,
+   "cache_entries": 0,
+   "cache_bytes": 0,
+   "cache_hits": 0,
+   "cache_misses": 0,
+   "kind": "asr",
+   "fault": false
+  },
+  "qwen3-embedding-0.6b": {
+   "op": "stats",
+   "req_id": "__stats_68b98fd1__",
+   "max_concurrent": 1,
+   "inflight": 2,
+   "queued": 1,
+   "kv_used_bytes": 100663296,
+   "completed": 0,
+   "cancelled": 0,
+   "cache_entries": 0,
+   "cache_bytes": 0,
+   "cache_hits": 0,
+   "cache_misses": 0,
+   "kind": "embedding",
+   "fault": false
+  },
+  "qwen3.6-35b-a3b-128k": {
+   "op": "stats",
+   "req_id": "__stats_e311b80a__",
+   "active": 2,
+   "inflight": 2,
+   "queued": 0,
+   "max_concurrent": 2,
+   "max_queue": 12,
+   "decode_quantum": 8,
+   "rejected_requests": 0,
+   "kv_budget_bytes": 509607936,
+   "kv_reserved_bytes": 72867840,
+   "kv_used_bytes": 67829760,
+   "waiting_for_memory": false,
+   "memory_waits": 0,
+   "supports_sampling": false,
+   "total_requests": 3,
+   "failed_requests": 0,
+   "cancelled_requests": 0,
+   "prompt_tokens": 57,
+   "completion_tokens": 36,
+   "avg_decode_tps": 27.51764509178928,
+   "cache": {
+    "entries": 0,
+    "location": "device",
+    "enabled": true,
+    "bytes": 0,
+    "max_bytes": 509607936,
+    "max_entries": 32,
+    "ttl_s": 7200.0,
+    "expirations": 0,
+    "hit_rate": 0.0,
+    "tokens_reused": 0,
+    "tokens_prompted": 57,
+    "evictions": 0
+   },
+   "kind": "chat",
+   "fault": false
+  }
+ },
+ "disk": {
+  "total_bytes": 48824676352,
+  "used_bytes": 36548694016,
+  "free_bytes": 11762929664,
+  "models_bytes": 31338475520,
+  "models_root": "/data/cv84x6_llm_server/models"
+ }
+}

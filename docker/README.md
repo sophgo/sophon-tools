@@ -5,7 +5,7 @@
 
 **M5 起为单镜像方案**：三个镜像（`sophon-tools-build:m2` ubuntu:22.04 主镜像、
 `sophon-tools-build-pqt` ubuntu:20.04 pqt 专用、`cross_build_sophon_u20:v1` ubuntu:20.04 pSophUI 专用）
-合并为**一个 ubuntu:20.04 基座镜像** `sophon-tools-build:unified`，全部 16 个子项目在单镜像内构建，
+合并为**一个 ubuntu:20.04 基座镜像** `sophon-tools-build:unified`，全部 17 个子项目在单镜像内构建，
 不再按子项目切换镜像。
 
 **镜像体积**：完整镜像（内置 dfss sw_64/loongarch64、Qt mingw 静态库、pSophUI aarch64 Qt 库）

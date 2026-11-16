@@ -1,0 +1,29 @@
+{
+  "auto_map": {
+    "AutoImageProcessor": "image_processing_paddleocr_vl.PaddleOCRVLImageProcessor",
+    "AutoProcessor": "processing_paddleocr_vl.PaddleOCRVLProcessor"
+  },
+  "do_convert_rgb": true,
+  "do_normalize": true,
+  "do_rescale": true,
+  "do_resize": true,
+  "image_mean": [
+    0.5,
+    0.5,
+    0.5
+  ],
+  "image_processor_type": "PaddleOCRVLImageProcessor",
+  "image_std": [
+    0.5,
+    0.5,
+    0.5
+  ],
+  "max_pixels": 1003520,
+  "merge_size": 2,
+  "min_pixels": 112896,
+  "patch_size": 14,
+  "processor_class": "PaddleOCRVLProcessor",
+  "resample": 3,
+  "rescale_factor": 0.00392156862745098,
+  "temporal_patch_size": 1
+}

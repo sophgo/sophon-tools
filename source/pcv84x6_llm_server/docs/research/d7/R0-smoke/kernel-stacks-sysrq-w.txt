@@ -1,0 +1,87 @@
+[  287.648509] sysrq: Show Blocked State
+[  287.652394] task:bm_mbox         state:D stack:14416 pid:  514 ppid:     2 flags:0x00000008
+[  287.652405] Call trace:
+[  287.652416]  __switch_to+0xb0/0xf4
+[  287.652422]  __schedule+0x30c/0x760
+[  287.652425]  schedule+0x70/0x104
+[  287.652429]  schedule_hrtimeout_range_clock+0xa4/0x160
+[  287.652431]  schedule_hrtimeout_range+0x14/0x20
+[  287.652434]  usleep_range+0x84/0xc0
+[  287.652456]  mbox_thread_fn+0x4c/0x84 [bmtpu]
+[  287.652461]  kthread+0x148/0x14c
+[  287.652464]  ret_from_fork+0x10/0x34
+[  287.652526] task:python3.10      state:D stack:13360 pid: 6027 ppid:  1299 flags:0x00000004
+[  287.652534] Call trace:
+[  287.652537]  __switch_to+0xb0/0xf4
+[  287.652540]  __schedule+0x30c/0x760
+[  287.652542]  schedule+0x70/0x104
+[  287.652545]  schedule_timeout+0x80/0xf0
+[  287.652548]  wait_for_completion_timeout+0xa4/0x130
+[  287.652559]  bmdrv_thread_sync_api+0x240/0x560 [bmtpu]
+[  287.652568]  bm_ioctl+0xc84/0x1c5c [bmtpu]
+[  287.652578]  bmdev_ioctl+0x54/0xd0 [bmtpu]
+[  287.652583]  __arm64_sys_ioctl+0x46c/0xbd0
+[  287.652587]  do_el0_svc+0xc0/0x210
+[  287.652590]  el0_svc+0x14/0x20
+[  287.652593]  el0_sync_handler+0xa4/0x140
+[  287.652596]  el0_sync+0x174/0x180
+[  287.652599] task:python3.10      state:D stack:13344 pid: 6130 ppid:  1299 flags:0x00000004
+[  287.652607] Call trace:
+[  287.652609]  __switch_to+0xb0/0xf4
+[  287.652613]  __schedule+0x30c/0x760
+[  287.652615]  schedule+0x70/0x104
+[  287.652618]  schedule_timeout+0x80/0xf0
+[  287.652620]  wait_for_completion_timeout+0xa4/0x130
+[  287.652630]  bmdrv_thread_sync_api+0x240/0x560 [bmtpu]
+[  287.652640]  bm_ioctl+0xc84/0x1c5c [bmtpu]
+[  287.652649]  bmdev_ioctl+0x54/0xd0 [bmtpu]
+[  287.652652]  __arm64_sys_ioctl+0x46c/0xbd0
+[  287.652654]  do_el0_svc+0xc0/0x210
+[  287.652657]  el0_svc+0x14/0x20
+[  287.652660]  el0_sync_handler+0xa4/0x140
+[  287.652662]  el0_sync+0x174/0x180
+[  287.652668] task:python3.10      state:D stack:13376 pid: 6154 ppid:  1299 flags:0x00000004
+[  287.652676] Call trace:
+[  287.652678]  __switch_to+0xb0/0xf4
+[  287.652681]  __schedule+0x30c/0x760
+[  287.652684]  schedule+0x70/0x104
+[  287.652686]  schedule_timeout+0x80/0xf0
+[  287.652689]  wait_for_completion_timeout+0xa4/0x130
+[  287.652698]  bmdrv_thread_sync_api+0x240/0x560 [bmtpu]
+[  287.652708]  bm_ioctl+0xc84/0x1c5c [bmtpu]
+[  287.652717]  bmdev_ioctl+0x54/0xd0 [bmtpu]
+[  287.652720]  __arm64_sys_ioctl+0x46c/0xbd0
+[  287.652723]  do_el0_svc+0xc0/0x210
+[  287.652726]  el0_svc+0x14/0x20
+[  287.652729]  el0_sync_handler+0xa4/0x140
+[  287.652731]  el0_sync+0x174/0x180
+[  287.652737] task:python3.10      state:D stack:13136 pid: 6174 ppid:  1299 flags:0x00000004
+[  287.652744] Call trace:
+[  287.652747]  __switch_to+0xb0/0xf4
+[  287.652750]  __schedule+0x30c/0x760
+[  287.652752]  schedule+0x70/0x104
+[  287.652754]  schedule_timeout+0x80/0xf0
+[  287.652757]  wait_for_completion_timeout+0xa4/0x130
+[  287.652767]  bmdrv_thread_sync_api+0x240/0x560 [bmtpu]
+[  287.652776]  bm_ioctl+0xc84/0x1c5c [bmtpu]
+[  287.652786]  bmdev_ioctl+0x54/0xd0 [bmtpu]
+[  287.652789]  __arm64_sys_ioctl+0x46c/0xbd0
+[  287.652792]  do_el0_svc+0xc0/0x210
+[  287.652795]  el0_svc+0x14/0x20
+[  287.652798]  el0_sync_handler+0xa4/0x140
+[  287.652800]  el0_sync+0x174/0x180
+[  287.652811] task:python3.10      state:D stack:13344 pid: 6306 ppid:  1299 flags:0x00000004
+[  287.652818] Call trace:
+[  287.652821]  __switch_to+0xb0/0xf4
+[  287.652824]  __schedule+0x30c/0x760
+[  287.652826]  schedule+0x70/0x104
+[  287.652829]  schedule_timeout+0x80/0xf0
+[  287.652832]  wait_for_completion_timeout+0xa4/0x130
+[  287.652841]  bmdrv_thread_sync_api+0x240/0x560 [bmtpu]
+[  287.652851]  bm_ioctl+0xc84/0x1c5c [bmtpu]
+[  287.652860]  bmdev_ioctl+0x54/0xd0 [bmtpu]
+[  287.652863]  __arm64_sys_ioctl+0x46c/0xbd0
+[  287.652865]  do_el0_svc+0xc0/0x210
+[  287.652868]  el0_svc+0x14/0x20
+[  287.652871]  el0_sync_handler+0xa4/0x140
+[  287.652873]  el0_sync+0x174/0x180

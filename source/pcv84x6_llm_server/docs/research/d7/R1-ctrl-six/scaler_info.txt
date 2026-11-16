@@ -1,0 +1,84 @@
+Scaler Driver Statistics
+================================
+Total logs received: 0
+
+Core 0:
+  Status: Active
+  Logs processed: 0
+  Logs dropped: 0
+  Last timestamp: 0 ms
+  Firmware: FIRMWARE_VERSION=f6175ad
+BUILD_TIME=2026-10-30 17:38:09
+  recvmsg_cnt: 9801
+  procmsg_cnt: 9801
+  running_flag: aa0b0036
+  using_flag: a5a5
+  debug_run_cnt: 85335870
+  cur_api_id: 0x90000003
+  cur_packet_addr: 0
+  cur_group_idx: 0, cur_start_core_idx: 0
+  cur_group_num: 1, cur_block_num: 1
+  cur_api_result: 0
+  log enable: 0
+  Buffer usage: 0/2092928 (0%)
+
+Core 1:
+  Status: Active
+  Logs processed: 0
+  Logs dropped: 0
+  Last timestamp: 0 ms
+  Firmware: FIRMWARE_VERSION=f6175ad
+BUILD_TIME=2026-10-30 17:38:54
+  recvmsg_cnt: 7497
+  procmsg_cnt: 7497
+  running_flag: aa55030a
+  using_flag: 0
+  debug_run_cnt: 152799245
+  cur_api_id: 0x90000003
+  cur_packet_addr: 0
+  cur_group_idx: 0, cur_start_core_idx: 0
+  cur_group_num: 1, cur_block_num: 4
+  cur_api_result: 0
+  log enable: 0
+  Buffer usage: 0/2092928 (0%)
+
+Core 2:
+  Status: Active
+  Logs processed: 0
+  Logs dropped: 0
+  Last timestamp: 0 ms
+  Firmware: FIRMWARE_VERSION=f6175ad
+BUILD_TIME=2026-10-30 17:39:39
+  recvmsg_cnt: 7350
+  procmsg_cnt: 7350
+  running_flag: aa55030a
+  using_flag: 0
+  debug_run_cnt: 152622214
+  cur_api_id: 0x90000003
+  cur_packet_addr: 0
+  cur_group_idx: 0, cur_start_core_idx: 0
+  cur_group_num: 1, cur_block_num: 4
+  cur_api_result: 0
+  log enable: 0
+  Buffer usage: 0/2092928 (0%)
+
+Core 3:
+  Status: Active
+  Logs processed: 0
+  Logs dropped: 0
+  Last timestamp: 0 ms
+  Firmware: FIRMWARE_VERSION=f6175ad
+BUILD_TIME=2026-10-30 17:40:24
+  recvmsg_cnt: 7344
+  procmsg_cnt: 7344
+  running_flag: aa55030a
+  using_flag: 0
+  debug_run_cnt: 152364984
+  cur_api_id: 0x90000003
+  cur_packet_addr: 0
+  cur_group_idx: 0, cur_start_core_idx: 0
+  cur_group_num: 1, cur_block_num: 4
+  cur_api_result: 0
+  log enable: 0
+  Buffer usage: 0/2092928 (0%)
+

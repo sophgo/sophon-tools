@@ -1,0 +1,8 @@
+fastapi>=0.110
+uvicorn>=0.27
+pydantic>=2.6
+httpx>=0.27
+# The service itself needs no scientific stack: tokenising and image
+# preprocessing (JPEG/PNG decode, smart_resize, Pillow-compatible bicubic resize,
+# normalise, patchify) live in lib/libcv84x6_llm.so. numpy remains a test-only
+# dependency of the unused sail backend's contract test.

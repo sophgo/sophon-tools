@@ -1,0 +1,187 @@
+#!/usr/bin/env python3
+"""A stdio MCP bridge to a running CV84X6 service: JSON-RPC in, JSON-RPC out.
+
+For MCP clients that can only *spawn* a server over stdin/stdout. The three
+agents this service ships are all configured against ``/mcp`` directly -- none of
+them needs this (``docs/mcp.md`` records the evidence) -- so this exists for the
+next client, and for a person who wants to try a tool from a shell.
+
+    cv84x6-mcp-stdio [--url http://127.0.0.1:8000/mcp] [--api-key sk-...]
+
+Each line on stdin is one JSON-RPC message. It is POSTed to the service's MCP
+endpoint, and the response -- if the message had an ``id`` -- is written back as
+one line on stdout. Notifications (``notifications/initialized`` and friends)
+get their request sent and produce no output, which is what a stdio client
+expects.
+
+**Standard library only, and Python 3.7 syntax at the oldest.** The release
+vendors no third-party wheels beyond what the service itself needs, and the
+board's interpreter is whatever the installer provisioned (3.10 today, but a
+client that spawns this script may have its own Python). Using ``urllib``
+rather than ``httpx`` is the point: this file has to run even when the service's
+own dependency tree cannot be imported.
+
+**Nothing is buffered, and nothing is logged to stdout.** A stray ``print``
+would corrupt the JSON-RPC stream; diagnostics go to stderr, which clients show
+in their own logs.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+import urllib.error
+import urllib.request
+
+#: The header this service authenticates ``/v1`` and ``/mcp`` with. Same key,
+#: same rule: a key must be presented unless the operator turned the check off.
+AUTH_HEADER = "Authorization"
+
+#: How long one tool call may take. A ``kb_search`` with reranking is ~10 s on
+#: the board, an ``ocr_read`` of a 50-page PDF is minutes; the HTTP client's own
+#: socket timeout is the only thing standing between a wedged NPU and a bridge
+#: that never answers, so it is generous rather than tight.
+DEFAULT_TIMEOUT_S = 1800.0
+
+
+def _log(message: str) -> None:
+    sys.stderr.write(message.rstrip("\n") + "\n")
+    sys.stderr.flush()
+
+
+class Bridge:
+    def __init__(self, url: str, api_key: str, timeout: float) -> None:
+        self.url = url
+        self.api_key = api_key
+        self.timeout = timeout
+
+    def post(self, message: dict) -> dict | None:
+        """Send one message; return the response, or None for a notification."""
+        body = json.dumps(message, ensure_ascii=False).encode("utf-8")
+        request = urllib.request.Request(self.url, data=body, method="POST")
+        request.add_header("Content-Type", "application/json")
+        # Both types, exactly as the Streamable HTTP spec asks a client to. This
+        # server answers JSON; naming the event stream costs nothing and keeps
+        # the request valid if the endpoint ever gains one.
+        request.add_header("Accept", "application/json, text/event-stream")
+        if self.api_key:
+            request.add_header(AUTH_HEADER, "Bearer " + self.api_key)
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                raw = response.read()
+        except urllib.error.HTTPError as exc:
+            detail = ""
+            try:
+                detail = exc.read().decode("utf-8", "replace")
+            except Exception:
+                pass
+            raise BridgeError(
+                "HTTP {} from {}: {}".format(exc.code, self.url, detail or exc.reason))
+        except urllib.error.URLError as exc:
+            raise BridgeError("cannot reach {}: {}".format(self.url, exc.reason))
+        except OSError as exc:
+            raise BridgeError("cannot reach {}: {}".format(self.url, exc))
+
+        if message.get("id") is None:
+            return None
+        if not raw.strip():
+            # A 202 with no body for a request means the server treated it as a
+            # notification. There is nothing to forward, and inventing a reply
+            # would be worse than silence.
+            return None
+        try:
+            payload = json.loads(raw)
+        except ValueError as exc:
+            raise BridgeError("response was not JSON: {} ({!r})".format(exc, raw[:200]))
+        if not isinstance(payload, dict):
+            raise BridgeError("response was not a JSON object")
+        return payload
+
+
+class BridgeError(Exception):
+    pass
+
+
+def _reply_error(message: dict, message_text: str) -> dict:
+    """A JSON-RPC error for a message the bridge could not deliver."""
+    rid = message.get("id") if isinstance(message, dict) else None
+    return {"jsonrpc": "2.0", "id": rid,
+            "error": {"code": -32603, "message": message_text}}
+
+
+def serve(bridge: Bridge, stdin=None, stdout=None) -> int:
+    """Pump stdin to the endpoint and back until stdin closes."""
+    stdin = stdin or sys.stdin
+    stdout = stdout or sys.stdout
+    for line in stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            message = json.loads(line)
+        except ValueError as exc:
+            # A parse error carries no id, so the client cannot match it to a
+            # request; still answer, because a silent bridge looks like a hang.
+            _emit(stdout, {"jsonrpc": "2.0", "id": None,
+                           "error": {"code": -32700, "message": "JSON parse error: {}".format(exc)}})
+            continue
+        if isinstance(message, list):
+            # MCP 2025-06-18 removed batching, and this service refuses it. Say
+            # so per message rather than forwarding something we know is refused.
+            _emit(stdout, {"jsonrpc": "2.0", "id": None,
+                           "error": {"code": -32600,
+                                     "message": "batched requests are not supported"}})
+            continue
+        if not isinstance(message, dict):
+            # Valid JSON that is not an object: `5`, `"ping"`, `null`. Legal JSON
+            # and not a legal JSON-RPC message, so it is a request error -- and
+            # answering it keeps the loop going instead of dying on
+            # `message.get` against an int.
+            _emit(stdout, {"jsonrpc": "2.0", "id": None,
+                           "error": {"code": -32600,
+                                     "message": "a JSON-RPC message must be an object"}})
+            continue
+        try:
+            response = bridge.post(message)
+        except BridgeError as exc:
+            _log("cv84x6-mcp-stdio: {}".format(exc))
+            if isinstance(message, dict) and message.get("id") is not None:
+                _emit(stdout, _reply_error(message, str(exc)))
+            continue
+        if response is not None:
+            _emit(stdout, response)
+    return 0
+
+
+def _emit(stdout, payload: dict) -> None:
+    stdout.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    stdout.flush()
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="cv84x6-mcp-stdio",
+        description="Bridge a stdio MCP client to a running CV84X6 service's /mcp endpoint.")
+    parser.add_argument(
+        "--url", default=os.environ.get("CV84X6_MCP_URL") or "http://127.0.0.1:8000/mcp",
+        help="the service's MCP endpoint (default: %(default)s, or $CV84X6_MCP_URL)")
+    parser.add_argument(
+        "--api-key", default=os.environ.get("CV84X6_API_KEY") or "",
+        help="API key to present (default: $CV84X6_API_KEY)")
+    parser.add_argument(
+        "--timeout", type=float, default=DEFAULT_TIMEOUT_S,
+        help="seconds to wait for one call (default: %(default)s)")
+    args = parser.parse_args(argv)
+    if not args.api_key:
+        _log("cv84x6-mcp-stdio: no API key given (--api-key or $CV84X6_API_KEY); "
+             "the endpoint will answer 401 unless key checks are off")
+    try:
+        return serve(Bridge(args.url, args.api_key, args.timeout))
+    except KeyboardInterrupt:
+        return 130
+
+
+if __name__ == "__main__":
+    sys.exit(main())

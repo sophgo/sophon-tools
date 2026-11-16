@@ -1,0 +1,219 @@
+{
+  "model": "PP-OCRv6_medium",
+  "source": {
+    "models": "https://github.com/PaddlePaddle/PaddleOCR (docs/version3.x/model_list.md, PP-OCRv6_medium det/rec)",
+    "reference_pipeline": "sophon-demo sample/PP-OCR python/ppocr_det_opencv.py, python/ppocr_rec_opencv.py",
+    "export": "paddle2onnx --model_dir <official inference dir> --params_filename inference.pdiparams --model_filename inference.json --save_file <name>.onnx"
+  },
+  "det": {
+    "bmodel": "ppocrv6-medium-det_f16_736_bm1684x2_static_20261103.bmodel",
+    "input": {
+      "name": "x",
+      "shape": [
+        1,
+        3,
+        736,
+        736
+      ],
+      "dtype": "float32",
+      "layout": "NCHW"
+    },
+    "output": {
+      "name": "fetch_name_0_Sigmoid",
+      "shape": [
+        1,
+        1,
+        736,
+        736
+      ],
+      "dtype": "float32"
+    },
+    "preprocess": {
+      "decode": {
+        "img_mode": "BGR",
+        "channel_first": false
+      },
+      "resize": {
+        "policy": "limit_side_len",
+        "limit_side_len": 736,
+        "note": "If max(h,w) >= 736, scale so the long side is 736 (ratio = 736/max(h,w)); otherwise keep the original size (ratio = 1). resize_h = int(h*ratio), resize_w = int(w*ratio).",
+        "interpolation": "cv2.INTER_LINEAR"
+      },
+      "normalize": {
+        "order": "hwc",
+        "mean": [
+          0.485,
+          0.456,
+          0.406
+        ],
+        "std": [
+          0.229,
+          0.224,
+          0.225
+        ],
+        "scale": 0.00392156862745098,
+        "note": "value = (pixel/255 - mean) / std, applied on the 0..255 BGR image; equivalent to (BGR - mean*255) * (1/std/255) used by sophon-demo."
+      },
+      "to_chw": true,
+      "padding": {
+        "mode": "zero",
+        "target": [
+          736,
+          736
+        ],
+        "note": "The resized image is written to the top-left corner of a 736x736 zero canvas; the remainder stays 0 (post-normalisation zeros, not grey)."
+      }
+    },
+    "postprocess": {
+      "name": "DBPostProcess",
+      "thresh": 0.2,
+      "box_thresh": 0.45,
+      "max_candidates": 3000,
+      "unclip_ratio": 1.4,
+      "min_size": 3,
+      "score_mode": "fast",
+      "use_dilation": false,
+      "note": "Values are from the model's own inference.yml (PostProcess). sophon-demo's PP-OCR python sample hardcodes thresh=0.3/box_thresh=0.6/unclip_ratio=1.5 for PP-OCRv4; PP-OCRv6's shipped inference.yml is authoritative for v6 and is what the golden uses.",
+      "output_maps": "Probability map cropped back to [0:resize_h, 0:resize_w] before contour extraction; boxes are scaled by (src_w/resize_w, src_h/resize_h) back to the original image."
+    }
+  },
+  "rec": {
+    "bmodels": [
+      {
+        "file": "ppocrv6-medium-rec_f16_48x320_bm1684x2_static_20261103.bmodel",
+        "width": 320,
+        "input": {
+          "name": "x",
+          "shape": [
+            1,
+            3,
+            48,
+            320
+          ],
+          "dtype": "float32",
+          "layout": "NCHW"
+        },
+        "output": {
+          "name": "fetch_name_0_Softmax",
+          "shape": [
+            1,
+            40,
+            18710
+          ],
+          "dtype": "float32"
+        }
+      },
+      {
+        "file": "ppocrv6-medium-rec_f16_48x640_bm1684x2_static_20261103.bmodel",
+        "width": 640,
+        "input": {
+          "name": "x",
+          "shape": [
+            1,
+            3,
+            48,
+            640
+          ],
+          "dtype": "float32",
+          "layout": "NCHW"
+        },
+        "output": {
+          "name": "fetch_name_0_Softmax",
+          "shape": [
+            1,
+            80,
+            18710
+          ],
+          "dtype": "float32"
+        }
+      },
+      {
+        "file": "ppocrv6-medium-rec_f16_48x1600_bm1684x2_static_20261103.bmodel",
+        "width": 1600,
+        "input": {
+          "name": "x",
+          "shape": [
+            1,
+            3,
+            48,
+            1600
+          ],
+          "dtype": "float32",
+          "layout": "NCHW"
+        },
+        "output": {
+          "name": "fetch_name_0_Softmax",
+          "shape": [
+            1,
+            200,
+            18710
+          ],
+          "dtype": "float32"
+        }
+      }
+    ],
+    "width_selection": {
+      "policy": "by_aspect_ratio",
+      "img_h": 48,
+      "tiers": [
+        {
+          "max_ratio": 6.666666666666667,
+          "width": 320
+        },
+        {
+          "max_ratio": 13.333333333333334,
+          "width": 640
+        },
+        {
+          "max_ratio": 33.333333333333336,
+          "width": 1600
+        }
+      ],
+      "squash_tolerance": 1.15,
+      "note": "ratio = crop_w / crop_h. Pick the narrowest tier whose max_ratio is >= ratio * 1.15. The 1.15 factor lets a slightly-longer line use the narrower model, which is cheaper; anything wider than 33.33:1 uses 1600 and is truncated there. 640 alone is NOT enough: it squashes a 34.8:1 line to a 2.3x horizontal squeeze and the recogniser returns garbage -- the same crop at 1600 decodes correctly. 1600 covers every line in the golden set. The model's own inference.yml declares dynamic support up to 3200; a 3200 tier was compiled and measured to give the same text as 1600 on these images, so it is not shipped (2x the time steps for no accuracy)."
+    },
+    "preprocess": {
+      "decode": {
+        "img_mode": "BGR",
+        "channel_first": false
+      },
+      "resize": {
+        "height": 48,
+        "keep_aspect_ratio": true,
+        "interpolation": "cv2.INTER_LINEAR",
+        "note": "resized_w = int(48 * w / h), width only; no height change."
+      },
+      "normalize": {
+        "mean": 127.5,
+        "scale": 0.0078125,
+        "note": "value = (pixel - 127.5) * 0.0078125, i.e. (pixel/255 - 0.5)/0.5. This is the RecResizeImg/NormalizeImage default in PaddleOCR's rec config, and matches the bmodel compiled from the same preprocessing."
+      },
+      "to_chw": true,
+      "padding": {
+        "mode": "zero",
+        "axis": "width_right",
+        "note": "Right-pad to the tier width with 0."
+      }
+    },
+    "postprocess": {
+      "name": "CTCLabelDecode",
+      "use_space_char": true,
+      "decoding": "greedy",
+      "steps": [
+        "argmax over the class axis -> index per time step",
+        "drop repeats (collapse consecutive equal indices)",
+        "drop blank (index 0)",
+        "map the remaining indices through labels[]",
+        "confidence = mean of the per-step softmax maxima of the kept steps"
+      ],
+      "class_count": 18710,
+      "labels_file": "ppocr_keys_v1.txt",
+      "labels_note": "labels[] is ['<blank>'] + ppocr_keys_v1.txt (18708 lines) + [' ']. 1 + 18708 + 1 = 18710 classes, matching the model output. The space character is appended because use_space_char defaults to true in PP-OCR rec; it is NOT present in the dictionary file itself.",
+      "softmax_note": "The bmodel output is already softmaxed (Softmax is the graph's last op). The ONNX graph also ends in Softmax, so argmax/confidence are directly comparable between the two."
+    }
+  },
+  "cls": {
+    "required": false,
+    "note": "No direction-classification model is used. The PP-OCRv6 det+rec path in sophon-demo sample/PP-OCR does not invoke cls; angle handling is left to the caller. Deliberately not built."
+  }
+}

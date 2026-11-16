@@ -1,0 +1,115 @@
+{
+  "model": "PP-DocLayout-M",
+  "source": {
+    "models": "https://github.com/PaddlePaddle/PaddleX (paddlex/configs/modules/layout_detection/PP-DocLayout-M.yaml)",
+    "export": "paddlex --paddle2onnx (官方 ONNX) -> tools/ocr/layout_cut.py 切掉 NMS 尾部 -> tpu-mlir bm1684x2 f16 4core static",
+    "report": "docs/ocr-structure.md（编译、板上对齐、S 与 M 的差别）"
+  },
+  "bmodel": {
+    "file": "ppdoclayout-m_f16_640_bm1684x2_static_20261104.bmodel",
+    "input": {
+      "name": "image",
+      "shape": [
+        1,
+        3,
+        640,
+        640
+      ],
+      "dtype": "float32",
+      "layout": "NCHW"
+    },
+    "outputs": [
+      {
+        "name": "boxes",
+        "shape": [
+          1,
+          8500,
+          4
+        ],
+        "dtype": "float32"
+      },
+      {
+        "name": "scores",
+        "shape": [
+          1,
+          23,
+          8500
+        ],
+        "dtype": "float32"
+      }
+    ],
+    "note": "两个输出是切掉 NMS/gather 尾部后的稠密张量：boxes 是网络输入像素下的 xyxy，scores 是 23 类的类别分数。NMS、top-k、PaddleX 的版面后处理全在 app/engine/ocr_layout.py 的 numpy 里（tools/ocr/layout_cut.py 切图时一并剪掉了 scale_factor 输入，所以 boxes 需要调用方按页面尺寸缩放）。"
+  },
+  "preprocess": {
+    "resize": {
+      "policy": "stretch_to_square",
+      "side": 640,
+      "interpolation": "cv2.INTER_LINEAR",
+      "note": "PaddleX 的 Resize(keep_ratio=false)：整页直接拉到 640x640，不保持长宽比、不 padding。这与 PP-OCR det 的 limit_side_len 不同，照抄 PaddleX 才对得上参考框。"
+    },
+    "normalize": {
+      "order": "hwc",
+      "color": "RGB",
+      "mean": [
+        0.485,
+        0.456,
+        0.406
+      ],
+      "std": [
+        0.229,
+        0.224,
+        0.225
+      ],
+      "note": "value = (RGB/255 - mean) / std。BGR 的图必须先转 RGB —— 用错通道时模型仍会给框，只是分数下降，属于最难发现的那类错误。"
+    },
+    "to_chw": true,
+    "scale_factor": "boxes 回到页面像素时除以 [side/h, side/w]（PaddleX 的 scale_factor 是 [net_h/page_h, net_w/page_w]，切图前它由图内的 Div 完成，切图后由这里完成）。"
+  },
+  "postprocess": {
+    "threshold": 0.5,
+    "num_classes": 23,
+    "layout_nms": true,
+    "iou_same": 0.6,
+    "iou_diff": 0.98,
+    "pre_threshold": 0.025,
+    "nms_top_k": 1000,
+    "keep_top_k": 100,
+    "filter_large_image_area_ratio": {
+      "portrait": 0.82,
+      "landscape": 0.93
+    },
+    "labels": [
+      "paragraph_title",
+      "image",
+      "text",
+      "number",
+      "abstract",
+      "content",
+      "figure_title",
+      "formula",
+      "table",
+      "table_title",
+      "reference",
+      "doc_title",
+      "footnote",
+      "header",
+      "algorithm",
+      "footer",
+      "seal",
+      "chart_title",
+      "chart",
+      "formula_number",
+      "header_image",
+      "footer_image",
+      "aside_text"
+    ],
+    "merge_mode": {
+      "0": "large",
+      "1": "large",
+      "6": "union",
+      "7": "large",
+      "16": "large"
+    },
+    "note": "labels 的顺序就是 bmodel 类别轴的顺序，改一个字都会让类别整体错位。merge_mode 取自 PaddleX configs/pipelines/PP-StructureV3.yaml 的 layout_merge_bboxes_mode（未列出的类别是 union）；threshold 0.5 与 MYS-2615 的 x86 对照一致（报告 §2）。iou_same/iou_diff 是 PaddleX 的 layout NMS，不是图内那个（图内 NMS 用普通 IoU，见 layout_postprocess 的注释）。"
+  }
+}
