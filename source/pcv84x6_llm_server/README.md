@@ -152,4 +152,6 @@ deploy/       systemd unit 模板
 - **原始 PNG 间歇性驱动超时**未稳定复现、未定位，见
   [`docs/session-state-contract.md`](docs/session-state-contract.md) 末节。
 
-版本变更看 [releases](https://github.com/zzttzzmyswy/cv84x6-llm-server/releases)。
+版本变更看 [releases](https://github.com/sophgo/sophon-tools/releases)（标签前缀
+`cv84x6-llm-server-v`）。v0.6.37 及更早的历史版本在私有仓库
+`zzttzzmyswy/cv84x6-llm-server` 的 releases 里，仅供追溯。

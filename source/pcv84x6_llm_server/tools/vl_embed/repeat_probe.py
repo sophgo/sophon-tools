@@ -134,6 +134,11 @@ class Encoder:
             raise RuntimeError("cv_vle_info failed")
         self.seq, self.hidden, self.max_patches = seq.value, hidden.value, patches.value
         self.min_pixels = int(manifest.get("min_pixels", 65536))
+        # Whether the bmodel carries the optional 1024-token graph. Detected by
+        # asking the loaded bmodel for it through the C API's family/info pair
+        # is not enough (they do not expose graph names), so it comes from the
+        # file itself: the graph name is part of the bmodel's network list.
+        self.has_middle_bucket = _has_graph(model, "block_0_s1024")
 
     # -- prompt rendering, identical to app/engine/vl_embed_native.py ---------
     def render(self, text: str, image_tokens: int, instruction: str | None) -> str:
@@ -152,6 +157,22 @@ class Encoder:
             if n <= rows:
                 return rows
         return self.seq
+
+    @property
+    def buckets(self) -> list[int]:
+        """The language-graph buckets this bmodel can actually select.
+
+        Mirrors ``native/src/vl_embed_engine.cpp``: 128 and 512 always, 1024
+        only when the bmodel carries that graph, and the context length last.
+        The middle graph is detected from the bmodel itself rather than
+        assumed, so an acceptance run that must "exercise every bucket" cannot
+        quietly skip one -- or demand one the file does not have.
+        """
+        rows = [b for b in (128, 512) if b < self.seq]
+        if self.seq > 1024 and self.has_middle_bucket:
+            rows.append(1024)
+        rows.append(self.seq)
+        return sorted(set(rows))
 
     def encode(self, text: str = "", png: bytes | None = None,
                instruction: str | None = None, dimensions: int | None = None,
@@ -314,6 +335,24 @@ def _size(text: str) -> tuple[int, int]:
     """``768x1024`` (h x w, as a page is described) -> (768, 1024)."""
     h, _, w = text.lower().partition("x")
     return int(h), int(w)
+
+
+def _has_graph(model: str, name: str, window: int = 16 << 20) -> bool:
+    """Whether the bmodel's network list names ``name``.
+
+    libsophon exposes no "list the graphs" call through the handle this probe
+    holds, and the engine's bucket selection is decided by which graphs the file
+    compiles. The network-name table sits at the head of the flatbuffer, so the
+    first few MiB are enough; the window is bounded so a 3 GiB model is never
+    read whole.
+    """
+    needle = name.encode()
+    try:
+        with open(model, "rb") as handle:
+            data = handle.read(window)
+    except OSError:
+        return False
+    return needle in data
 
 
 def main() -> int:

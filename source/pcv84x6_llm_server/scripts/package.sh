@@ -230,18 +230,23 @@ find "$D/vendor" -name '__pycache__' -prune -exec rm -rf {} +
 python3 -m pip freeze --path "$D/vendor" > "$D/vendor/VENDORED.txt" 2>/dev/null || true
 
 echo "$VERSION" > "$D/VERSION"
-# COMMIT records the SERVICE source commit (zzttzzmyswy/cv84x6-llm-server), not
-# the sophon-tools build commit: writing the latter would mislabel the snapshot
-# as a commit of the original repository. When the service source lives inside
-# sophon-tools, keep the provenance explicit instead of resolving the outer HEAD.
+# COMMIT records the SERVICE source commit the engine and service code came
+# from. Since v0.6.38 that source lives in this repository
+# (sophgo/sophon-tools, source/pcv84x6_llm_server), so the file names that
+# repository explicitly rather than resolving the outer HEAD blindly: a caller
+# building from a subdirectory or a detached worktree must still get the truth
+# instead of an unrelated commit.
 SOURCE_FILE="$ROOT/build/source-commit.txt"
 if [ -f "$SOURCE_FILE" ]; then
-  # format: <service commit> [<repo>] [repo-root]  — repo-root means this tree
-  # IS the original repository, so git rev-parse is meaningful.
+  # format: <service commit> <repo> [<path within that repo>]
   SRC_COMMIT="$(cut -d' ' -f1 "$SOURCE_FILE")"
   SRC_REPO="$(cut -d' ' -f2 "$SOURCE_FILE")"
+  SRC_PATH="$(cut -d' ' -f3 "$SOURCE_FILE")"
   echo "$SRC_COMMIT" > "$D/COMMIT"
-  echo "service-repo: ${SRC_REPO:-unknown}" > "$D/COMMIT.provenance"
+  {
+    echo "service-repo: ${SRC_REPO:-unknown}"
+    [ -n "${SRC_PATH:-}" ] && echo "service-path: $SRC_PATH"
+  } > "$D/COMMIT.provenance"
 else
   git rev-parse HEAD > "$D/COMMIT" 2>/dev/null || true
 fi

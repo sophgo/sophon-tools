@@ -70,7 +70,7 @@ SHA256 固定在本目录（`SHA256SUMS`），构建时逐项校验：
 
 | 输入 | 来源 | SHA256 |
 | --- | --- | --- |
-| `lib/libcv84x6_llm.so` | 从 `build/source-commit.txt` 指向的**源码提交 A** 在 CV84X6 板端完整 CMake 构建（`native/`，全量目标，非诊断子集）；构建记录见 `build/native-build.md` | 见 `SHA256SUMS`（v0.6.38：`__LIB_SHA256__`） |
+| `lib/libcv84x6_llm.so` | 从 `build/source-commit.txt` 指向的**源码提交 A** 在 CV84X6 板端完整 CMake 构建（`native/`，全量目标，非诊断子集）；构建记录见 `build/native-build.md` | 见 `SHA256SUMS`（v0.6.38：`26bd2702cf903bd69a1e413be16f93d327f04a0d99679c6408ea46a8694eee09`） |
 | `qwen3_5-config/*` | sophon-demo Qwen3_5 `config.zip`（官方 v0.6.37 deb 内 `model-config/qwen3_5/`，已验证与 MYS-2846/MYS-2754 发布输入逐字节一致；v0.6.38 未改动） | 见 `SHA256SUMS` |
 
 ### 引擎库（libcv84x6_llm.so）

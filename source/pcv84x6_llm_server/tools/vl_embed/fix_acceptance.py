@@ -55,18 +55,27 @@ MIN_COSINE = 0.99
 
 SHORT_EN = "A photograph of a meal on a wooden table."
 SHORT_ZH = "一只猫趴在窗台上晒太阳。"
-# Long enough to select the 512 / 1024 / 2048 graphs with no image at all.
-LONG_512 = " ".join(["The quick brown fox jumps over the lazy dog."] * 20)
-LONG_1024 = " ".join(["The quick brown fox jumps over the lazy dog."] * 45)
-LONG_2048 = " ".join(["The quick brown fox jumps over the lazy dog."] * 90)
+# One sentence is ~10 tokens with this tokenizer, so these repeat counts land in
+# 512 / 1024 / 2048 respectively. The run prints each shape's real token count
+# and asserts every compiled bucket was exercised: a length that silently lands
+# in the wrong bucket would leave a graph untested while looking exercised,
+# which is exactly what the first draft of this file did.
+_SENTENCE = "The quick brown fox jumps over the lazy dog."
+LONG_512 = " ".join([_SENTENCE] * 20)     # ~205 tokens
+LONG_1024 = " ".join([_SENTENCE] * 70)    # ~707 tokens
+LONG_2048 = " ".join([_SENTENCE] * 190)   # ~1920 tokens
 
 # (name, HxW) -- deliberately varied aspect ratios and pixel counts, so the ViT
 # sees more than one patch grid and the buckets are reached from both sides.
+# The last one is at the compiled maximum of 1310720 pixels: 1280 image tokens
+# push the request into the 2048 bucket through the *image* path, which is the
+# path the field failure took.
 IMAGES = [
     ("img-384x512", 384, 512),
     ("img-512x384", 512, 384),
     ("img-256x256", 256, 256),
     ("img-352x480", 352, 480),
+    ("img-max-1280x1024", 1280, 1024),
 ]
 
 
@@ -115,6 +124,7 @@ def repeat_matrix(enc: Encoder, processes_note: str, per_shape: int) -> dict:
         ("image-alt", {"png": png["img-512x384"]}),
         ("image-square", {"png": png["img-256x256"]}),
         ("image+text", {"text": SHORT_EN, "png": png["img-352x480"]}),
+        ("image-max", {"png": png["img-max-1280x1024"]}),
         ("long-512", {"text": LONG_512}),
         ("long-1024", {"text": LONG_1024}),
         ("long-2048", {"text": LONG_2048}),
@@ -156,6 +166,10 @@ def repeat_matrix(enc: Encoder, processes_note: str, per_shape: int) -> dict:
                     result["failures"].append(
                         f"{name}[{index}]: repeat cosine {c:.9f} < {MIN_COSINE}")
         entry["distinct_digests"] = len(set(digests))
+        # The digest itself, so a second process can check that the same input
+        # produced the same bytes across a fresh handle, not just within one.
+        entry["digest"] = digests[0] if digests else None
+        entry["norm"] = round(math.sqrt(sum(x * x for x in vectors[0])), 9) if vectors else None
         entry["p50_ms"] = percentile(latencies, 50)
         entry["p95_ms"] = percentile(latencies, 95)
         entry["latencies_ms"] = [round(x, 1) for x in latencies]
@@ -169,7 +183,7 @@ def repeat_matrix(enc: Encoder, processes_note: str, per_shape: int) -> dict:
         result["shapes"].append(entry)
         # Return to an earlier bucket: replay every shape already seen, so the
         # last request of this block re-enters a bucket it left.
-        if name in ("image-alt", "long-1024"):
+        if name in ("image-max", "long-1024"):
             for earlier, earlier_item in shapes[:shapes.index((name, item)) + 1]:
                 if enc.fault:
                     break
@@ -178,6 +192,15 @@ def repeat_matrix(enc: Encoder, processes_note: str, per_shape: int) -> dict:
                 if not ok(rec):
                     result["failures"].append(
                         f"return-to-{earlier}: {rec.get('error') or 'not ok'}")
+    # Every compiled graph must have been exercised, or "the buckets all pass"
+    # would be a claim about graphs the run never touched. The expectation is
+    # read from the engine, not hard-coded: 128/512/1024/2048 for a model with
+    # the middle bucket, and whatever subset the bmodel actually compiled.
+    expected = {str(b) for b in enc.buckets}
+    seen = {str(b) for b in result["buckets_seen"]}
+    if seen != expected:
+        result["failures"].append(
+            f"buckets exercised {sorted(seen)} != compiled {sorted(expected)}")
     return result
 
 
@@ -196,13 +219,18 @@ def reference_comparison(enc: Encoder, reference: Path, boundary: Path | None,
                          image_dir: Path | None) -> dict:
     """Re-embed each reference case and compare at all six MRL widths.
 
-    The reference rows carry the token ids the official processor produced, so
-    the comparison is on the *same* tokenisation -- this is a check of the
-    encoder, not of the tokenizer. A row whose image file is not available is
-    reported as skipped, never as passed.
+    The reference rows carry the exact token ids the official processor
+    produced, and the engine is fed those ids verbatim, so this compares *the
+    encoder* rather than a tokenizer or prompt-rendering difference. The image
+    is still preprocessed by this engine; the engine itself then rejects the
+    request if its grid disagrees with the ids' image_pad span, which is how a
+    preprocessing drift surfaces instead of being silently compared.
+
+    A row whose image file is not available is reported as skipped, never as
+    passed.
     """
     out = {"reference": str(reference), "rows": 0, "compared": 0,
-           "skipped": [], "worst": {str(d): None for d in MRL},
+           "by_type": {}, "skipped": [], "worst": {str(d): None for d in MRL},
            "worst_case": {}, "failures": []}
     for path in [p for p in (reference, boundary) if p]:
         if not path.exists():
@@ -210,39 +238,46 @@ def reference_comparison(enc: Encoder, reference: Path, boundary: Path | None,
             continue
         for row in _reference_rows(path):
             out["rows"] += 1
-            image = row.get("image")
-            png = None
-            if image:
-                candidate = (image_dir / image) if image_dir else None
-                if not candidate or not candidate.exists():
-                    out["skipped"].append(f"{row.get('id')}: image {image} unavailable")
-                    continue
-                png = candidate.read_bytes()
-            text = row.get("text") or ""
+            kind = row.get("type") or "?"
             ids = row.get("input_ids")
             expected = row.get("vector")
+            case = row.get("id")
             if not expected:
-                out["skipped"].append(f"{row.get('id')}: no reference vector")
+                out["skipped"].append(f"{case}: no reference vector")
                 continue
-            rec = enc.encode(text=text, png=png, keep_vector=True, ids=ids)
+            if not ids:
+                out["skipped"].append(f"{case}: no reference token ids")
+                continue
+            png = None
+            if kind in ("image", "mixed"):
+                # COCO rows are identified by their image id, which is the
+                # `group` the reference kept; the file is the zero-padded name.
+                group = row.get("group")
+                candidate = (image_dir / f"{int(group):012d}.jpg") if (
+                    image_dir and group is not None) else None
+                if not candidate or not candidate.exists():
+                    out["skipped"].append(f"{case}: image {group} unavailable")
+                    continue
+                png = candidate.read_bytes()
+            rec = enc.encode(png=png, keep_vector=True, ids=ids)
             if not ok(rec):
-                out["failures"].append(
-                    f"{row.get('id')}: {rec.get('error') or 'not ok'}")
+                out["failures"].append(f"{case}: {rec.get('error') or 'not ok'}")
                 continue
             vec = rec["vec"]
             if len(vec) != len(expected):
                 out["failures"].append(
-                    f"{row.get('id')}: dimension {len(vec)} != {len(expected)}")
+                    f"{case}: dimension {len(vec)} != {len(expected)}")
                 continue
             out["compared"] += 1
+            out["by_type"][kind] = out["by_type"].get(kind, 0) + 1
             for dim in MRL:
                 c = cosine(vec[:dim], expected[:dim])
                 if out["worst"][str(dim)] is None or c < out["worst"][str(dim)]:
                     out["worst"][str(dim)] = c
-                    out["worst_case"][str(dim)] = row.get("id")
+                    out["worst_case"][str(dim)] = case
                 if c < MIN_COSINE:
                     out["failures"].append(
-                        f"{row.get('id')} @{dim}: cosine {c:.6f} < {MIN_COSINE}")
+                        f"{case} @{dim}: cosine {c:.6f} < {MIN_COSINE}")
     return out
 
 
@@ -295,6 +330,9 @@ def main() -> int:
     p.add_argument("--per-shape", type=int, default=10)
     p.add_argument("--rounds", type=int, default=30)
     p.add_argument("--warmup", type=int, default=2)
+    p.add_argument("--process", type=int, default=0,
+                   help="which fresh process this is (0-based); its report is "
+                        "written beside --out and named for the index")
     p.add_argument("--out", type=Path, required=True)
     p.add_argument("--skip-reference", action="store_true")
     a = p.parse_args()
@@ -309,6 +347,7 @@ def main() -> int:
 
     report: dict = {"library": a.library, "library_sha256": _sha(a.library),
                     "model": a.model, "model_sha256": _sha(a.model),
+                    "process": a.process,
                     "started": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
     started = time.perf_counter()
     try:
@@ -319,8 +358,9 @@ def main() -> int:
     report["load_s"] = round(enc.load_s, 2)
     report["seq"], report["hidden"], report["max_patches"] = (
         enc.seq, enc.hidden, enc.max_patches)
+    report["compiled_buckets"] = enc.buckets
     try:
-        report["repeat"] = repeat_matrix(enc, "single process", a.per_shape)
+        report["repeat"] = repeat_matrix(enc, f"process {a.process}", a.per_shape)
         if not a.skip_reference:
             report["numeric"] = reference_comparison(
                 enc, a.reference, a.reference_boundary, a.image_dir)
