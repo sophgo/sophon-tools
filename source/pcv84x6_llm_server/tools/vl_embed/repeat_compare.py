@@ -58,7 +58,13 @@ def max_abs(a, b) -> float:
 
 
 def classify(rec: dict) -> str:
-    """What actually happened on this call -- see the module docstring."""
+    """What actually happened on this call -- see the module docstring.
+
+    An unrecognised error is NOT assumed to be an input rejection: it is
+    ``other_error``, and whether the forward ran is unknown (``None``), because
+    guessing "not executed" would silently deflate the denominator the whole
+    analysis rests on.
+    """
     if rec.get("ok"):
         return "ok"
     error = rec.get("error") or ""
@@ -68,7 +74,20 @@ def classify(rec: dict) -> str:
         return "zero"
     if "non-finite" in error:
         return "nonfinite"
-    return "input_error"
+    # These are the only messages produced before any device work.
+    if ("exceed" in error or "image_create failed" in error
+            or "must be a" in error or "needs text or an image" in error):
+        return "input_error"
+    return "other_error"
+
+
+def forward_executed(verdict: str):
+    """True/False when it is known; None when the error is unrecognised."""
+    if verdict in ("ok", "zero", "nonfinite"):
+        return True
+    if verdict in ("refused", "input_error"):
+        return False
+    return None  # other_error: the tool cannot tell, so it does not claim.
 
 
 def one_trial(a, text: str, png, trial: int) -> dict:
@@ -91,7 +110,8 @@ def one_trial(a, text: str, png, trial: int) -> dict:
             verdict = classify(rec)
             # ``forward_executed`` is the only honest denominator: a refusal
             # never reached the device, so it cannot be a device observation.
-            executed = verdict in ("ok", "zero", "nonfinite")
+            # For other_error it stays None rather than being guessed.
+            executed = forward_executed(verdict)
             calls.append({
                 "index": index,
                 "verdict": verdict,
@@ -130,7 +150,8 @@ def one_trial(a, text: str, png, trial: int) -> dict:
         "bucket": calls[0]["bucket"] if calls else None,
         "calls": calls,
         "counts": counts,
-        "forward_executed": sum(1 for c in calls if c["forward_executed"]),
+        "forward_executed": sum(1 for c in calls if c["forward_executed"] is True),
+        "forward_unknown": sum(1 for c in calls if c["forward_executed"] is None),
         "first_failure_index": next(
             (c["index"] for c in calls if c["verdict"] in ("zero", "nonfinite")), None),
         "successful_vectors": len(shas),
@@ -139,6 +160,88 @@ def one_trial(a, text: str, png, trial: int) -> dict:
         "worst_max_abs": max((p["max_abs"] for p in pairs), default=None),
         "pairs": pairs,
     }
+
+
+def _run_isolated(a) -> int:
+    """Run each trial in its own child process and fold the results."""
+    import subprocess
+    import tempfile
+
+    trials = []
+    failures = 0
+    with tempfile.TemporaryDirectory(prefix="mys2913-trials.") as tmp:
+        for index in range(a.trials):
+            child_out = Path(tmp) / f"trial-{index}.json"
+            cmd = [sys.executable, str(Path(__file__).resolve()),
+                   "--library", a.library, "--model", a.model, "--config", a.config,
+                   "--calls", str(a.calls), "--trials", "1",
+                   "--text", a.text,
+                   "--long-text-repeats", str(a.long_text_repeats),
+                   "--output", str(child_out), "--_child"]
+            if a.image:
+                cmd += ["--image", a.image]
+            if a.dimensions is not None:
+                cmd += ["--dimensions", str(a.dimensions)]
+            done = subprocess.run(cmd, capture_output=True, text=True, timeout=a.timeout)
+            if done.returncode != 0:
+                failures += 1
+                trials.append({"trial": index,
+                               "load_failed": f"child exit {done.returncode}: "
+                                              + (done.stderr or "").strip()[-400:],
+                               "calls": [], "counts": {}, "forward_executed": 0,
+                               "forward_unknown": 0, "first_failure_index": None,
+                               "successful_vectors": 0, "distinct_vectors": 0,
+                               "worst_cosine": None, "worst_max_abs": None, "pairs": []})
+                continue
+            try:
+                child = json.loads(child_out.read_text())
+            except Exception as exc:  # noqa: BLE001
+                failures += 1
+                trials.append({"trial": index,
+                               "load_failed": f"unreadable child report: {exc}",
+                               "calls": [], "counts": {}, "forward_executed": 0,
+                               "forward_unknown": 0, "first_failure_index": None,
+                               "successful_vectors": 0, "distinct_vectors": 0,
+                               "worst_cosine": None, "worst_max_abs": None, "pairs": []})
+                continue
+            child["trial"] = index
+            trials.append(child)
+
+    totals = {}
+    for trial in trials:
+        for verdict, count in trial["counts"].items():
+            totals[verdict] = totals.get(verdict, 0) + count
+    report = {
+        "input": {"text_chars": len(a.text) * (a.long_text_repeats or 1),
+                  "image": a.image},
+        "calls_per_trial": a.calls,
+        "trials": trials,
+        "totals": totals,
+        "trials_with_zero": sum(1 for t in trials if t["counts"].get("zero")),
+        "trials_with_nonfinite": sum(1 for t in trials if t["counts"].get("nonfinite")),
+        "trials_load_failed": sum(1 for t in trials if t.get("load_failed")),
+        "forwards_executed": sum(t.get("forward_executed", 0) for t in trials),
+        "forwards_unknown": sum(t.get("forward_unknown", 0) for t in trials),
+        "worst_cosine": min((t["worst_cosine"] for t in trials
+                             if t.get("worst_cosine") is not None), default=None),
+        "process_isolated": True,
+        "child_failures": failures,
+    }
+    if a.output:
+        Path(a.output).write_text(json.dumps(report, indent=1) + "\n")
+    print(json.dumps({k: v for k, v in report.items() if k != "trials"},
+                     ensure_ascii=False), flush=True)
+    for trial in trials:
+        if trial.get("load_failed"):
+            print(f"  trial{trial['trial']} FAILED: {trial['load_failed']}",
+                  file=sys.stderr)
+            continue
+        detail = " ".join(f"{c['index']}:{c['verdict']}" for c in trial["calls"])
+        print(f"  trial{trial['trial']} tokens={trial['tokens']} "
+              f"bucket={trial['bucket']} distinct={trial['distinct_vectors']}/"
+              f"{trial['successful_vectors']} worst_cos={trial['worst_cosine']} [{detail}]",
+              file=sys.stderr)
+    return 0 if failures == 0 else 1
 
 
 def main() -> int:
@@ -156,6 +259,9 @@ def main() -> int:
     p.add_argument("--image", help="HxW pixels, e.g. 384x512; omit for text only")
     p.add_argument("--dimensions", type=int, default=None)
     p.add_argument("--output")
+    p.add_argument("--timeout", type=float, default=900.0,
+                   help="per-trial child timeout in seconds (default 900)")
+    p.add_argument("--_child", action="store_true", help=argparse.SUPPRESS)
     a = p.parse_args()
 
     text = (" ".join([a.text] * a.long_text_repeats) if a.long_text_repeats else a.text)
@@ -164,7 +270,23 @@ def main() -> int:
         h, w = _size(a.image)
         png = make_png(h, w, 20261116)
 
-    trials = [one_trial(a, text, png, t) for t in range(a.trials)]
+    if a.trials > 1 and not a._child:
+        # Process isolation is a correctness requirement, not a nicety: a
+        # handle created inside a process that already faulted can fail to load
+        # ("bmodel loading failed" / "bm free gmem failed"), so trials sharing a
+        # process are not independent. Re-exec one child per trial instead of
+        # silently weakening the experiment.
+        return _run_isolated(a)
+
+    trials = [one_trial(a, text, png, t) for t in range(1 if a._child else a.trials)]
+    if a._child:
+        # A child reports only its own trial; the parent folds them together.
+        report = trials[0]
+        if a.output:
+            Path(a.output).write_text(json.dumps(report, indent=1) + "\n")
+        print(json.dumps({k: v for k, v in report.items() if k != "pairs"},
+                         ensure_ascii=False), flush=True)
+        return 0
 
     totals = {}
     for trial in trials:
@@ -181,6 +303,7 @@ def main() -> int:
         "trials_with_nonfinite": sum(1 for t in trials if t["counts"].get("nonfinite")),
         "trials_load_failed": sum(1 for t in trials if t.get("load_failed")),
         "forwards_executed": sum(t["forward_executed"] for t in trials),
+        "forwards_unknown": sum(t.get("forward_unknown", 0) for t in trials),
         "worst_cosine": min((t["worst_cosine"] for t in trials
                              if t["worst_cosine"] is not None), default=None),
     }

@@ -27,13 +27,27 @@ ROUNDS="${ROUNDS:-2}"
 TEXT_ARGS="${TEXT_ARGS:---long-text-repeats 20}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
-rm -rf "$ROOT"; mkdir -p "$ROOT/results"
+# The work directory must be new: this script never deletes a tree it did not
+# create, so a mistyped path cannot destroy a caller's data.
+if [ -e "$ROOT" ]; then
+  echo "run_from_clean: refusing to reuse existing path $ROOT" >&2
+  echo "run_from_clean: pass a path that does not exist yet" >&2
+  exit 1
+fi
+mkdir -p "$ROOT/results"
 cd "$ROOT"
 
 echo "== clone $BRANCH"
-git clone --depth 1 --branch "$BRANCH" "$REPO" st 2>&1 | grep -v "Updating files" | tail -2
+if ! git clone --depth 1 --branch "$BRANCH" "$REPO" st >"$ROOT/clone.log" 2>&1; then
+  echo "run_from_clean: clone failed" >&2
+  tail -20 "$ROOT/clone.log" >&2
+  exit 1
+fi
 PKG="$ROOT/st/source/pcv84x6_llm_server"
-test -d "$PKG" || { echo "package root missing" >&2; exit 1; }
+if [ ! -d "$PKG" ]; then
+  echo "run_from_clean: package root missing after clone" >&2
+  exit 1
+fi
 
 echo "== provenance"
 echo "commit=$(git -C "$ROOT/st" rev-parse HEAD)"
@@ -44,9 +58,18 @@ echo "bmlib_sha256=$(sha256sum /opt/sophon/libsophon-current/lib/libbmlib.so.0 |
 echo "libsophon=$(dpkg-query -W -f='${Version}' sophon-soc-libsophon 2>/dev/null || echo unknown)"
 
 echo "== build instrumented library from clean source"
-bash "$PKG/tools/vl_embed/MYS-2913-build-diag.sh" "$PKG" "$ROOT/build" >"$ROOT/build.log" 2>&1
+if ! bash "$PKG/tools/vl_embed/MYS-2913-build-diag.sh" "$PKG" "$ROOT/build" \
+        >"$ROOT/build.log" 2>&1; then
+  echo "run_from_clean: diagnostic build FAILED" >&2
+  tail -30 "$ROOT/build.log" >&2
+  exit 1
+fi
 DIAG="$ROOT/build/libcv84x6_vl_diag.so"
-test -f "$DIAG" || { echo "build produced no library" >&2; tail -20 "$ROOT/build.log"; exit 1; }
+if [ ! -f "$DIAG" ]; then
+  echo "run_from_clean: build reported success but produced no library" >&2
+  tail -30 "$ROOT/build.log" >&2
+  exit 1
+fi
 echo "diag_lib_sha256=$(sha256sum "$DIAG" | cut -d' ' -f1)"
 
 arm_env() {
@@ -71,15 +94,26 @@ run_arm() {
   for t in $(seq 0 $((TRIALS - 1))); do
     local out="$ROOT/results/$arm-r$round-t$t.json"
     # One process per trial: a faulted handle must never be reused.
-    env -u CV_VLE_TRACE $envs python3 "$PKG/tools/vl_embed/repeat_compare.py" \
+    if ! env -u CV_VLE_TRACE $envs python3 "$PKG/tools/vl_embed/repeat_compare.py" \
         --library "$lib" --model "$MODEL" --config "$CFG" \
         --calls "$CALLS" --trials 1 $TEXT_ARGS --output "$out" \
-        >/dev/null 2>"$ROOT/results/$arm-r$round-t$t.err"
+        >/dev/null 2>"$ROOT/results/$arm-r$round-t$t.err"; then
+      echo "    trial $t FAILED (exit non-zero); see $out.err" >&2
+      tail -5 "$ROOT/results/$arm-r$round-t$t.err" >&2
+      FAILURES=$((FAILURES + 1))
+    fi
     files+=("$out")
   done
-  python3 "$HERE/aggregate.py" "$arm-r$round" "$ROOT/results/$arm-r$round.json" "${files[@]}"
+  # A missing/corrupt trial JSON makes aggregate.py exit non-zero; propagate it
+  # instead of continuing with a hole in the matrix.
+  if ! python3 "$HERE/aggregate.py" "$arm-r$round" \
+        "$ROOT/results/$arm-r$round.json" "${files[@]}"; then
+    echo "    aggregate FAILED for arm=$arm round=$round" >&2
+    FAILURES=$((FAILURES + 1))
+  fi
 }
 
+FAILURES=0
 for ROUND in $(seq 1 "$ROUNDS"); do
   # Different order each round.
   if [ $((ROUND % 2)) -eq 0 ]; then
@@ -91,6 +125,10 @@ for ROUND in $(seq 1 "$ROUNDS"); do
 done
 
 echo
+if [ "$FAILURES" -ne 0 ]; then
+  echo "run_from_clean: $FAILURES step(s) failed; results are INCOMPLETE" >&2
+fi
+
 echo "== summary"
 python3 - "$ROOT" <<'PY'
 import glob, json, os, sys
@@ -110,3 +148,9 @@ print(f"{'arm':<16}{'zero':<6}{'nonfin':<8}{'refus':<7}{'ok':<5}"
 for r in rows:
     print(f"{r[0]:<16}{r[1]:<6}{r[2]:<8}{r[3]:<7}{r[4]:<5}{r[5]:<6}{r[6]:<10}{r[7]:<18}{r[8]}")
 PY
+
+# The summary is informational; the exit status carries the verdict.
+if [ "$FAILURES" -eq 0 ]; then
+  exit 0
+fi
+exit 1
