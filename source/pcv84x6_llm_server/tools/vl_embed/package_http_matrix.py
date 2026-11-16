@@ -227,7 +227,17 @@ async def run(a) -> int:
             baseline: dict[str, list] = {}
 
             async def embed(item) -> tuple[dict, list | None]:
-                body: dict = {"model": model_id, "input": [item], "dimensions": DIMENSIONS}
+                # The HTTP body speaks OpenAI's multimodal shape: text and a
+                # data: URL, never raw bytes. The C-API matrix passes bytes
+                # straight to the engine, so this conversion is one of the
+                # things only the HTTP path can get wrong.
+                entry: dict = {}
+                if item.get("text"):
+                    entry["text"] = item["text"]
+                if item.get("png"):
+                    entry["image"] = _data_url(item["png"])
+                body: dict = {"model": model_id, "input": [entry],
+                              "dimensions": DIMENSIONS}
                 r = await c.post("/v1/embeddings", headers=headers, json=body)
                 if r.status_code != 200:
                     return {"status": r.status_code, "error": r.text[:300]}, None
@@ -309,9 +319,18 @@ async def run(a) -> int:
                     f"(saw {report['buckets_seen']})")
             if not report["revisits"]:
                 report["failures"].append("no revisit was issued over HTTP")
-
-            await c.post(f"/api/models/{model_id}/unload")
     finally:
+        # Unload before stopping the server, and do it on the failure path too:
+        # a run that crashed mid-matrix must not leave the model resident and
+        # NPU memory held. `should_exit` alone stops the HTTP server, not the
+        # worker process that owns the device allocation.
+        try:
+            async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}",
+                                         timeout=120) as c:
+                await c.post("/api/login", json={"password": "admin"})
+                await c.post(f"/api/models/{model_id}/unload")
+        except Exception as exc:  # noqa: BLE001 - teardown must not mask the verdict
+            report["failures"].append(f"teardown unload failed: {exc}")
         server.should_exit = True
         await task
 
