@@ -201,7 +201,7 @@ async def run(a) -> int:
                   "console login failed")
             loaded = await c.post(f"/api/models/{model_id}/load")
             if not check(loaded.status_code == 200, f"model load: {loaded.status_code} {loaded.text[:300]}"):
-                raise SystemExit
+                raise RuntimeError("model load failed")
             key = (await c.post("/api/keys", json={"name": "mys2914-http"})).json()["key"]
             headers = {"Authorization": f"Bearer {key}"}
 
@@ -319,6 +319,8 @@ async def run(a) -> int:
                     f"(saw {report['buckets_seen']})")
             if not report["revisits"]:
                 report["failures"].append("no revisit was issued over HTTP")
+    except Exception as exc:
+        report["failures"].append(f"matrix aborted: {type(exc).__name__}: {exc}")
     finally:
         # Unload before stopping the server, and do it on the failure path too:
         # a run that crashed mid-matrix must not leave the model resident and
@@ -328,7 +330,8 @@ async def run(a) -> int:
             async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}",
                                          timeout=120) as c:
                 await c.post("/api/login", json={"password": "admin"})
-                await c.post(f"/api/models/{model_id}/unload")
+                unloaded = await c.post(f"/api/models/{model_id}/unload")
+                unloaded.raise_for_status()
         except Exception as exc:  # noqa: BLE001 - teardown must not mask the verdict
             report["failures"].append(f"teardown unload failed: {exc}")
         server.should_exit = True
