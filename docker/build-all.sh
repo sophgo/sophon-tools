@@ -128,9 +128,10 @@ EXTRA_ENV[pqt_memory_edit]="export PQT_INPLACE=1"
 EXTRA_ENV[psewriter]="export PATH=/opt/go/bin:\$PATH"
 # pcv84x6_llm_server: 镜像内 python3 是 3.8，而 vendor wheel 面向板上 cp310。
 # pip 20.0.2 在 --platform/--python-version 组合下有 tag 误筛 bug，且 host requires-python
-# 会拦住为 3.10 构建的 wheel——package.sh 内先用 --user 升级 pip 24 并以
-# --abi cp310 --ignore-requires-python 规避（见 source/pcv84x6_llm_server/scripts/package.sh）。
-EXTRA_ENV[pcv84x6_llm_server]="export PATH=/root/.local/bin:\$PATH"
+# 会拦住为 3.10 构建的 wheel——package.sh 内在 staging 目录自备 pip 24（不动调用者的
+# user 级 pip）并以 --abi cp310 --ignore-requires-python 规避
+# （见 source/pcv84x6_llm_server/scripts/package.sh）。
+EXTRA_ENV[pcv84x6_llm_server]=""
 
 # 子项目 -> 构建依赖（先构建依赖方，再构建本项目）
 # pbmsec 的 socbak.zip 取自 psocbak（release.sh 会优先复用其产物，缺失时现场打包），

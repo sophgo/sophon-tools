@@ -1121,4 +1121,3 @@ class OcrBackend:
                 logger.exception("%s engine failed to close; continuing the "
                                  "teardown so the others still release their "
                                  "NPU memory", name)
-

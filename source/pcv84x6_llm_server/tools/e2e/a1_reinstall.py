@@ -23,4 +23,3 @@ record(A, "全新安装：服务起来、模型与 key 仍在", '"ok":true' in o
 ag = {a["id"]: a for a in admin.get("/api/agents").json()["agents"]}
 record(A, "全新安装：agent 安装与设置保留", all(a.get("installed") for a in ag.values()) and ag["picoclaw"].get("autostart"),
        f"installed={[i for i, a in ag.items() if a.get('installed')]} picoclaw.autostart={ag['picoclaw'].get('autostart')}")
-

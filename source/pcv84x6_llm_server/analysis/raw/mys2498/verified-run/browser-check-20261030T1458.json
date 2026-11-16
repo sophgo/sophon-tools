@@ -1,9 +1,0 @@
-{
- "base": "http://127.0.0.1:18800",
- "rows": 50,
- "facts": {
-  "first_row": "2026-10-30 07:58:51 OpenAI 接口 qwen3.6-35b-a3b-32k MYS-2498-stability 完成 stop 37 1 0.92 s 29.0 详情",
-  "detail_head": "CV84X6 LLM\n离线推理服务\n◎\n总览\n▤\n模型\n◈\nAgent\n✎\n对话测试\n⚿\nAPI Key\n☰\n推理记录\n⚙\n设置\n≡\n文档\n退出登录\n☀ 白天\n☾ 夜间\n推理记录\n\n每一次真正发起的模型推理都会留下一条记录：请求内容、实际生效的参数、完整输出与耗时。 成功、流式中断和推理异常都会落盘，便于事后定位现场问题。\n\n隐私说明\n\n客户对话默认明文保存在本机数据目录 state/inference_records.sqlite3，仅管理员可查看；导出的 NDJSON 文件同样是敏感数据，请自行妥善保管。图片只记录数量与尺寸，不保存原图， 也不保存 API Key 明文、哈希或会话 cookie。清理方式有两种：按保留策略自动清理 （超过保留条数或保留天数的最旧记录），以及在下方一次性全部清空。\n\n/data/cv84x6_llm_server/state/inference_records.sqlite3 · 240.1 KiB · 71 条 · 保留 1000 条 / 30 天\n\n记录列表\n每页 20 条\n每页 50 条\n每页 100 条\n刷新\n导出 NDJSON\n全部清空\n时间\t来源\t模型\t调用方\t状态\t输入\t输出\tTTFT\tTPS\t\n2026-10-30 07:58:51\tOpenAI 接口\tqwen3.6-35b-a3b-32k\tMYS-2498-stability\t"
- },
- "problems": []
-}

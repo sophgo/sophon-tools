@@ -44,20 +44,28 @@ mkdir -p "$D"
 
 # Application code, console, engine source (for rebuilding on another SDK).
 # rsync is the upstream tool; the sophon-tools unified image does not ship it,
-# so fall back to an equivalent `cp -a` when rsync is absent. The two differ in
-# one way that matters here: cp has no --exclude, so pycache filtering is done
-# by the shared _tree_copy below (post-copy prune for the fallback, --exclude
-# for rsync). Both paths produce the same tree for a clean checkout.
+# so there is a `cp -a` fallback. cp cannot filter, so the fallback prunes the
+# excluded paths AFTER the copy — the excluded sets are shared in one place
+# (_TREE_EXCLUDES below) and the prune mirrors them exactly, so both paths
+# produce the same tree even when the source has build residue (native/build/,
+# stray .pyc) from a previous in-tree compile.
 if command -v rsync >/dev/null 2>&1; then
   _tree_copy() { local ex=(); while [ "$1" = "--exclude" ]; do ex+=(--exclude "$2"); shift 2; done; rsync -a "${ex[@]}" "$@"; }
+  _tree_prune() { :; }   # rsync already skipped the excluded paths
 else
-  # cp cannot filter; the excludes are honoured by the post-copy prune below.
   _tree_copy() { while [ "$1" = "--exclude" ]; do shift 2; done; cp -a "$@"; }
+  _tree_prune() {
+    # Must mirror every --exclude passed above, per copied directory.
+    find "$D/app" "$D/native" -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
+    find "$D/app" "$D/native" -name '*.pyc' -delete 2>/dev/null || true
+    rm -rf "$D/native/build" 2>/dev/null || true
+  }
 fi
 _tree_copy --exclude '__pycache__' --exclude '*.pyc' app "$D/"
 mkdir -p "$D/web"
 _tree_copy web/dist "$D/web/"
 _tree_copy --exclude build native "$D/"
+_tree_prune
 mkdir -p "$D/lib"
 cp "$LIB" "$D/lib/libcv84x6_llm.so"
 # Tokenizer/processor configs. `--config` is the Qwen3.5 chat config (the
@@ -75,9 +83,12 @@ if [ -d model-config ]; then
     _tree_copy "$src/" "$D/model-config/$name/"
   done
 fi
-# cp -a fallback has no --exclude: prune the caches here, where the tree is
-# already staged (a no-op when rsync handled the copy, since those were skipped).
+# (the cp -a fallback's prune ran right after the copy; this later sweep is a
+# final guarantee for BOTH paths: the package must never ship native build
+# output or caches, whatever the source tree looked like.)
 find "$D/app" "$D/native" -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
+find "$D/app" "$D/native" -name '*.pyc' -delete 2>/dev/null || true
+rm -rf "$D/native/build" 2>/dev/null || true
 for required in qwen3_embedding/tokenizer.json bge_reranker_v2_m3/tokenizer.json \
                 qwen3_asr/tokenizer.json wemm_embedding/tokenizer.json \
                 wemm_embedding/embedding_config.json ppocr_v6/ppocr.json \
@@ -105,21 +116,28 @@ cp tools/vl_embed/service_check.py "$D/tools/vl_embed/"
 # host's. The unified sophon-tools image ships python3.8 + pip 20.0.2, which
 # mis-filters manylinux platform tags under --platform/--python-version and
 # refuses cp310 wheels with a host-side requires-python error. Detect that
-# host once: bump pip into ~/.local (no root, no host package changes) and pin
-# --abi cp310 --ignore-requires-python so the wheel selection follows the
-# --python-version 3.10 target instead of the 3.8 host. On a cp310 host the
-# original upstream invocation is used unchanged.
+# host once: build a private pip >= 24 inside the staging area (never the
+# caller's user-level pip) and pin --abi cp310 --ignore-requires-python so the
+# wheel selection follows the --python-version 3.10 target instead of the 3.8
+# host. On a cp310 host the original upstream invocation is used unchanged.
 _vendor_pip_host=$(python3 -c 'import sys; print("cp%d%d" % sys.version_info[:2])')
 _vendor_pip_flags=()
+_vendor_pip_cmd=(python3 -m pip)
 if [ "$_vendor_pip_host" != "cp310" ]; then
-  _vendor_pip_minor=$(python3 -m pip --version | grep -oE '[0-9]+\.[0-9]+' | head -1 | cut -d. -f2)
-  if [ "${_vendor_pip_minor:-0}" -lt 24 ]; then
-    python3 -m pip install -q --disable-pip-version-check --upgrade --user "pip==24.0"
+  _vendor_pip_ver=$(python3 -m pip --version | awk '{print $2}')
+  _vendor_pip_major=${_vendor_pip_ver%%.*}
+  if [ "${_vendor_pip_major:-0}" -lt 24 ]; then
+    # Isolated target, not --user: the caller's site-packages stay untouched.
+    python3 -m pip install -q --disable-pip-version-check \
+      --target "$STAGE/pip-host" "pip==24.0"
+    PYTHONPATH="$STAGE/pip-host" _vendor_pip_cmd=(python3 -m pip)
   fi
   _vendor_pip_flags=(--abi cp310 --ignore-requires-python)
 fi
 _vendor_pip() {
-  python3 -m pip install -q --disable-pip-version-check --target "$D/vendor" \
+  env PYTHONPATH="$STAGE/pip-host${PYTHONPATH:+:$PYTHONPATH}" \
+    "${_vendor_pip_cmd[@]}" install -q --disable-pip-version-check \
+    --target "$D/vendor" \
     --platform manylinux2014_aarch64 --python-version 3.10 --implementation cp \
     --only-binary=:all: "${_vendor_pip_flags[@]}" "$@"
 }
@@ -137,14 +155,23 @@ _vendor_pip() {
 # re-installed with --no-deps below (the release VENDORED.txt records it, but
 # a plain -r would pull its huggingface-hub dependency tree, which the official
 # package deliberately does not carry).
-grep -v '^tokenizers==' requirements-vendor-lock.txt > "$STAGE/vendor-lock-no-tok.txt"
+# The lockfile is the full VENDORED.txt of the release; the wheels that are
+# re-installed below with --no-deps (tokenizers, pyclipper, numpy, pypdfium2,
+# pillow) are excluded from this pass so they are fetched exactly once, with
+# the same locked versions as upstream's separate --no-deps installs.
+grep -vE '^(tokenizers|pyclipper|numpy|pypdfium2|pillow)==' requirements-vendor-lock.txt > "$STAGE/vendor-lock-no-tok.txt"
 _vendor_pip -r "$STAGE/vendor-lock-no-tok.txt"
 # HF `tokenizers` (Rust) separately, and with --no-deps, for two reasons: it is
 # only needed for the auxiliary models (embedding/rerank), so a chat-only install
 # would carry it for nothing, and its dependency set (huggingface-hub, etc.) is
 # a tree the board does not need — the tokenizer.json is read straight from the
-# model config directory.
-_vendor_pip --no-deps tokenizers
+# model config directory. The version comes from the one lockfile (--no-deps
+# skips dependency resolution, not version selection): an unpinned name here
+# would let the newest release drift in while everything else stays locked.
+VENDORIZERS_SPEC="$(grep -oE '^tokenizers==[^#[:space:]]+' requirements-vendor-lock.txt)"
+[ -n "$VENDORIZERS_SPEC" ] || {
+  echo "requirements-vendor-lock.txt must pin tokenizers==<version>" >&2; exit 2; }
+_vendor_pip --no-deps "$VENDORIZERS_SPEC"
 # pyclipper, same treatment: PP-OCR's DB postprocess offsets each text polygon
 # outwards with it, and it is a 100 KB native wheel with no dependencies to
 # speak of. Vendored rather than left to the device because nothing in the SDK
@@ -153,7 +180,7 @@ _vendor_pip --no-deps tokenizers
 # app/engine/ocr_ppocr.py and docs/aux-models.md). numpy is a runtime
 # dependency of the OCR path only; it goes in from requirements.txt's aarch64
 # wheel list below.
-_vendor_pip --no-deps pyclipper
+_vendor_pip --no-deps "$(grep -oE '^pyclipper==[^#[:space:]]+' requirements-vendor-lock.txt)"
 # numpy: the OCR backend's arithmetic is numpy (resize/contour results, the
 # softmax map, CTC). Everything else in this service avoids it on purpose, so it
 # is installed here explicitly rather than added to requirements-vendor.txt --
@@ -163,7 +190,10 @@ _vendor_pip --no-deps pyclipper
 # C ABI, and under numpy 2 `import cv2` fails ("_ARRAY_API not found"), which
 # leaves every OCR model unloadable (v0.6.22 shipped 2.2.6). 1.26.4 is the last
 # 1.x with a cp310 aarch64 wheel; verified with cv2 4.8.0 on the CV84X6 board.
-NUMPY_SPEC=numpy==1.26.4
+# The pin is asserted against the lockfile below, so the two cannot drift:
+# lockfile is the single version source; the literal here is the assertion.
+NUMPY_SPEC="$(grep -oE '^numpy==[^#[:space:]]+' requirements-vendor-lock.txt)"
+[ -n "$NUMPY_SPEC" ] || { echo "lockfile must pin numpy==" >&2; exit 2; }
 _vendor_pip --no-deps "$NUMPY_SPEC"
 compgen -G "$D/vendor/numpy-1.*.dist-info" > /dev/null || {
   echo "vendor/numpy must be 1.x for the device's sophon-opencv" >&2; exit 2; }
@@ -185,8 +215,10 @@ compgen -G "$D/vendor/numpy-1.*.dist-info" > /dev/null || {
 # These are *package* versions, not this service's: the service's own version
 # comes from app/__init__.py and nowhere else (tests/test_packaging.py enforces
 # that), which is why the names below do not start with `VERSION`.
-KB_PDFIUM_PKG=pypdfium2==5.14.0
-KB_IMAGE_PKG=pillow==12.2.0
+KB_PDFIUM_PKG="$(grep -oE '^pypdfium2==[^#[:space:]]+' requirements-vendor-lock.txt)"
+KB_IMAGE_PKG="$(grep -oE '^pillow==[^#[:space:]]+' requirements-vendor-lock.txt)"
+[ -n "$KB_PDFIUM_PKG" ] && [ -n "$KB_IMAGE_PKG" ] || {
+  echo "lockfile must pin pypdfium2== and pillow==" >&2; exit 2; }
 _vendor_pip --no-deps "$KB_PDFIUM_PKG"
 _vendor_pip --no-deps "$KB_IMAGE_PKG"
 for required_pkg in tokenizers pyclipper numpy pypdfium2 PIL; do

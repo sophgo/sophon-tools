@@ -2065,7 +2065,7 @@ def build_html(evidence: Path, env: dict, summary: dict, records: dict, db: dict
     add(kpi(f'{totals["core_ok"]}/{planned * 2}', "核心请求正常结束（无上下文 + 带上下文）",
             "ok" if gate.get("core_all_ok") else "bad"))
     add(kpi(f'{totals["concurrency_ok"]}/{CONCURRENCY_LANES * CONCURRENCY_ROUNDS}',
-            f'并发 {CONCURRENCY_LANES} 路 × {CONCURRENCY_ROUNDS} 轮', 
+            f'并发 {CONCURRENCY_LANES} 路 × {CONCURRENCY_ROUNDS} 轮',
             "ok" if gate.get("concurrency_all_ok") else "bad"))
     add(kpi(gate.get("readiness_refused"), "加载窗口内被拒（409）次数",
             "ok" if gate.get("readiness_no_admitted") else "bad"))

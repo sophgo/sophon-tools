@@ -194,4 +194,3 @@ def test_the_committed_bundle_carries_the_replacement_copy():
     assert "预估内存" in text, "the bundle no longer explains the card's estimate"
     assert "MemAvailable" in text, "the bundle no longer names the live memory reading"
     assert "总览" in text, "the bundle no longer points at the usage readout"
-

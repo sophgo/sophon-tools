@@ -116,7 +116,7 @@
 
   ```
   Instruct: Given a web search query, retrieve relevant passages that answer the query
-  Query: 
+  Query:
   ```
 
   切片**不加**指令（见 `docs/aux-models.md`：改一个词参考相似度就会跑出容差）。

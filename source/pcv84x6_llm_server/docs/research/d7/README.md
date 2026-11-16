@@ -1,8 +1,16 @@
-# D7 卡死现场原始证据
+# D7 卡死现场证据索引
 
 每个目录对应报告 [`../d7-tpu-hang.md`](../d7-tpu-hang.md) 里的一次卡死，内容是该次卡死后
 立刻在板上跑 `tools/e2e/d7_capture.py` 采到的原始输出。**全部只读采集**，没有一次采集动作
 会写设备状态（`sysrq-w` 只打印、不改变任何东西）。
+
+> **sophon-tools 版说明**：原始采集件（每个 run 目录的 dmesg 原文、内核栈、固件
+> scaler 状态、kernel_fifo、推理记录与请求流水，共 9 个 run）属于板端原始日志，
+> 不随本仓库分发，保留在原私有仓库 `zzttzzmyswy/cv84x6-llm-server` 的
+> `docs/research/d7/R*/`。本仓库保留结论：本文件的内容表、各 run 的实验配置
+> 表，以及 [`step1-stuck-command.md`](step1-stuck-command.md)、
+> [`step2-3-conditions-and-fix.md`](step2-3-conditions-and-fix.md) 和
+> [`../d7-tpu-hang.md`](../d7-tpu-hang.md) 的完整分析。
 
 ## 每个目录里有什么
 

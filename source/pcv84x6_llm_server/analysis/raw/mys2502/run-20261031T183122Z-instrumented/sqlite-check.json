@@ -1,7 +1,0 @@
-{
-  "db": "/data/cv84x6-readiness-v0613/state/inference_records.sqlite3",
-  "exists": true,
-  "requested": 4,
-  "found": 4,
-  "missing": []
-}

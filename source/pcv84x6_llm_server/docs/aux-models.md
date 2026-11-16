@@ -111,7 +111,7 @@ PR #120），**不新增逻辑**。`.157` 实测一份 227 切片的中文语料
 
 ```
 Instruct: Given a web search query, retrieve relevant passages that answer the query
-Query: 
+Query:
 ```
 
 **这个词不能改**：把 `query` 写成 `question`，上面那三个相似度就会变成

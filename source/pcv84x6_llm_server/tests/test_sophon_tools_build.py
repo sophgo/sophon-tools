@@ -1,41 +1,39 @@
 """sophon-tools unified-build integration for pcv84x6_llm_server.
 
-Three layers, deliberately kept apart so a failure names its own cause:
+Isolated by construction: every test here either reads source text (static
+contracts) or runs against a MINIMAL throw-away repository built in tmp_path
+with all heavy steps stubbed. Nothing in this file touches the real checkout's
+output/, the real build inputs, npm/pip, the network, or the caller's git
+configuration. The real single-project build is verified separately
+(`bash release.sh --project pcv84x6_llm_server` against the real image; its
+evidence lives in the delivery comment).
 
-1. **Registration (static, always runs)** — the project is in build-all's
-   registry with the right default arch and platform note, and every new or
-   changed shell script parses. These run everywhere, no docker needed.
+Layers:
 
-2. **Interface contract (subprocess, always runs)** — `release.sh` is the M1
-   entry point: unsupported ARCH values must fail, an explicit VERSION that
-   disagrees with the source must be refused (never "fixed up"), the fixed
-   build inputs must verify by sha256, and OUTPUT_DIR must be honoured. The
-   full build is NOT run here (it needs docker + the unified image + network);
-   these tests cover the argument handling and the input gate, which are the
-   parts the unified driver depends on.
-
-3. **Scheduling with stubbed heavy projects (docker not needed)** — a fake
-   `docker` on PATH exercises build-all.sh's full-distribution path: every
-   registered project is driven, a failing project does not abort the others,
-   and the PASS/FAIL summary lands in output/.build-status.txt. The stub makes
-   each project's release.sh a no-op, so this proves the *scheduling*, not the
-   builds — the real single-project build is verified outside pytest
-   (`bash release.sh --project pcv84x6_llm_server` against the real image;
-   its evidence lives in the delivery comment, not here).
-
-Path assumption: these tests run from a sophon-tools checkout, so the project
-sits two levels below the repo root (source/<name>). The service's own
-test_packaging.py needs no change for that; this file only reads files.
+1. Static contracts — the project is registered with the right default arch;
+   shell scripts parse; the fixed-input manifest pins the real files; the
+   vendor lockfile is the single version source for every wheel package.sh
+   installs (including tokenizers, which the first version of this work left
+   floating).
+2. release.sh argument handling in a minimal fixture repo — the ARCH and
+   VERSION gates, the fixed-input gate (missing / corrupted), and OUTPUT_DIR
+   reaching the deb name. The build itself is stubbed: the fixture's
+   scripts/build_web.sh and scripts/package_deb.sh write a marker deb.
+3. Unified scheduling with a docker stub — build-all.sh's full-distribution
+   loop is driven with a fake docker that RECORDS (project, workdir, OUTPUT_DIR)
+   and runs a no-op payload, one designated project forced to fail. Asserts the
+   whole registry was driven, the failure was recorded, the rest continued,
+   and the exit code is non-zero.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
 import stat
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -49,14 +47,12 @@ def _read(rel: str) -> str:
     return (TOOLS / rel).read_text(encoding="utf-8")
 
 
-# -- layer 1: registration ---------------------------------------------------
+# -- layer 1: static contracts -------------------------------------------------
 
 def test_project_is_registered_with_arm64_default():
     src = _read("docker/build-all.sh")
     assert f'DEFAULT_ARCH[{PROJECT}]=arm64' in src
     assert f'PLATFORMS[{PROJECT}]=' in src
-    # No EXTRA_ENV requirement beyond what is in the file: the project must not
-    # depend on an unregistered tool (this bit the pqt series once).
     registry = src.split("declare -A DEFAULT_ARCH")[1].split("declare -A PLATFORMS")[0]
     assert PROJECT in registry
 
@@ -80,147 +76,248 @@ def test_shell_scripts_parse(script):
     subprocess.run(["bash", "-n", str(SRC / script)], check=True)
 
 
-# -- layer 2: release.sh contract ---------------------------------------------
+def test_fixed_inputs_manifest_matches_files():
+    """SHA256SUMS must actually pin the shipped fixed inputs (no drift)."""
+    import hashlib
+    inputs = SRC / "build" / "inputs"
+    lines = (inputs / "SHA256SUMS").read_text().splitlines()
+    assert lines, "SHA256SUMS is empty"
+    for line in lines:
+        digest, rel = re.split(r"\s+", line.strip(), maxsplit=1)
+        path = inputs / rel
+        assert path.exists(), f"manifest names a missing input: {rel}"
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == digest, rel
 
-@pytest.fixture(scope="module")
-def outdir(tmp_path_factory):
-    """A scratch OUTPUT_DIR, so tests never touch the real output/."""
-    return tmp_path_factory.mktemp("out")
+
+def test_every_vendor_install_is_locked_to_the_lockfile():
+    """No wheel may resolve a floating version at build time.
+
+    package.sh installs the vendored stack from requirements-vendor-lock.txt
+    and a few wheels separately with --no-deps. --no-deps skips dependency
+    resolution, NOT version selection, so every one of those separate installs
+    must also read its version from the lockfile.
+    """
+    src = (SRC / "scripts" / "package.sh").read_text(encoding="utf-8")
+    lock = (SRC / "requirements-vendor-lock.txt").read_text(encoding="utf-8")
+    # A bare `_vendor_pip --no-deps <name>` (no pinned spec) must not exist.
+    for line in src.splitlines():
+        line = line.strip()
+        if not line.startswith("_vendor_pip ") and not line.startswith("_vendor_pip -"):
+            continue
+        pinned = ("requirements-vendor-lock.txt" in line
+                  or "-r \"$STAGE/" in line
+                  or "_SPEC\"" in line or "_PKG\"" in line)
+        assert pinned, f"vendor install not pinned to the lockfile: {line}"
+    # And the tokenizers install specifically reads tokenizers== from the lock.
+    assert "tokenizers==" in src
+    assert re.search(r"^tokenizers==[^#\s]+", lock, re.M)
 
 
-def _run_release(args, outdir, env_extra=None, cwd=SRC):
+def test_build_web_uses_npm_ci_with_committed_lockfile():
+    src = (SRC / "scripts" / "build_web.sh").read_text(encoding="utf-8")
+    assert "npm ci" in src
+    assert "package-lock.json" in src
+    assert "npm install" not in src.split("npm ci")[0].replace("#", ""), \
+        "plain npm install must not remain in the build path"
+    assert (SRC / "web" / "package-lock.json").exists()
+
+
+def test_no_caller_user_pip_mutation_in_package_sh():
+    """The build must not upgrade the caller's own pip installation."""
+    src = (SRC / "scripts" / "package.sh").read_text(encoding="utf-8")
+    assert "--user" not in src.split("pip install")[1].split("\n")[0] or True
+    # Stronger form: no pip --user upgrade anywhere.
+    for line in src.splitlines():
+        if "pip" in line and "--user" in line:
+            raise AssertionError(f"caller user pip touched: {line}")
+    # pip is provisioned inside the staging area instead.
+    assert "--target \"$STAGE/pip-host\"" in src
+
+
+# -- layer 2: release.sh in a minimal fixture repo ------------------------------
+
+FIXTURE_VERSION = "0.6.37"
+
+
+@pytest.fixture()
+def fixture_repo(tmp_path):
+    """A minimal stand-in for source/pcv84x6_llm_server with stubbed builds.
+
+    Contains ONLY what release.sh reads: app/__init__.py (version source), the
+    fixed build inputs, and stub build/packaging scripts. release.sh itself is
+    copied verbatim from the real tree — that is the code under test.
+    """
+    repo = tmp_path / "repo"
+    sub = repo / "source" / PROJECT
+    (sub / "app").mkdir(parents=True)
+    (sub / "app" / "__init__.py").write_text(f'__version__ = "{FIXTURE_VERSION}"\n')
+    inputs = sub / "build" / "inputs"
+    (inputs / "lib").mkdir(parents=True)
+    (inputs / "qwen3_5-config").mkdir()
+    lib = inputs / "lib" / "libcv84x6_llm.so"
+    lib.write_bytes(b"\x7fELF-fake-aarch64-lib")
+    tok = inputs / "qwen3_5-config" / "tokenizer.json"
+    tok.write_text("{}")
+    import hashlib
+    (inputs / "SHA256SUMS").write_text(
+        f"{hashlib.sha256(lib.read_bytes()).hexdigest()}  lib/libcv84x6_llm.so\n"
+        f"{hashlib.sha256(tok.read_bytes()).hexdigest()}  qwen3_5-config/tokenizer.json\n")
+    (sub / "scripts").mkdir()
+    # Stub build/packaging: record the call and write a marker deb.
+    (sub / "scripts" / "build_web.sh").write_text(
+        "#!/usr/bin/env bash\nset -euo pipefail\necho 'stub web build'\n")
+    (sub / "scripts" / "package_deb.sh").write_text(
+        "#!/usr/bin/env bash\nset -euo pipefail\n"
+        "out=\"\"\n"
+        "while [ $# -gt 0 ]; do case \"$1\" in --out) out=$2; shift 2;; *) shift;; esac; done\n"
+        "mkdir -p \"$out\"\n"
+        "echo fake-deb > \"$out/cv84x6-llm-server_${FAKE_VERSION:-0.6.37}_arm64.deb\"\n"
+        "(cd \"$out\" && sha256sum cv84x6-llm-server_*.deb > cv84x6-llm-server_0.6.37_arm64.deb.sha256)\n"
+        "echo \"stub packaged into $out\"\n")
+    shutil.copy(SRC / "release.sh", sub / "release.sh")
+    return sub
+
+
+def _run_release(repo: Path, args, outdir, env_extra=None):
     env = dict(os.environ, OUTPUT_DIR=str(outdir))
     if env_extra:
         env.update(env_extra)
-    return subprocess.run(["bash", "release.sh", *args], cwd=cwd, env=env,
+    return subprocess.run(["bash", "release.sh", *args], cwd=repo, env=env,
                           capture_output=True, text=True)
 
 
 @pytest.mark.parametrize("arch", ["amd64", "armhf", "riscv64", "bogus"])
-def test_unsupported_arch_is_refused(arch, outdir):
-    r = _run_release([arch], outdir)
+def test_unsupported_arch_is_refused(arch, fixture_repo, tmp_path):
+    r = _run_release(fixture_repo, [arch], tmp_path / "out")
     assert r.returncode != 0
     assert "arm64" in r.stderr
 
 
-def test_all_arch_is_accepted_as_arm64(outdir):
-    """`all` means the one supported platform, so it must not die on ARCH."""
-    # Not a full build: kill the run after the version gate. release.sh passes
-    # ARCH through to the build steps, so run with a version mismatch instead —
-    # that check happens BEFORE any build work and after the ARCH gate, which
-    # is exactly the boundary under test.
-    r = _run_release(["all", "9.9.9"], outdir)
-    assert r.returncode != 0
-    # The refusal must name the VERSION disagreement, not the platform.
-    assert "9.9.9" in r.stderr and "0.6." in r.stderr
-
-
-def test_version_mismatch_is_refused_not_silently_ignored(outdir):
-    r = _run_release(["arm64", "0.0.1"], outdir)
+def test_version_mismatch_is_refused_and_source_untouched(fixture_repo, tmp_path):
+    r = _run_release(fixture_repo, ["arm64", "0.0.1"], tmp_path / "out")
     assert r.returncode != 0
     assert "0.0.1" in r.stderr
-    # ...and the source must not have been "helpfully" rewritten.
-    assert '__version__ = "0.6.37"' in (SRC / "app" / "__init__.py").read_text()
+    assert f'__version__ = "{FIXTURE_VERSION}"' in (
+        fixture_repo / "app" / "__init__.py").read_text()
 
 
-def test_version_agrees_proceeds_past_the_gate(outdir):
-    """An explicit VERSION equal to the source's must pass the gate."""
-    r = _run_release(["arm64", "0.6.37"], outdir)
-    # A full build would need docker; without it the failure must come from the
-    # build steps (missing web/dist or the container), never from the gate.
-    assert "不一致" not in (r.stderr or "")
+def test_version_agreement_builds_into_output_dir(fixture_repo, tmp_path):
+    """Happy path with stubbed builds: OUTPUT_DIR must receive the deb."""
+    out = tmp_path / "custom-out"
+    r = _run_release(fixture_repo, ["arm64", FIXTURE_VERSION], out)
+    assert r.returncode == 0, r.stderr + r.stdout
+    assert (out / f"cv84x6-llm-server_{FIXTURE_VERSION}_arm64.deb").exists()
+    assert "stub packaged" in r.stdout
 
 
-def test_pinned_inputs_are_verified(outdir):
-    """A corrupted fixed input must abort the build with a clear error."""
-    inputs = SRC / "build" / "inputs"
-    sums = (inputs / "SHA256SUMS").read_bytes()
-    lib = inputs / "lib" / "libcv84x6_llm.so"
-    original = lib.read_bytes()
-    try:
-        lib.write_bytes(original + b"\x00")
-        r = _run_release(["arm64"], outdir)
-        assert r.returncode != 0
-        assert "SHA256SUMS" in r.stderr
-    finally:
-        lib.write_bytes(original)
-        (inputs / "SHA256SUMS").write_bytes(sums)
+def test_all_arch_is_accepted_as_arm64(fixture_repo, tmp_path):
+    out = tmp_path / "out-all"
+    r = _run_release(fixture_repo, ["all"], out)
+    assert r.returncode == 0, r.stderr
+    assert (out / f"cv84x6-llm-server_{FIXTURE_VERSION}_arm64.deb").exists()
 
 
-def test_missing_fixed_input_is_refused(outdir):
-    lib = SRC / "build" / "inputs" / "lib" / "libcv84x6_llm.so"
-    stash = lib.with_suffix(".so.stash")
-    try:
-        shutil.move(str(lib), str(stash))
-        r = _run_release(["arm64"], outdir)
-        assert r.returncode != 0
-        assert "build/inputs" in r.stderr
-    finally:
-        if stash.exists():
-            shutil.move(str(stash), str(lib))
+def test_corrupted_fixed_input_aborts_the_build(fixture_repo, tmp_path):
+    lib = fixture_repo / "build" / "inputs" / "lib" / "libcv84x6_llm.so"
+    lib.write_bytes(lib.read_bytes() + b"\x00")
+    r = _run_release(fixture_repo, ["arm64"], tmp_path / "out")
+    assert r.returncode != 0
+    assert "SHA256SUMS" in r.stderr
 
 
-def test_output_dir_is_honoured(outdir):
-    """OUTPUT_DIR must reach the packaging step, not just the banner.
-
-    Without docker the build stops before packaging, so assert on the script
-    text plus the completed real build's behaviour (the deb lands in the
-    OUTPUT_DIR passed on the command line — verified by the real run recorded
-    in the delivery comment; here the source must at least wire it through).
-    """
-    src = (SRC / "release.sh").read_text(encoding="utf-8")
-    assert 'OUTPUT_DIR="${OUTPUT_DIR:-' in src
-    assert '--out "$OUTPUT_DIR"' in src
-    assert '"$OUTPUT_DIR/cv84x6-llm-server' in src
+def test_missing_fixed_input_aborts_the_build(fixture_repo, tmp_path):
+    (fixture_repo / "build" / "inputs" / "lib" / "libcv84x6_llm.so").unlink()
+    r = _run_release(fixture_repo, ["arm64"], tmp_path / "out")
+    assert r.returncode != 0
+    assert "build/inputs" in r.stderr
 
 
-# -- layer 3: full-distribution scheduling with a docker stub ------------------
+# -- layer 3: unified scheduling with a recording docker stub -------------------
 
 @pytest.fixture()
-def docker_stub(tmp_path):
-    """A fake docker that runs the container command as a plain bash -c.
+def mini_unified(tmp_path):
+    """A minimal sophon-tools repo whose build-all.sh is the real one.
 
-    The stub drops the docker run options and executes the payload directly in
-    a directory the caller controls, so build-all.sh's loop, result tally and
-    status file are exercised for real while every project's build is a no-op.
+    Every registered project gets a stub source directory with a no-op
+    release.sh that just appends to a per-project log. The docker stub records
+    (project, workdir, OUTPUT_DIR) instead of running the container payload.
     """
+    root = tmp_path / "unified"
+    (root / "docker").mkdir(parents=True)
+    (root / "source").mkdir()
+    (root / "output").mkdir()
+    shutil.copy(TOOLS / "docker" / "build-all.sh", root / "docker" / "build-all.sh")
+    # versions.env is sourced for the default image name.
+    (root / "docker" / "versions.env").write_text('IMAGE_TAG="stub"\n')
+    # The git-version helper build-all.sh sources at startup.
+    (root / "docker" / "scripts").mkdir()
+    shutil.copy(TOOLS / "docker" / "scripts" / "git-version.sh",
+                root / "docker" / "scripts" / "git-version.sh")
+    # Read the REAL registry out of the real build-all.sh so the fixture covers
+    # exactly what production will drive (no drift between test and reality).
+    registry = re.findall(r"DEFAULT_ARCH\[([^\]]+)\]=(\S+)",
+                          (TOOLS / "docker" / "build-all.sh").read_text())
+    projects = [p for p, _ in registry]
+    for p in projects:
+        src = root / "source" / p
+        src.mkdir()
+        (src / "release.sh").write_text(
+            f"#!/usr/bin/env bash\necho \"{p} stub release arch=$1 out=$OUTPUT_DIR\"\n"
+            f"echo '{p}' >> \"${{BUILD_CALL_LOG:-/dev/null}}\"\n")
+    # Recording docker stub on PATH.
     bindir = tmp_path / "bin"
     bindir.mkdir()
-    stub = bindir / "docker"
-    stub.write_text("""#!/usr/bin/env bash
-# docker stub: run the payload (the last bash -c argument) in $PWD.
+    (bindir / "docker").write_text("""#!/usr/bin/env bash
+# Record the invocation (project = container -w basename); never run the payload.
+workdir=""
+outdir=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    bash) shift; exec "$@" ;;
+    -w) workdir="$2"; shift 2 ;;
+    -e) case "$2" in OUTPUT_DIR=*) outdir="${2#OUTPUT_DIR=}";; esac; shift 2 ;;
     *) shift ;;
   esac
 done
+project=$(basename "$workdir")
+echo "$project|$workdir|$outdir" >> "$DOCKER_RECORD"
+if [ "$project" = "pget_info" ]; then exit 3; fi
 exit 0
 """)
-    stub.chmod(stub.stat().st_mode | stat.S_IXUSR)
-    return bindir
-
-
-def test_full_distribution_schedules_every_project_and_isolates_failures(
-        docker_stub, tmp_path):
-    status = tmp_path / "build-status.txt"
+    (bindir / "docker").chmod(0o755)
     env = dict(os.environ,
-               PATH=f"{docker_stub}:{os.environ['PATH']}",
-               IMAGE="stub-image")
-    # output/ is created under the repo root; keep the real one untouched by
-    # pointing the status file read at whatever the run produced.
-    r = subprocess.run(["bash", "docker/build-all.sh", "--image", "stub-image"],
-                       cwd=TOOLS, env=env, capture_output=True, text=True)
-    combined = r.stdout + r.stderr
-    # Every registered project was driven (the stub logs each project header).
-    assert PROJECT in combined
-    assert "pbmssm" in combined and "se-rag-core" in combined
-    # A per-project failure must be isolated: the loop records a FAIL rc for
-    # the stubbed projects (their real build steps cannot run under the stub)
-    # and still drives the rest — that is the scheduling property under test.
-    status_file = TOOLS / "output" / ".build-status.txt"
-    assert status_file.exists()
-    lines = status_file.read_text().splitlines()
-    names = {ln.split()[0] for ln in lines if ln.strip()}
-    assert PROJECT in names
-    assert len(names) >= 10, f"expected the full registry, got {sorted(names)}"
+               PATH=f"{bindir}:{os.environ['PATH']}",
+               DOCKER_RECORD=str(tmp_path / "docker-record.log"),
+               BUILD_CALL_LOG=str(tmp_path / "release-calls.log"))
+    return root, projects, env
+
+
+def test_full_distribution_drives_every_project_and_isolates_failure(mini_unified):
+    root, projects, env = mini_unified
+    r = subprocess.run(["bash", "docker/build-all.sh"], cwd=root, env=env,
+                       capture_output=True, text=True)
+    record = Path(env["DOCKER_RECORD"]).read_text().splitlines()
+    driven = {line.split("|")[0] for line in record}
+    # The entire real registry was driven, including the new project.
+    assert driven == set(projects), f"missing: {set(projects) - driven}"
+    assert PROJECT in driven
+    # The designated failure was recorded, everything else continued.
+    assert "pget_info" in driven
+    status = (root / "output" / ".build-status.txt").read_text()
+    assert "pget_info" in status and "fail:3" in status
+    # Others (including the new project) are ok; failure is not silent.
+    assert re.search(rf"{PROJECT}\s+ok", status)
+    # Exit code must be non-zero because one project failed.
+    assert r.returncode != 0
+    # OUTPUT_DIR was passed per project into the container workdir.
+    for line in record:
+        _, _, out = line.split("|")
+        assert out.endswith("/output/" + line.split("|")[0])
+
+
+def test_single_project_selection_drives_only_that_project(mini_unified):
+    root, projects, env = mini_unified
+    r = subprocess.run(["bash", "docker/build-all.sh", "--project", PROJECT],
+                       cwd=root, env=env, capture_output=True, text=True)
+    record = Path(env["DOCKER_RECORD"]).read_text().splitlines()
+    assert [line.split("|")[0] for line in record] == [PROJECT]
+    assert r.returncode == 0, r.stderr

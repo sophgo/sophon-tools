@@ -112,6 +112,16 @@ done
 
 ## Raw data
 
+> sophon-tools source snapshot: the board-side original logs and bulky run
+> records (dmesg/journal dumps, SSE streams, NDJSON exports, the
+> mys2498/mys2501/mys2502 run directories, the D7 hang-scene captures, and
+> `raw/dmesg_wedged_tpu.txt` / `raw/hang_prof.csv`) are NOT distributed here --
+> they stay in the upstream private repository. What ships is the measurement
+> anchors the research docs' "复现" sections and the unit tests reference:
+> the probe/profile CSVs, `model_info_*`, `queue_depth_table.txt`,
+> `driver-evidence/`, `decode_bench_crosscheck.txt`, `mys2474/`, `mys2477/`,
+> `mys2510-supplement/` and `mys2702/` (minus its hang traces).
+
 `raw/ok_prof.csv` is the per-call log of the baseline run in the report;
 `raw/hang_prof.csv` and `raw/dmesg_wedged_tpu.txt` are the wedged-TPU trace from the
 probe bug described above. `raw/model_info_{128k,32k}.txt` are
@@ -121,10 +131,11 @@ are the excerpts kept in git; the full board log (`board_2026-10-29.log`) is not
 committed. `raw/decode_bench_crosscheck.txt` compares the queue result with the
 real engine.
 
-MYS-2501 extended stability run: `raw/mys2501/` holds the delivered run on `.151`
-(`0.6.14`, `qwen3.6-35b-a3b-128k`, 2100 requests + a readiness probe). It keeps the
-self-contained `report.html`, the per-request `rounds.jsonl`, `summary.json`,
-`env.json`, `samples.json`, `timeline.jsonl` and `sqlite-check.json`, plus a
-`README.md` with the findings. The bulky parts (26 MB of raw SSE bodies, the NDJSON
-export, journal and dmesg) stay on the board under
-`/data/stability/evidence/run-20261031T025800Z/`; `README.md` lists them.
+MYS-2501 extended stability run: `raw/mys2501/` held the delivered run on `.151`
+(`0.6.14`, `qwen3.6-35b-a3b-128k`, 2100 requests + a readiness probe) upstream --
+self-contained `report.html`, per-request `rounds.jsonl`, `summary.json`,
+`env.json`, `samples.json`, `timeline.jsonl`, `sqlite-check.json` and a
+`README.md` with the findings. As noted above, that directory is not part of
+this snapshot; the bulky parts (26 MB of raw SSE bodies, the NDJSON export,
+journal and dmesg) stayed on the board under
+`/data/stability/evidence/run-20261031T025800Z/`.

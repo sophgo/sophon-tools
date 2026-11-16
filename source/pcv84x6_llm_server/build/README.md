@@ -18,11 +18,19 @@
 全部为「接入 sophon-tools 出包流程」所需的适配，不改任何业务行为、UI、
 服务名、包名、安装/数据目录与配置保留语义：
 
-1. **排除项**（原始运行代码一律原样保留）：
-   - `analysis/` — 实验测量数据与探针（非发布内容，README 亦如此声明）；
-     原仓库 151 个 raw 证据文件不随本仓库分发。
+1. **导入范围**（原始运行代码原样保留；实验原始输出与板端日志不随本仓库分发）：
+   - `analysis/` 探针代码保留（decode/队列可复现研究脚本），`analysis/raw/`
+     只保留被 `docs/research/*`「复现」一节与单测引用的**测量数据锚点**
+     （prefill/queue/embed sweep、prof CSV、model_info、queue_depth 表、
+     driver-evidence 摘录、mys2474/2477/2510-supplement/2702 数据）；原仓库
+     的板端原始日志与运行记录（dmesg/journal/栈 dump/SSE 流/recent-inference
+     等，mys2498/2501/2502 整目录、mys2702 的 hang trace、顶层
+     `dmesg_wedged_tpu.txt`/`hang_prof.csv`）与 `docs/research/d7/` 下 9 个
+     卡死现场采集目录（每个 run 的 dmesg/内核栈/kernel_fifo/请求记录）不在
+     本仓库——结论已整理进 `docs/research/d7-tpu-hang.md`、`d7/step1`、
+     `d7/step2-3`、各篇研究文档与各自 README，原始件留在原私有仓库。
    - `web/node_modules` — 源树里是指向个人路径的 symlink，本仓库由
-     `npm ci` 现场构建（`scripts/build_web.sh`）。
+     `npm ci` 现场构建（`scripts/build_web.sh`，lockfile 已入库）。
    - `tools/e2e/d7_reserve_sweep.py` — D7 调研脚本，内嵌临时测试设备的
      sudo 密码明文（随机密码），凭据不能入库；其余 `tools/e2e/` 脚本的
      设备入口都是环境变量注入，原样保留。
@@ -59,7 +67,18 @@ SHA256 固定在本目录（`SHA256SUMS`），构建时逐项校验：
 - 升级输入时：替换 `build/inputs/lib/libcv84x6_llm.so` 与
   `qwen3_5-config/`，重新生成 `SHA256SUMS`，并同步更新本表。
 
-### 不得使用
+### 文本格式（git diff --check）
+
+本目录/子项目自有文本（脚本、文档、测试）保持 `git diff --check` 干净。以下
+导入的第三方原文与测量数据**保留原样、不改写**，其行尾空白/文件尾空行属原文
+特征，逐项列为例外：
+- `build/inputs/qwen3_5-config/README.md`（HuggingFace 模型卡片原文）
+- `model-config/wemm_embedding/LICENSE`、`app/static/docs/LICENSE-redoc.txt`、
+  `app/static/docs/redoc.standalone.js`（第三方许可证与库文件原文）
+- `analysis/raw/` 测量数据（prof/表/model_info/driver-evidence/rounds 等原始
+  探针输出，mys2521-report.html 为交付报告原文）
+
+## 不得使用
 
 - 旧版本库（如 0.6.34 的 lib）冒充；
 - 浮动 latest 下载；

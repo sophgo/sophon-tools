@@ -422,7 +422,7 @@ def unroll(graph, steps: int) -> int:
                 nn.output[j] = rename(name)
             # The body's copies of the cursor are superseded by the literals.
             if nn.output and nn.output[0] in (rename(cursor),
-                                              rename(cursor_step or "")): 
+                                              rename(cursor_step or "")):
                 continue
             new_nodes.append(nn)
         cur = [f"{name}__s{step}" for name in carried_out]

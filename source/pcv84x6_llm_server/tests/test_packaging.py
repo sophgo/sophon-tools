@@ -110,11 +110,19 @@ def test_the_ocr_prerequisites_are_vendored_or_borrowed_explicitly():
       different library with a different ``minAreaRect``.
     """
     src = (SCRIPTS / "package.sh").read_text(encoding="utf-8")
-    assert "--no-deps pyclipper" in src, "pyclipper must be vendored"
+    # sophon-tools adaptation: every vendored wheel's version is read from
+    # requirements-vendor-lock.txt (the single version source). The assertion
+    # pins the COMMAND (--no-deps + lockfile read), and for numpy additionally
+    # the 1.x policy: the lockfile itself is checked to pin numpy==1.*.
+    lock = (ROOT / "requirements-vendor-lock.txt").read_text(encoding="utf-8")
+    assert "--no-deps \"$(grep -oE '^pyclipper==" in src, "pyclipper must be vendored from the lockfile"
     assert '--no-deps "$NUMPY_SPEC"' in src, "numpy must be vendored"
     # ...and pinned below 2: the device's cv2.so is built against the numpy 1
     # C ABI, so a numpy 2 vendor breaks `import cv2` and with it every OCR model.
-    assert "NUMPY_SPEC=numpy==1." in src, "vendored numpy must be pinned to 1.x"
+    numpy_lock = re.search(r"^numpy==([^#\s]+)", lock, re.M)
+    assert numpy_lock and numpy_lock.group(1).startswith("1."), numpy_lock
+    assert "grep -oE '^numpy==" in src, \
+        "numpy version must come from the lockfile"
     assert 'numpy-1.*.dist-info' in src, "the build must refuse a numpy 2 vendor"
     # And the model config the OCR worker reads.
     assert "ppocr_v6/ppocr.json" in src
