@@ -1,0 +1,184 @@
+{"t": "2026-11-07 11:38:41", "area": "A2 模型", "check": "qwen3-embedding-0.6b 加载", "verdict": "PASS", "evidence": "6.6s heapΔ MiB {'npu': 2605, 'vpp': 0}"}
+{"t": "2026-11-07 11:38:41", "area": "A2 模型", "check": "qwen3-embedding-0.6b 内存字段", "verdict": "PASS", "evidence": "static=2605 used=2605 limit=2752 MiB"}
+{"t": "2026-11-07 11:38:47", "area": "A2 模型", "check": "qwen3-embedding-0.6b 推理", "verdict": "PASS", "evidence": "200 dims=1024"}
+{"t": "2026-11-07 11:38:49", "area": "A2 模型", "check": "qwen3-embedding-0.6b 卸载回基线", "verdict": "PASS", "evidence": "HTTP 200 residual MiB {'npu': 0, 'vpp': 0}"}
+{"t": "2026-11-07 11:38:55", "area": "A2 模型", "check": "bge-reranker-v2-m3 加载", "verdict": "PASS", "evidence": "6.0s heapΔ MiB {'npu': 1136, 'vpp': 0}"}
+{"t": "2026-11-07 11:38:55", "area": "A2 模型", "check": "bge-reranker-v2-m3 内存字段", "verdict": "PASS", "evidence": "static=1165 used=1165 limit=1344 MiB"}
+{"t": "2026-11-07 11:38:56", "area": "A2 模型", "check": "bge-reranker-v2-m3 推理", "verdict": "PASS", "evidence": "200 top={'index': 0, 'relevance_score': 0.5841525674430875, 'document': {'text': '二号线合格率 99.1%'}}"}
+{"t": "2026-11-07 11:38:58", "area": "A2 模型", "check": "bge-reranker-v2-m3 卸载回基线", "verdict": "PASS", "evidence": "HTTP 200 residual MiB {'npu': 0, 'vpp': 0}"}
+{"t": "2026-11-07 11:39:05", "area": "A2 模型", "check": "qwen3-asr-0.6b 加载", "verdict": "PASS", "evidence": "7.6s heapΔ MiB {'npu': 1639, 'vpp': 0}"}
+{"t": "2026-11-07 11:39:05", "area": "A2 模型", "check": "qwen3-asr-0.6b 内存字段", "verdict": "PASS", "evidence": "static=1639 used=1639 limit=1856 MiB"}
+{"t": "2026-11-07 11:39:06", "area": "A2 模型", "check": "qwen3-asr-0.6b 推理", "verdict": "PASS", "evidence": "200 '甚至出现交易几乎停滞的情况。'"}
+{"t": "2026-11-07 11:39:08", "area": "A2 模型", "check": "qwen3-asr-0.6b 卸载回基线", "verdict": "PASS", "evidence": "HTTP 200 residual MiB {'npu': 0, 'vpp': 0}"}
+{"t": "2026-11-07 11:39:23", "area": "A2 模型", "check": "qwen3-asr-1.7b 加载", "verdict": "PASS", "evidence": "15.1s heapΔ MiB {'npu': 4048, 'vpp': 0}"}
+{"t": "2026-11-07 11:39:23", "area": "A2 模型", "check": "qwen3-asr-1.7b 内存字段", "verdict": "PASS", "evidence": "static=4048 used=4048 limit=4288 MiB"}
+{"t": "2026-11-07 11:39:24", "area": "A2 模型", "check": "qwen3-asr-1.7b 推理", "verdict": "PASS", "evidence": "200 '甚至出现交易几乎停滞的情况。'"}
+{"t": "2026-11-07 11:39:25", "area": "A2 模型", "check": "qwen3-asr-1.7b 卸载回基线", "verdict": "PASS", "evidence": "HTTP 200 residual MiB {'npu': 0, 'vpp': 0}"}
+{"t": "2026-11-07 11:39:26", "area": "A2 模型", "check": "ppocrv6-medium 加载", "verdict": "PASS", "evidence": "1.1s heapΔ MiB {'npu': 154, 'vpp': 0}"}
+{"t": "2026-11-07 11:39:26", "area": "A2 模型", "check": "ppocrv6-medium 内存字段", "verdict": "PASS", "evidence": "static=326 used=326 limit=512 MiB"}
+{"t": "2026-11-07 11:39:27", "area": "A2 模型", "check": "ppocrv6-medium 推理", "verdict": "PASS", "evidence": "200 lines=26"}
+{"t": "2026-11-07 11:39:29", "area": "A2 模型", "check": "ppocrv6-medium 卸载回基线", "verdict": "PASS", "evidence": "HTTP 200 residual MiB {'npu': 0, 'vpp': 0}"}
+{"t": "2026-11-07 11:40:34", "area": "A2 模型", "check": "qwen3.6-35b-a3b-128k 加载", "verdict": "PASS", "evidence": "65.4s heapΔ MiB {'npu': 22752, 'vpp': 0}"}
+{"t": "2026-11-07 11:40:34", "area": "A2 模型", "check": "qwen3.6-35b-a3b-128k 内存字段", "verdict": "PASS", "evidence": "static=22752 used=22752 limit=23232 MiB"}
+{"t": "2026-11-07 11:40:36", "area": "A2 模型", "check": "qwen3.6-35b-a3b-128k 推理", "verdict": "PASS", "evidence": "200 '我是通义千问，由阿里巴巴集团通义实验室独立研发的大语言模型，致力于成为您得力的思考伙伴和智能助手。' usage={'prompt_tokens': 17, 'completion_tokens': 29, 'total_tokens': 46, 'prompt_tokens_details': None}"}
+{"t": "2026-11-07 11:40:37", "area": "A2 模型", "check": "qwen3.6-35b-a3b-128k 卸载回基线", "verdict": "PASS", "evidence": "HTTP 200 residual MiB {'npu': 0, 'vpp': 0}"}
+{"t": "2026-11-07 11:41:18", "area": "RC2 复测", "check": "D5 OCR 加载/卸载 5 次（含 layout 引擎）", "verdict": "FAIL", "evidence": "本轮 journal 中 terminate/bmlib error 行数=86；worker 日志累计 terminate=0（含 RC1 时的旧记录）；dmesg wait api timeout=0"}
+{"t": "2026-11-07 11:41:18", "area": "RC2 复测", "check": "D1 /v1 错误为 OpenAI error 对象（SDK 能读出 message）", "verdict": "PASS", "evidence": "401 message='invalid API key'; 不存在的模型 message=\"model 'qwen3-embedding-0.6b-not-loaded' not found\""}
+{"t": "2026-11-07 11:41:36", "area": "RC2 复测", "check": "D3 kb_search 文本带 chunk_id", "verdict": "PASS", "evidence": "'检索「合格率」共 3 条：\\n[1] [e2e-mcp] 说明.txt（相关度 0.633）  chunk_id=681c49268db348d394597b094107c4a1:0\\n二号线合格率为 99.1%，负责人李静。一号线产量最高。\\n[2] [e2e-mcp] text.pdf 第 1 页（相关度 0.001） '"}
+{"t": "2026-11-07 11:41:36", "area": "RC2 复测", "check": "D2 kb_read 相邻片段不跨文档", "verdict": "PASS", "evidence": "说明.txt→1 doc; text.pdf→1 doc; text.pdf→1 doc"}
+{"t": "2026-11-07 11:42:02", "area": "RC2 复测", "check": "D8 opencode 只监听 127.0.0.1", "verdict": "PASS", "evidence": "LISTEN 0      512        127.0.0.1:14096      0.0.0.0:*    users:((\"opencode\",pid=43470,fd=11))"}
+{"t": "2026-11-07 11:42:41", "area": "RC2 复测", "check": "D5 OCR 加载/卸载 5 次（含 layout 引擎）", "verdict": "PASS", "evidence": "自 2026-11-08 03:42:23（板上时间）起：terminate/bmlib error 行数=0；dmesg wait api timeout=0。首判 86 行是脚本用 13.24 的 PST 时间作 --since，板子按 CST 解析，窗口包含了 RC1 的旧错误"}
+{"t": "2026-11-07 11:43:08", "area": "RC2 复测", "check": "D6 主进程崩溃（kill -9，worker 空闲）→ worker 存活并被接管", "verdict": "PASS", "evidence": "worker pid=42714 崩溃后 存活；重启后 loaded=True adopted=True pid=42714"}
+{"t": "2026-11-07 11:43:17", "area": "RC2 复测", "check": "D6 systemctl restart → worker 优雅卸载（非 SIGKILL）", "verdict": "PASS", "evidence": "2026-11-08 03:43:10,256 INFO worker: worker stopped cleanly; 重启后 loaded=False"}
+{"t": "2026-11-07 11:43:44", "area": "A3 /v1 对话", "check": "SDK 非流式", "verdict": "PASS", "evidence": "'2' finish=stop usage=23/1"}
+{"t": "2026-11-07 11:43:45", "area": "A3 /v1 对话", "check": "SDK 流式 + usage", "verdict": "PASS", "evidence": "chunks=8 finish=stop usage=18/5 text='凉爽、金黄、丰收'"}
+{"t": "2026-11-07 11:43:46", "area": "A3 /v1 对话", "check": "max_tokens=5 截断", "verdict": "PASS", "evidence": "finish=length completion=5"}
+{"t": "2026-11-07 11:43:47", "area": "A3 /v1 对话", "check": "max_completion_tokens=5 截断", "verdict": "PASS", "evidence": "finish=length completion=5"}
+{"t": "2026-11-07 11:43:48", "area": "A3 /v1 对话", "check": "stop 序列", "verdict": "PASS", "evidence": "'1, 2, '"}
+{"t": "2026-11-07 11:44:00", "area": "A3 /v1 对话", "check": "思考开启", "verdict": "PASS", "evidence": "reasoning=812 chars content='17 × 23 等于 **391**。' finish=stop"}
+{"t": "2026-11-07 11:44:01", "area": "A3 /v1 对话", "check": "思考默认关闭", "verdict": "PASS", "evidence": "content='391'"}
+{"t": "2026-11-07 11:44:05", "area": "A3 /v1 对话", "check": "函数调用 tools", "verdict": "PASS", "evidence": "finish=tool_calls tool_calls=[('get_weather', '{\"city\": \"北京\"}')]"}
+{"t": "2026-11-07 11:44:06", "area": "A3 /v1 对话", "check": "函数调用 回填结果", "verdict": "PASS", "evidence": "'北京今天天气晴朗，气温为18摄氏度。'"}
+{"t": "2026-11-07 11:44:15", "area": "A3 /v1 对话", "check": "视觉（图片输入）", "verdict": "PASS", "evidence": "200 '这张表格的标题是：**2026 年第三季度生产数据统计表**\\n\\n产量最高的产线是：**一号线**，产量为 **4,120 台**。' prompt_tokens=577"}
+{"t": "2026-11-07 11:44:19", "area": "A3 /v1 对话", "check": "3 路并发", "verdict": "PASS", "evidence": "200 0.8s; 200 3.3s; 200 3.8s"}
+{"t": "2026-11-07 11:44:26", "area": "A3 /v1 对话", "check": "前缀缓存命中", "verdict": "PASS", "evidence": "prompt=673 cached=640"}
+{"t": "2026-11-07 11:45:11", "area": "A3 /v1 对话", "check": "长提示（≥2048 token）", "verdict": "PASS", "evidence": "200 prompt_tokens=8027 answer='46'"}
+{"t": "2026-11-07 11:45:11", "area": "A3 /v1 对话", "check": "/v1/models", "verdict": "PASS", "evidence": "['qwen3.6-35b-a3b-128k']"}
+{"t": "2026-11-07 11:45:11", "area": "A3 /v1 对话", "check": "认证：无 key / 错 key", "verdict": "PASS", "evidence": "401 401 {\"error\":{\"param\":null,\"code\":null,\"message\":\"invalid API key\",\"type\":\"invalid_request_error\"},\"deta"}
+{"t": "2026-11-07 11:45:33", "area": "A2 模型", "check": "35B + 4 个辅助模型同时在线", "verdict": "PASS", "evidence": "heaps MiB {'npu': 28727, 'vpp': 256}"}
+{"t": "2026-11-07 11:45:42", "area": "A3 /v1 辅助", "check": "embeddings（SDK，批量 3 条）", "verdict": "PASS", "evidence": "n=3 dim=1024 usage=12"}
+{"t": "2026-11-07 11:45:45", "area": "A3 /v1 辅助", "check": "embeddings dimensions=256", "verdict": "PASS", "evidence": "200 dim=256 "}
+{"t": "2026-11-07 11:45:47", "area": "A3 /v1 辅助", "check": "embeddings encoding_format=base64", "verdict": "PASS", "evidence": "200 type=str"}
+{"t": "2026-11-07 11:45:49", "area": "A3 /v1 辅助", "check": "rerank top_n=2", "verdict": "PASS", "evidence": "200 [(2, 0.686), (0, 0.397)]"}
+{"t": "2026-11-07 11:45:49", "area": "A3 /v1 辅助", "check": "transcriptions response_format=json", "verdict": "PASS", "evidence": "200 '{\"text\":\"甚至出现交易几乎停滞的情况。\"}'"}
+{"t": "2026-11-07 11:45:50", "area": "A3 /v1 辅助", "check": "transcriptions response_format=text", "verdict": "PASS", "evidence": "200 '甚至出现交易几乎停滞的情况。'"}
+{"t": "2026-11-07 11:45:50", "area": "A3 /v1 辅助", "check": "transcriptions response_format=verbose_json", "verdict": "PASS", "evidence": "200 '{\"task\":\"transcribe\",\"language\":\"Chinese\",\"duration\":4.204,\"text\":\"甚至出现交易几乎停滞的情况。\",\"segments\":[{\"id\"'"}
+{"t": "2026-11-07 11:45:51", "area": "A3 /v1 辅助", "check": "transcriptions（SDK）", "verdict": "PASS", "evidence": "'甚至出现交易几乎停滞的情况。'"}
+{"t": "2026-11-07 11:45:55", "area": "A3 /v1 辅助", "check": "transcriptions 95 秒长音频", "verdict": "PASS", "evidence": "200 duration=95.5 segments=4 text='甚至出现交易几乎停滞的情况。甚至出现交易几乎停滞的情况。甚至出现交易几乎停滞的情'"}
+{"t": "2026-11-07 11:45:59", "area": "A3 /v1 辅助", "check": "ASR 流式转写（SSE）", "verdict": "PASS", "evidence": "200 events=6 first=data: {\"type\": \"meta\", \"duration\": 95.5, \"segments_total\": 4, \"segment_seconds\": last=data: {\"type\": \"done\", \"text\": \"甚至出现交易几乎停滞的情况。甚至出现交易几乎停滞的情况。甚至出现交易几乎停滞的情况。甚至出现交易"}
+{"t": "2026-11-07 11:46:01", "area": "A3 /v1 辅助", "check": "/v1/ocr lines", "verdict": "PASS", "evidence": "200 lines=17 usage={'det_ms': 111.95, 'rec_ms': 1081.25, 'lines': 17}"}
+{"t": "2026-11-07 11:46:02", "area": "A3 /v1 辅助", "check": "/v1/ocr layout twocolumn.png", "verdict": "PASS", "evidence": "200 blocks=['subtitle', 'text', 'text', 'text', 'text', 'text'] usage={'det_ms': 105.57, 'rec_ms': 685.05, 'lines': 15, 'blocks': 6, 'layout_ms': 53.58}"}
+{"t": "2026-11-07 11:46:02", "area": "A3 /v1 辅助", "check": "/v1/ocr layout table_stats.png", "verdict": "PASS", "evidence": "200 blocks=['subtitle', 'table', 'text'] usage={'det_ms': 121.91, 'rec_ms': 375.11, 'lines': 26, 'blocks': 3, 'layout_ms': 50.24}"}
+{"t": "2026-11-07 11:46:03", "area": "A3 /v1 辅助", "check": "/v1/ocr multipart + layout", "verdict": "PASS", "evidence": "200 blocks=5"}
+{"t": "2026-11-07 11:46:03", "area": "A3 /v1 辅助", "check": "/v1/ocr 坏图片 400", "verdict": "PASS", "evidence": "400 {\"error\":{\"message\":\"无法解码这张图片；支持 PNG/JPEG/BMP/WebP 等 OpenCV 能读的格式\",\"type\":\"invalid_request_error\",\"param\":null,\"code\":\"b"}
+{"t": "2026-11-07 11:46:16", "area": "A3 /v1 对话", "check": "排队与 429（并发 2 + 队列 1，发 6 个）", "verdict": "PASS", "evidence": "codes=[200, 200, 200, 429, 429, 429] times=[7.2, 7.7, 11.5, 0.1, 0.1, 0.1] 429body={\"error\":{\"message\":\"1 requests running and 2 queued; try again later\",\"type\":\"rate_limit_error\",\"param\":null,\"code\":\"qu"}
+{"t": "2026-11-07 11:46:28", "area": "A2 模型", "check": "paddleocr-vl-1.5 加载（dfss 下载的文件）", "verdict": "PASS", "evidence": "200 7.6s heaps={'npu': 30719, 'vpp': 435} "}
+{"t": "2026-11-07 11:46:30", "area": "A3 PaddleOCR-VL", "check": "聊天·区域裁剪 subtitle 706×47（OCR:）", "verdict": "PASS", "evidence": "200 '2026 年第三季度生产数据统计表' usage={'prompt_tokens': 797, 'completion_tokens': 10, 'total_tokens': 807, 'prompt_tokens_details': None}"}
+{"t": "2026-11-07 11:46:33", "area": "A3 PaddleOCR-VL", "check": "聊天·区域裁剪 table 1037×540（Table Recognition:）", "verdict": "PASS", "evidence": "200 '<fcel>产线<fcel>产量（台）<fcel>合格率<fcel>负责人<nl><fcel>一号线<fcel>4,120<fcel>99.6%<fcel>张伟<nl><fcel>' usage={'prompt_tokens': 797, 'completion_tokens': 108, 'total_tokens': 905, 'prompt_tokens_details': None}"}
+{"t": "2026-11-07 11:46:34", "area": "A3 PaddleOCR-VL", "check": "聊天·区域裁剪 text 537×29（OCR:）", "verdict": "PASS", "evidence": "200 '注：合格率按抽检样本计算，抽检比例 5%。' usage={'prompt_tokens': 797, 'completion_tokens': 16, 'total_tokens': 813, 'prompt_tokens_details': None}"}
+{"t": "2026-11-07 11:46:37", "area": "A3 PaddleOCR-VL", "check": "聊天·整图 cn_table_merged.png（Table Recognition:）", "verdict": "PASS", "evidence": "200 '<fcel>2026年第三季度设备巡检记录<lcel><lcel><lcel><lcel><nl><fcel>区域/设备<fcel>巡检日期<fcel>状态<fcel>负责人<ec'"}
+{"t": "2026-11-07 11:46:40", "area": "A3 PaddleOCR-VL", "check": "聊天·整图 en_report.png（OCR:）", "verdict": "PASS", "evidence": "200 'Quarterly Operations Report\\n\\nExecutive Summary\\n\\nDuring the third quarter, total production'"}
+{"t": "2026-11-07 11:46:44", "area": "A3 PaddleOCR-VL", "check": "聊天·整图 cn_notice.png（OCR:）", "verdict": "PASS", "evidence": "200 '关于开展设备巡检工作的通知\\n\\n各部门：\\n为保障生产设备安全稳定运行，经研究决定，于本月15日至20日开展全厂设备巡检工作。现将有关事项通知如下：\\n一、巡检范围\\n覆盖一号厂房至三号厂'"}
+{"t": "2026-11-07 11:46:49", "area": "A3 PaddleOCR-VL", "check": "聊天·Formula Recognition:", "verdict": "PASS", "evidence": "200 '\\\\[\\\\begin{array}{l} \\\\text{产品规格书 / Product Specification} \\\\\\\\ \\\\'"}
+{"t": "2026-11-07 11:46:53", "area": "A3 PaddleOCR-VL", "check": "聊天·Chart Recognition:", "verdict": "PASS", "evidence": "200 'Model | Product Specification | Product Type\\n1. 型号 Model | C'"}
+{"t": "2026-11-07 11:46:55", "area": "A3 PaddleOCR-VL", "check": "聊天·流式", "verdict": "PASS", "evidence": "200 chunks=113"}
+{"t": "2026-11-07 11:46:55", "area": "A3 PaddleOCR-VL", "check": "聊天·两张图 400", "verdict": "PASS", "evidence": "400 {\"error\":{\"message\":\"这个模型一次只接受一张图片，收到 2 张；请把多页/多元素拆成多次请求\",\"type\":\"invalid_request_error\",\"param\":nul"}
+{"t": "2026-11-07 11:47:00", "area": "A3 PaddleOCR-VL", "check": "/v1/ocr mode=vl table_stats.png", "verdict": "PASS", "evidence": "200 blocks=3 tasks=['OCR:', 'Table Recognition:', 'OCR:'] usage={'det_ms': 0.0, 'rec_ms': 0.0, 'lines': 0, 'blocks': 3, 'layout_ms': 48.5, 'vl_ms': 4358.05, 'vl_tokens': 134}"}
+{"t": "2026-11-07 11:47:04", "area": "A3 PaddleOCR-VL", "check": "/v1/ocr mode=vl cn_table_merged.png", "verdict": "PASS", "evidence": "200 blocks=2 tasks=['Table Recognition:', 'OCR:'] usage={'det_ms': 0.0, 'rec_ms': 0.0, 'lines': 0, 'blocks': 2, 'layout_ms': 46.1, 'vl_ms': 3266.32, 'vl_tokens': 114} rowspan=True colspan=True"}
+{"t": "2026-11-07 11:47:14", "area": "A3 PaddleOCR-VL", "check": "/v1/ocr mode=vl cn_notice.png", "verdict": "PASS", "evidence": "200 blocks=10 tasks=['OCR:', 'OCR:', 'OCR:', 'OCR:', 'OCR:', 'OCR:', 'OCR:', 'OCR:', 'OCR:', 'OCR:'] usage={'det_ms': 0.0, 'rec_ms': 0.0, 'lines': 0, 'blocks': 10, 'layout_ms': 59.08, 'vl_ms': 10114.32, 'vl_tokens': 145}"}
+{"t": "2026-11-07 11:47:19", "area": "A3 PaddleOCR-VL", "check": "/v1/ocr mode=vl mixed_spec.png", "verdict": "PASS", "evidence": "200 blocks=3 tasks=['OCR:', 'OCR:', 'OCR:'] usage={'det_ms': 0.0, 'rec_ms': 0.0, 'lines': 0, 'blocks': 3, 'layout_ms': 87.27, 'vl_ms': 3963.56, 'vl_tokens': 107}"}
+{"t": "2026-11-07 11:47:19", "area": "A2 模型", "check": "VL 加载后设备内存", "verdict": "PASS", "evidence": "heaps MiB {'npu': 30719, 'vpp': 435}"}
+{"t": "2026-11-07 11:47:20", "area": "A4 MCP", "check": "initialize", "verdict": "PASS", "evidence": "server=cv84x6-llm-server proto=2025-06-18"}
+{"t": "2026-11-07 11:47:20", "area": "A4 MCP", "check": "tools/list（9 个）", "verdict": "PASS", "evidence": "['kb_add_document', 'kb_create', 'kb_document_status', 'kb_list', 'kb_list_documents', 'kb_read', 'kb_search', 'ocr_read', 'transcribe_audio']"}
+{"t": "2026-11-07 11:47:24", "area": "A4 MCP", "check": "ocr_read mode=vl（合并单元格表格）", "verdict": "PASS", "evidence": "4.0s 'cn_table_merged.png（图片，VL模式，Markdown）\\n<table><tr><td colspan=\"2\">区域/设备</td><td>巡检日期</td><td>状态</td><td>负责人</td></tr><tr><td>二号机房</td><td>服务器 D</td><td>2026-06-3'"}
+{"t": "2026-11-07 11:47:32", "area": "A4 MCP", "check": "ocr_read mode=vl 扫描 PDF", "verdict": "PASS", "evidence": "8.3s 'scan.pdf：共 1 页，本次读取 1 页。VL模式：有文字层的页仍直接取文字层，只有扫描页走VL 逐区域识别并输出 Markdown。\\n\\n## 第 1 页（OCR）\\n## 附件一 盘点作业指导书\\n\\n作业指导书规定了盘点前的准备工作。第一步是清理货位，把散放的物料归位并贴上货位标签。第二步是核对货位卡与系统库存，发'"}
+{"t": "2026-11-07 11:47:38", "area": "A4 MCP", "check": "initialize", "verdict": "PASS", "evidence": "server=cv84x6-llm-server proto=2025-06-18"}
+{"t": "2026-11-07 11:47:38", "area": "A4 MCP", "check": "tools/list（9 个）", "verdict": "PASS", "evidence": "['kb_add_document', 'kb_create', 'kb_document_status', 'kb_list', 'kb_list_documents', 'kb_read', 'kb_search', 'ocr_read', 'transcribe_audio']"}
+{"t": "2026-11-07 11:47:38", "area": "A4 MCP", "check": "kb_create", "verdict": "PASS", "evidence": "kb=2c69d42c5fec4457b3deb7c533e0fb6a '已创建知识库 e2e-mcp（id 2c69d42c5fec4457b3deb7c533e0fb6a）。用 kb_add_document 添加文档，建库完成后就能用 kb_search 检索。'"}
+{"t": "2026-11-07 11:47:38", "area": "A4 MCP", "check": "kb_add_document（PDF 路径）", "verdict": "PASS", "evidence": "doc=4d74cdd1e54348bbac516e540f18db4d '已加入 text.pdf（文档 id 4d74cdd1e54348bbac516e540f18db4d，类型 pdf，82.2 KB），状态 queued。建库是后台任务，用 kb_document_status 查询进度。'"}
+{"t": "2026-11-07 11:47:38", "area": "A4 MCP", "check": "kb_add_document（文本）", "verdict": "PASS", "evidence": "'已加入 说明.txt（文档 id dba582259bdf46239d680a10418da462，类型 txt，0.1 KB），状态 queued。建库是后台任务，用 kb_document_status 查询进度。'"}
+{"t": "2026-11-07 11:47:51", "area": "A4 MCP", "check": "kb_list_documents / 建库完成", "verdict": "PASS", "evidence": "'知识库 e2e-mcp 共 2 篇文档：\\n- text.pdf，id 4d74cdd1e54348bbac516e540f18db4d，状态 ready，3 个片段\\n- 说明.txt，id dba582259bdf46239d680a10418da462，状态 ready，1 个片段'"}
+{"t": "2026-11-07 11:47:51", "area": "A4 MCP", "check": "kb_document_status", "verdict": "PASS", "evidence": "'text.pdf：状态 ready\\n3 个片段'"}
+{"t": "2026-11-07 11:47:55", "area": "A4 MCP", "check": "kb_search（混合检索 + 精排）", "verdict": "PASS", "evidence": "4.2s '检索「哪条产线的合格率是 99.1%」共 3 条：\\n[1] 说明.txt（相关度 0.990）  chunk_id=dba582259bdf46239d680a10418da462:0\\n二号线合格率为 99.1%，负责人李静。一号线产量最高。\\n[2] text.pdf 第 2 页（相关度 0.001）  chunk_id=4d74cdd1e54348bbac516e540f18db4d:2\\n2.1'"}
+{"t": "2026-11-07 11:47:55", "area": "A4 MCP", "check": "kb_read", "verdict": "FAIL", "evidence": "'没有找到片段 dba582259bdf46239d680a10418da462；它可能属于已被删除或重建的知识库。用 kb_search 重新检索一次可以拿到当前有效的 chunk_id。'"}
+{"t": "2026-11-07 11:47:55", "area": "A4 MCP", "check": "kb_list", "verdict": "PASS", "evidence": "'共 3 个知识库：\\n- e2e-mcp（id 54ee051a3c6d42cb887657822444b790），2 篇文档，4 个片段，embedding qwen3-embedding-0.6b\\n- e2e-probe（id 20948'"}
+{"t": "2026-11-07 11:47:56", "area": "A4 MCP", "check": "ocr_read 图片（lines）", "verdict": "PASS", "evidence": "1.1s 'table_stats.png（图片，OCR）共 26 行：\\n2026年第三季度生产数据统计表\\n产线\\n产量（台）\\n合格率\\n负责人\\n一号线\\n4,120\\n99.6%\\n张伟\\n二号线\\n3,860\\n99.1%\\n'"}
+{"t": "2026-11-07 11:47:57", "area": "A4 MCP", "check": "ocr_read PDF（文字层 + 扫描混合）", "verdict": "PASS", "evidence": "1.1s 'mixed.pdf：共 2 页，本次读取 1–2 页。\\n\\n## 第 1 页（文字层）\\n第 1 章 仓库盘点制度\\r\\n仓库盘点由仓管员在每个季度末执行。盘点开始前必须冻结出入库操作，打印盘点\\r\\n单并分配到具体货位。盘点单上应注明物料编码、批次号、账面数量与实盘数量四\\r\\n栏。\\r\\n盘点期间禁止任何形式的物料移动；确因生产急需必'"}
+{"t": "2026-11-07 11:47:58", "area": "A4 MCP", "check": "ocr_read 扫描 PDF layout", "verdict": "PASS", "evidence": "1.1s 'scan.pdf：共 1 页，本次读取 1 页。版面模式：有文字层的页仍直接取文字层，只有扫描页走版面识别并输出 Markdown。\\n\\n## 第 1 页（OCR）\\n## 附件一盘点作业指导书\\n\\n作业指导书规定了盘点前的准备工作。第一步是清理'"}
+{"t": "2026-11-07 11:47:59", "area": "A4 MCP", "check": "transcribe_audio", "verdict": "PASS", "evidence": "0.5s 'asr_zh.mp3（音频，Chinese，00:04，1 段，模型 qwen3-asr-0.6b）：\\n\\n甚至出现交易几乎停滞的情况。\\n\\n分段：\\n[00:00–00:04] 甚至出现交易几乎停滞的情况'"}
+{"t": "2026-11-07 11:47:59", "area": "A4 MCP", "check": "路径白名单拒绝 /etc/passwd", "verdict": "PASS", "evidence": "isError=True '不允许读取 passwd：只允许数据根目录下的 agents/ 与 inbox/，以及 CV84X6_MCP_PATHS 中列出的目录（当前：agents/、inbox/）'"}
+{"t": "2026-11-07 11:47:59", "area": "A4 MCP", "check": "路径穿越被拒（../）", "verdict": "PASS", "evidence": "isError=True '不允许读取 state/state.json：只允许数据根目录下的 agents/ 与 inbox/，以及 CV84X6_MCP_PATHS 中列出的目录（当前：agents/、inbox/）'"}
+{"t": "2026-11-07 11:47:59", "area": "A5 应用·知识库", "check": "建库", "verdict": "PASS", "evidence": "200 id=06a4735df5d84214888a994f70758d81"}
+{"t": "2026-11-07 11:48:00", "area": "A5 应用·知识库", "check": "上传 4 个文件（txt / 文字 pdf / 扫描 pdf / 图片）", "verdict": "PASS", "evidence": "200 {\"docs\":[{\"id\":\"b69a018b623c40808f592d6f79ceb8e6\",\"name\":\"制度.pdf\",\"type\":\"pdf\",\"bytes\":84144,\"pages\":0,\"status\":\"queued\",\"progress\":{\"stage\":\"queued\",\"done\":0,\""}
+{"t": "2026-11-07 11:48:21", "area": "A5 应用·知识库", "check": "建库完成（含 OCR）", "verdict": "PASS", "evidence": "21s 制度.pdf=ready/3; 扫描件.pdf=ready/1; 产量表.png=ready/1; 说明.txt=ready/1"}
+{"t": "2026-11-07 11:48:26", "area": "A5 应用·知识库", "check": "混合检索 + 精排", "verdict": "PASS", "evidence": "200 stages={'bm25': {'status': 'ok', 'reason': None, 'ms': 0.1, 'hits': [{'chunk_id': '86b9412961d54c84b5327a2edf131e58:0', 'rank': 1, 'score': 6.141849}, {'chunk_id': 'c772c97ea7664e7ca9a403ec777b1075:0', 'rank': 2, 'score': 3.364468}]}, 'vector': {'status': 'ok', 'reason': None, 'ms': 2802.34, 'hits': [{'chunk_id': '86b9412961d54c84b5327a2edf131e58:0', 'rank': 1, 'score': 0.613764}, {'chunk_id': 'c772c97ea7664e7ca9a403ec777b1075:0', 'rank': 2, 'score': 0.379967}, {'chunk_id': 'b69a018b623c40808f592d6f79ceb8e6:2', 'rank': 3, 'score': 0.211684}, {'chunk_id': 'b69a018b623c40808f592d6f79ceb8e6:1', 'rank': 4, 'score': 0.201141}, {'chunk_id': 'b69a018b623c40808f592d6f79ceb8e6:0', 'rank': 5, 'score': 0.171554}, {'chunk_id': 'f3b6abca68a24e9588b0b1343854e8ba:0', 'rank': 6, 'score': 0.140835}]}, 'fusion': {'status': 'ok', 'reason': None, 'ms': 0.08, 'hits': [{'chunk_id': '86b9412961d54c84b5327a2edf131e58:0', 'rank': 1, 'score': 0.032787}, {'chunk_id': 'c772c97ea7664e7ca9a403ec777b1075:0', 'rank': 2, 'score': 0.032258}, {'chunk_id': 'b69a018b623c40808f592d6f79ceb8e6:2', 'rank': 3, 'score': 0.015873}, {'chunk_id': 'b69a018b623c40808f592d6f79ceb8e6:1', 'rank': 4, 'score': 0.015625}, {'chunk_id': 'b69a018b623c40808f592d6f79ceb8e6:0', 'rank': 5, 'score': 0.015385}, {'chunk_id': 'f3b6abca68a24e9588b0b1343854e8ba:0', 'rank': 6, 'score': 0.015152}]}, 'rerank': {'status': 'ok', 'reason': None, 'ms': 1998.41, 'hits': [{'chunk_id': '86b9412961d54c84b5327a2edf131e58:0', 'rank': 1, 'score': 0.943348}, {'chunk_id': 'c772c97ea7664e7ca9a403ec777b1075:0', 'rank': 2, 'score': 0.00522}, {'chunk_id': 'b69a018b623c40808f592d6f79ceb8e6:2', 'rank': 3, 'score': 0.000553}, {'chunk_id': 'b69a018b623c40808f592d6f79ceb8e6:1', 'rank': 4, 'score': 0.00018}, {'chunk_id': 'b69a018b623c40808f592d6f79ceb8e6:0', 'rank': 5, 'score': 0.000158}, {'chunk_id': 'f3b6abca68a24e9588b0b1343854e8ba:0', 'rank': 6, 'score': 0.000109}]}} top=说明.txt"}
+{"t": "2026-11-07 11:48:30", "area": "A5 应用·知识库", "check": "检索图片 OCR 内容", "verdict": "PASS", "evidence": "top docs=['产量表.png', '说明.txt', '制度.pdf']"}
+{"t": "2026-11-07 11:48:35", "area": "A5 应用·知识库", "check": "检索扫描 PDF 内容", "verdict": "PASS", "evidence": "top docs=['扫描件.pdf', '制度.pdf', '制度.pdf']"}
+{"t": "2026-11-07 11:48:39", "area": "A5 应用·知识库", "check": "问答（35B，流式，带引用）", "verdict": "FAIL", "evidence": "200 events=15 ''"}
+{"t": "2026-11-07 11:48:39", "area": "A5 应用·知识库", "check": "查看片段", "verdict": "PASS", "evidence": "200 n=1"}
+{"t": "2026-11-07 11:48:39", "area": "A5 应用·知识库", "check": "删除文档", "verdict": "PASS", "evidence": "200 left=['制度.pdf', '扫描件.pdf', '产量表.png']"}
+{"t": "2026-11-07 11:48:39", "area": "A5 应用·知识库", "check": "删除知识库", "verdict": "PASS", "evidence": "200"}
+{"t": "2026-11-07 11:49:05", "area": "A4 MCP", "check": "kb_read", "verdict": "PASS", "evidence": "从 kb_search 文本取 chunk_id=681c49268db348d394597b094107c4a1:0 调 kb_read 成功：'知识库 e2e-mcp 中 681c49268db348d394597b094107c4a1:0 及其前后各 1 个片段：\\n\\n--- 681c49268db348d394597b094107c4a1:'（首判是测试正则未包含「:n」）"}
+{"t": "2026-11-07 11:49:16", "area": "A5 应用·知识库", "check": "问答（35B，流式，带引用）", "verdict": "PASS", "evidence": "'根据资料，三号线下月停产检修 [1]。' citations=[{'n': 1, 'chunk_id': '792ed7eaeba8454da181387eaf7e242c:0', 'doc_name': '说明.txt', 'page': None}]"}
+{"t": "2026-11-07 11:49:21", "area": "A7 管理 API", "check": "/api/docs 管理凭据可读、匿名拒绝", "verdict": "PASS", "evidence": "admin=200 anon=401 bytes=2347"}
+{"t": "2026-11-07 11:49:21", "area": "A7 管理 API", "check": "/api/redoc 管理凭据可读、匿名拒绝", "verdict": "PASS", "evidence": "admin=200 anon=401 bytes=2439"}
+{"t": "2026-11-07 11:49:23", "area": "A7 管理 API", "check": "/api/openapi.json 管理凭据可读、匿名拒绝", "verdict": "PASS", "evidence": "admin=200 anon=401 bytes=173474"}
+{"t": "2026-11-07 11:49:23", "area": "A7 管理 API", "check": "/v1/openapi.json 管理凭据可读、匿名拒绝", "verdict": "PASS", "evidence": "admin=200 anon=401 bytes=66167"}
+{"t": "2026-11-07 11:49:23", "area": "A7 管理 API", "check": "OpenAPI 完整（tags + summary）", "verdict": "PASS", "evidence": "ops=64 untagged=[]"}
+{"t": "2026-11-07 11:49:23", "area": "A7 管理 API", "check": "错误码 404 not_found", "verdict": "PASS", "evidence": "404 {\"detail\":\"model not found on disk\",\"code\":\"not_found\"}"}
+{"t": "2026-11-07 11:49:23", "area": "A7 管理 API", "check": "错误码 422 validation_error（中文）", "verdict": "PASS", "evidence": "{\"detail\":\"请求参数校验失败：max_queue 必须是整数\",\"code\":\"validation_error\"}"}
+{"t": "2026-11-07 11:49:23", "area": "A7 管理 API", "check": "推理 key 调 /api → 403 forbidden_scope", "verdict": "PASS", "evidence": "403"}
+{"t": "2026-11-07 11:49:23", "area": "A7 管理 API", "check": "设置读写", "verdict": "PASS", "evidence": "200"}
+{"t": "2026-11-07 11:49:24", "area": "A7 管理 API", "check": "按模型设置读写与恢复默认", "verdict": "PASS", "evidence": "200 {'idle_unload_min': 7, 'auto_load': True, 'mem_limit_mb': 3072} -> {'idle_unload_min': None, 'auto_load': None, 'mem_limit_mb': None}"}
+{"t": "2026-11-07 11:49:24", "area": "A7 管理 API", "check": "按模型设置越界 400", "verdict": "PASS", "evidence": "400 {\"detail\":\"mem_limit_mb 必须是 64-1048576 之间的整数或 null（null 表示用推算的默认值），收到 1\",\"code\":\"bad_request\"}"}
+{"t": "2026-11-07 11:49:27", "area": "A7 管理 API", "check": "GET /api/storage", "verdict": "PASS", "evidence": "200"}
+{"t": "2026-11-07 11:49:27", "area": "A7 管理 API", "check": "GET /api/keys", "verdict": "PASS", "evidence": "200"}
+{"t": "2026-11-07 11:49:27", "area": "A7 管理 API", "check": "GET /api/catalog", "verdict": "PASS", "evidence": "200"}
+{"t": "2026-11-07 11:49:30", "area": "A7 管理 API", "check": "GET /api/agents", "verdict": "PASS", "evidence": "200"}
+{"t": "2026-11-07 11:49:30", "area": "A7 管理 API", "check": "GET /api/inference-records", "verdict": "PASS", "evidence": "200"}
+{"t": "2026-11-07 11:49:30", "area": "A8 日志与审计", "check": "日志源（平台 + 各 worker）", "verdict": "PASS", "evidence": "['platform', 'worker:bge-reranker-v2-m3', 'worker:paddleocr-vl-1.5', 'worker:ppocrv6-medium', 'worker:qwen3-asr-0.6b', 'worker:qwen3-asr-1.7b', 'worker:qwen3-embedding-0.6b', 'worker:qwen3.6-35b-a3b-128k', 'agent:dsh', 'agent:picoclaw', 'agent:opencode', 'agent:openclaw']"}
+{"t": "2026-11-07 11:49:30", "area": "A8 日志与审计", "check": "平台日志最新 N 行", "verdict": "PASS", "evidence": "lines=50 last=indexed c209e082fda74031926c676e0c6fa1c7/792ed7eaeba8454da181387eaf7e242c: 1 chu"}
+{"t": "2026-11-07 11:49:30", "area": "A8 日志与审计", "check": "级别过滤（warning 及以上）", "verdict": "PASS", "evidence": "n=5 sample=['unhandled error on /v1/embeddings', 'unhandled error on /v1/ocr', 'unhandled error on /v1/embeddings']"}
+{"t": "2026-11-07 11:49:30", "area": "A8 日志与审计", "check": "关键字过滤", "verdict": "PASS", "evidence": "n=50"}
+{"t": "2026-11-07 11:49:31", "area": "A8 日志与审计", "check": "翻页（cursor）", "verdict": "PASS", "evidence": "older=50"}
+{"t": "2026-11-07 11:49:31", "area": "A8 日志与审计", "check": "下载筛选结果（文本）", "verdict": "PASS", "evidence": "200 text/plain; charset=utf-8 9624 B"}
+{"t": "2026-11-07 11:49:31", "area": "A8 日志与审计", "check": "下载全部（zip）", "verdict": "PASS", "evidence": "200 ['worker-bge-reranker-v2-m3.log']"}
+{"t": "2026-11-07 11:49:31", "area": "A8 日志与审计", "check": "日志源路径穿越被拒", "verdict": "PASS", "evidence": "404"}
+{"t": "2026-11-07 11:49:31", "area": "A8 日志与审计", "check": "审计覆盖本次操作（e2e-admin 加载模型等）", "verdict": "PASS", "evidence": "total=252 loads_by_e2e=83 failures=5"}
+{"t": "2026-11-07 11:49:31", "area": "A8 日志与审计", "check": "审计 CSV 导出（BOM + 无密钥）", "verdict": "PASS", "evidence": "200 rows=253 leaked=0"}
+{"t": "2026-11-07 11:49:31", "area": "A8 日志与审计", "check": "audit.db 中无任何 key（含前 24 字符）与密码字段", "verdict": "PASS", "evidence": "['0', '0', '0', 'pwfield 0']"}
+{"t": "2026-11-07 11:49:38", "area": "A9 控制台", "check": "overview（桌面亮）", "verdict": "PASS", "evidence": "console_errors=0 api_errors=[] scrollWidth=1440/1440"}
+{"t": "2026-11-07 11:49:41", "area": "A9 控制台", "check": "models（桌面亮）", "verdict": "PASS", "evidence": "console_errors=0 api_errors=[] scrollWidth=1440/1440"}
+{"t": "2026-11-07 11:49:44", "area": "A9 控制台", "check": "agents（桌面亮）", "verdict": "PASS", "evidence": "console_errors=0 api_errors=[] scrollWidth=1440/1440"}
+{"t": "2026-11-07 11:49:46", "area": "A9 控制台", "check": "playground（桌面亮）", "verdict": "PASS", "evidence": "console_errors=0 api_errors=[] scrollWidth=1440/1440"}
+{"t": "2026-11-07 11:49:49", "area": "A9 控制台", "check": "apps（桌面亮）", "verdict": "PASS", "evidence": "console_errors=0 api_errors=[] scrollWidth=1440/1440"}
+{"t": "2026-11-07 11:49:52", "area": "A9 控制台", "check": "keys（桌面亮）", "verdict": "PASS", "evidence": "console_errors=0 api_errors=[] scrollWidth=1440/1440"}
+{"t": "2026-11-07 11:49:55", "area": "A9 控制台", "check": "records（桌面亮）", "verdict": "PASS", "evidence": "console_errors=0 api_errors=[] scrollWidth=1440/1440"}
+{"t": "2026-11-07 11:49:58", "area": "A9 控制台", "check": "logs（桌面亮）", "verdict": "PASS", "evidence": "console_errors=0 api_errors=[] scrollWidth=1440/1440"}
+{"t": "2026-11-07 11:50:00", "area": "A9 控制台", "check": "settings（桌面亮）", "verdict": "PASS", "evidence": "console_errors=0 api_errors=[] scrollWidth=1440/1440"}
+{"t": "2026-11-07 11:50:05", "area": "A9 控制台", "check": "docs（桌面亮）", "verdict": "PASS", "evidence": "console_errors=0 api_errors=[] scrollWidth=1440/1440"}
+{"t": "2026-11-07 11:50:10", "area": "A9 控制台", "check": "overview（手机暗）", "verdict": "PASS", "evidence": "console_errors=0 api_errors=[] scrollWidth=390/390"}
+{"t": "2026-11-07 11:50:13", "area": "A9 控制台", "check": "models（手机暗）", "verdict": "PASS", "evidence": "console_errors=0 api_errors=[] scrollWidth=390/390"}
+{"t": "2026-11-07 11:50:15", "area": "A9 控制台", "check": "agents（手机暗）", "verdict": "PASS", "evidence": "console_errors=0 api_errors=[] scrollWidth=390/390"}
+{"t": "2026-11-07 11:50:18", "area": "A9 控制台", "check": "playground（手机暗）", "verdict": "PASS", "evidence": "console_errors=0 api_errors=[] scrollWidth=390/390"}
+{"t": "2026-11-07 11:50:21", "area": "A9 控制台", "check": "apps（手机暗）", "verdict": "PASS", "evidence": "console_errors=0 api_errors=[] scrollWidth=390/390"}
+{"t": "2026-11-07 11:50:23", "area": "A9 控制台", "check": "keys（手机暗）", "verdict": "PASS", "evidence": "console_errors=0 api_errors=[] scrollWidth=390/390"}
+{"t": "2026-11-07 11:50:26", "area": "A9 控制台", "check": "records（手机暗）", "verdict": "PASS", "evidence": "console_errors=0 api_errors=[] scrollWidth=390/390"}
+{"t": "2026-11-07 11:50:29", "area": "A9 控制台", "check": "logs（手机暗）", "verdict": "PASS", "evidence": "console_errors=0 api_errors=[] scrollWidth=390/390"}
+{"t": "2026-11-07 11:50:32", "area": "A9 控制台", "check": "settings（手机暗）", "verdict": "PASS", "evidence": "console_errors=0 api_errors=[] scrollWidth=390/390"}
+{"t": "2026-11-07 11:50:36", "area": "A9 控制台", "check": "docs（手机暗）", "verdict": "PASS", "evidence": "console_errors=0 api_errors=[] scrollWidth=390/390"}
+{"t": "2026-11-07 11:52:32", "area": "RC2 复测", "check": "D6 主进程崩溃时 agent 存活并被接管（picoclaw）", "verdict": "PASS", "evidence": "pid 47214 → 47214 running=True adopted=True"}
+{"t": "2026-11-07 12:04:42", "area": "D7 实验", "check": "H4 前置：35B 生成中 kill -9 主进程 → worker 存活并被接管", "verdict": "PASS", "evidence": "生成了 330 个 SSE 事件后中断（RemoteProtocolError）；usage:87 avusage:30；35B pid 47785→47785 adopted=True；dmesg timeout=0"}
+{"t": "2026-11-07 12:15:30", "area": "最终包冒烟", "check": "加载 4 个模型 + embeddings / rerank / OCR vl 模式 / OpenAI 错误格式", "verdict": "PASS", "evidence": "embed 200 rerank 200 ocr-vl 200 rowspan=True 404-shape=['error', 'detail']"}
+{"t": "2026-11-07 12:15:38", "area": "A9 控制台", "check": "overview（桌面亮）", "verdict": "PASS", "evidence": "console_errors=0 api_errors=[] scrollWidth=1440/1440"}
+{"t": "2026-11-07 12:15:41", "area": "A9 控制台", "check": "models（桌面亮）", "verdict": "PASS", "evidence": "console_errors=0 api_errors=[] scrollWidth=1440/1440"}
+{"t": "2026-11-07 12:15:44", "area": "A9 控制台", "check": "agents（桌面亮）", "verdict": "PASS", "evidence": "console_errors=0 api_errors=[] scrollWidth=1440/1440"}
+{"t": "2026-11-07 12:15:47", "area": "A9 控制台", "check": "playground（桌面亮）", "verdict": "PASS", "evidence": "console_errors=0 api_errors=[] scrollWidth=1440/1440"}
+{"t": "2026-11-07 12:15:49", "area": "A9 控制台", "check": "apps（桌面亮）", "verdict": "PASS", "evidence": "console_errors=0 api_errors=[] scrollWidth=1440/1440"}
+{"t": "2026-11-07 12:15:52", "area": "A9 控制台", "check": "keys（桌面亮）", "verdict": "PASS", "evidence": "console_errors=0 api_errors=[] scrollWidth=1440/1440"}
+{"t": "2026-11-07 12:15:55", "area": "A9 控制台", "check": "records（桌面亮）", "verdict": "PASS", "evidence": "console_errors=0 api_errors=[] scrollWidth=1440/1440"}
+{"t": "2026-11-07 12:15:58", "area": "A9 控制台", "check": "logs（桌面亮）", "verdict": "PASS", "evidence": "console_errors=0 api_errors=[] scrollWidth=1440/1440"}
+{"t": "2026-11-07 12:16:01", "area": "A9 控制台", "check": "settings（桌面亮）", "verdict": "PASS", "evidence": "console_errors=0 api_errors=[] scrollWidth=1440/1440"}
+{"t": "2026-11-07 12:16:05", "area": "A9 控制台", "check": "docs（桌面亮）", "verdict": "PASS", "evidence": "console_errors=0 api_errors=[] scrollWidth=1440/1440"}
+{"t": "2026-11-07 12:16:10", "area": "A9 控制台", "check": "overview（手机暗）", "verdict": "PASS", "evidence": "console_errors=0 api_errors=[] scrollWidth=390/390"}
+{"t": "2026-11-07 12:16:13", "area": "A9 控制台", "check": "models（手机暗）", "verdict": "PASS", "evidence": "console_errors=0 api_errors=[] scrollWidth=390/390"}
+{"t": "2026-11-07 12:16:16", "area": "A9 控制台", "check": "agents（手机暗）", "verdict": "PASS", "evidence": "console_errors=0 api_errors=[] scrollWidth=390/390"}
+{"t": "2026-11-07 12:16:18", "area": "A9 控制台", "check": "playground（手机暗）", "verdict": "PASS", "evidence": "console_errors=0 api_errors=[] scrollWidth=390/390"}
+{"t": "2026-11-07 12:16:21", "area": "A9 控制台", "check": "apps（手机暗）", "verdict": "PASS", "evidence": "console_errors=0 api_errors=[] scrollWidth=390/390"}
+{"t": "2026-11-07 12:16:24", "area": "A9 控制台", "check": "keys（手机暗）", "verdict": "PASS", "evidence": "console_errors=0 api_errors=[] scrollWidth=390/390"}
+{"t": "2026-11-07 12:16:26", "area": "A9 控制台", "check": "records（手机暗）", "verdict": "PASS", "evidence": "console_errors=0 api_errors=[] scrollWidth=390/390"}
+{"t": "2026-11-07 12:16:29", "area": "A9 控制台", "check": "logs（手机暗）", "verdict": "PASS", "evidence": "console_errors=0 api_errors=[] scrollWidth=390/390"}
+{"t": "2026-11-07 12:16:32", "area": "A9 控制台", "check": "settings（手机暗）", "verdict": "PASS", "evidence": "console_errors=0 api_errors=[] scrollWidth=390/390"}
+{"t": "2026-11-07 12:16:36", "area": "A9 控制台", "check": "docs（手机暗）", "verdict": "PASS", "evidence": "console_errors=0 api_errors=[] scrollWidth=390/390"}
+{"t": "2026-11-07 12:18:14", "area": "D7 实验", "check": "H3：混合负载 + 流式请求中途断开（对话 / VL），9 分钟", "verdict": "PASS", "evidence": "521 次请求：chat/embed/rerank/ocr 284 次全部 200，主动中断 237 次（chat 35、VL 202）；dmesg wait api timeout=0，TPU 未卡死（logs/h3a.out、d7_req.jsonl）"}
+{"t": "2026-11-07 12:18:14", "area": "D7 实验", "check": "H4：35B 生成中 kill -9 主进程、接管后 6 模型持续混合负载 9 分钟", "verdict": "PASS", "evidence": "432/432 次请求全部 200；NPU 30666–30717 MiB、VPP 435–607 MiB、TPU 79–98%；dmesg wait api timeout=0（soak_req.jsonl seg=h4）"}

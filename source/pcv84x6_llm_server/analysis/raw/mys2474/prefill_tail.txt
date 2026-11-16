@@ -1,0 +1,13 @@
+[engine] FA decode windows: 131072/65536/32768/16384/8192/4096/2048
+[engine] linear state in place: conv 30/30, rec 0/0
+[engine] layers=40 seq=131072 max_input=2048 hidden=2048 kv_bytes=1024 dynamic=1 prefill_mask=0 lm_topk=1 greedy=0 vit=1(2304 patches) history=1
+engine: max_input=2048 context=131072
+ call   rows     cum         ms    ms/row
+    1   2048    2048     9836.1     4.803
+    2   2048    4096    10835.8     5.291
+    3   2048    6144    11792.0     5.758
+    4   2048    8192    12836.0     6.268
+    5   2048   10240    13858.0     6.767
+    6   2048   12288    14955.1     7.302
+    7   2048   14336    16051.1     7.837
+    8   2048   16384    17145.2     8.372

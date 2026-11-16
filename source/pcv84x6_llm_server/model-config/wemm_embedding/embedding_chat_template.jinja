@@ -1,0 +1,28 @@
+{# Direct-tokenization template for vLLM 0.27 embedding requests.
+   Qwen's processor post-processor removes the role newline before images,
+   keeps it before text/video, and appends <embedding> without a preceding
+   newline. vLLM 0.27 adds each frame's vision boundaries itself, so video
+   uses a bare <video_pad> placeholder. #}
+{%- for message in messages %}
+{{- '<|im_start|>' + message.role }}
+{%- if message.content is string %}
+{{- '\n' + message.content }}
+{%- else %}
+{%- for item in message.content %}
+{%- if item.type in ['image', 'image_url'] or 'image' in item or 'image_url' in item %}
+{{- '<|vision_start|><|image_pad|><|vision_end|>' }}
+{%- elif item.type in ['video', 'video_url'] or 'video' in item or 'video_url' in item %}
+{{- '\n<|video_pad|>' }}
+{%- elif item.type == 'text' or 'text' in item %}
+{{- ('\n' if loop.first else '') + item.text }}
+{%- else %}
+{{- raise_exception('Unsupported embedding content type') }}
+{%- endif %}
+{%- endfor %}
+{%- endif %}
+{{- '<|im_end|>' }}
+{%- if not loop.last %}
+{{- '\n' }}
+{%- endif %}
+{%- endfor %}
+{{- '<embedding>' }}

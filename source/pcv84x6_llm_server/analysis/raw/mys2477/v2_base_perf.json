@@ -1,0 +1,83 @@
+{
+ "context": 131072,
+ "decode_tokens": 8,
+ "items": {
+  "2048": {
+   "max_ms": 10046.38,
+   "median_ms": 10044.97,
+   "min_ms": 10041.43,
+   "prompt_tokens": 2068,
+   "samples_ms": [
+    10045.41,
+    10043.63,
+    10046.38,
+    10041.43,
+    10044.97
+   ],
+   "text": "Paris\n",
+   "tokens": [
+    57590,
+    248046,
+    198,
+    248044,
+    248045,
+    248045,
+    248045,
+    248045
+   ]
+  },
+  "256": {
+   "max_ms": 1998.38,
+   "median_ms": 1989.97,
+   "min_ms": 1988.37,
+   "prompt_tokens": 274,
+   "samples_ms": [
+    1991.14,
+    1988.77,
+    1989.97,
+    1988.37,
+    1998.38
+   ],
+   "text": "Paris\n",
+   "tokens": [
+    57590,
+    248046,
+    198,
+    248044,
+    248045,
+    248045,
+    248045,
+    248045
+   ]
+  },
+  "64": {
+   "max_ms": 855.46,
+   "median_ms": 851.16,
+   "min_ms": 850.03,
+   "prompt_tokens": 67,
+   "samples_ms": [
+    855.46,
+    851.16,
+    850.55,
+    850.03,
+    851.28
+   ],
+   "text": "Paris\nuser\n",
+   "tokens": [
+    57590,
+    248046,
+    198,
+    248044,
+    248045,
+    248045,
+    846,
+    198
+   ]
+  }
+ },
+ "lib": "/data/tmp/mys2477/base/native/build/libcv84x6_llm.so",
+ "max_input": 2048,
+ "mode": "perf",
+ "prompt": "Name the capital of France in one word.",
+ "repeat": 5
+}

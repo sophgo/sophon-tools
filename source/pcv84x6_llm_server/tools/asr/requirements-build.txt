@@ -1,0 +1,14 @@
+# Packages the Qwen3-ASR converter needs that the tpuc22 base image lacks.
+#
+# Only for the build container; the board runtime never imports any of these.
+# transformers==4.57.6 is pinned by qwen_asr, which registers the qwen3_asr
+# model type the converter looks up.
+#
+# nagisa is listed for completeness but needs dyNET (source-only); a stub on
+# PYTHONPATH is enough because conversion never touches forced alignment.
+transformers==4.57.6
+huggingface-hub==0.36.0
+qwen-asr==0.0.6
+soynlp==0.0.493
+librosa
+soundfile

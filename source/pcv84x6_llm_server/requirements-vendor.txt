@@ -1,0 +1,9 @@
+fastapi>=0.110
+uvicorn>=0.27
+pydantic>=2.6
+httpx>=0.27
+exceptiongroup>=1.2  # anyio needs it on the board's Python 3.10; pip skips it when the host Python is newer
+# The agent reverse proxy forwards the Control UI's WebSocket. uvicorn speaks
+# WebSocket only when this (or wsproto) is importable, and the release installs
+# from here, so it is a runtime dependency of the package, not a test one.
+websockets>=13,<15  # pure Python: the same wheel serves aarch64 and x86

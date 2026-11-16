@@ -1,0 +1,1 @@
+== rr2048         seq=2048  bge-reranker-v2-m3_bf16_seq2048_bm1684x2_4core_static_20261108_050120.bmodel

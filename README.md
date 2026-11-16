@@ -31,12 +31,13 @@
 | [sophliteos](./source/psophliteos) | source/psophliteos | 算力设备管理 Web 平台（Go+Vue，:8080），反代 bmssm。见 [API.md](./API.md) / [USAGE.md](./USAGE.md) / [BUILD.md](./BUILD.md) |
 | [se-rag-core](./source/se-rag-core) | source/se-rag-core | SE 系列知识库 RAG 检索核心（Go，本地向量/BM25 + 内置网关），供 SE 系列 skill 使用。见 [README](./source/se-rag-core/README.md) |
 | [sewriter](./source/psewriter) | source/psewriter | SE写卡工具（Windows 单文件）：把发版文件包/目录/整卡镜像写成 SE 系列设备 TF 卡，也可只格式化 TF 卡；写后回读校验。见 [使用说明](./source/psewriter/README.md) / [开发与构建](./source/psewriter/BUILD.md) |
+| [cv84x6-llm-server](./source/pcv84x6_llm_server) | source/pcv84x6_llm_server | CV84X6 离线 LLM 推理服务（OpenAI 兼容 API + Web 管理页，arm64 deb）。见 [README](./source/pcv84x6_llm_server/README.md) / [构建输入与来源](./source/pcv84x6_llm_server/build/README.md) |
 
 ## 编译方式
 
 ### 一键全量 release（推荐）
 
-本仓库已接入统一构建工程（M1~M4）：16 个子项目注册到统一构建清单（pmulti_video_qt /
+本仓库已接入统一构建工程（M1~M4）：17 个子项目注册到统一构建清单（pmulti_video_qt /
 psoph_phytool / pspacc_efuse_demo 默认不发版，见 [RELEASE.md](./RELEASE.md)），由
 Docker 统一镜像 `sophon-tools-build` 在容器内完成编译。**一条命令全量出包**：
 

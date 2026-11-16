@@ -45,11 +45,14 @@ bash release.sh          # 需要统一镜像 sophon-tools-build:<IMAGE_TAG>
 ```
 
 - 镜像：`docker/versions.env` 的 `IMAGE_TAG`（当前 `unified-v1.2.1`）；镜像缺失用 `bash docker/build.sh` 构建。
-- 范围：**16 个子项目**（统一构建清单），`docker/build-all.sh --list` 查看。以下项目**默认不发版、不在统一构建范围**：
+- 范围：**17 个子项目**（统一构建清单），`docker/build-all.sh --list` 查看。以下项目**默认不发版、不在统一构建范围**：
   - `pmulti_video_qt`（产品决定不需要）
   - `psoph_phytool`、`pspacc_efuse_demo`（产品决定默认不发版，2026-08-30；如确需发布在源码目录手动 `bash release.sh`）
 - 失败隔离：单项目失败不阻塞整体，构建结束看 `output/.build-status.txt` 与 `output/MANIFEST.txt`，失败项必须修复后单独重建。
 - 产物：汇聚 `output/<工具>/`，生成 `MANIFEST.txt`（清单+md5）、`git_hash.txt`。
+- `pcv84x6_llm_server`（cv84x6-llm-server）是外部服务源码快照（`zzttzzmyswy/cv84x6-llm-server`
+  固定提交，见其 `build/README.md`），版本号跟随服务源码（当前 0.6.37），**不随 sophon-tools
+  发版 bump**；引擎库/基础配置为 SHA256 固定输入，换源码版本时按其 build/README.md 重放适配。
 - **构建通过是发布前提**：任何 FAIL 项都要修复并重建到 PASS。
 
 ## 5. 发布（GitHub Release + PyPI）

@@ -1,0 +1,18 @@
+-r requirements.txt
+pytest>=8
+pytest-asyncio>=0.23
+# Test-only: the sail backend's contract test drives a fake sophon.sail that
+# speaks numpy. Production runs --backend native and never imports either.
+numpy>=1.24
+# Test-only: renders the model's chat_template.jinja as the oracle the
+# hand-written renderer in app/api/tool_calls.py is compared against.
+jinja2>=3.1
+# Test-only: tests/test_ocr_assets.py verifies every golden image decodes. The
+# board has no Pillow, which is why the service parses image headers itself
+# (app/api/audio_upload.py, docs/inference-records.md); this is the oracle that
+# check is written against, not a runtime dependency.
+pillow>=10
+# Runtime for the auxiliary models (embedding/rerank), listed here as well so a
+# dev checkout can run tests/test_aux_tokenize.py against the same tokenizer the
+# release vendors. scripts/package.sh installs it into vendor/ with --no-deps.
+tokenizers>=0.20

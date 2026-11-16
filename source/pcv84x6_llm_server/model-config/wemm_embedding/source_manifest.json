@@ -1,0 +1,86 @@
+{
+  "repo": "tencent/WeMM-Embedding-2B",
+  "revision": "bbd6cd4bf52cfc6716f752a2df80b2706720bd95",
+  "files": [
+    {
+      "path": "modules.json",
+      "size": 106,
+      "sha256": "be6481eec30eb56a0020baea14d5fc6d14a2134a44c6485e3595781cceb04f8f"
+    },
+    {
+      "path": "config_sentence_transformers.json",
+      "size": 245,
+      "sha256": "7957a6bc6c8f20335abd7b4e55d433db830551b86be932400a6a1200a28d4bb6"
+    },
+    {
+      "path": "sentence_bert_config.json",
+      "size": 950,
+      "sha256": "9d3d5f6695cf12784c13b03dbef305c80ee2bdf378abf5cb15ed032de578d00b"
+    },
+    {
+      "path": "embedding_chat_template.jinja",
+      "size": 1086,
+      "sha256": "7c3df2aab83ab9096428ec27b6b99ad87c4790418b830d119957634f28c677ba"
+    },
+    {
+      "path": "tokenizer_config.json",
+      "size": 1148,
+      "sha256": "35db43580d8c551641a5fe1d1daafb10e73d0a1243db18ff7bc00413a6152ff5"
+    },
+    {
+      "path": "processor_config.json",
+      "size": 1192,
+      "sha256": "d601e2fe0de1bc11852de3aa843f01a1677ca84f4dc743916c9ce4b8d30fb384"
+    },
+    {
+      "path": "modeling_wemm_embedding.py",
+      "size": 1205,
+      "sha256": "ac255e1fad459cc3e68891d6c3327f4486922aed02fb3c5c13fb53277ba8e94f"
+    },
+    {
+      "path": "additional_chat_templates/sentence_transformers.jinja",
+      "size": 1452,
+      "sha256": "69c72e7d4579f377e15c79de4d4bf5964f929ac2cf8c1b1231f95940ed97cd97"
+    },
+    {
+      "path": "patch_sglang_video.py",
+      "size": 1983,
+      "sha256": "c20c73e803a634e5dc54c39bc1c20cec0e7929c0320121769268a3dfb2e58a2d"
+    },
+    {
+      "path": "config.json",
+      "size": 2853,
+      "sha256": "f6e5925cba6a907adedb9c86ab61f336947c4010eee3bf8583086cb90067eec2"
+    },
+    {
+      "path": "modeling_st_wemm.py",
+      "size": 3180,
+      "sha256": "521d02c1c60ae727cc9dc6500cdb0b28c53b259e0ce3d37197920a33ba4dd333"
+    },
+    {
+      "path": "chat_template.jinja",
+      "size": 7755,
+      "sha256": "273d8e0e683b885071fb17e08d71e5f2a5ddfb5309756181681de4f5a1822d80"
+    },
+    {
+      "path": "README.md",
+      "size": 7993,
+      "sha256": "c194dcd545e03e2b0806ffbc25a05cccdd176964fe851a04713a177cc64fc968"
+    },
+    {
+      "path": "LICENSE",
+      "size": 24546,
+      "sha256": "e87f02efc35e9bdde65c8cd5cfa26fbd3a8dcb209c5b82ed91b274b2ff643b53"
+    },
+    {
+      "path": "tokenizer.json",
+      "size": 19990378,
+      "sha256": "40e444c744512f423da4c8443c47c21e22ff76056ba4e9796a81c04c13a9daf0"
+    },
+    {
+      "path": "model.safetensors",
+      "size": 5441695216,
+      "sha256": "e1a1ad752808c26965aa97d37bf4a9bca71d838513f41e83790cb1e71cac6e59"
+    }
+  ]
+}

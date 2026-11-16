@@ -1,0 +1,1341 @@
+bmodel version: B.2.2+v1.30.2-20260831
+chip: BM1684X2
+create time: Sun Oct 25 01:58:24 2026
+
+kernel_module name: libbm1684x2_kernel_module.so
+kernel_module size: 5536064
+kernel mode: normal
+==========================================
+net 0: [vit]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:2304, max:1536], float32, scale: 1, zero_point: 0
+input: position_ids, [max:2304, max:2], int32, scale: 1, zero_point: 0
+input: pos_idx, [max:2304, max:4], int32, scale: 1, zero_point: 0
+input: pos_weight, [max:2304, max:4, max:1], float32, scale: 1, zero_point: 0
+output: model.visual.merger.linear_fc2, [576, 2048], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 1: [embedding]  static
+------------
+stage 0, core num: 4
+input: input_ids, [1, 2048], int32, scale: 1, zero_point: 0
+output: embedding, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 2: [lm_head]  static
+------------
+stage 0, core num: 4
+subnet number: 2
+input: hidden_states, [1, 2048], bfloat16, scale: 1, zero_point: 0
+output: token_id, [1, 1], int32, scale: 1, zero_point: 0
+==========================================
+net 3: [block_cache_0]  static
+addr mode: 1
+------------
+stage 0, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: conv_state, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+input: recurrent_state, [1, 32, 128, 128], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: model.language_model.layers.0.linear_attn.conv1d.concat, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 4: [block_cache_1]  static
+addr mode: 1
+------------
+stage 0, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: conv_state, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+input: recurrent_state, [1, 32, 128, 128], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: model.language_model.layers.1.linear_attn.conv1d.concat, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 5: [block_cache_2]  static
+addr mode: 1
+------------
+stage 0, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: conv_state, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+input: recurrent_state, [1, 32, 128, 128], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: model.language_model.layers.2.linear_attn.conv1d.concat, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 6: [block_cache_3]  static
+addr mode: 1
+------------
+stage 0, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 32769], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 32768, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 32768, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+------------
+stage 1, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 16385], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 16384, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 16384, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+------------
+stage 2, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 8193], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 8192, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 8192, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+------------
+stage 3, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 4097], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 4096, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 4096, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+------------
+stage 4, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 2049], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 7: [block_cache_4]  static
+addr mode: 1
+------------
+stage 0, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: conv_state, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+input: recurrent_state, [1, 32, 128, 128], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: model.language_model.layers.4.linear_attn.conv1d.concat, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 8: [block_cache_5]  static
+addr mode: 1
+------------
+stage 0, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: conv_state, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+input: recurrent_state, [1, 32, 128, 128], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: model.language_model.layers.5.linear_attn.conv1d.concat, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 9: [block_cache_6]  static
+addr mode: 1
+------------
+stage 0, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: conv_state, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+input: recurrent_state, [1, 32, 128, 128], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: model.language_model.layers.6.linear_attn.conv1d.concat, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 10: [block_cache_7]  static
+addr mode: 1
+------------
+stage 0, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 32769], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 32768, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 32768, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+------------
+stage 1, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 16385], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 16384, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 16384, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+------------
+stage 2, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 8193], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 8192, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 8192, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+------------
+stage 3, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 4097], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 4096, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 4096, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+------------
+stage 4, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 2049], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 11: [block_cache_8]  static
+addr mode: 1
+------------
+stage 0, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: conv_state, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+input: recurrent_state, [1, 32, 128, 128], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: model.language_model.layers.8.linear_attn.conv1d.concat, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 12: [block_cache_9]  static
+addr mode: 1
+------------
+stage 0, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: conv_state, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+input: recurrent_state, [1, 32, 128, 128], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: model.language_model.layers.9.linear_attn.conv1d.concat, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 13: [block_cache_10]  static
+addr mode: 1
+------------
+stage 0, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: conv_state, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+input: recurrent_state, [1, 32, 128, 128], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: model.language_model.layers.10.linear_attn.conv1d.concat, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 14: [block_cache_11]  static
+addr mode: 1
+------------
+stage 0, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 32769], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 32768, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 32768, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+------------
+stage 1, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 16385], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 16384, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 16384, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+------------
+stage 2, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 8193], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 8192, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 8192, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+------------
+stage 3, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 4097], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 4096, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 4096, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+------------
+stage 4, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 2049], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 15: [block_cache_12]  static
+addr mode: 1
+------------
+stage 0, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: conv_state, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+input: recurrent_state, [1, 32, 128, 128], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: model.language_model.layers.12.linear_attn.conv1d.concat, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 16: [block_cache_13]  static
+addr mode: 1
+------------
+stage 0, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: conv_state, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+input: recurrent_state, [1, 32, 128, 128], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: model.language_model.layers.13.linear_attn.conv1d.concat, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 17: [block_cache_14]  static
+addr mode: 1
+------------
+stage 0, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: conv_state, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+input: recurrent_state, [1, 32, 128, 128], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: model.language_model.layers.14.linear_attn.conv1d.concat, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 18: [block_cache_15]  static
+addr mode: 1
+------------
+stage 0, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 32769], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 32768, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 32768, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+------------
+stage 1, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 16385], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 16384, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 16384, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+------------
+stage 2, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 8193], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 8192, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 8192, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+------------
+stage 3, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 4097], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 4096, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 4096, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+------------
+stage 4, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 2049], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 19: [block_cache_16]  static
+addr mode: 1
+------------
+stage 0, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: conv_state, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+input: recurrent_state, [1, 32, 128, 128], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: model.language_model.layers.16.linear_attn.conv1d.concat, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 20: [block_cache_17]  static
+addr mode: 1
+------------
+stage 0, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: conv_state, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+input: recurrent_state, [1, 32, 128, 128], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: model.language_model.layers.17.linear_attn.conv1d.concat, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 21: [block_cache_18]  static
+addr mode: 1
+------------
+stage 0, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: conv_state, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+input: recurrent_state, [1, 32, 128, 128], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: model.language_model.layers.18.linear_attn.conv1d.concat, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 22: [block_cache_19]  static
+addr mode: 1
+------------
+stage 0, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 32769], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 32768, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 32768, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+------------
+stage 1, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 16385], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 16384, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 16384, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+------------
+stage 2, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 8193], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 8192, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 8192, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+------------
+stage 3, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 4097], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 4096, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 4096, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+------------
+stage 4, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 2049], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 23: [block_cache_20]  static
+addr mode: 1
+------------
+stage 0, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: conv_state, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+input: recurrent_state, [1, 32, 128, 128], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: model.language_model.layers.20.linear_attn.conv1d.concat, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 24: [block_cache_21]  static
+addr mode: 1
+------------
+stage 0, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: conv_state, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+input: recurrent_state, [1, 32, 128, 128], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: model.language_model.layers.21.linear_attn.conv1d.concat, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 25: [block_cache_22]  static
+addr mode: 1
+------------
+stage 0, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: conv_state, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+input: recurrent_state, [1, 32, 128, 128], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: model.language_model.layers.22.linear_attn.conv1d.concat, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 26: [block_cache_23]  static
+addr mode: 1
+------------
+stage 0, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 32769], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 32768, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 32768, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+------------
+stage 1, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 16385], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 16384, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 16384, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+------------
+stage 2, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 8193], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 8192, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 8192, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+------------
+stage 3, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 4097], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 4096, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 4096, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+------------
+stage 4, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 2049], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 27: [block_cache_24]  static
+addr mode: 1
+------------
+stage 0, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: conv_state, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+input: recurrent_state, [1, 32, 128, 128], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: model.language_model.layers.24.linear_attn.conv1d.concat, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 28: [block_cache_25]  static
+addr mode: 1
+------------
+stage 0, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: conv_state, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+input: recurrent_state, [1, 32, 128, 128], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: model.language_model.layers.25.linear_attn.conv1d.concat, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 29: [block_cache_26]  static
+addr mode: 1
+------------
+stage 0, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: conv_state, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+input: recurrent_state, [1, 32, 128, 128], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: model.language_model.layers.26.linear_attn.conv1d.concat, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 30: [block_cache_27]  static
+addr mode: 1
+------------
+stage 0, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 32769], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 32768, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 32768, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+------------
+stage 1, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 16385], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 16384, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 16384, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+------------
+stage 2, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 8193], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 8192, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 8192, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+------------
+stage 3, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 4097], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 4096, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 4096, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+------------
+stage 4, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 2049], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 31: [block_cache_28]  static
+addr mode: 1
+------------
+stage 0, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: conv_state, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+input: recurrent_state, [1, 32, 128, 128], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: model.language_model.layers.28.linear_attn.conv1d.concat, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 32: [block_cache_29]  static
+addr mode: 1
+------------
+stage 0, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: conv_state, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+input: recurrent_state, [1, 32, 128, 128], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: model.language_model.layers.29.linear_attn.conv1d.concat, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 33: [block_cache_30]  static
+addr mode: 1
+------------
+stage 0, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: conv_state, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+input: recurrent_state, [1, 32, 128, 128], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: model.language_model.layers.30.linear_attn.conv1d.concat, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 34: [block_cache_31]  static
+addr mode: 1
+------------
+stage 0, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 32769], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 32768, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 32768, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+------------
+stage 1, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 16385], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 16384, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 16384, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+------------
+stage 2, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 8193], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 8192, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 8192, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+------------
+stage 3, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 4097], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 4096, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 4096, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+------------
+stage 4, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 2049], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 35: [block_cache_32]  static
+addr mode: 1
+------------
+stage 0, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: conv_state, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+input: recurrent_state, [1, 32, 128, 128], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: model.language_model.layers.32.linear_attn.conv1d.concat, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 36: [block_cache_33]  static
+addr mode: 1
+------------
+stage 0, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: conv_state, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+input: recurrent_state, [1, 32, 128, 128], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: model.language_model.layers.33.linear_attn.conv1d.concat, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 37: [block_cache_34]  static
+addr mode: 1
+------------
+stage 0, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: conv_state, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+input: recurrent_state, [1, 32, 128, 128], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: model.language_model.layers.34.linear_attn.conv1d.concat, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 38: [block_cache_35]  static
+addr mode: 1
+------------
+stage 0, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 32769], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 32768, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 32768, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+------------
+stage 1, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 16385], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 16384, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 16384, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+------------
+stage 2, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 8193], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 8192, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 8192, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+------------
+stage 3, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 4097], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 4096, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 4096, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+------------
+stage 4, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 2049], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 39: [block_cache_36]  static
+addr mode: 1
+------------
+stage 0, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: conv_state, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+input: recurrent_state, [1, 32, 128, 128], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: model.language_model.layers.36.linear_attn.conv1d.concat, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 40: [block_cache_37]  static
+addr mode: 1
+------------
+stage 0, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: conv_state, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+input: recurrent_state, [1, 32, 128, 128], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: model.language_model.layers.37.linear_attn.conv1d.concat, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 41: [block_cache_38]  static
+addr mode: 1
+------------
+stage 0, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: conv_state, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+input: recurrent_state, [1, 32, 128, 128], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: model.language_model.layers.38.linear_attn.conv1d.concat, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 42: [block_cache_39]  static
+addr mode: 1
+------------
+stage 0, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 32769], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 32768, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 32768, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+------------
+stage 1, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 16385], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 16384, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 16384, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+------------
+stage 2, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 8193], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 8192, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 8192, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+------------
+stage 3, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 4097], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 4096, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 4096, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+------------
+stage 4, core num: 4
+input: input_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [3, 1], int32, scale: 1, zero_point: 0
+input: attention_mask, [1, 1, 1, 2049], bfloat16, scale: 1, zero_point: 0
+input: history_k, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 1, 2, 256], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 43: [embedding_cache]  static
+------------
+stage 0, core num: 1
+input: input_ids, [1, 1], int32, scale: 1, zero_point: 0
+output: embedding_cache, [1, 1, 2048], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 44: [block_0]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: recurrent_states, [max:1, max:32, max:128, max:128], bfloat16, scale: 1, zero_point: 0
+input: conv_states, [max:1, max:8192, max:4], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: conv_states, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 45: [block_1]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: recurrent_states, [max:1, max:32, max:128, max:128], bfloat16, scale: 1, zero_point: 0
+input: conv_states, [max:1, max:8192, max:4], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: conv_states, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 46: [block_2]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: recurrent_states, [max:1, max:32, max:128, max:128], bfloat16, scale: 1, zero_point: 0
+input: conv_states, [max:1, max:8192, max:4], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: conv_states, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 47: [block_3]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [max:3, max:2048], int32, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 48: [block_kv_3]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [max:3, max:2048], int32, scale: 1, zero_point: 0
+input: history_k, [max:1, max:32768, max:2, max:256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [max:1, max:32768, max:2, max:256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 49: [block_4]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: recurrent_states, [max:1, max:32, max:128, max:128], bfloat16, scale: 1, zero_point: 0
+input: conv_states, [max:1, max:8192, max:4], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: conv_states, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 50: [block_5]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: recurrent_states, [max:1, max:32, max:128, max:128], bfloat16, scale: 1, zero_point: 0
+input: conv_states, [max:1, max:8192, max:4], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: conv_states, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 51: [block_6]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: recurrent_states, [max:1, max:32, max:128, max:128], bfloat16, scale: 1, zero_point: 0
+input: conv_states, [max:1, max:8192, max:4], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: conv_states, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 52: [block_7]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [max:3, max:2048], int32, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 53: [block_kv_7]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [max:3, max:2048], int32, scale: 1, zero_point: 0
+input: history_k, [max:1, max:32768, max:2, max:256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [max:1, max:32768, max:2, max:256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 54: [block_8]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: recurrent_states, [max:1, max:32, max:128, max:128], bfloat16, scale: 1, zero_point: 0
+input: conv_states, [max:1, max:8192, max:4], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: conv_states, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 55: [block_9]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: recurrent_states, [max:1, max:32, max:128, max:128], bfloat16, scale: 1, zero_point: 0
+input: conv_states, [max:1, max:8192, max:4], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: conv_states, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 56: [block_10]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: recurrent_states, [max:1, max:32, max:128, max:128], bfloat16, scale: 1, zero_point: 0
+input: conv_states, [max:1, max:8192, max:4], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: conv_states, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 57: [block_11]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [max:3, max:2048], int32, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 58: [block_kv_11]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [max:3, max:2048], int32, scale: 1, zero_point: 0
+input: history_k, [max:1, max:32768, max:2, max:256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [max:1, max:32768, max:2, max:256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 59: [block_12]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: recurrent_states, [max:1, max:32, max:128, max:128], bfloat16, scale: 1, zero_point: 0
+input: conv_states, [max:1, max:8192, max:4], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: conv_states, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 60: [block_13]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: recurrent_states, [max:1, max:32, max:128, max:128], bfloat16, scale: 1, zero_point: 0
+input: conv_states, [max:1, max:8192, max:4], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: conv_states, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 61: [block_14]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: recurrent_states, [max:1, max:32, max:128, max:128], bfloat16, scale: 1, zero_point: 0
+input: conv_states, [max:1, max:8192, max:4], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: conv_states, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 62: [block_15]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [max:3, max:2048], int32, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 63: [block_kv_15]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [max:3, max:2048], int32, scale: 1, zero_point: 0
+input: history_k, [max:1, max:32768, max:2, max:256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [max:1, max:32768, max:2, max:256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 64: [block_16]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: recurrent_states, [max:1, max:32, max:128, max:128], bfloat16, scale: 1, zero_point: 0
+input: conv_states, [max:1, max:8192, max:4], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: conv_states, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 65: [block_17]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: recurrent_states, [max:1, max:32, max:128, max:128], bfloat16, scale: 1, zero_point: 0
+input: conv_states, [max:1, max:8192, max:4], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: conv_states, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 66: [block_18]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: recurrent_states, [max:1, max:32, max:128, max:128], bfloat16, scale: 1, zero_point: 0
+input: conv_states, [max:1, max:8192, max:4], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: conv_states, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 67: [block_19]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [max:3, max:2048], int32, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 68: [block_kv_19]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [max:3, max:2048], int32, scale: 1, zero_point: 0
+input: history_k, [max:1, max:32768, max:2, max:256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [max:1, max:32768, max:2, max:256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 69: [block_20]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: recurrent_states, [max:1, max:32, max:128, max:128], bfloat16, scale: 1, zero_point: 0
+input: conv_states, [max:1, max:8192, max:4], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: conv_states, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 70: [block_21]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: recurrent_states, [max:1, max:32, max:128, max:128], bfloat16, scale: 1, zero_point: 0
+input: conv_states, [max:1, max:8192, max:4], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: conv_states, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 71: [block_22]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: recurrent_states, [max:1, max:32, max:128, max:128], bfloat16, scale: 1, zero_point: 0
+input: conv_states, [max:1, max:8192, max:4], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: conv_states, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 72: [block_23]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [max:3, max:2048], int32, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 73: [block_kv_23]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [max:3, max:2048], int32, scale: 1, zero_point: 0
+input: history_k, [max:1, max:32768, max:2, max:256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [max:1, max:32768, max:2, max:256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 74: [block_24]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: recurrent_states, [max:1, max:32, max:128, max:128], bfloat16, scale: 1, zero_point: 0
+input: conv_states, [max:1, max:8192, max:4], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: conv_states, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 75: [block_25]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: recurrent_states, [max:1, max:32, max:128, max:128], bfloat16, scale: 1, zero_point: 0
+input: conv_states, [max:1, max:8192, max:4], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: conv_states, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 76: [block_26]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: recurrent_states, [max:1, max:32, max:128, max:128], bfloat16, scale: 1, zero_point: 0
+input: conv_states, [max:1, max:8192, max:4], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: conv_states, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 77: [block_27]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [max:3, max:2048], int32, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 78: [block_kv_27]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [max:3, max:2048], int32, scale: 1, zero_point: 0
+input: history_k, [max:1, max:32768, max:2, max:256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [max:1, max:32768, max:2, max:256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 79: [block_28]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: recurrent_states, [max:1, max:32, max:128, max:128], bfloat16, scale: 1, zero_point: 0
+input: conv_states, [max:1, max:8192, max:4], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: conv_states, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 80: [block_29]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: recurrent_states, [max:1, max:32, max:128, max:128], bfloat16, scale: 1, zero_point: 0
+input: conv_states, [max:1, max:8192, max:4], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: conv_states, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 81: [block_30]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: recurrent_states, [max:1, max:32, max:128, max:128], bfloat16, scale: 1, zero_point: 0
+input: conv_states, [max:1, max:8192, max:4], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: conv_states, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 82: [block_31]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [max:3, max:2048], int32, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 83: [block_kv_31]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [max:3, max:2048], int32, scale: 1, zero_point: 0
+input: history_k, [max:1, max:32768, max:2, max:256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [max:1, max:32768, max:2, max:256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 84: [block_32]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: recurrent_states, [max:1, max:32, max:128, max:128], bfloat16, scale: 1, zero_point: 0
+input: conv_states, [max:1, max:8192, max:4], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: conv_states, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 85: [block_33]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: recurrent_states, [max:1, max:32, max:128, max:128], bfloat16, scale: 1, zero_point: 0
+input: conv_states, [max:1, max:8192, max:4], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: conv_states, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 86: [block_34]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: recurrent_states, [max:1, max:32, max:128, max:128], bfloat16, scale: 1, zero_point: 0
+input: conv_states, [max:1, max:8192, max:4], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: conv_states, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 87: [block_35]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [max:3, max:2048], int32, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 88: [block_kv_35]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [max:3, max:2048], int32, scale: 1, zero_point: 0
+input: history_k, [max:1, max:32768, max:2, max:256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [max:1, max:32768, max:2, max:256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 89: [block_36]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: recurrent_states, [max:1, max:32, max:128, max:128], bfloat16, scale: 1, zero_point: 0
+input: conv_states, [max:1, max:8192, max:4], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: conv_states, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 90: [block_37]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: recurrent_states, [max:1, max:32, max:128, max:128], bfloat16, scale: 1, zero_point: 0
+input: conv_states, [max:1, max:8192, max:4], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: conv_states, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 91: [block_38]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: recurrent_states, [max:1, max:32, max:128, max:128], bfloat16, scale: 1, zero_point: 0
+input: conv_states, [max:1, max:8192, max:4], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: conv_states, [1, 8192, 4], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 92: [block_39]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [max:3, max:2048], int32, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+==========================================
+net 93: [block_kv_39]  dynamic
+------------
+stage 0, core num: 4
+input: input_states, [max:1, max:2048, max:2048], bfloat16, scale: 1, zero_point: 0
+input: position_ids, [max:3, max:2048], int32, scale: 1, zero_point: 0
+input: history_k, [max:1, max:32768, max:2, max:256], bfloat16, scale: 1, zero_point: 0
+input: history_v, [max:1, max:32768, max:2, max:256], bfloat16, scale: 1, zero_point: 0
+output: output_states, [1, 2048, 2048], bfloat16, scale: 1, zero_point: 0
+output: k_cache, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+output: v_cache, [1, 2048, 2, 256], bfloat16, scale: 1, zero_point: 0
+
+device mem size: 20761295236 (weight: 20500512768, instruct: 30005636, runtime: 230776832)
+host mem size: 0 (weight: 0, runtime: 0)
+estimated SoC CPU peak: 11801216
+estimated PCIE CPU peak: 17506304
+bmodel is 4k aligned

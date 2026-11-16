@@ -1,0 +1,183 @@
+# Fetching bmtpu.ko from linaro@10.42.0.242 (read-only)
+
+## 1. tsh_cfg_default: compile-time config; field 0 is 'mode'
+
+/tmp/multica-task-1036309081/tmp.Tuvu2IXDsZ/bmtpu.ko:     file format elf64-littleaarch64
+
+Contents of section .data.tsh_cfg_default:
+ 0000 00000000 00000000 01010000 00000000  ................
+ 0010 00000000 00000000 00000000 00000000  ................
+ 0020 00000000 00000000 00000000 00000000  ................
+ 0030 00000000 00000000 00000000 00000000  ................
+ 0040 00000000 00000000 00000000 00000000  ................
+ 0050 00000000 00000000 00000000 00000000  ................
+
+  mode at default+0x68 = 1
+  tsh_cfg_default size = 312 bytes, mode at +0x00 = 0
+
+## 2. bmdrv_probe calls tsh_init(handle, NULL): the default is used,
+##    so the mode -- and therefore the depth -- is not read from DT or a param
+    14b0:	a94573fb 	ldp	x27, x28, [sp, #80]
+    14b4:	17fffd94 	b	b04 <bmdrv_probe+0x184>
+    14b8:	d2800001 	mov	x1, #0x0                   	// #0
+    14bc:	aa1303e0 	mov	x0, x19
+    14c0:	94000000 	bl	2da64 <tsh_init>
+			14c0: R_AARCH64_CALL26	tsh_init
+    14c4:	aa1303e0 	mov	x0, x19
+    14c8:	94000000 	bl	2e130 <tsh_getmode>
+
+## 3. tsh_init: cfg selection (NULL -> default+0x68)
+000000000002da64 <tsh_init>:
+   2da64:	d503233f 	paciasp
+   2da68:	a9bc7bfd 	stp	x29, x30, [sp, #-64]!
+   2da6c:	f100003f 	cmp	x1, #0x0
+   2da70:	910003fd 	mov	x29, sp
+   2da74:	a90153f3 	stp	x19, x20, [sp, #16]
+   2da78:	aa0003f3 	mov	x19, x0
+   2da7c:	90000000 	adrp	x0, 0 <bmdrv_tpu_resume>
+			2da7c: R_AARCH64_ADR_PREL_PG_HI21	.data.tsh_cfg_default
+   2da80:	91000000 	add	x0, x0, #0x0
+			2da80: R_AARCH64_ADD_ABS_LO12_NC	.data.tsh_cfg_default
+   2da84:	b9433263 	ldr	w3, [x19, #816]
+   2da88:	9101a000 	add	x0, x0, #0x68
+   2da8c:	9a810014 	csel	x20, x0, x1, eq	// eq = none
+   2da90:	12001c61 	and	w1, w3, #0xff
+   2da94:	12001c63 	and	w3, w3, #0xff
+
+## 4. mode 1 depth check: regs 0x6024/0x6028 must read 0x10101010
+##    0x10101010 -> four bytes of 0x10 = 16 slots per HWQ
+   2dd28:	b9400682 	ldr	w2, [x20, #4]
+   2dd2c:	528c0181 	mov	w1, #0x600c                	// #24588
+   2dd30:	aa1303e0 	mov	x0, x19
+   2dd34:	72a05a01 	movk	w1, #0x2d0, lsl #16
+   2dd38:	94000000 	bl	12880 <tpu_reg_write>
+			2dd38: R_AARCH64_CALL26	tpu_reg_write
+   2dd3c:	2a1503e2 	mov	w2, w21
+   2dd40:	528c3301 	mov	w1, #0x6198                	// #24984
+   2dd44:	aa1303e0 	mov	x0, x19
+   2dd48:	72a05a01 	movk	w1, #0x2d0, lsl #16
+   2dd4c:	94000000 	bl	12880 <tpu_reg_write>
+			2dd4c: R_AARCH64_CALL26	tpu_reg_write
+   2dd50:	528c0481 	mov	w1, #0x6024                	// #24612
+   2dd54:	aa1303e0 	mov	x0, x19
+   2dd58:	72a05a01 	movk	w1, #0x2d0, lsl #16
+   2dd5c:	94000000 	bl	128a0 <tpu_reg_read>
+			2dd5c: R_AARCH64_CALL26	tpu_reg_read
+   2dd60:	3204c3e1 	mov	w1, #0x10101010            	// #269488144
+   2dd64:	2a0003f4 	mov	w20, w0
+   2dd68:	6b01001f 	cmp	w0, w1
+   2dd6c:	540015e1 	b.ne	2e028 <tsh_init+0x5c4>  // b.any
+   2dd70:	528c0501 	mov	w1, #0x6028                	// #24616
+   2dd74:	aa1303e0 	mov	x0, x19
+   2dd78:	72a05a01 	movk	w1, #0x2d0, lsl #16
+   2dd7c:	94000000 	bl	128a0 <tpu_reg_read>
+			2dd7c: R_AARCH64_CALL26	tpu_reg_read
+   2dd80:	6b14001f 	cmp	w0, w20
+   2dd84:	54fff8a0 	b.eq	2dc98 <tsh_init+0x234>  // b.none
+   2dd88:	2a0003e3 	mov	w3, w0
+   2dd8c:	90000001 	adrp	x1, 0 <bmdrv_tpu_resume>
+			2dd8c: R_AARCH64_ADR_PREL_PG_HI21	.rodata.__func__.0+0x1a8
+   2dd90:	90000000 	adrp	x0, 0 <bmdrv_tpu_resume>
+			2dd90: R_AARCH64_ADR_PREL_PG_HI21	.rodata.str1.8+0xad28
+   2dd94:	91000021 	add	x1, x1, #0x0
+			2dd94: R_AARCH64_ADD_ABS_LO12_NC	.rodata.__func__.0+0x1a8
+   2dd98:	91000000 	add	x0, x0, #0x0
+			2dd98: R_AARCH64_ADD_ABS_LO12_NC	.rodata.str1.8+0xad28
+   2dd9c:	52801902 	mov	w2, #0xc8                  	// #200
+   2dda0:	94000000 	bl	0 <printk>
+			2dda0: R_AARCH64_CALL26	printk
+   2dda4:	12800000 	mov	w0, #0xffffffff            	// #-1
+   2dda8:	a9425bf5 	ldp	x21, x22, [sp, #32]
+   2ddac:	f9401bf7 	ldr	x23, [sp, #48]
+   2ddb0:	17ffffbd 	b	2dca4 <tsh_init+0x240>
+
+## 5. mode 2 depth check: regs 0x6050/0x6054 must read 0x40404040
+##    0x40404040 -> four bytes of 0x40 = 64 slots per HWQ
+   2dc58:	71000abf 	cmp	w21, #0x2
+   2dc5c:	540002c1 	b.ne	2dcb4 <tsh_init+0x250>  // b.any
+   2dc60:	528c0a01 	mov	w1, #0x6050                	// #24656
+   2dc64:	aa1303e0 	mov	x0, x19
+   2dc68:	72a05a01 	movk	w1, #0x2d0, lsl #16
+   2dc6c:	94000000 	bl	128a0 <tpu_reg_read>
+			2dc6c: R_AARCH64_CALL26	tpu_reg_read
+   2dc70:	3202c3e1 	mov	w1, #0x40404040            	// #1077952576
+   2dc74:	2a0003f4 	mov	w20, w0
+   2dc78:	6b01001f 	cmp	w0, w1
+   2dc7c:	54001fc1 	b.ne	2e074 <tsh_init+0x610>  // b.any
+   2dc80:	528c0a81 	mov	w1, #0x6054                	// #24660
+   2dc84:	aa1303e0 	mov	x0, x19
+   2dc88:	72a05a01 	movk	w1, #0x2d0, lsl #16
+   2dc8c:	94000000 	bl	128a0 <tpu_reg_read>
+			2dc8c: R_AARCH64_CALL26	tpu_reg_read
+   2dc90:	6b14001f 	cmp	w0, w20
+   2dc94:	54001b41 	b.ne	2dffc <tsh_init+0x598>  // b.any
+   2dc98:	a9425bf5 	ldp	x21, x22, [sp, #32]
+
+## 6. bm84x6_task_init: kfifo depth is 16 or 64, chosen on (mode == 2)
+   29de8:	71000a7f 	cmp	w19, #0x2
+   29dec:	a90363f7 	stp	x23, x24, [sp, #48]
+   29df0:	910c2013 	add	x19, x0, #0x308
+   29df4:	90000018 	adrp	x24, 0 <bmdrv_tpu_resume>
+			29df4: R_AARCH64_ADR_PREL_PG_HI21	.bss.__key.23
+   29df8:	90000017 	adrp	x23, 0 <bmdrv_tpu_resume>
+			29df8: R_AARCH64_ADR_PREL_PG_HI21	.rodata.str1.8+0x8d68
+   29dfc:	52800201 	mov	w1, #0x10                  	// #16
+   29e00:	52800800 	mov	w0, #0x40                  	// #64
+   29e04:	91000318 	add	x24, x24, #0x0
+			29e04: R_AARCH64_ADD_ABS_LO12_NC	.bss.__key.23
+   29e08:	1a801021 	csel	w1, w1, w0, ne	// ne = any
+   29e0c:	910002f7 	add	x23, x23, #0x0
+			29e0c: R_AARCH64_ADD_ABS_LO12_NC	.rodata.str1.8+0x8d68
+   29e10:	52800014 	mov	w20, #0x0                   	// #0
+   29e14:	b90002c1 	str	w1, [x22]
+   29e18:	f90032d9 	str	x25, [x22, #96]
+
+## 7. tsh_get_hwq_free_slots: reg holds 4 HWQs, 8 bits each => hw max 255
+000000000002e174 <tsh_get_hwq_free_slots>:
+   2e174:	d503233f 	paciasp
+   2e178:	a9be7bfd 	stp	x29, x30, [sp, #-32]!
+   2e17c:	7100003f 	cmp	w1, #0x0
+   2e180:	910003fd 	mov	x29, sp
+   2e184:	f9000bf3 	str	x19, [sp, #16]
+   2e188:	2a0103f3 	mov	w19, w1
+   2e18c:	11000c21 	add	w1, w1, #0x3
+   2e190:	52830123 	mov	w3, #0x1809                	// #6153
+   2e194:	1a93b021 	csel	w1, w1, w19, lt	// lt = tstop
+   2e198:	72a13683 	movk	w3, #0x9b4, lsl #16
+   2e19c:	52bb8002 	mov	w2, #0xdc000000            	// #-603979776
+   2e1a0:	0b810861 	add	w1, w3, w1, asr #2
+   2e1a4:	0b010841 	add	w1, w2, w1, lsl #2
+   2e1a8:	94000000 	bl	128a0 <tpu_reg_read>
+			2e1a8: R_AARCH64_CALL26	tpu_reg_read
+   2e1ac:	6b1303e1 	negs	w1, w19
+   2e1b0:	12000673 	and	w19, w19, #0x3
+   2e1b4:	12000421 	and	w1, w1, #0x3
+   2e1b8:	52801fe2 	mov	w2, #0xff                  	// #255
+   2e1bc:	5a814661 	csneg	w1, w19, w1, mi	// mi = first
+   2e1c0:	f9400bf3 	ldr	x19, [sp, #16]
+   2e1c4:	531d7021 	lsl	w1, w1, #3
+   2e1c8:	a8c27bfd 	ldp	x29, x30, [sp], #32
+   2e1cc:	d50323bf 	autiasp
+   2e1d0:	1ac12041 	lsl	w1, w2, w1
+   2e1d4:	0a000020 	and	w0, w1, w0
+   2e1d8:	d65f03c0 	ret
+   2e1dc:	d503201f 	nop
+
+000000000002e1e0 <tsh_get_outbox_free_slots>:
+
+## 8. every depth-register address load, and its callee:
+##    all tpu_reg_read -- the driver never writes the depth
+  2dc60:	528c0a01 	mov	w1, #0x6050                	// #24656 -> tpu_reg_read
+  2dc80:	528c0a81 	mov	w1, #0x6054                	// #24660 -> tpu_reg_read
+  2dd50:	528c0481 	mov	w1, #0x6024                	// #24612 -> tpu_reg_read
+  2dd70:	528c0501 	mov	w1, #0x6028                	// #24616 -> tpu_reg_read
+  2df3c:	528c0481 	mov	w1, #0x6024                	// #24612 -> tpu_reg_read
+  2df58:	528c0501 	mov	w1, #0x6028                	// #24616 -> tpu_reg_read
+  total depth-register address loads: 6
+
+## 9. device-tree properties the driver reads (never a queue depth)
+##    .rodata.str1.8+0x4e0 / +0x4f8 are the only of_property name arguments
+  0x4e0 -> sophgo_c906_fw_mode
+  0x4f8 -> sophgon_arm9_fw_mode
+
+## 10. boot-log corroboration: 8 HWQ x 16 slots x 128-byte entries = 16384

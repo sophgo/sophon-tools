@@ -1,0 +1,6 @@
+{
+  "auto_map": {
+    "AutoProcessor": "processing_paddleocr_vl.PaddleOCRVLProcessor"
+  },
+  "processor_class": "PaddleOCRVLProcessor"
+}

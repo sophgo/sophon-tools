@@ -1,0 +1,75 @@
+Example prose for the prefill-width probe corpus. Every word below is ordinary
+English text; the generator repeats it as needed to reach an exact token count.
+Nothing here is a token id, and nothing is chosen to steer the model: the
+corpus only has to be real text so that the tokenizer produces the id sequence a
+user's message would produce.
+
+The engine launches a dynamic prefill graph for one chunk at a time, and the
+width of that chunk comes from the prompt length, not from the bmodel. A prompt
+of sixty three tokens therefore asks for a sixty three row launch, while a prompt
+of sixty four tokens asks for a sixty four row launch. The rule the engine
+currently enforces keeps every dynamic launch on a multiple of sixty four and
+sends the surplus rows through the decode graphs one row at a time. That rule was
+written after a short extend hung the driver on this board, and the question this
+probe asks is whether the hardware still behaves that way today.
+
+A second group of runs extends a session that already holds history, so the
+attention layers read their past keys and values from the session state instead
+of building a fresh mask. Those are different graphs from the first turn, and
+they are the ones a conversation actually uses: each follow up message appends a
+handful of tokens to a session that already holds the earlier turns. If the
+alignment rule forces that handful through the decode graphs, the cost is paid on
+every turn of every conversation, which is exactly the latency the users notice.
+
+Numbers in this corpus are deliberately spelled out in words so that a reader can
+tell at a glance that no numeric literal was smuggled into the text. Names of
+graph operators, register reads and driver calls appear only where the surrounding
+sentence is about them, and they are the names printed by the software itself.
+
+We measure three things for every width. First, whether the launch returns at all,
+because a hung launch takes the device down until it is rebooted and that costs
+far more than any latency it saves. Second, how long the call takes, since the
+whole point of widening the dynamic path is to stop replaying rows one at a time.
+Third, whether the sixteen greedy tokens that follow are identical to the ones the
+aligned baseline produced, because a faster path that computes different numbers
+is not a faster path at all.
+
+The comparison only means something if the input is identical, so every run of a
+given length reads the same id file. The tokenizer in the release package encodes
+the same text the same way on every machine, which makes the file reproducible
+from the corpus beside it. Anyone can regenerate the files and compare them byte
+for byte against the ones committed here, and the manifest records the length and
+the digest that each file is expected to have.
+
+Long prompts are included for completeness rather than because anyone expects
+them to be slow. A prompt of a thousand tokens already fills sixteen aligned
+chunks, so the only rows that reach the replay path are the final remainder, and
+that remainder is small enough that the saving looks like noise next to the cost
+of the aligned chunks themselves. A prompt of two thousand and forty eight tokens
+divides evenly, so under the default rule it never touches the replay path at all
+and serves as a control.
+
+The interesting lengths are the short ones. Sixty three tokens is one token short
+of a single aligned chunk, which means the entire prompt is replayed. Forty eight
+tokens, thirty three tokens, seventeen tokens and five tokens are all shorter than
+a chunk, and five is the width that appears in the old failure report, so it is
+kept for the end of the run when everything else has already passed.
+
+Operators on this part are shared between sessions, so a probe that changes the
+alignment stays inside one process and one engine handle. Loading the model costs
+more than the measurements themselves, and unloading it between runs would add a
+memory fragmentation pattern that has nothing to do with the question. Each run
+opens its own session and frees it again, which keeps the state of one width out
+of the state of the next.
+
+Prudence says the last word belongs to the driver log. A launch can return without
+error and still leave a register read pending, and the only place that shows up is
+the kernel ring buffer. Every run in the matrix is therefore followed by a look at
+the tail of that buffer, and the first sign of trouble stops the whole sequence
+rather than being retried on a device that may already be wedged.
+
+The rest of this paragraph exists only to give the generator a few more words to
+choose from when it needs to land on an exact count. It says nothing that the
+paragraphs above have not already said, and it repeats their vocabulary on
+purpose, so that a reader comparing two generated files finds the difference in
+length rather than in subject matter.
