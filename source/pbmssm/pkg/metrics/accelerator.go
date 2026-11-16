@@ -149,7 +149,7 @@ const (
 )
 
 // TPUFrequencyClk 读取 TPU 时钟频率（Hz → MHz）。
-// 对齐 pget_info TPU_CLK。CV84X2 时钟名为 clk_tpu_ip。
+// 对齐 pget_info TPU_CLK。CV84X2 走 tpuFrequencyCv84x6（sysfs 优先）。
 func (c *Collector) TPUFrequencyClk() int64 {
 	chip := c.ChipType()
 	var path string
@@ -179,7 +179,9 @@ func (c *Collector) tpuFrequencyCv84x6() int64 {
 		return mhz
 	}
 	if hz, ok := c.readSysfsHz(tpuClkPathCv84x6); ok {
-		return hz / 1000000 * 2 // Hz → MHz，再按实测倍率校正
+		// 先 ×2 再折算 MHz：先整除会把亚 MHz 余数截掉，倍率放大后误差翻倍
+		// （999999999Hz 先截断得 999 → 1998，正确应为 1999）。
+		return hz * 2 / 1000000
 	}
 	return 0
 }

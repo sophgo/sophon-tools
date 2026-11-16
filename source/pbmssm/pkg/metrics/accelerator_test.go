@@ -96,6 +96,28 @@ func TestTPUFrequencyClkCv84x6SysfsInvalid(t *testing.T) {
 	}
 }
 
+func TestTPUFrequencyClkCv84x6FallbackRounding(t *testing.T) {
+	// 兜底路径必须先 ×2 再折算 MHz。若写成 hz/1000000*2，亚 MHz 余数会先被截掉、
+	// 倍率再把误差放大一倍：999999999Hz → 999 → 1998（正确 1999）。
+	for _, tc := range []struct {
+		hz   string
+		want int64
+	}{
+		{"999999999", 1999},  // 近 1GHz：截断会得 1998
+		{"1499999999", 2999}, // DVFS 中间档位：截断会得 2998
+		{"1000000000", 2000}, // 标称档位：两种写法同值
+	} {
+		fr := &fakeFileReader{files: map[string]string{
+			"/proc/cpuinfo": "model name	: cv84x6\n",
+			"/sys/kernel/debug/clk/clk_tpu_ip/clk_rate": tc.hz + "\n",
+		}}
+		c := NewCollector(fr, nil)
+		if got := c.TPUFrequencyClk(); got != tc.want {
+			t.Errorf("debugfs=%s Hz → %d MHz, want %d（应先 ×2 再折算）", tc.hz, got, tc.want)
+		}
+	}
+}
+
 func TestVPUFrequencyCv84x6(t *testing.T) {
 	// clk_ve_axi 是 AXI 总线时钟，语义与 bm1688 cam0pll 不同，不 ÷2。
 	fr := &fakeFileReader{files: map[string]string{
