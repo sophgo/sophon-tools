@@ -73,7 +73,16 @@ def classify(rec: dict) -> str:
 
 def one_trial(a, text: str, png, trial: int) -> dict:
     """One fresh handle, ``--calls`` identical requests, classified per call."""
-    enc = Encoder(a.library, a.model, a.config)
+    # A failed load is reported, never silently folded into the call counts: an
+    # arm that could not load produced no observation at all.
+    try:
+        enc = Encoder(a.library, a.model, a.config)
+    except Exception as exc:  # noqa: BLE001 - reported verbatim
+        return {"trial": trial, "load_failed": f"{type(exc).__name__}: {exc}",
+                "calls": [], "counts": {}, "forward_executed": 0,
+                "first_failure_index": None, "successful_vectors": 0,
+                "distinct_vectors": 0, "worst_cosine": None,
+                "worst_max_abs": None, "pairs": []}
     calls, vectors = [], []
     try:
         for index in range(a.calls):
@@ -170,6 +179,7 @@ def main() -> int:
         # failure, and how many forwards actually ran.
         "trials_with_zero": sum(1 for t in trials if t["counts"].get("zero")),
         "trials_with_nonfinite": sum(1 for t in trials if t["counts"].get("nonfinite")),
+        "trials_load_failed": sum(1 for t in trials if t.get("load_failed")),
         "forwards_executed": sum(t["forward_executed"] for t in trials),
         "worst_cosine": min((t["worst_cosine"] for t in trials
                              if t["worst_cosine"] is not None), default=None),
@@ -179,6 +189,10 @@ def main() -> int:
     print(json.dumps({k: v for k, v in report.items() if k != "trials"},
                      ensure_ascii=False), flush=True)
     for trial in trials:
+        if trial.get("load_failed"):
+            print(f"  trial{trial['trial']} LOAD FAILED: {trial['load_failed']}",
+                  file=sys.stderr)
+            continue
         detail = " ".join(f"{c['index']}:{c['verdict']}" for c in trial["calls"])
         print(f"  trial{trial['trial']} tokens={trial['tokens']} "
               f"bucket={trial['bucket']} distinct={trial['distinct_vectors']}/"

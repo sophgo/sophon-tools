@@ -1,5 +1,5 @@
 --- a/native/src/vl_embed_engine.cpp	2026-11-16 02:20:58.947599544 -0800
-+++ b/native/src/vl_embed_engine.cpp	2026-11-16 03:22:39.840890549 -0800
++++ b/native/src/vl_embed_engine.cpp	2026-11-16 03:56:34.617318824 -0800
 @@ -16,6 +16,7 @@
  #include <cstdlib>
  #include <cstring>
@@ -44,10 +44,14 @@
  }  // namespace
  
  struct VlEmbedEngine::Impl {
-@@ -51,6 +81,14 @@
+@@ -50,7 +80,17 @@
+   std::atomic<bool> fault{false};
    std::string error;
    std::mutex mutex;
-   bool trace = std::getenv("CV_VLE_TRACE") != nullptr;
+-  bool trace = std::getenv("CV_VLE_TRACE") != nullptr;
++  // CV_VLE_TRACE=0 must mean OFF. Testing only for presence made "=0" enable
++  // tracing, which serialises the device and hides the very race under study.
++  bool trace = std::getenv("CV_VLE_TRACE") && std::atoi(std::getenv("CV_VLE_TRACE")) != 0;
 +  bool memset_sync = std::getenv("CV_VLE_MEMSET_SYNC") != nullptr &&
 +                     std::atoi(std::getenv("CV_VLE_MEMSET_SYNC")) != 0;
 +  bool copy_sync = std::getenv("CV_VLE_COPY_SYNC") != nullptr &&
@@ -59,7 +63,7 @@
  
    ~Impl() {
      // A failed sync can leave a launch outstanding. Drain before releasing
-@@ -81,22 +119,59 @@
+@@ -81,22 +121,59 @@
      return true;
    }
    bool zero(bm_device_mem_t mem) {
@@ -123,7 +127,7 @@
      if (trace) std::fprintf(stderr, "[vl-embed] launch %s rows=%d\n", net->name, rows);
      std::vector<bm_tensor_t> in(net->input_num), out(net->output_num);
      for (int i = 0; i < net->input_num; ++i) {
-@@ -320,9 +395,42 @@
+@@ -320,9 +397,42 @@
    auto start = Clock::now();
    if (!e.zero(e.embed->stages[0].input_mems[0]) ||
        !e.upload(e.embed->stages[0].input_mems[0], ids, n * sizeof(int32_t)) ||
@@ -167,7 +171,7 @@
    if (image) {
      start = Clock::now();
      for (auto mem : e.deep) if (!e.zero(mem)) return false;
-@@ -338,7 +446,14 @@
+@@ -338,7 +448,14 @@
          !e.launch(e.vit, image->patches())) return false;
      const size_t at = static_cast<size_t>(offset) * kHidden * sizeof(uint16_t);
      const size_t count = static_cast<size_t>(image->patches() / 4) * kHidden * sizeof(uint16_t);
@@ -183,7 +187,7 @@
      for (int i = 0; i < static_cast<int>(e.deep.size()); ++i)
        if (!e.copy(e.deep[i], at, v.output_mems[i + 1], count)) return false;
      measured.vision_ms = elapsed(start);
-@@ -352,16 +467,30 @@
+@@ -352,16 +469,30 @@
      // Each item and each layer starts from zero state; hidden is owned
      // separately from BMRT's shared scratch pool.
      if (e.linear(i) && !e.zero(net->stages[0].input_mems[1])) return false;
