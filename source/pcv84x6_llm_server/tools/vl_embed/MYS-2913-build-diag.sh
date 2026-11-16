@@ -1,22 +1,52 @@
 #!/bin/bash
-# Build the MYS-2913 instrumented encoder in /tmp/mys2913/diag.
+# Build the MYS-2913 instrumented WeMM encoder from a *clean* checkout.
 #
-# This is a *diagnostic copy* of native/src/vl_embed_engine.cpp with per-stage
-# readbacks added (token embedding, ViT output, and every encoder block's output
-# row). It is compiled here, in a temporary directory, and links against the
-# board's own libsophon. The production library is never replaced and the
-# production service is never restarted.
+# Everything it needs is in this repository plus the board's own libsophon; it
+# creates its own working directory and consumes no pre-existing /tmp layout.
+#
+#   bash tools/vl_embed/MYS-2913-build-diag.sh <package-root> [work-dir]
+#
+#   <package-root>  source/pcv84x6_llm_server (a clean checkout of this package)
+#   [work-dir]      defaults to $PWD/mys2913-diag-build
+#
+# Output: <work-dir>/libcv84x6_vl_diag.so
+#
+# The instrumented source is native/src/vl_embed_engine.cpp plus
+# MYS-2913-instrumentation.patch, which only adds per-stage readbacks and the
+# CV_VLE_* A/B switches. It is a diagnostic artifact: the production library at
+# /opt/sophgo/cv84x6_llm_server/lib/libcv84x6_llm.so is never touched.
 set -eu
-SRC="${1:-/tmp/mys2913/diag}"
-OUT=/tmp/mys2913/build
-mkdir -p "$OUT"
 
+PKG="${1:?usage: $0 <package-root> [work-dir]}"
+WORK="${2:-$PWD/mys2913-diag-build}"
+PKG="$(cd "$PKG" && pwd)"
+HERE="$(cd "$(dirname "$0")" && pwd)"
+
+LIBSOPHON="${LIBSOPHON:-/opt/sophon/libsophon-current}"
+test -d "$LIBSOPHON/include" || { echo "missing $LIBSOPHON/include" >&2; exit 1; }
+
+# libjpeg ships as a versioned soname with no bare .so symlink on this image.
+JPEG="$(ls /usr/lib/*/libjpeg.so.8 /lib/*/libjpeg.so.8 2>/dev/null | head -1 || true)"
+test -n "$JPEG" || { echo "libjpeg.so.8 not found" >&2; exit 1; }
+
+echo "== work dir: $WORK"
+rm -rf "$WORK"
+mkdir -p "$WORK/src"
+cp -r "$PKG/native/." "$WORK/src/"
+
+echo "== applying MYS-2913-instrumentation.patch"
+( cd "$WORK/src" && patch -p1 --no-backup-if-mismatch \
+    < "$HERE/MYS-2913-instrumentation.patch" )
+
+echo "== compiling"
 g++ -std=c++17 -O2 -fPIC -shared -Wall -Wextra \
-    -I"$SRC/include" \
-    -I/opt/sophon/libsophon-current/include \
-    "$SRC/vl_embed_engine_diag.cpp" "$SRC/vl_embed_c_api.cpp" "$SRC/vision.cpp" \
-    -o "$OUT/libcv84x6_vl_diag.so" \
-    -L/opt/sophon/libsophon-current/lib -lbmrt -lbmlib -lpthread /usr/lib/aarch64-linux-gnu/libjpeg.so.8 -lz \
-    -Wl,-rpath,/opt/sophon/libsophon-current/lib
-echo "built $OUT/libcv84x6_vl_diag.so"
-ls -l "$OUT/libcv84x6_vl_diag.so"
+    -I"$WORK/src/include" -I"$LIBSOPHON/include" \
+    "$WORK/src/src/vl_embed_engine.cpp" \
+    "$WORK/src/src/vl_embed_c_api.cpp" \
+    "$WORK/src/src/vision.cpp" \
+    -o "$WORK/libcv84x6_vl_diag.so" \
+    -L"$LIBSOPHON/lib" -lbmrt -lbmlib -lpthread "$JPEG" -lz \
+    -Wl,-rpath,"$LIBSOPHON/lib"
+
+echo "== built $WORK/libcv84x6_vl_diag.so"
+sha256sum "$WORK/libcv84x6_vl_diag.so"

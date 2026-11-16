@@ -1,8 +1,5 @@
-# 生成方式：在 native/src/vl_embed_engine.cpp 基础上加逐层回读与 A/B 开关。
-# 应用：cp 到临时目录，patch 后按 MYS-2913-build-diag.sh 编译（板端，链接本机 libsophon）。
-# 仅诊断用，不进入产品构建。
---- source/pcv84x6_llm_server/native/src/vl_embed_engine.cpp	2026-11-16 02:20:58.947599544 -0800
-+++ diag-native/vl_embed_engine_diag.cpp	2026-11-16 03:22:39.840890549 -0800
+--- a/native/src/vl_embed_engine.cpp	2026-11-16 02:20:58.947599544 -0800
++++ b/native/src/vl_embed_engine.cpp	2026-11-16 03:22:39.840890549 -0800
 @@ -16,6 +16,7 @@
  #include <cstdlib>
  #include <cstring>
