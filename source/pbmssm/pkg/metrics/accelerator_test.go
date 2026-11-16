@@ -45,13 +45,76 @@ func TestVPUUsageCv84x6SophInfo(t *testing.T) {
 }
 
 func TestTPUFrequencyClkCv84x6(t *testing.T) {
+	// sysfs 的 tpu_freq_mhz 是唯一"就是频率"的来源（单位 MHz），优先于 debugfs。
+	// debugfs clk_tpu_ip 报的是分频前基准，只有真实值的一半：真机对照
+	// debugfs=1000000000Hz ↔ sysfs=2000MHz。两者同时存在时必须取 2000。
+	fr := &fakeFileReader{files: map[string]string{
+		"/proc/cpuinfo": "model name	: cv84x6\n",
+		"/sys/devices/platform/cv84x2-dvfs/tpu_freq_mhz": "2000\n",
+		"/sys/kernel/debug/clk/clk_tpu_ip/clk_rate":      "1000000000\n",
+	}}
+	c := NewCollector(fr, nil)
+	if got := c.TPUFrequencyClk(); got != 2000 {
+		t.Errorf("TPUFrequencyClk() = %d, want 2000 MHz（sysfs 优先，不能是 debugfs 的一半值 1000）", got)
+	}
+}
+
+func TestTPUFrequencyClkCv84x6FallbackDebugfs(t *testing.T) {
+	// sysfs 缺失（老内核 / DVFS 未 probe）时回退 debugfs，并按实测倍率 ×2 校正，
+	// 绝不能直接吐出未校正的 1000。
 	fr := &fakeFileReader{files: map[string]string{
 		"/proc/cpuinfo": "model name	: cv84x6\n",
 		"/sys/kernel/debug/clk/clk_tpu_ip/clk_rate": "1000000000\n",
 	}}
 	c := NewCollector(fr, nil)
-	if got := c.TPUFrequencyClk(); got != 1000 {
-		t.Errorf("TPUFrequencyClk() = %d, want 1000 MHz", got)
+	if got := c.TPUFrequencyClk(); got != 2000 {
+		t.Errorf("TPUFrequencyClk() = %d, want 2000 MHz（debugfs 回退须 ×2 校正）", got)
+	}
+}
+
+func TestTPUFrequencyClkCv84x6NoSource(t *testing.T) {
+	// 两个来源都取不到时返回 0，不臆造数值。
+	fr := &fakeFileReader{files: map[string]string{
+		"/proc/cpuinfo": "model name	: cv84x6\n",
+	}}
+	c := NewCollector(fr, nil)
+	if got := c.TPUFrequencyClk(); got != 0 {
+		t.Errorf("TPUFrequencyClk() = %d, want 0（无来源时应为 0）", got)
+	}
+}
+
+func TestTPUFrequencyClkCv84x6SysfsInvalid(t *testing.T) {
+	// sysfs 内容非法时同样回退 debugfs 并校正。
+	fr := &fakeFileReader{files: map[string]string{
+		"/proc/cpuinfo": "model name	: cv84x6\n",
+		"/sys/devices/platform/cv84x2-dvfs/tpu_freq_mhz": "n/a\n",
+		"/sys/kernel/debug/clk/clk_tpu_ip/clk_rate":      "1000000000\n",
+	}}
+	c := NewCollector(fr, nil)
+	if got := c.TPUFrequencyClk(); got != 2000 {
+		t.Errorf("TPUFrequencyClk() = %d, want 2000 MHz（sysfs 非法应回退并 ×2）", got)
+	}
+}
+
+func TestTPUFrequencyClkCv84x6FallbackRounding(t *testing.T) {
+	// 兜底路径必须先 ×2 再折算 MHz。若写成 hz/1000000*2，亚 MHz 余数会先被截掉、
+	// 倍率再把误差放大一倍：999999999Hz → 999 → 1998（正确 1999）。
+	for _, tc := range []struct {
+		hz   string
+		want int64
+	}{
+		{"999999999", 1999},  // 近 1GHz：截断会得 1998
+		{"1499999999", 2999}, // DVFS 中间档位：截断会得 2998
+		{"1000000000", 2000}, // 标称档位：两种写法同值
+	} {
+		fr := &fakeFileReader{files: map[string]string{
+			"/proc/cpuinfo": "model name	: cv84x6\n",
+			"/sys/kernel/debug/clk/clk_tpu_ip/clk_rate": tc.hz + "\n",
+		}}
+		c := NewCollector(fr, nil)
+		if got := c.TPUFrequencyClk(); got != tc.want {
+			t.Errorf("debugfs=%s Hz → %d MHz, want %d（应先 ×2 再折算）", tc.hz, got, tc.want)
+		}
 	}
 }
 

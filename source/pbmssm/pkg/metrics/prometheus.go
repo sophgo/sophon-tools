@@ -100,10 +100,11 @@ func NewMetricsRegistry() *MetricsRegistry {
 		PowerUsage:   newGaugeVec("power_usage_watts", "Power usage in watts"),
 		HealthStatus: newGaugeVec("health_status", "Device health status (1=healthy, 0=unhealthy)"),
 
-		// 频率（Hz，debugfs clk，对齐 get_info CPU_CLK/TPU_CLK/VPU_CLK；
-		// 采集自 CollectAll 的 CPUFreqMHz/TPUFreqMHz/VPUFreqMHz × 1e6）
+		// 频率（Hz，对齐 get_info CPU_CLK/TPU_CLK/VPU_CLK；采集自 CollectAll 的
+		// CPUFreqMHz/TPUFreqMHz/VPUFreqMHz × 1e6）。CPU/VPU 取自 debugfs clk；
+		// TPU 在 CV84X2 上改取 sysfs DVFS（tpu_freq_mhz），debugfs 仅兜底并 ×2 校正。
 		CPUFreq: newGaugeVec("cpu_frequency_hz", "CPU frequency in hertz (debugfs clk)"),
-		TPUFreq: newGaugeVec("tpu_frequency_hz", "TPU frequency in hertz (debugfs clk)"),
+		TPUFreq: newGaugeVec("tpu_frequency_hz", "TPU frequency in hertz (debugfs clk; sysfs DVFS on CV84X2)"),
 		VPUFreq: newGaugeVec("vpu_frequency_hz", "VPU frequency in hertz (debugfs clk)"),
 
 		ChipInfo: newGaugeVec("chip_info", "Chip information"),
