@@ -116,6 +116,125 @@ inline unsigned int memset_bytes_of(unsigned long long addr) {
 inline constexpr size_t kHeapBytes = 256u << 20;
 inline unsigned char* heap_base = nullptr;
 
+inline void* host_ptr(unsigned long long addr) {
+  if (!heap_base || addr < 0x10000000) return nullptr;
+  const size_t off = static_cast<size_t>(addr - 0x10000000);
+  return off < kHeapBytes ? heap_base + off : nullptr;
+}
+
+// ---- deferred device writes ------------------------------------------------
+//
+// The field SDK does NOT establish completion order for the copy kernels. On
+// the CV84X6 branch of the installed libbmlib, `bm_memcpy_d2d_byte_with_core`
+// and `bm_memset_device_ext` submit a TPU kernel with
+// `tpu_kernel_launch_from_multi_cores` and return WITHOUT the
+// `bm_sync_api_from_core` that the other chips' branches perform. The call
+// therefore means "submitted", not "visible": a later device consumer can read
+// the buffer's previous contents. Measured on the board with a model-free
+// A->B->C chain: 4/128 and 2/64 whole-block-zero results without a sync between
+// the copies, 0 with one (tools/vl_embed/MYS-2913-wemm-zero-vector.md).
+//
+// With `defer_device_writes` the fake models exactly that: a d2d copy or a
+// memset issued by the engine becomes visible to other device consumers only
+// at the next bm_thread_sync. Reads in between resolve to the *committed*
+// bytes -- the state as of the last sync -- which is what the hardware does.
+// A host upload (bm_memcpy_s2d) is not deferred: the driver polls the CDMA
+// engine to completion for it, so it is ordered against later submissions.
+//
+// This is opt-in because the chat/OCR engines keep the same copy-then-launch
+// pattern and their fixtures assert the optimistic (ordered) behaviour; the
+// vl_embed tests are the ones that must prove the encoder no longer relies on
+// an ordering the SDK does not provide.
+inline bool defer_device_writes = false;
+// Every device read that had to fall back to pre-write bytes because a pending
+// write covered the region. A correct engine keeps this at 0: it never lets a
+// consumer look at a buffer it has written but not synced.
+inline int stale_device_reads = 0;
+// Copies and memsets issued while deferring, i.e. how much was left pending.
+inline int deferred_writes = 0;
+// Fail the next d2d copy / memset, so a test can drive the error paths.
+inline bool fail_d2d = false;
+inline bool fail_memset = false;
+// Make a graph's output[0] a verbatim copy of its input[0] when both are the
+// same size, so a value planted at the head of a graph chain can only reach
+// the pooled output if every copy along the way was ordered. Without this the
+// fake's graphs are address-keyed constants and a stale read would be
+// invisible to a value assertion.
+inline bool chain_hidden = false;
+// Launches under `chain_hidden` whose input still carried bytes no sync had
+// made visible. A correct engine keeps this at 0.
+inline int stale_input_launches = 0;
+
+struct PendingWrite {
+  unsigned long long addr = 0;
+  std::vector<unsigned char> data;  // bytes the kernel will commit at sync
+  std::vector<unsigned char> old;   // committed bytes it will replace
+};
+inline std::vector<PendingWrite> pending_writes;
+
+// The committed view of [addr, addr+len): the heap as of the last sync, with
+// any byte covered by a pending write replaced by that write's pre-image.
+// Pending entries are consulted oldest-first, because the oldest one holds the
+// last committed value for every byte it covers. Returns whether any byte had
+// to be rolled back.
+inline bool committed_view(unsigned long long addr, unsigned char* out, size_t len) {
+  auto* p = static_cast<const unsigned char*>(host_ptr(addr));
+  if (!p || len == 0) return false;
+  std::memcpy(out, p, len);
+  if (pending_writes.empty()) return false;
+  std::vector<unsigned char> patched(len, 0);
+  bool stale = false;
+  for (const auto& w : pending_writes) {
+    const unsigned long long w_end = w.addr + w.data.size();
+    if (w_end <= addr || w.addr >= addr + len) continue;
+    const unsigned long long from = std::max(addr, w.addr);
+    const unsigned long long to = std::min(addr + len, w_end);
+    for (unsigned long long a = from; a < to; ++a) {
+      const size_t i = static_cast<size_t>(a - addr);
+      if (patched[i]) continue;
+      out[i] = w.old[static_cast<size_t>(a - w.addr)];
+      patched[i] = 1;
+      stale = true;
+    }
+  }
+  return stale;
+}
+
+// A device consumer reading [addr, addr+len). While writes are deferred this
+// sees the pre-write bytes for anything not yet synced, and counts it.
+inline bool committed_read(unsigned long long addr, unsigned char* out, size_t len) {
+  const bool stale = committed_view(addr, out, len);
+  if (stale) stale_device_reads++;
+  return stale;
+}
+
+// Commit or defer a device write of `len` bytes at `addr`.
+inline bool device_write(unsigned long long addr, const unsigned char* src, size_t len) {
+  auto* p = static_cast<unsigned char*>(host_ptr(addr));
+  if (!p) return false;
+  if (!defer_device_writes) {
+    std::memcpy(p, src, len);
+    return true;
+  }
+  PendingWrite w;
+  w.addr = addr;
+  w.data.assign(src, src + len);
+  w.old.resize(len);
+  committed_view(addr, w.old.data(), len);  // bookkeeping, not a consumer read
+  pending_writes.push_back(std::move(w));
+  deferred_writes++;
+  return true;
+}
+
+// The sync boundary: everything submitted so far retires, in submission order.
+inline void commit_pending() {
+  for (const auto& w : pending_writes) {
+    auto* p = static_cast<unsigned char*>(host_ptr(w.addr));
+    if (p) std::memcpy(p, w.data.data(), w.data.size());
+  }
+  pending_writes.clear();
+}
+
 inline void reset() {
   launches.clear();
   sync_points.clear();
@@ -131,13 +250,15 @@ inline void reset() {
   memsets.clear();
   next_addr = 0x10000000;
   single_graph_echo = false;
+  defer_device_writes = false;
+  stale_device_reads = 0;
+  deferred_writes = 0;
+  fail_d2d = false;
+  fail_memset = false;
+  chain_hidden = false;
+  stale_input_launches = 0;
+  pending_writes.clear();
   if (!heap_base) heap_base = static_cast<unsigned char*>(std::calloc(1, kHeapBytes));
-}
-
-inline void* host_ptr(unsigned long long addr) {
-  if (!heap_base || addr < 0x10000000) return nullptr;
-  const size_t off = static_cast<size_t>(addr - 0x10000000);
-  return off < kHeapBytes ? heap_base + off : nullptr;
 }
 
 // Read one byte of "device" memory, so a test can assert on what a state buffer

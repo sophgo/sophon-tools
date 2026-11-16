@@ -112,11 +112,17 @@ bm_status_t bm_memset_device_ext(bm_handle_t handle, void* value, int mode,
                                  bm_device_mem_t mem) {
   (void)handle;
   (void)mode;
+  if (fake_bm::fail_memset) {
+    fake_bm::fail_memset = false;
+    return BM_ERR_FAILURE;
+  }
   fake_bm::memsets.push_back(
       {mem.u.device.device_addr, static_cast<unsigned int>(mem.size)});
   auto* p = static_cast<unsigned char*>(fake_bm::host_ptr(mem.u.device.device_addr));
   if (!p) return BM_ERR_PARAM;
-  std::memset(p, *static_cast<unsigned char*>(value), mem.size);
+  std::vector<unsigned char> filled(mem.size, *static_cast<unsigned char*>(value));
+  if (!fake_bm::device_write(mem.u.device.device_addr, filled.data(), filled.size()))
+    return BM_ERR_PARAM;
   return BM_SUCCESS;
 }
 
@@ -139,18 +145,20 @@ bm_status_t bm_memcpy_s2d(bm_handle_t handle, bm_device_mem_t dst, void* src) {
 
 bm_status_t bm_memcpy_d2s(bm_handle_t handle, void* dst, bm_device_mem_t src) {
   (void)handle;
-  auto* p = static_cast<unsigned char*>(fake_bm::host_ptr(src.u.device.device_addr));
-  if (!p) return BM_ERR_PARAM;
-  std::memcpy(dst, p, src.size);
+  if (!fake_bm::host_ptr(src.u.device.device_addr)) return BM_ERR_PARAM;
+  // Returns whether the read had to fall back to pre-write bytes; the read
+  // itself still produces the committed contents, as the hardware would.
+  fake_bm::committed_read(src.u.device.device_addr,
+                          static_cast<unsigned char*>(dst), src.size);
   return BM_SUCCESS;
 }
 
 bm_status_t bm_memcpy_d2s_partial(bm_handle_t handle, void* dst, bm_device_mem_t src,
                                   unsigned int size) {
   (void)handle;
-  auto* p = static_cast<unsigned char*>(fake_bm::host_ptr(src.u.device.device_addr));
-  if (!p || size > src.size) return BM_ERR_PARAM;
-  std::memcpy(dst, p, size);
+  if (!fake_bm::host_ptr(src.u.device.device_addr) || size > src.size) return BM_ERR_PARAM;
+  fake_bm::committed_read(src.u.device.device_addr,
+                          static_cast<unsigned char*>(dst), size);
   return BM_SUCCESS;
 }
 
@@ -158,12 +166,22 @@ bm_status_t bm_memcpy_d2d_byte(bm_handle_t handle, bm_device_mem_t dst,
                                size_t dst_offset, bm_device_mem_t src,
                                size_t src_offset, size_t size) {
   (void)handle;
+  if (fake_bm::fail_d2d) {
+    fake_bm::fail_d2d = false;
+    return BM_ERR_FAILURE;
+  }
   fake_bm::d2d_counts[{src.u.device.device_addr + src_offset,
                        dst.u.device.device_addr + dst_offset}]++;
   auto* d = static_cast<unsigned char*>(fake_bm::host_ptr(dst.u.device.device_addr));
-  auto* s = static_cast<unsigned char*>(fake_bm::host_ptr(src.u.device.device_addr));
-  if (!d || !s) return BM_ERR_PARAM;
-  std::memmove(d + dst_offset, s + src_offset, size);
+  if (!d || !fake_bm::host_ptr(src.u.device.device_addr)) return BM_ERR_PARAM;
+  // The copy kernel READS its source as a device consumer would: with writes
+  // deferred (the field-SDK behaviour, see fake_bm.h), a source whose earlier
+  // copy has not been synced still yields its pre-write bytes. That is the
+  // whole defect -- a chained copy reads a buffer nobody has filled yet.
+  std::vector<unsigned char> staged(size);
+  fake_bm::committed_read(src.u.device.device_addr + src_offset, staged.data(), size);
+  if (!fake_bm::device_write(dst.u.device.device_addr + dst_offset, staged.data(), size))
+    return BM_ERR_PARAM;
   return BM_SUCCESS;
 }
 
@@ -171,7 +189,9 @@ bm_status_t bm_thread_sync(bm_handle_t handle) {
   (void)handle;
   fake_bm::syncs++;
   fake_bm::pending = 0;
-  // Everything launched so far retires at this boundary.
+  // Everything launched or submitted so far retires at this boundary. This is
+  // the only point at which a deferred device write becomes visible.
+  fake_bm::commit_pending();
   fake_bm::sync_points.push_back(fake_bm::launches.size());
   if (fake_bm::fail_sync) {
     fake_bm::fail_sync = false;
@@ -301,6 +321,26 @@ bool bmrt_launch_tensor_ex(void* p_bmrt, const char* net_name,
     const int32_t id = l.first_input;
     if (id < 0 || id >= fake_bm::vocab) fake_bm::out_of_range_id_launches++;
   }
+  // A value keyed on the output address alone would be a constant, and a stale
+  // read of a chained copy would then be indistinguishable from a fresh one.
+  // `chain_hidden` makes output[0] a verbatim copy of the graph's input[0]
+  // instead, so a value planted at the head of the chain only reaches the
+  // pooled row when every copy that carried it was ordered.
+  if (fake_bm::chain_hidden && input_num > 0 && output_num > 0 &&
+      input_tensors[0].dtype == output_tensors[0].dtype) {
+    const unsigned int in_size = input_tensors[0].device_mem.size;
+    const unsigned int out_size = output_tensors[0].device_mem.size;
+    const unsigned int size = std::min(in_size, out_size);
+    std::vector<unsigned char> staged(size);
+    if (fake_bm::committed_read(input_tensors[0].device_mem.u.device.device_addr,
+                                staged.data(), size))
+      fake_bm::stale_input_launches++;
+    if (!fake_bm::device_write(output_tensors[0].device_mem.u.device.device_addr,
+                               staged.data(), size))
+      return false;
+    fake_bm::launches.push_back(l);
+    return true;
+  }
   for (int i = 0; i < output_num; i++) {
     l.out_addrs.push_back(output_tensors[i].device_mem.u.device.device_addr);
     if (fake_bm::single_graph_echo && input_num > 0) {
@@ -332,11 +372,19 @@ bool bmrt_launch_tensor_ex(void* p_bmrt, const char* net_name,
       continue;
     }
     // Pretend the graph ran: write a value that depends on the launch order, so
-    // an output read before the sync yields a different number.
-    write_u32(output_tensors[i].device_mem.u.device.device_addr,
-              output_tensors[i].device_mem.size,
-              fake_token(output_tensors[i].device_mem.u.device.device_addr) +
-                  static_cast<int32_t>(fake_bm::launches.size()));
+    // an output read before the sync yields a different number. The write is a
+    // device write, so it obeys the same retirement rule as a copy kernel. Only
+    // the first word is written -- fixtures seed the pooled row further in, and
+    // a whole-buffer clear here would erase that seed rather than model a graph.
+    if (output_tensors[i].device_mem.size >= sizeof(int32_t)) {
+      const int32_t v = fake_token(output_tensors[i].device_mem.u.device.device_addr) +
+                        static_cast<int32_t>(fake_bm::launches.size());
+      std::vector<unsigned char> staged(sizeof(v));
+      std::memcpy(staged.data(), &v, sizeof(v));
+      if (!fake_bm::device_write(output_tensors[i].device_mem.u.device.device_addr,
+                                 staged.data(), staged.size()))
+        return false;
+    }
   }
   fake_bm::launches.push_back(l);
   return true;

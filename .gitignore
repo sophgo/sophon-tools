@@ -7,6 +7,18 @@ images/
 models/
 output/*
 !.gitkeep
+# The `data/` rule above is meant for runtime/build payloads (models, datasets,
+# captured device state). It also swallowed the service's CHECKED-IN test
+# fixtures under source/pcv84x6_llm_server/tests/data/, so a clean checkout
+# could not run `python3 -m pytest -q`: 96 tests failed with FileNotFoundError
+# on files the tests legitimately expect. The exception below is deliberately
+# narrow -- that one directory and nothing else. No global `data/` is reopened,
+# and the fixture set is bounded: every file is a small, reviewable artifact
+# whose provenance and digest are recorded in
+# source/pcv84x6_llm_server/tests/data/PROVENANCE.md. Anything large or
+# licensed (model weights, customer documents) still stays out.
+!source/pcv84x6_llm_server/tests/data/
+!source/pcv84x6_llm_server/tests/data/**
 # psophliteos frontend src 下的 data/(icons.data) images/(logo/header) 是源码资源，需入库
 !source/psophliteos/frontend/src/**/data/
 !source/psophliteos/frontend/src/**/data/**

@@ -110,7 +110,11 @@ mkdir -p "$D/scripts" "$D/tools"
 cp scripts/install.sh scripts/uninstall.sh "$D/scripts/"
 cp tools/engine_check.py tools/e2e_check.py tools/cache_check.py tools/cache_e2e.py tools/stress_check.py "$D/tools/"
 mkdir -p "$D/tools/vl_embed"
-cp tools/vl_embed/service_check.py "$D/tools/vl_embed/"
+# Both acceptance tools ship: service_check.py is the fixed-input HTTP check,
+# and package_http_matrix.py is the bucket/switch matrix over the installed
+# package's own HTTP path. The latter must be inside the package to be runnable
+# against it, and it imports nothing outside the package's own app/ and vendor/.
+cp tools/vl_embed/service_check.py tools/vl_embed/package_http_matrix.py "$D/tools/vl_embed/"
 
 # Vendor wheels target the BOARD's interpreter (cp310/aarch64), never the build
 # host's. The unified sophon-tools image ships python3.8 + pip 20.0.2, which
@@ -230,18 +234,23 @@ find "$D/vendor" -name '__pycache__' -prune -exec rm -rf {} +
 python3 -m pip freeze --path "$D/vendor" > "$D/vendor/VENDORED.txt" 2>/dev/null || true
 
 echo "$VERSION" > "$D/VERSION"
-# COMMIT records the SERVICE source commit (zzttzzmyswy/cv84x6-llm-server), not
-# the sophon-tools build commit: writing the latter would mislabel the snapshot
-# as a commit of the original repository. When the service source lives inside
-# sophon-tools, keep the provenance explicit instead of resolving the outer HEAD.
+# COMMIT records the SERVICE source commit the engine and service code came
+# from. Since v0.6.38 that source lives in this repository
+# (sophgo/sophon-tools, source/pcv84x6_llm_server), so the file names that
+# repository explicitly rather than resolving the outer HEAD blindly: a caller
+# building from a subdirectory or a detached worktree must still get the truth
+# instead of an unrelated commit.
 SOURCE_FILE="$ROOT/build/source-commit.txt"
 if [ -f "$SOURCE_FILE" ]; then
-  # format: <service commit> [<repo>] [repo-root]  — repo-root means this tree
-  # IS the original repository, so git rev-parse is meaningful.
+  # format: <service commit> <repo> [<path within that repo>]
   SRC_COMMIT="$(cut -d' ' -f1 "$SOURCE_FILE")"
   SRC_REPO="$(cut -d' ' -f2 "$SOURCE_FILE")"
+  SRC_PATH="$(cut -d' ' -f3 "$SOURCE_FILE")"
   echo "$SRC_COMMIT" > "$D/COMMIT"
-  echo "service-repo: ${SRC_REPO:-unknown}" > "$D/COMMIT.provenance"
+  {
+    echo "service-repo: ${SRC_REPO:-unknown}"
+    [ -n "${SRC_PATH:-}" ] && echo "service-path: $SRC_PATH"
+  } > "$D/COMMIT.provenance"
 else
   git rev-parse HEAD > "$D/COMMIT" 2>/dev/null || true
 fi

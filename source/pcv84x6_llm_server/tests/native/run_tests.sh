@@ -21,6 +21,27 @@ fi
 out=$(mktemp -d)
 trap 'rm -rf "$out"' EXIT
 
+# The SDK image ships libjpeg's runtime object but not the bare libjpeg.so
+# linker symlink (same reason native/CMakeLists.txt resolves it by path), so
+# `-ljpeg` fails on a board that can run the engine perfectly well. Resolve the
+# versioned soname instead, and fail with a message that says so.
+jpeg="-ljpeg"
+if ! g++ -std=c++17 -x c++ - -o "$out/jpeg-probe" -ljpeg >/dev/null 2>&1 <<'EOF'
+int main() { return 0; }
+EOF
+then
+  jpeg=""
+  for candidate in /lib/*/libjpeg.so.8 /usr/lib/*/libjpeg.so.8 \
+                   /lib/*/libjpeg.so.62 /usr/lib/*/libjpeg.so.62; do
+    if [ -e "$candidate" ]; then jpeg="$candidate"; break; fi
+  done
+  if [ -z "$jpeg" ]; then
+    echo "no libjpeg (neither -ljpeg nor a versioned libjpeg.so.N)" >&2
+    exit 2
+  fi
+  echo "run_tests: linking $jpeg (no libjpeg.so linker symlink)" >&2
+fi
+
 g++ -std=c++17 -O1 -g -Wall -Wextra \
   -I"$inc" -I"$repo/native/include" -I"$here" \
   "$repo/native/src/llm_engine.cpp" "$here/fake_bm.cpp" "$here/test_decode_submit.cpp" \
@@ -42,6 +63,6 @@ g++ -std=c++17 -O1 -g -Wall -Wextra \
   -I"$inc" -I"$repo/native/include" -I"$here" \
   "$repo/native/src/vl_embed_engine.cpp" "$repo/native/src/vl_embed_c_api.cpp" "$repo/native/src/vision.cpp" \
   "$here/fake_bm.cpp" "$here/test_vl_embed_engine.cpp" \
-  -o "$out/test_vl_embed_engine" -lpthread -ljpeg -lz
+  -o "$out/test_vl_embed_engine" -lpthread "$jpeg" -lz
 
 "$out/test_vl_embed_engine"

@@ -80,21 +80,51 @@ struct VlEmbedEngine::Impl {
     owned.push_back(*mem);
     return true;
   }
+  // Wait until every device operation issued on this handle has retired.
+  //
+  // This is the completion order the field SDK does NOT give us for the copy
+  // kernels. On the CV84X6 branch of the installed `libbmlib.so.0`,
+  // `bm_memcpy_d2d_byte_with_core` calls `tpu_kernel_launch_from_multi_cores`
+  // and returns without any `bm_sync_api_from_core`; `bm_memset_device_ext`
+  // does the same. The call therefore means "the copy kernel was submitted",
+  // not "the bytes are in the destination". Measured on the board with a
+  // model-free A->B->C chain, an A->B copy followed by a B->C copy reads B
+  // before A->B landed and returns a whole block of zeros (4/128 and 2/64 in
+  // two independent runs); inserting a sync between the copies made every
+  // trial byte-identical. See tools/vl_embed/MYS-2913-wemm-zero-vector.md.
+  //
+  // The encoder has exactly that dependency pattern in production: a graph's
+  // output is copied into the independent `hidden` buffer and the next graph
+  // is launched on it. Without this wait the next graph reads a buffer whose
+  // contents are still the previous request's, which is what produced the
+  // zero vectors and the silently different vectors for identical input.
+  //
+  // A failed wait leaves the device in an unknown state, so it takes the same
+  // fatal path as a failed launch: `fault` latches and no further work is
+  // submitted until the model is reloaded.
+  bool sync(const char* what) {
+    if (bm_thread_sync(handle) != BM_SUCCESS)
+      return fail(std::string("device sync failed after ") + what, true);
+    return true;
+  }
   bool zero(bm_device_mem_t mem) {
-    return bm_memset_device_ext(handle, &aux::kZero, 1, mem) == BM_SUCCESS ||
-           fail("device memset failed", true);
+    if (bm_memset_device_ext(handle, &aux::kZero, 1, mem) != BM_SUCCESS)
+      return fail("device memset failed", true);
+    return sync("memset");
   }
   bool upload(bm_device_mem_t mem, const void* data, size_t bytes) {
     if (bytes > bm_mem_get_device_size(mem)) return fail("upload exceeds graph input");
-    return bm_memcpy_s2d_partial(handle, mem, const_cast<void*>(data), bytes) == BM_SUCCESS ||
-           fail("host-to-device copy failed", true);
+    if (bm_memcpy_s2d_partial(handle, mem, const_cast<void*>(data), bytes) != BM_SUCCESS)
+      return fail("host-to-device copy failed", true);
+    return sync("host-to-device copy");
   }
   bool copy(bm_device_mem_t dst, size_t offset, bm_device_mem_t src, size_t bytes) {
     if (offset + bytes > bm_mem_get_device_size(dst) || bytes > bm_mem_get_device_size(src))
       return fail("device copy exceeds graph buffer");
     if (dst.u.device.device_addr + offset == src.u.device.device_addr) return true;
-    return bm_memcpy_d2d_byte(handle, dst, offset, src, 0, bytes) == BM_SUCCESS ||
-           fail("device-to-device copy failed", true);
+    if (bm_memcpy_d2d_byte(handle, dst, offset, src, 0, bytes) != BM_SUCCESS)
+      return fail("device-to-device copy failed", true);
+    return sync("device-to-device copy");
   }
   bool launch(const bm_net_info_t* net, int rows = 0) {
     if (trace) std::fprintf(stderr, "[vl-embed] launch %s rows=%d\n", net->name, rows);
@@ -113,8 +143,7 @@ struct VlEmbedEngine::Impl {
     if (!bmrt_launch_tensor_ex(rt, net->name, in.data(), net->input_num,
                                out.data(), net->output_num, true, false))
       return fail(std::string("launch failed: ") + net->name, true);
-    if (bm_thread_sync(handle) != BM_SUCCESS)
-      return fail(std::string("device sync failed: ") + net->name, true);
+    if (!sync(net->name)) return false;
     if (trace) std::fprintf(stderr, "[vl-embed] complete %s\n", net->name);
     return true;
   }

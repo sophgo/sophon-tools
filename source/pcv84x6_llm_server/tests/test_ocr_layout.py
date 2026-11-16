@@ -205,8 +205,12 @@ def _npz_arrays(image: str, kind: str):
 
 def _npz_path():
     path = DATA / "layout_tensors.npz"
-    if not path.exists():  # pragma: no cover - regenerated with the golden
-        pytest.skip("layout_tensors.npz missing; re-run tools/ocr/make_golden.py")
+    # A missing golden is a broken checkout, not a reason to skip: skipping
+    # would report "passed" while the tensor comparison never ran. The fixture
+    # is checked in and its digest is in tests/data/PROVENANCE.md.
+    assert path.exists(), (
+        f"{path} is missing; it is a checked-in fixture (see "
+        f"tests/data/PROVENANCE.md), so a clean checkout should have it")
     return path
 
 

@@ -49,8 +49,9 @@ def checker(tmp_path_factory) -> Path:
 
 
 def test_pipeline_matches_reference_bitwise(checker: Path):
-    if not GOLDEN.exists():
-        pytest.skip("tests/vision_golden.json is missing")
+    # Checked in; a missing golden must fail rather than skip, or the bitwise
+    # comparison silently stops being part of the suite.
+    assert GOLDEN.exists(), f"{GOLDEN} is missing; it is a checked-in fixture"
     proc = subprocess.run([str(checker), str(GOLDEN), str(FIXTURES)],
                           capture_output=True, text=True)
     assert proc.returncode == 0, (
@@ -60,8 +61,7 @@ def test_pipeline_matches_reference_bitwise(checker: Path):
 
 def test_golden_covers_the_awkward_inputs():
     """A shrunken fixture set would quietly stop testing the hard paths."""
-    if not GOLDEN.exists():
-        pytest.skip("tests/vision_golden.json is missing")
+    assert GOLDEN.exists(), f"{GOLDEN} is missing; it is a checked-in fixture"
     data = json.loads(GOLDEN.read_text(encoding="utf-8"))
     names = {c["name"] for c in data["cases"]}
     for required in ("gradient.png", "noise.png", "photo.jpg", "palette.png",

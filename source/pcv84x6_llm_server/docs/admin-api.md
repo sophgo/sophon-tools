@@ -1,7 +1,7 @@
 # 管理 API 文档
 
 本文件由 `tools/gen_admin_api_doc.py` 从服务的 OpenAPI 文档生成（当前服务版本
-`0.6.37`），**不要手改**：改接口后重新生成，`tests/test_admin_api_docs.py` 会检查
+`0.6.38`），**不要手改**：改接口后重新生成，`tests/test_admin_api_docs.py` 会检查
 两者是否一致。手写的几节（本节的约定、错误码、分页与时间格式、`/v1` 的文档）写在生成
 脚本里，其余全部来自 `app/api/*.py` 的注解与 `app/api/admin_schemas.py` 的模型。
 

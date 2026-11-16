@@ -1,0 +1,396 @@
+{
+ "source": "paddlex 3.7.2 paddlex/inference/pipelines/paddleocr_vl/uilts.py::convert_otsl_to_html",
+ "generator": "tools/ocr/make_otsl_golden.py",
+ "cases": [
+  {
+   "otsl": "<fcel>2026年第三季度生产数据统计表<lcel><lcel><lcel><nl><fcel>产线<fcel>产量（台）<fcel>合格率<fcel>负责人<nl><fcel>一号线<fcel>4,120<fcel>99.6%<fcel>张伟<nl><fcel>二号线<fcel>3,860<fcel>99.1%<fcel>李静<nl><fcel>三号线<fcel>3,300<fcel>98.7%<fcel>王强<nl><fcel>四号线<fcel>1,200<fcel>99.4%<fcel>赵敏<nl><fcel>合计<fcel>12,480<fcel>99.2%<fcel>—<nl>",
+   "html": "<table><tr><td colspan=\"4\">2026年第三季度生产数据统计表</td></tr><tr><td>产线</td><td>产量（台）</td><td>合格率</td><td>负责人</td></tr><tr><td>一号线</td><td>4,120</td><td>99.6%</td><td>张伟</td></tr><tr><td>二号线</td><td>3,860</td><td>99.1%</td><td>李静</td></tr><tr><td>三号线</td><td>3,300</td><td>98.7%</td><td>王强</td></tr><tr><td>四号线</td><td>1,200</td><td>99.4%</td><td>赵敏</td></tr><tr><td>合计</td><td>12,480</td><td>99.2%</td><td>—</td></tr></table>",
+   "note": "curated"
+  },
+  {
+   "otsl": "<fcel>2026年第三季度设备巡检记录<lcel><lcel><lcel><lcel><nl><fcel>区域/设备<lcel><fcel>巡检日期<fcel>状态<fcel>负责人<nl><fcel>二号机房<fcel>服务器D<fcel>2026-06-30<fcel>正常<fcel>赵敏<nl><fcel>一号机房<fcel>服务器A<fcel>2026-07-12<fcel>正常<fcel>张伟<nl><ucel><fcel>服务器B<fcel>2026-08-09<fcel>告警<fcel>李娜<nl><ucel><fcel>服务器C<fcel>2026-09-01<fcel>正常<fcel>王强<nl>",
+   "html": "<table><tr><td colspan=\"5\">2026年第三季度设备巡检记录</td></tr><tr><td colspan=\"2\">区域/设备</td><td>巡检日期</td><td>状态</td><td>负责人</td></tr><tr><td>二号机房</td><td>服务器D</td><td>2026-06-30</td><td>正常</td><td>赵敏</td></tr><tr><td rowspan=\"3\">一号机房</td><td>服务器A</td><td>2026-07-12</td><td>正常</td><td>张伟</td></tr><tr><td>服务器B</td><td>2026-08-09</td><td>告警</td><td>李娜</td></tr><tr><td>服务器C</td><td>2026-09-01</td><td>正常</td><td>王强</td></tr></table>",
+   "note": "curated"
+  },
+  {
+   "otsl": "<fcel>a<fcel>b<nl><fcel>c<fcel>d<nl>",
+   "html": "<table><tr><td>a</td><td>b</td></tr><tr><td>c</td><td>d</td></tr></table>",
+   "note": "curated"
+  },
+  {
+   "otsl": "<fcel>a<fcel>b<fcel>c<nl><fcel>d<nl>",
+   "html": "<table><tr><td>a</td><td>b</td><td>c</td></tr><tr><td>d</td><td></td><td></td></tr></table>",
+   "note": "curated"
+  },
+  {
+   "otsl": "<ecel><fcel>x<nl>",
+   "html": "<table><tr><td></td><td>x</td></tr></table>",
+   "note": "curated"
+  },
+  {
+   "otsl": "<fcel>a<xcel><nl><xcel><fcel>b<nl>",
+   "html": "<table><tr><td rowspan=\"2\" colspan=\"2\">a</td></tr><tr><td>b</td></tr></table>",
+   "note": "curated"
+  },
+  {
+   "otsl": "<fcel>a<lcel><lcel><nl><fcel>b<fcel>c<nl>",
+   "html": "<table><tr><td colspan=\"2\">a</td></tr><tr><td>b</td><td>c</td></tr></table>",
+   "note": "curated"
+  },
+  {
+   "otsl": "<fcel>a<fcel>b<lcel><nl><fcel>c<fcel>d<fcel>e<nl>",
+   "html": "<table><tr><td>a</td><td colspan=\"2\">b</td></tr><tr><td>c</td><td>d</td><td>e</td></tr></table>",
+   "note": "curated"
+  },
+  {
+   "otsl": "<fcel>a<fcel>b<nl><ucel><ucel><nl>",
+   "html": "<table><tr><td rowspan=\"2\">a</td><td rowspan=\"2\">b</td></tr><tr></tr></table>",
+   "note": "curated"
+  },
+  {
+   "otsl": "<fcel>a<b<fcel>&amp<fcel>\"q\"<nl>",
+   "html": "<table><tr><td>a&lt;b</td><td>&amp;amp</td><td>&quot;q&quot;</td></tr></table>",
+   "note": "curated"
+  },
+  {
+   "otsl": "\n<fcel>a<fcel>b<nl>\n",
+   "html": "<table><tr><td>a</td><td>b</td></tr></table>",
+   "note": "curated"
+  },
+  {
+   "otsl": "<fcel>only<nl>",
+   "html": "<table><tr><td>only</td></tr></table>",
+   "note": "curated"
+  },
+  {
+   "otsl": "<fcel>a<fcel>b<nl><fcel>c<fcel>",
+   "html": "<table><tr><td>a</td><td>b</td></tr><tr><td>c</td><td>&lt;nl&gt;</td></tr></table>",
+   "note": "curated"
+  },
+  {
+   "otsl": "<fcel>a<nl><nl><fcel>b<nl>",
+   "html": "<table><tr><td>a</td></tr><tr><td>b</td></tr></table>",
+   "note": "curated"
+  },
+  {
+   "otsl": "text before<fcel>a<nl>text after",
+   "html": "<table><tr><td>a</td></tr></table>",
+   "note": "curated"
+  },
+  {
+   "otsl": "",
+   "html": "",
+   "note": "curated"
+  },
+  {
+   "otsl": "<nl>",
+   "html": "",
+   "note": "curated"
+  },
+  {
+   "otsl": "上表是 2026 年第三季度的产线统计。一号线产量最高。",
+   "html": "",
+   "note": "curated"
+  },
+  {
+   "otsl": "<xcel><lcel><lcel><fcel>x y<ecel><ecel><xcel><fcel><nl><fcel>—<fcel>4,120<nl><ecel><ucel><ecel><nl><xcel><ecel><lcel>",
+   "html": "<table><tr><td></td><td></td><td></td><td>x y</td><td></td><td colspan=\"2\"></td><td>&lt;nl&gt;</td></tr><tr><td>—</td><td rowspan=\"2\">4,120</td><td></td><td></td><td></td><td></td><td></td><td></td></tr><tr><td rowspan=\"2\"></td><td></td><td></td><td></td><td></td><td></td><td></td></tr><tr><td colspan=\"2\"></td><td></td><td></td><td></td><td></td><td></td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<xcel><ucel><fcel><ecel><fcel>a<lcel><ucel><ecel><ucel><xcel><ecel><ecel><ucel><fcel><xcel><lcel><xcel><ucel><ucel><fcel><lcel>",
+   "html": "<table><tr><td></td><td></td><td>&lt;ecel&gt;</td><td></td><td colspan=\"2\">a</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td colspan=\"4\">&lt;xcel&gt;</td><td></td><td></td><td>&lt;lcel&gt;</td><td></td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<lcel><ecel><ecel><fcel><fcel><b>&<nl><xcel><nl><xcel><ucel><lcel><xcel><fcel>x y<fcel><ecel><ecel><xcel><ecel><xcel><ecel>",
+   "html": "<table><tr><td></td><td></td><td></td><td>&lt;fcel&gt;</td><td>&lt;b&gt;&amp;</td><td></td></tr><tr><td></td><td rowspan=\"2\"></td><td></td><td rowspan=\"2\"></td><td></td><td></td></tr><tr><td></td><td></td><td>x y</td><td>&lt;nl&gt;</td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<lcel><xcel><xcel><ecel><nl><ecel><lcel><fcel>a<ucel><nl><xcel><nl><nl><ucel><fcel><b>&",
+   "html": "<table><tr><td></td><td></td><td></td></tr><tr><td rowspan=\"3\" colspan=\"2\"></td><td>a</td></tr><tr><td></td><td></td></tr><tr><td>&lt;b&gt;&amp;</td><td></td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<ucel><ucel><xcel><fcel><lcel><ucel><nl>",
+   "html": "<table><tr><td></td><td></td><td></td><td>&lt;lcel&gt;</td><td></td><td></td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<ucel><xcel><ucel><xcel><fcel>x y<ucel><ucel><fcel>a<lcel><xcel><lcel><nl><xcel><ucel><ucel><fcel>a<ecel><ucel><ecel><ucel><ucel><fcel>\"q\"",
+   "html": "<table><tr><td></td><td></td><td></td><td></td><td>x y</td><td></td><td></td><td rowspan=\"2\" colspan=\"3\">a</td></tr><tr><td></td><td></td><td></td><td>a</td><td></td><td></td><td></td><td>&quot;q&quot;</td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<xcel><nl><ecel><fcel>产线<xcel><ucel><lcel><ecel><ucel>",
+   "html": "<table><tr><td></td><td></td></tr><tr><td></td><td>产线</td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<ecel><nl><xcel><nl><lcel><ecel><nl>",
+   "html": "<table><tr><td rowspan=\"2\"></td></tr><tr></tr><tr><td></td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<ecel><nl><fcel>a<ucel><xcel><lcel><ecel><nl><ecel><ucel><lcel><fcel>—<ucel><lcel><ecel><nl><nl>",
+   "html": "<table><tr><td></td><td rowspan=\"3\"></td><td rowspan=\"2\"></td><td></td><td></td></tr><tr><td>a</td><td></td><td rowspan=\"2\"></td></tr><tr><td></td><td></td><td>—</td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<xcel><nl><ecel><xcel><xcel><fcel><b>&<nl><lcel><lcel>",
+   "html": "<table><tr><td></td><td rowspan=\"2\"></td><td rowspan=\"2\"></td><td></td></tr><tr><td colspan=\"3\"></td><td>&lt;b&gt;&amp;</td></tr><tr><td></td><td></td><td></td><td></td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<fcel>—<xcel><fcel>—<fcel>x y<fcel><xcel><lcel><xcel>",
+   "html": "<table><tr><td colspan=\"2\">—</td><td>—</td><td>x y</td><td colspan=\"4\">&lt;xcel&gt;</td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<xcel><xcel><nl><lcel><nl><nl><xcel><xcel><xcel>",
+   "html": "<table><tr><td></td><td></td></tr><tr><td></td><td rowspan=\"2\"></td></tr><tr><td></td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<lcel><ucel><nl>",
+   "html": "",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<ecel><ecel><fcel>a<fcel>a<fcel>",
+   "html": "<table><tr><td></td><td></td><td>a</td><td>a</td><td>&lt;nl&gt;</td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<lcel><fcel>x y<fcel>4,120<ecel>",
+   "html": "<table><tr><td></td><td>x y</td><td>4,120</td><td></td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<ecel><lcel><fcel>产线",
+   "html": "<table><tr><td colspan=\"2\"></td><td>产线</td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<ucel><ecel><ucel><ucel><lcel><fcel><ucel><lcel><nl><xcel><ecel><xcel><lcel><lcel><xcel><ucel><lcel><xcel><nl><ucel><xcel><ucel>",
+   "html": "<table><tr><td></td><td></td><td></td><td></td><td></td><td rowspan=\"2\">&lt;ucel&gt;</td><td></td><td></td></tr><tr><td></td><td rowspan=\"2\" colspan=\"5\"></td><td></td><td></td></tr><tr><td></td><td></td><td></td><td></td><td></td><td></td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<fcel><b>&<lcel>",
+   "html": "<table><tr><td colspan=\"2\">&lt;b&gt;&amp;</td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<ucel><xcel><xcel><ucel><ecel><lcel><fcel>a<xcel>",
+   "html": "<table><tr><td></td><td></td><td></td><td></td><td colspan=\"2\"></td><td colspan=\"2\">a</td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<xcel><ucel><lcel><xcel><lcel><nl><lcel><lcel><ecel><fcel><ecel><lcel><nl><lcel><xcel><nl>",
+   "html": "<table><tr><td></td><td></td><td></td><td></td><td></td></tr><tr><td></td><td></td><td></td><td>&lt;ecel&gt;</td><td></td></tr><tr><td></td><td></td><td></td><td></td><td></td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<ucel><xcel><fcel>4,120<nl><fcel>4,120<nl><xcel><ucel><fcel>",
+   "html": "<table><tr><td></td><td></td><td>4,120</td></tr><tr><td rowspan=\"2\">4,120</td><td rowspan=\"2\"></td><td></td></tr><tr><td>&lt;nl&gt;</td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<lcel><nl><ecel><lcel><ecel><ecel><ecel><ecel><ecel><lcel><xcel><ecel>",
+   "html": "<table><tr><td></td></tr><tr><td></td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<fcel><xcel><ecel><xcel><ecel><ecel>",
+   "html": "<table><tr><td>&lt;xcel&gt;</td><td></td><td colspan=\"2\"></td><td></td><td></td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<ucel><ucel><fcel><b>&<lcel><xcel><lcel><lcel><lcel><lcel><ucel><lcel><fcel><ecel><nl><xcel><ucel><lcel>",
+   "html": null,
+   "note": "PaddleX raises IndexError; ours must still answer HTML"
+  },
+  {
+   "otsl": "<nl><ucel><ucel><ecel><lcel><ecel><lcel><xcel><lcel><ucel><fcel>—<ecel><nl><ucel><fcel>a<nl>",
+   "html": "<table><tr><td></td><td></td><td colspan=\"2\"></td><td colspan=\"4\"></td><td></td><td>—</td></tr><tr><td></td><td>a</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<fcel>4,120<ecel><fcel>产线<nl><ecel><ucel><ucel><xcel><fcel>x y<lcel><lcel><fcel>\"q\"<fcel>\"q\"<ucel><ecel><fcel><nl><fcel><fcel><b>&",
+   "html": "<table><tr><td>4,120</td><td rowspan=\"2\"></td><td rowspan=\"2\">产线</td><td rowspan=\"2\"></td><td></td><td></td><td></td><td></td><td></td><td rowspan=\"2\"></td><td></td><td></td></tr><tr><td></td><td colspan=\"3\">x y</td><td>&quot;q&quot;</td><td>&quot;q&quot;</td><td></td><td>&lt;nl&gt;</td></tr><tr><td>&lt;fcel&gt;</td><td>&lt;b&gt;&amp;</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<xcel><fcel><ucel><nl><ucel><fcel>4,120<lcel><ecel><nl><xcel><lcel><ucel><ecel><ecel>",
+   "html": "<table><tr><td></td><td>&lt;ucel&gt;</td><td></td><td></td></tr><tr><td></td><td colspan=\"2\">4,120</td><td></td></tr><tr><td></td><td></td><td></td><td></td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<fcel><xcel><lcel><ecel><nl><xcel><xcel><xcel><ecel><xcel><lcel><xcel><fcel><nl><nl>",
+   "html": "<table><tr><td rowspan=\"2\" colspan=\"3\">&lt;xcel&gt;</td><td></td><td rowspan=\"2\"></td><td></td><td rowspan=\"2\"></td><td></td></tr><tr><td colspan=\"4\"></td><td>&lt;nl&gt;</td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<nl><ucel><fcel><xcel><ecel><lcel><ucel><lcel><ucel><fcel>—<lcel><lcel><nl><ucel><ecel><ucel><ucel><lcel><ucel><ecel><nl><ecel>",
+   "html": "<table><tr><td></td><td>&lt;xcel&gt;</td><td></td><td rowspan=\"2\" colspan=\"2\"></td><td></td><td></td><td></td><td>—</td></tr><tr><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr><tr><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<lcel><ucel><ucel>",
+   "html": "",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<nl><lcel><xcel><ecel><fcel>x y<ecel><ucel><nl>",
+   "html": "<table><tr><td></td><td></td><td></td><td>x y</td><td></td><td></td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<fcel>产线<ecel><fcel><ucel><nl>",
+   "html": "<table><tr><td>产线</td><td></td><td>&lt;ucel&gt;</td><td></td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<xcel><xcel><ecel><ecel><lcel><ecel><ecel><xcel><ucel><fcel>产线<lcel><fcel>4,120<ecel><lcel><nl><fcel>x y<nl><ucel><ucel>",
+   "html": "<table><tr><td></td><td></td><td></td><td colspan=\"2\"></td><td></td><td colspan=\"2\"></td><td></td><td colspan=\"2\">产线</td><td>4,120</td></tr><tr><td rowspan=\"2\">x y</td><td rowspan=\"2\"></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr><tr><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<nl><fcel>\"q\"<nl><lcel><xcel><ucel><fcel>产线<fcel><xcel><ecel><lcel><ucel><lcel><xcel><ecel><fcel>—",
+   "html": "<table><tr><td>&quot;q&quot;</td><td rowspan=\"2\"></td><td rowspan=\"2\"></td><td></td><td></td><td rowspan=\"2\"></td><td></td><td></td><td rowspan=\"2\"></td><td></td><td rowspan=\"2\"></td><td></td><td></td></tr><tr><td></td><td>产线</td><td>&lt;xcel&gt;</td><td colspan=\"2\"></td><td></td><td></td><td>—</td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<nl><xcel><ecel><ecel><ecel><lcel><nl><lcel><lcel><xcel>",
+   "html": "<table><tr><td></td><td></td><td rowspan=\"2\"></td></tr><tr><td></td><td></td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<lcel><xcel><lcel><ucel><lcel><xcel><fcel><ecel><ucel><nl><xcel><ecel><ecel><ecel><ucel><xcel><fcel><b>&",
+   "html": null,
+   "note": "PaddleX raises IndexError; ours must still answer HTML"
+  },
+  {
+   "otsl": "<xcel><xcel><xcel><nl>",
+   "html": "",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<nl><ucel><fcel>a<ucel><lcel><ucel><ucel><fcel>产线<ecel><ecel><xcel><nl><lcel><ucel><fcel>\"q\"<fcel>4,120<nl><nl><ucel>",
+   "html": "<table><tr><td></td><td rowspan=\"2\">a</td><td></td><td></td><td></td><td></td><td>产线</td></tr><tr><td></td><td>&quot;q&quot;</td><td>4,120</td><td></td><td></td><td></td></tr><tr><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<xcel><xcel><nl><xcel><ecel><xcel><fcel><nl><fcel>x y",
+   "html": "<table><tr><td></td><td></td><td rowspan=\"2\"></td><td></td></tr><tr><td></td><td colspan=\"2\"></td><td>&lt;nl&gt;</td></tr><tr><td>x y</td><td></td><td></td><td></td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<ecel><nl><ecel><nl><nl>",
+   "html": "<table><tr><td></td></tr><tr><td></td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<lcel><ecel><fcel>—<ecel><xcel><nl><lcel><nl><nl><nl><nl><xcel><xcel><nl><nl><ucel><lcel><lcel>",
+   "html": "<table><tr><td></td><td></td><td>—</td></tr><tr><td></td><td rowspan=\"2\"></td><td></td></tr><tr><td></td><td></td></tr><tr><td></td><td></td><td></td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<nl><lcel>",
+   "html": "",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<nl><ecel><nl><lcel><lcel><ucel><nl><ecel><fcel>产线<ecel><nl><xcel><fcel>—<ecel><ecel><ecel><fcel>\"q\"",
+   "html": "<table><tr><td></td><td></td><td rowspan=\"2\"></td><td></td><td></td><td></td></tr><tr><td></td><td></td><td></td><td></td><td></td></tr><tr><td rowspan=\"2\"></td><td>产线</td><td></td><td></td><td></td><td></td></tr><tr><td>—</td><td></td><td></td><td></td><td>&quot;q&quot;</td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<nl><ucel>",
+   "html": "",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<nl><nl><xcel><xcel><lcel><xcel>",
+   "html": "",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<lcel><ucel><lcel><fcel>4,120<ecel><xcel><xcel><ecel><ecel><nl><ucel><lcel>",
+   "html": "<table><tr><td></td><td></td><td></td><td>4,120</td></tr><tr><td></td><td></td><td></td><td></td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<ecel><nl><ecel><ecel><lcel><ucel><ucel><fcel>4,120<nl><fcel>\"q\"<ucel><ecel><ucel><nl><nl><nl><xcel>",
+   "html": "<table><tr><td></td><td></td><td></td><td rowspan=\"3\"></td><td rowspan=\"2\"></td><td></td></tr><tr><td></td><td rowspan=\"2\" colspan=\"2\"></td><td>4,120</td></tr><tr><td rowspan=\"2\">&quot;q&quot;</td><td></td><td></td><td></td></tr><tr><td></td><td></td><td></td><td></td><td></td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<xcel>",
+   "html": "",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<nl><xcel><ecel><nl><lcel>",
+   "html": "",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<lcel><xcel><ecel><ucel><ucel><nl><fcel>x y<ecel><ucel><xcel><xcel><fcel>4,120",
+   "html": "<table><tr><td></td><td></td><td rowspan=\"2\"></td><td></td><td></td><td></td></tr><tr><td>x y</td><td></td><td></td><td></td><td>4,120</td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<ecel><fcel>—<ucel><xcel><ucel><lcel><ucel><nl><fcel>产线<xcel><lcel><lcel>",
+   "html": "<table><tr><td></td><td rowspan=\"2\">—</td><td></td><td></td></tr><tr><td colspan=\"4\">产线</td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<fcel>产线<fcel>a<ucel><fcel>产线<ucel><nl><ecel><fcel>产线<ecel><nl><ecel><lcel><xcel><fcel>a<xcel><lcel><ucel>",
+   "html": "<table><tr><td>产线</td><td>a</td><td></td><td>产线</td><td></td></tr><tr><td></td><td>产线</td><td rowspan=\"2\"></td><td></td><td rowspan=\"2\"></td></tr><tr><td colspan=\"3\"></td><td colspan=\"2\">a</td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<ucel><fcel>—<xcel><ucel><nl><ecel><ucel><fcel>x y<ecel><ucel><xcel><fcel>产线<ecel><ucel><lcel><xcel>",
+   "html": "<table><tr><td></td><td rowspan=\"2\" colspan=\"2\">—</td><td></td><td rowspan=\"2\"></td><td rowspan=\"2\"></td><td></td></tr><tr><td></td><td>x y</td><td></td><td>产线</td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<ecel><ecel><ecel><nl><fcel><ecel><nl><ecel><fcel>a<nl><lcel><lcel><nl>",
+   "html": "<table><tr><td></td><td></td></tr><tr><td>&lt;ecel&gt;</td><td></td></tr><tr><td></td><td>a</td></tr><tr><td></td><td></td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<fcel>x y<lcel><xcel><lcel><fcel><nl><fcel><fcel>产线<xcel><ecel><ecel><lcel><ecel><fcel>a<ucel>",
+   "html": "<table><tr><td colspan=\"4\">x y</td><td>&lt;ecel&gt;</td><td></td><td></td><td></td></tr><tr><td>&lt;fcel&gt;</td><td colspan=\"2\">产线</td><td></td><td colspan=\"2\"></td><td></td><td>a</td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<ucel>",
+   "html": "",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<ucel><nl><ecel><lcel><fcel>—<xcel><xcel><fcel>a<fcel><ucel><xcel><ucel><nl><ecel>",
+   "html": "<table><tr><td></td><td></td><td></td><td rowspan=\"2\"></td><td rowspan=\"2\"></td><td></td><td></td></tr><tr><td colspan=\"2\"></td><td colspan=\"3\">—</td><td>a</td><td>&lt;nl&gt;</td></tr><tr><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<fcel>产线<lcel><nl><xcel><xcel><lcel><fcel>产线<lcel><nl><ecel><lcel><xcel><lcel><ucel><fcel><ecel>",
+   "html": "<table><tr><td rowspan=\"2\" colspan=\"2\">产线</td><td></td><td></td><td></td><td></td></tr><tr><td></td><td colspan=\"2\">产线</td><td></td></tr><tr><td colspan=\"4\"></td><td></td><td>&lt;nl&gt;</td></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<nl><nl><fcel>产线<xcel><nl><ucel>",
+   "html": "<table><tr><td rowspan=\"2\">产线</td></tr><tr></tr></table>",
+   "note": "fuzz"
+  },
+  {
+   "otsl": "<ucel><nl><ecel><ecel><nl><fcel>—<fcel><b>&<lcel><fcel>产线<ecel>",
+   "html": "<table><tr><td></td><td></td><td></td><td></td></tr><tr><td></td><td></td><td></td><td></td></tr><tr><td>—</td><td colspan=\"2\">&lt;b&gt;&amp;</td><td>产线</td></tr></table>",
+   "note": "fuzz"
+  }
+ ]
+}

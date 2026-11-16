@@ -68,9 +68,11 @@ def golden() -> dict:
 @pytest.fixture(scope="module")
 def tensors() -> dict:
     path = DATA / "postprocess.npz"
-    if not path.exists():
-        pytest.skip("tests/data/ocr/postprocess.npz missing; run "
-                    "tools/ocr/make_postprocess_golden.py")
+    # Checked in, with its digest recorded in tests/data/PROVENANCE.md. A skip
+    # here would let the whole tensor comparison vanish from a "passing" run.
+    assert path.exists(), (
+        f"{path} is missing; it is a checked-in fixture (see "
+        f"tests/data/PROVENANCE.md)")
     with np.load(path) as archive:
         return {name: archive[name] for name in archive.files}
 
