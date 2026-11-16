@@ -1,0 +1,221 @@
+# 生成方式：在 native/src/vl_embed_engine.cpp 基础上加逐层回读与 A/B 开关。
+# 应用：cp 到临时目录，patch 后按 MYS-2913-build-diag.sh 编译（板端，链接本机 libsophon）。
+# 仅诊断用，不进入产品构建。
+--- source/pcv84x6_llm_server/native/src/vl_embed_engine.cpp	2026-11-16 02:20:58.947599544 -0800
++++ diag-native/vl_embed_engine_diag.cpp	2026-11-16 03:22:39.840890549 -0800
+@@ -16,6 +16,7 @@
+ #include <cstdlib>
+ #include <cstring>
+ #include <mutex>
++#include <thread>
+ #include <vector>
+ 
+ namespace cv84x6 {
+@@ -25,6 +26,35 @@
+   return std::chrono::duration<double, std::milli>(Clock::now() - start).count();
+ }
+ constexpr int kHidden = 2048;
++
++// --- MYS-2913 diagnostics -------------------------------------------------
++// Read a row of a device buffer back and summarise it. A stage that is
++// supposed to produce activations but reports norm 0 is the first zero of the
++// chain; everything downstream of it is a consequence, not a cause.
++struct RowSummary {
++  double norm = 0;
++  int nonzero = 0;
++  unsigned long long hash = 1469598103934665603ULL;
++  float first[4] = {0, 0, 0, 0};
++};
++RowSummary summarise(bm_handle_t handle, bm_device_mem_t mem, size_t offset_bytes,
++                     int dims) {
++  RowSummary s;
++  std::vector<uint16_t> raw(static_cast<size_t>(dims));
++  bm_device_mem_t view = bm_mem_from_device(
++      mem.u.device.device_addr + offset_bytes, raw.size() * sizeof(uint16_t));
++  if (bm_memcpy_d2s(handle, raw.data(), view) != BM_SUCCESS) return s;
++  for (int i = 0; i < dims; ++i) {
++    const float v = aux::bf16_to_f32(raw[i]);
++    s.norm += static_cast<double>(v) * v;
++    if (v != 0.0f) ++s.nonzero;
++    if (i < 4) s.first[i] = v;
++    s.hash ^= raw[i];
++    s.hash *= 1099511628211ULL;
++  }
++  s.norm = std::sqrt(s.norm);
++  return s;
++}
+ }  // namespace
+ 
+ struct VlEmbedEngine::Impl {
+@@ -51,6 +81,14 @@
+   std::string error;
+   std::mutex mutex;
+   bool trace = std::getenv("CV_VLE_TRACE") != nullptr;
++  bool memset_sync = std::getenv("CV_VLE_MEMSET_SYNC") != nullptr &&
++                     std::atoi(std::getenv("CV_VLE_MEMSET_SYNC")) != 0;
++  bool copy_sync = std::getenv("CV_VLE_COPY_SYNC") != nullptr &&
++                   std::atoi(std::getenv("CV_VLE_COPY_SYNC")) != 0;
++  int copy_delay_us = std::getenv("CV_VLE_COPY_DELAY_US")
++                          ? std::atoi(std::getenv("CV_VLE_COPY_DELAY_US")) : 0;
++  bool launch_sync = std::getenv("CV_VLE_LAUNCH_SYNC") != nullptr &&
++                     std::atoi(std::getenv("CV_VLE_LAUNCH_SYNC")) != 0;
+ 
+   ~Impl() {
+     // A failed sync can leave a launch outstanding. Drain before releasing
+@@ -81,22 +119,59 @@
+     return true;
+   }
+   bool zero(bm_device_mem_t mem) {
+-    return bm_memset_device_ext(handle, &aux::kZero, 1, mem) == BM_SUCCESS ||
+-           fail("device memset failed", true);
++    if (bm_memset_device_ext(handle, &aux::kZero, 1, mem) != BM_SUCCESS)
++      return fail("device memset failed", true);
++    // MYS-2913 experiment: the shipped path never waits for the asynchronous
++    // memset to retire before the graph is submitted. CV_VLE_MEMSET_SYNC=1
++    // adds that wait and nothing else, so the two arms differ in one factor.
++    if (memset_sync && bm_thread_sync(handle) != BM_SUCCESS)
++      return fail("device memset sync failed", true);
++    return true;
+   }
+   bool upload(bm_device_mem_t mem, const void* data, size_t bytes) {
+     if (bytes > bm_mem_get_device_size(mem)) return fail("upload exceeds graph input");
+     return bm_memcpy_s2d_partial(handle, mem, const_cast<void*>(data), bytes) == BM_SUCCESS ||
+            fail("host-to-device copy failed", true);
+   }
++  // MYS-2913: CV_VLE_COPY_SYNC_SITE selects which d2d copy waits, so the
++  // minimal site can be identified instead of syncing all of them.
++  //   embed  = embed graph output -> engine hidden
++  //   block  = engine hidden -> block input
++  //   vit    = ViT output -> engine hidden
++  bool sync_site(const char* site) const {
++    if (!copy_sync && !copy_delay_us) return false;
++    const char* want = std::getenv("CV_VLE_COPY_SYNC_SITE");
++    return !want || !*want || std::strcmp(want, "all") == 0 || std::strcmp(want, site) == 0;
++  }
++  bool copy_site_impl(const char* site, bm_device_mem_t dst, size_t offset,
++                      bm_device_mem_t src, size_t bytes) {
++    if (!copy(dst, offset, src, bytes)) return false;
++    // Falsification arm: a pure CPU delay with no device sync. If faults
++    // disappear here too, the effect is "go slower", not "restore ordering",
++    // and the sync arm proves nothing about ordering.
++    if (copy_delay_us && sync_site(site))
++      std::this_thread::sleep_for(std::chrono::microseconds(copy_delay_us));
++    if (!copy_delay_us && sync_site(site) && bm_thread_sync(handle) != BM_SUCCESS)
++      return fail(std::string("copy sync failed: ") + site, true);
++    return true;
++  }
+   bool copy(bm_device_mem_t dst, size_t offset, bm_device_mem_t src, size_t bytes) {
+     if (offset + bytes > bm_mem_get_device_size(dst) || bytes > bm_mem_get_device_size(src))
+       return fail("device copy exceeds graph buffer");
+     if (dst.u.device.device_addr + offset == src.u.device.device_addr) return true;
+-    return bm_memcpy_d2d_byte(handle, dst, offset, src, 0, bytes) == BM_SUCCESS ||
+-           fail("device-to-device copy failed", true);
++    if (bm_memcpy_d2d_byte(handle, dst, offset, src, 0, bytes) != BM_SUCCESS)
++      return fail("device-to-device copy failed", true);
++    // MYS-2913 experiment: CV_VLE_COPY_SYNC=1 waits for the d2d copy to retire
++    // before the next launch. This is the "copy feeds the next graph" hazard.
++    return true;
+   }
+   bool launch(const bm_net_info_t* net, int rows = 0) {
++    // MYS-2913 experiment: CV_VLE_LAUNCH_SYNC=1 drains every outstanding
++    // asynchronous API (the d2d copies and memsets that fill this graph's input
++    // buffers) immediately before the TPU is started. This is the ordering
++    // point, as opposed to the delay/sync arms which merely slow the host down.
++    if (launch_sync && bm_thread_sync(handle) != BM_SUCCESS)
++      return fail(std::string("pre-launch sync failed: ") + net->name, true);
+     if (trace) std::fprintf(stderr, "[vl-embed] launch %s rows=%d\n", net->name, rows);
+     std::vector<bm_tensor_t> in(net->input_num), out(net->output_num);
+     for (int i = 0; i < net->input_num; ++i) {
+@@ -320,9 +395,42 @@
+   auto start = Clock::now();
+   if (!e.zero(e.embed->stages[0].input_mems[0]) ||
+       !e.upload(e.embed->stages[0].input_mems[0], ids, n * sizeof(int32_t)) ||
+-      !e.launch(e.embed) || !e.copy(e.hidden, 0, e.embed->stages[0].output_mems[0], bytes))
++      !e.launch(e.embed) || !e.copy_site_impl("embed", e.hidden, 0, e.embed->stages[0].output_mems[0], bytes))
+     return false;
+   measured.embedding_ms = elapsed(start);
++  if (e.trace) {
++    // Stage 1: token embedding. Non-zero unless the id table or the copy failed.
++    const auto s = summarise(e.handle, e.hidden, static_cast<size_t>(n - 1) * kHidden * 2, kHidden);
++    std::fprintf(stderr, "[vl-embed] stage=embed last_row norm=%.6g nz=%d first=%.6g,%.6g\n",
++                 s.norm, s.nonzero, s.first[0], s.first[1]);
++  }
++  if (e.trace && std::getenv("CV_VLE_ADDR")) {
++    // Buffer aliasing check: every graph's stage-0 buffers and the engine's own
++    // hidden buffer, as [start,end) device address ranges. Two ranges that
++    // overlap mean two producers write the same bytes, which is exactly the
++    // kind of defect that reads as a zero vector only sometimes.
++    auto dump = [&](const char* who, bm_device_mem_t m) {
++      const unsigned long long a = m.u.device.device_addr;
++      std::fprintf(stderr, "[vl-embed] addr %-22s 0x%010llx .. 0x%010llx (%llu bytes)\n",
++                   who, a, a + bm_mem_get_device_size(m), bm_mem_get_device_size(m));
++    };
++    dump("engine.hidden", e.hidden);
++    dump("graph.embed.out0", e.embed->stages[0].output_mems[0]);
++    dump("graph.embed.in0", e.embed->stages[0].input_mems[0]);
++    dump("graph.vit.out0", e.vit->stages[0].output_mems[0]);
++    dump("graph.vit.in0", e.vit->stages[0].input_mems[0]);
++    const std::string tag = "graph.block_s" + std::to_string(encoder.rows);
++    for (int i = 0; i < e.layers; ++i) {
++      const auto* net = encoder.blocks[i];
++      char name[64];
++      std::snprintf(name, sizeof(name), "%s[%d].in0", tag.c_str(), i);
++      dump(name, net->stages[0].input_mems[0]);
++      std::snprintf(name, sizeof(name), "%s[%d].in1", tag.c_str(), i);
++      dump(name, net->stages[0].input_mems[1]);
++      std::snprintf(name, sizeof(name), "%s[%d].out0", tag.c_str(), i);
++      dump(name, net->stages[0].output_mems[0]);
++    }
++  }
+   if (image) {
+     start = Clock::now();
+     for (auto mem : e.deep) if (!e.zero(mem)) return false;
+@@ -338,7 +446,14 @@
+         !e.launch(e.vit, image->patches())) return false;
+     const size_t at = static_cast<size_t>(offset) * kHidden * sizeof(uint16_t);
+     const size_t count = static_cast<size_t>(image->patches() / 4) * kHidden * sizeof(uint16_t);
+-    if (!e.copy(e.hidden, at, v.output_mems[0], count)) return false;
++    if (e.trace) {
++      // Stage 2: ViT output, before it is copied over the image_pad rows.
++      const auto s = summarise(e.handle, v.output_mems[0],
++                               static_cast<size_t>(image->patches() / 4 - 1) * kHidden * 2, kHidden);
++      std::fprintf(stderr, "[vl-embed] stage=vit rows=%d last_patch norm=%.6g nz=%d first=%.6g,%.6g\n",
++                   image->patches() / 4, s.norm, s.nonzero, s.first[0], s.first[1]);
++    }
++    if (!e.copy_site_impl("vit", e.hidden, at, v.output_mems[0], count)) return false;
+     for (int i = 0; i < static_cast<int>(e.deep.size()); ++i)
+       if (!e.copy(e.deep[i], at, v.output_mems[i + 1], count)) return false;
+     measured.vision_ms = elapsed(start);
+@@ -352,16 +467,30 @@
+     // Each item and each layer starts from zero state; hidden is owned
+     // separately from BMRT's shared scratch pool.
+     if (e.linear(i) && !e.zero(net->stages[0].input_mems[1])) return false;
+-    if (!e.copy(net->stages[0].input_mems[0], 0, current, bytes) ||
++    if (e.trace) {
++      const auto s = summarise(e.handle, current,
++                               static_cast<size_t>(n - 1) * kHidden * 2, kHidden);
++      std::fprintf(stderr,
++                   "[vl-embed] stage=block_in layer=%d linear=%d last_row norm=%.6g nz=%d hash=%016llx\n",
++                   i, int(e.linear(i)), s.norm, s.nonzero, s.hash);
++    }
++    if (!e.copy_site_impl("block", net->stages[0].input_mems[0], 0, current, bytes) ||
+         (!e.linear(i) && !e.upload(net->stages[0].input_mems[1], positions.data(), positions.size() * sizeof(int32_t))) ||
+         (!encoder.dynamic && !e.linear(i) && !e.copy(net->stages[0].input_mems[2], 0, encoder.mask,
+                                      static_cast<size_t>(work_rows) * work_rows * sizeof(uint16_t))) ||
+         !e.launch(net, work_rows)) return false;
+     current = net->stages[0].output_mems[0];
+     if (e.wemm) {
+-      if (!e.copy(e.hidden, 0, current, bytes)) return false;
++      if (!e.copy_site_impl("wemm", e.hidden, 0, current, bytes)) return false;
+       current = e.hidden;
+     }
++    if (e.trace) {
++      const auto s = summarise(e.handle, current,
++                               static_cast<size_t>(n - 1) * kHidden * 2, kHidden);
++      std::fprintf(stderr,
++                   "[vl-embed] stage=block_out layer=%d last_row norm=%.6g nz=%d hash=%016llx\n",
++                   i, s.norm, s.nonzero, s.hash);
++    }
+     if (image && e.add && i < 3) {
+       const auto& a = e.add->stages[0];
+       if (!e.copy(a.input_mems[0], 0, current, bytes) ||

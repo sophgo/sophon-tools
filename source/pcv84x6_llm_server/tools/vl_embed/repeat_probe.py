@@ -233,8 +233,8 @@ LONGER_TEXT = " ".join(["The quick brown fox jumps over the lazy dog."] * 45)
 # tokenizer those totals are only reachable from non-square pages: 24x32 and
 # 22x30 patch grids. The default matrix therefore uses non-square images --
 # a square 512 image is 262 tokens and never lands on either figure.
-DEFAULT_SMALL = (768, 1024)    # h, w  -> 24x32 grid, 192 image tokens, 204 total
-DEFAULT_LARGE = (704, 960)     # h, w  -> 22x30 grid, 165 image tokens, 177 total
+DEFAULT_SMALL = (384, 512)     # h, w  -> 24x32 grid, 192 image tokens, 204 total
+DEFAULT_LARGE = (352, 480)     # h, w  -> 22x30 grid, 165 image tokens, 177 total
 
 
 def plan(group: str, small: tuple[int, int], large: tuple[int, int]) -> list[dict]:
@@ -310,9 +310,9 @@ def main() -> int:
     p.add_argument("--config", required=True)
     p.add_argument("--group", default="all")
     p.add_argument("--small", default=f"{DEFAULT_SMALL[0]}x{DEFAULT_SMALL[1]}",
-                   help="first image as HxW pixels (default 768x1024 -> 204 tokens)")
+                   help="first image as HxW pixels (default 384x512 -> 204 tokens)")
     p.add_argument("--large", default=f"{DEFAULT_LARGE[0]}x{DEFAULT_LARGE[1]}",
-                   help="second image as HxW pixels (default 704x960 -> 177 tokens)")
+                   help="second image as HxW pixels (default 352x480 -> 177 tokens)")
     p.add_argument("--dimensions", type=int, default=None)
     p.add_argument("--instruction", default=None)
     p.add_argument("--output")
