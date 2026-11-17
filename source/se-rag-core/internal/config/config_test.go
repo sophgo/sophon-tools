@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"strings"
 	"testing"
 )
 
@@ -41,18 +40,76 @@ func TestEffectiveKeyUsesBuiltinWhenEmpty(t *testing.T) {
 	}
 }
 
+// 默认链 CF → FC：CF 是第一跳，FC 是 CF 超时后的快速回退。
+func TestDefaultGatewayIsCFFirst(t *testing.T) {
+	g := DefaultConfig().Gateway
+	if g.PrimaryURL != GatewayBaseURL {
+		t.Errorf("default primary = %q, want CF %q", g.PrimaryURL, GatewayBaseURL)
+	}
+	if g.FallbackURL != GatewayFCBaseURL {
+		t.Errorf("default fallback = %q, want FC %q", g.FallbackURL, GatewayFCBaseURL)
+	}
+	if !containsGatewayHost(GatewayBaseURL, "workers.dev") {
+		t.Errorf("primary %q should be the Cloudflare worker", GatewayBaseURL)
+	}
+	if !containsGatewayHost(GatewayFCBaseURL, "fcapp.run") {
+		t.Errorf("fallback %q should be the Alibaba FC gateway", GatewayFCBaseURL)
+	}
+	chain := g.Chain()
+	if len(chain) != 2 || chain[0] != GatewayBaseURL || chain[1] != GatewayFCBaseURL {
+		t.Errorf("chain = %v, want [CF FC]", chain)
+	}
+	if g.AttemptTimeout != DefaultAttemptTimeout {
+		t.Errorf("attempt timeout = %v, want %v", g.AttemptTimeout, DefaultAttemptTimeout)
+	}
+	if g.FailoverBudget != DefaultFailoverBudget {
+		t.Errorf("failover budget = %v, want %v", g.FailoverBudget, DefaultFailoverBudget)
+	}
+	if !g.AllowHTTPFallback {
+		t.Error("plain HTTP fallback should default to enabled")
+	}
+}
+
+func containsGatewayHost(raw, suffix string) bool {
+	for i := 0; i+len(suffix) <= len(raw); i++ {
+		if raw[i:i+len(suffix)] == suffix {
+			return true
+		}
+	}
+	return false
+}
+
+// 内建模型与维度：内置 key 的白名单只有这两个模型。
+func TestDefaultModels(t *testing.T) {
+	p := DefaultConfig().Products[0]
+	if p.Embedder.Model != BuiltinEmbeddingModel || p.Embedder.Dim != BuiltinEmbeddingDim {
+		t.Errorf("default embedder = %s/%d", p.Embedder.Model, p.Embedder.Dim)
+	}
+	if p.Reranker.Model != BuiltinRerankModel {
+		t.Errorf("default reranker model = %s", p.Reranker.Model)
+	}
+}
+
+// 自备 key：显式 base_url 必须实际生效；只有未提供 URL 时才回落官方 SiliconFlow。
 func TestEffectiveBaseURL(t *testing.T) {
+	g := DefaultConfig().Gateway
 	d := DefaultConfig()
 	p := d.Products[0].Embedder
-	// 内置 → 默认网关（FC 主）
-	if p.EffectiveBaseURL() != GatewayFCBaseURL {
-		t.Errorf("builtin effective base url = %q, want gateway %q", p.EffectiveBaseURL(), GatewayFCBaseURL)
+	// 内置 → 网关链首跳（CF）
+	if got := p.EffectiveBaseURL(g); got != GatewayBaseURL {
+		t.Errorf("builtin effective base url = %q, want gateway %q", got, GatewayBaseURL)
 	}
-	// 自备 key → 回落官方 SiliconFlow，直达不被网关替换
+	// 自备 key 未给 URL → 官方 SiliconFlow
 	u := p
 	u.APIKey = "user-key"
-	if u.EffectiveBaseURL() != officialSiliconflowBaseURL {
-		t.Errorf("user-key effective base url = %q, want official %q", u.EffectiveBaseURL(), officialSiliconflowBaseURL)
+	if got := u.EffectiveBaseURL(g); got != officialSiliconflowBaseURL {
+		t.Errorf("user-key effective base url = %q, want official %q", got, officialSiliconflowBaseURL)
+	}
+	// 自备 key + 显式 URL → 用户地址，不被改写成 SiliconFlow
+	c := u
+	c.BaseURL = "https://my-proxy.example/v1"
+	if got := c.EffectiveBaseURL(g); got != "https://my-proxy.example/v1" {
+		t.Errorf("explicit base url ignored: got %q", got)
 	}
 }
 
@@ -66,55 +123,54 @@ func TestUserKeyOverrides(t *testing.T) {
 	}
 }
 
-func TestGatewayBaseURLShape(t *testing.T) {
-	if !strings.Contains(GatewayBaseURL, "workers.dev") {
-		t.Errorf("GatewayBaseURL %q should be the gateway worker host", GatewayBaseURL)
-	}
-}
-
-func TestGatewayFCBaseURLShape(t *testing.T) {
-	if !strings.Contains(GatewayFCBaseURL, "fcapp.run") {
-		t.Errorf("GatewayFCBaseURL %q should be the Alibaba FC gateway host", GatewayFCBaseURL)
-	}
-	if GatewayFCBaseURL == GatewayBaseURL {
-		t.Errorf("FC primary must differ from CF gateway, got %q", GatewayFCBaseURL)
-	}
-}
-
-// 故障转移链：内置 key → [FC 网关（主）, CF 网关（备）]；自备 key → 官方 SiliconFlow 直达（无故障转移项）。
+// 故障转移链：内置 key → [CF 网关（主）, FC 网关（备）]；自备 key → 单地址直达（无故障转移项）。
 func TestEffectiveBaseURLs(t *testing.T) {
-	d := DefaultConfig()
-	p := d.Products[0].Embedder
-	want := []string{GatewayFCBaseURL, GatewayBaseURL}
-	if got := p.EffectiveBaseURLs(); fmt.Sprint(got) != fmt.Sprint(want) {
+	g := DefaultConfig().Gateway
+	p := DefaultConfig().Products[0].Embedder
+	want := []string{GatewayBaseURL, GatewayFCBaseURL}
+	if got := p.EffectiveBaseURLs(g); fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Errorf("builtin effective base urls = %v, want %v", got, want)
 	}
 
-	// 自备 key → 仅官方地址，不经网关
+	// 自备 key 无 URL → 仅官方地址，不经网关
 	u := p
 	u.APIKey = "user-key"
-	if got := u.EffectiveBaseURLs(); fmt.Sprint(got) != fmt.Sprint([]string{officialSiliconflowBaseURL}) {
+	if got := u.EffectiveBaseURLs(g); fmt.Sprint(got) != fmt.Sprint([]string{officialSiliconflowBaseURL}) {
 		t.Errorf("user-key effective base urls = %v, want [official]", got)
+	}
+	// 自备 key + 显式 URL → 只有该地址（单地址，不走内置网关故障转移）
+	u.BaseURL = "https://my-proxy.example/v1"
+	if got := u.EffectiveBaseURLs(g); fmt.Sprint(got) != fmt.Sprint([]string{"https://my-proxy.example/v1"}) {
+		t.Errorf("user-key explicit base urls = %v, want [my-proxy]", got)
 	}
 }
 
-// 显式指定主/备地址与去重：主地址为空回落默认 FC；备与主相同则去重为单地址。
-func TestEffectiveBaseURLsExplicitAndDedup(t *testing.T) {
-	d := DefaultConfig()
-	p := d.Products[0].Embedder
+// 备与主相同（或备为空）→ 单跳（显式禁用故障转移）。
+func TestGatewayChainDedup(t *testing.T) {
+	g := DefaultConfig().Gateway
 
-	custom := p
-	custom.BaseURL = "https://gw.example.com/v1"
-	custom.FallbackBaseURL = "https://fb.example.com/v1"
-	if got := custom.EffectiveBaseURLs(); fmt.Sprint(got) != fmt.Sprint([]string{"https://gw.example.com/v1", "https://fb.example.com/v1"}) {
-		t.Errorf("custom base urls = %v", got)
+	g.PrimaryURL = "https://gw.example.com/v1"
+	g.FallbackURL = "https://fb.example.com/v1"
+	if got := g.Chain(); fmt.Sprint(got) != fmt.Sprint([]string{"https://gw.example.com/v1", "https://fb.example.com/v1"}) {
+		t.Errorf("custom chain = %v", got)
 	}
 
-	// 备与主相同 → 去重（显式禁用故障转移）
-	dup := p
-	dup.FallbackBaseURL = GatewayFCBaseURL
-	if got := dup.EffectiveBaseURLs(); fmt.Sprint(got) != fmt.Sprint([]string{GatewayFCBaseURL}) {
-		t.Errorf("dedup base urls = %v", got)
+	g.FallbackURL = "https://gw.example.com/v1"
+	if got := g.Chain(); fmt.Sprint(got) != fmt.Sprint([]string{"https://gw.example.com/v1"}) {
+		t.Errorf("dedup chain = %v", got)
+	}
+
+	// 显式空 = 禁用备用网关
+	g.FallbackURL = ""
+	if got := g.Chain(); len(got) != 1 {
+		t.Errorf("empty fallback chain = %v, want single hop", got)
+	}
+
+	// 主地址为空 → 回落默认 CF
+	g.PrimaryURL = ""
+	g.FallbackURL = GatewayFCBaseURL
+	if got := g.Chain(); len(got) != 2 || got[0] != GatewayBaseURL {
+		t.Errorf("empty primary chain = %v, want [CF FC]", got)
 	}
 }
 
@@ -125,24 +181,13 @@ func TestDefaultProductIsSE7(t *testing.T) {
 	}
 }
 
-// SE_RAG_FALLBACK_URL 覆盖备网关：可指向自定义域名（解决 SNI 阻断的 A 方案），
-// 也可置空/置为与主网关相同来显式单跳（C 方案止血），都不必改代码。
-func TestEffectiveBaseURLsEnvOverride(t *testing.T) {
-	p := Provider{Type: "siliconflow", BaseURL: "https://primary.example/v1"}
-
-	t.Setenv("SE_RAG_FALLBACK_URL", "https://cf.example.com/v1")
-	if got := p.EffectiveBaseURLs(); len(got) != 2 || got[1] != "https://cf.example.com/v1" {
-		t.Errorf("fallback override = %v, want custom fallback", got)
-	}
-
-	// 置空 → 单跳（止血）
-	t.Setenv("SE_RAG_FALLBACK_URL", "")
-	if got := p.EffectiveBaseURLs(); len(got) != 1 {
-		t.Errorf("empty fallback = %v, want single hop", got)
-	}
-
-	t.Setenv("SE_RAG_GATEWAY_URL", "https://main2.example/v1")
-	if got := p.EffectiveBaseURLs(); len(got) != 1 || got[0] != "https://main2.example/v1" {
-		t.Errorf("primary override = %v, want main2", got)
+// DefaultConfig 必须纯净：不读环境变量、不读文件，可重复调用得到相同结果。
+// 配置读取只发生在 Load，避免包 init 阶段悄悄改掉进程行为。
+func TestDefaultConfigIgnoresEnv(t *testing.T) {
+	t.Setenv("SE_RAG_GATEWAY_URL", "https://env.example/v1")
+	t.Setenv("OPENAI_BASE_URL", "https://env-openai.example/v1")
+	g := DefaultConfig().Gateway
+	if g.PrimaryURL != GatewayBaseURL {
+		t.Errorf("DefaultConfig must not read env: primary = %q", g.PrimaryURL)
 	}
 }

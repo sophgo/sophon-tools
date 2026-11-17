@@ -6,7 +6,6 @@ import (
 	"os"
 	"time"
 
-	"se-rag-core/internal/config"
 	"se-rag-core/internal/docstore"
 	"se-rag-core/internal/registry"
 	"se-rag-core/internal/retriever"
@@ -143,9 +142,6 @@ func containsTarget(ts []target, id string) bool {
 
 // runMultiSourceQuery 多索引合并检索（注册表模式，也是 -doc-type 的路径）。
 func runMultiSourceQuery(rc runCtx, srcs []retriever.Source, filter *retriever.ChunkFilter) error {
-	rc.ensureFactories()
-	rc.applyFakeMode()
-
 	m := &retriever.MultiRetriever{Sources: srcs, Filter: filter}
 	fallback := ""
 	switch {
@@ -155,11 +151,16 @@ func runMultiSourceQuery(rc runCtx, srcs []retriever.Source, filter *retriever.C
 		fmt.Fprintf(os.Stderr, "note: all target indexes are bm25-only (built with -offline); query falls back to pure BM25, no text is sent out\n")
 		fallback = "all indexes are bm25-only (built with build -offline)"
 	default:
-		cfg := config.DefaultConfig()
-		p := cfg.Products[0]
-		if err := applyUserKeys(&p, rc.useBuiltin, true); err != nil {
+		cfg, err := loadOnlineConfig()
+		if err != nil {
 			return err
 		}
+		p, err := resolveProviders(cfg, rc.keyMode, true, isFakeMode())
+		if err != nil {
+			return err
+		}
+		rc.ensureFactories(cfg.Gateway)
+		rc.applyFakeMode()
 		emb, err := rc.embedF(p.Embedder)
 		if err != nil {
 			return fmt.Errorf("embedder init: %w", err)

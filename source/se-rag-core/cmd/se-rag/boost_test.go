@@ -297,9 +297,9 @@ func TestTitleMatchSurvivesRerank(t *testing.T) {
 	captureStdout(t, func() {
 		if err := runBuild(runCtx{
 			docsDir: boostDoc(t, dir), indexDir: idx, product: metaProductLabel,
-			useBuiltin: true,
-			embedF:     func(config.Provider) (embed.Embedder, error) { return embed.NewFakeEmbedder(2), nil },
-			rerankF:    func(config.Provider) (embed.Reranker, error) { return embed.NewFakeReranker(), nil },
+			keyMode: keyModeAuto,
+			embedF:  func(config.Provider) (embed.Embedder, error) { return embed.NewFakeEmbedder(2), nil },
+			rerankF: func(config.Provider) (embed.Reranker, error) { return embed.NewFakeReranker(), nil },
 		}); err != nil {
 			t.Fatalf("build: %v", err)
 		}
@@ -307,9 +307,9 @@ func TestTitleMatchSurvivesRerank(t *testing.T) {
 	out := captureStdout(t, func() {
 		if err := runQuery(runCtx{
 			indexDir: idx, product: metaProductLabel, query: "rtc_ctrl_status1", topN: 5,
-			useBuiltin: true,
-			embedF:     func(config.Provider) (embed.Embedder, error) { return embed.NewFakeEmbedder(2), nil },
-			rerankF:    func(config.Provider) (embed.Reranker, error) { return embed.NewFakeReranker(), nil },
+			keyMode: keyModeAuto,
+			embedF:  func(config.Provider) (embed.Embedder, error) { return embed.NewFakeEmbedder(2), nil },
+			rerankF: func(config.Provider) (embed.Reranker, error) { return embed.NewFakeReranker(), nil },
 		}); err != nil {
 			t.Fatalf("query: %v", err)
 		}

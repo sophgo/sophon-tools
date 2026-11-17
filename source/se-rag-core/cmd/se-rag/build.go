@@ -22,12 +22,13 @@ const buildTimeout = 15 * time.Minute
 // runCtx 供 build/query/doctor 共享的参数 + 可注入的 provider 工厂（测试/离线 fake）。
 // build 始终依据 docs 全量重建索引（docs 是唯一真源），无需 force 开关。
 type runCtx struct {
-	docsDir    string
-	indexDir   string
-	product    string
-	topN       int
-	query      string
-	useBuiltin bool
+	docsDir  string
+	indexDir string
+	product  string
+	topN     int
+	query    string
+	// keyMode -builtin-key 的语义（默认自动 / 显式内置 / 显式要求自备）。
+	keyMode builtinKeyMode
 	// offline = build 建纯 BM25 索引（不初始化 embedder、不读 key、不联网），
 	// query 走纯 BM25 检索。两条命令语义一致：全程不外发任何文本。
 	offline bool
@@ -41,28 +42,6 @@ type runCtx struct {
 	docTypes string
 	embedF   func(config.Provider) (embed.Embedder, error)
 	rerankF  func(config.Provider) (embed.Reranker, error)
-}
-
-// applyUserKeys 按 -builtin-key 语义设置供应商 key：
-// useBuiltin=true（默认）交给内置 key 逻辑；false 时 key 必须来自环境变量，
-// 缺失即显式报错（不再静默回落内置 key + 限流）。SE_RAG_FAKE_EMBED=1 离线
-// 模式不校验（fake provider 不真正使用 key）。requireRerank 仅 query 需要。
-func applyUserKeys(p *config.Product, useBuiltin, requireRerank bool) error {
-	if useBuiltin {
-		return nil
-	}
-	p.Embedder.APIKey = os.Getenv("SE_RAG_EMBED_KEY")
-	p.Reranker.APIKey = os.Getenv("SE_RAG_RERANK_KEY")
-	if os.Getenv("SE_RAG_FAKE_EMBED") != "" {
-		return nil
-	}
-	if p.Embedder.APIKey == "" {
-		return fmt.Errorf("-builtin-key=false requires SE_RAG_EMBED_KEY (missing); set env or drop the flag")
-	}
-	if requireRerank && p.Reranker.APIKey == "" {
-		return fmt.Errorf("-builtin-key=false requires SE_RAG_RERANK_KEY (missing); set env or drop the flag")
-	}
-	return nil
 }
 
 // embedWithRetry 单个批次 embedding 失败时最多重试 embedRetries 次（退避 1s、3s）。
@@ -92,23 +71,19 @@ func embedWithRetry(ctx context.Context, emb embed.Embedder, texts []string) ([]
 	return nil, lastErr
 }
 
-// realEmbed 真实 embedding 工厂（测试可注入 fake）。
-func realEmbed(p config.Provider) (embed.Embedder, error)  { return embed.NewEmbedder(p) }
-func realRerank(p config.Provider) (embed.Reranker, error) { return embed.NewReranker(p) }
-
-// buildCtx 默认工厂（未注入时）
-func (rc *runCtx) ensureFactories() {
+// ensureFactories 装上默认工厂（需要网关策略，因此在拿到最终配置后才调用）。
+func (rc *runCtx) ensureFactories(gw config.Gateway) {
 	if rc.embedF == nil {
-		rc.embedF = realEmbed
+		rc.embedF = makeEmbedderFactory(gw)
 	}
 	if rc.rerankF == nil {
-		rc.rerankF = realRerank
+		rc.rerankF = makeRerankerFactory(gw)
 	}
 }
 
 // applyFakeMode 供离线端到端（SE_RAG_FAKE_EMBED=1）。
 func (rc *runCtx) applyFakeMode() {
-	if os.Getenv("SE_RAG_FAKE_EMBED") == "" {
+	if !isFakeMode() {
 		return
 	}
 	rc.embedF = func(config.Provider) (embed.Embedder, error) { return embed.NewFakeEmbedder(2), nil }
@@ -116,24 +91,27 @@ func (rc *runCtx) applyFakeMode() {
 }
 
 func runBuild(rc runCtx) error {
-	rc.ensureFactories()
-	rc.applyFakeMode()
 	// product 仅作 meta 标签，不参与路径（不同知识库用不同 index-dir/docs-dir）
 	if rc.product == "" {
 		rc.product = metaProductLabel
 	}
-	// 离线构建：不碰 key、不构造 embedder、不联网。
-	// 先判 offline，避免 -builtin-key=false 的 key 校验在离线路径上误报。
+	// 离线构建：不碰 key、不构造 embedder、不联网，也不读在线配置。
+	// 先判 offline：损坏的配置文件不该让纯 BM25 建索引失败。
 	if rc.offline {
 		return runBuildOffline(rc)
 	}
-	// 先校验 key 配置（-builtin-key=false 缺 env key 属配置错误，优先报出）
-	cfg := config.DefaultConfig()
-	p := cfg.Products[0]
-	p.Name = rc.product
-	if err := applyUserKeys(&p, rc.useBuiltin, false); err != nil {
+	// 在线路径：先加载并校验最终配置，再决定 key 归属——配置错误要在发请求前报出。
+	cfg, err := loadOnlineConfig()
+	if err != nil {
 		return err
 	}
+	p, err := resolveProviders(cfg, rc.keyMode, false, isFakeMode())
+	if err != nil {
+		return err
+	}
+	p.Name = rc.product
+	rc.ensureFactories(cfg.Gateway)
+	rc.applyFakeMode()
 	if rc.docsDir == "" {
 		return fmt.Errorf("docs-dir is empty")
 	}
@@ -237,7 +215,7 @@ func runBuildOffline(rc runCtx) error {
 		return fmt.Errorf("index-dir is empty")
 	}
 	// 离线构建不读 key：显式点出冲突配置，避免用户以为 -builtin-key=false 生效了
-	if !rc.useBuiltin {
+	if rc.keyMode == keyModeRequireUser {
 		fmt.Fprintln(os.Stderr, "note: build -offline ignores -builtin-key (offline index needs no key)")
 	}
 

@@ -39,13 +39,13 @@ func goldenDocs(t *testing.T, dir string) string {
 func goldenRun(t *testing.T, docsDir, indexDir, question string) string {
 	t.Helper()
 	rc := runCtx{
-		docsDir:    docsDir,
-		indexDir:   indexDir,
-		product:    metaProductLabel,
-		topN:       5,
-		useBuiltin: true,
-		embedF:     func(config.Provider) (embed.Embedder, error) { return embed.NewFakeEmbedder(2), nil },
-		rerankF:    func(config.Provider) (embed.Reranker, error) { return embed.NewFakeReranker(), nil },
+		docsDir:  docsDir,
+		indexDir: indexDir,
+		product:  metaProductLabel,
+		topN:     5,
+		keyMode:  keyModeAuto,
+		embedF:   func(config.Provider) (embed.Embedder, error) { return embed.NewFakeEmbedder(2), nil },
+		rerankF:  func(config.Provider) (embed.Reranker, error) { return embed.NewFakeReranker(), nil },
 	}
 	if err := runBuild(rc); err != nil {
 		t.Fatalf("build: %v", err)

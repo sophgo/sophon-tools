@@ -58,13 +58,13 @@ func twoHybridIndexes(t *testing.T, dir string) ([]retriever.Source, *registry.R
 		idx := reg.IndexPath(e)
 		captureStdout(t, func() {
 			if err := runBuild(runCtx{
-				docsDir:    reg.DocsPath(e),
-				indexDir:   idx,
-				product:    id,
-				offline:    false,
-				useBuiltin: true,
-				embedF:     func(config.Provider) (embed.Embedder, error) { return embed.NewFakeEmbedder(2), nil },
-				rerankF:    func(config.Provider) (embed.Reranker, error) { return embed.NewFakeReranker(), nil },
+				docsDir:  reg.DocsPath(e),
+				indexDir: idx,
+				product:  id,
+				offline:  false,
+				keyMode:  keyModeAuto,
+				embedF:   func(config.Provider) (embed.Embedder, error) { return embed.NewFakeEmbedder(2), nil },
+				rerankF:  func(config.Provider) (embed.Reranker, error) { return embed.NewFakeReranker(), nil },
 			}); err != nil {
 				t.Fatalf("build %s: %v", id, err)
 			}
@@ -87,11 +87,11 @@ func TestMultiIndexQueryReranksOnce(t *testing.T) {
 	rr := &countingReranker{}
 	out := captureStdout(t, func() {
 		if err := runMultiSourceQuery(runCtx{
-			query:      "I2C 怎么接",
-			topN:       5,
-			useBuiltin: true,
-			embedF:     func(config.Provider) (embed.Embedder, error) { return embed.NewFakeEmbedder(2), nil },
-			rerankF:    func(config.Provider) (embed.Reranker, error) { return rr, nil },
+			query:   "I2C 怎么接",
+			topN:    5,
+			keyMode: keyModeAuto,
+			embedF:  func(config.Provider) (embed.Embedder, error) { return embed.NewFakeEmbedder(2), nil },
+			rerankF: func(config.Provider) (embed.Reranker, error) { return rr, nil },
 		}, srcs, nil); err != nil {
 			t.Fatalf("multi query: %v", err)
 		}

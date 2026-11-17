@@ -15,6 +15,29 @@ import (
 	"se-rag-core/internal/embed"
 )
 
+// TestMain 让整个包的测试默认不读宿主机的 /etc/se-rag-core/config.json：
+// 测试必须与开发机/CI 的真实配置隔离，否则本机配了自备 key 就会改变用例行为。
+// 需要测配置的用例各自用 t.Setenv("SE_RAG_CONFIG", ...) 覆盖。
+func TestMain(m *testing.M) {
+	if os.Getenv("SE_RAG_CONFIG") == "" {
+		// 指向一份空配置（{}）：效果等同「只用默认值」，且不会读到宿主机的真实配置。
+		// 不能指向不存在的路径——显式指定的文件缺失按设计要报错。
+		dir, err := os.MkdirTemp("", "se-rag-cfg-")
+		if err != nil {
+			panic(err)
+		}
+		p := filepath.Join(dir, "config.json")
+		if err := os.WriteFile(p, []byte("{}\n"), 0o600); err != nil {
+			panic(err)
+		}
+		os.Setenv("SE_RAG_CONFIG", p)
+		code := m.Run()
+		os.RemoveAll(dir)
+		os.Exit(code)
+	}
+	os.Exit(m.Run())
+}
+
 func TestProcessArgs(t *testing.T) {
 	tt := []struct {
 		args []string
@@ -34,12 +57,12 @@ func TestProcessArgs(t *testing.T) {
 // fakeFactory 用固定 2 维 fake embedder/reranker，使 build/query/doctor 全链路可离线跑通。
 func fakeFactory() runCtx {
 	return runCtx{
-		useBuiltin: true,
-		indexDir:   filepath.Join(os.TempDir(), "se-rag-test-index"),
-		product:    "se7",
-		topN:       5,
-		embedF:     func(config.Provider) (embed.Embedder, error) { return embed.NewFakeEmbedder(2), nil },
-		rerankF:    func(config.Provider) (embed.Reranker, error) { return embed.NewFakeReranker(), nil },
+		keyMode:  keyModeAuto,
+		indexDir: filepath.Join(os.TempDir(), "se-rag-test-index"),
+		product:  "se7",
+		topN:     5,
+		embedF:   func(config.Provider) (embed.Embedder, error) { return embed.NewFakeEmbedder(2), nil },
+		rerankF:  func(config.Provider) (embed.Reranker, error) { return embed.NewFakeReranker(), nil },
 	}
 }
 
@@ -55,7 +78,7 @@ func keyTestCtx(t *testing.T) runCtx {
 		t.Fatal(err)
 	}
 	rc := fakeFactory()
-	rc.useBuiltin = false
+	rc.keyMode = keyModeRequireUser
 	rc.docsDir = docsDir
 	rc.indexDir = filepath.Join(dir, "idx")
 	rc.query = "网络配置"
@@ -400,7 +423,7 @@ func TestBuildDimMismatchErrors(t *testing.T) {
 
 func TestStaleIndexWarningPrintedOnce(t *testing.T) {
 	rc := keyTestCtx(t)
-	rc.useBuiltin = true
+	rc.keyMode = keyModeAuto
 	if err := runBuild(rc); err != nil {
 		t.Fatalf("build: %v", err)
 	}
