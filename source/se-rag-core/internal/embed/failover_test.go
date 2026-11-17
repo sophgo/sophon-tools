@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"se-rag-core/internal/config"
 )
 
 // 以下测试覆盖网关故障转移链（CF Worker → 阿里云 FC 网关）：
@@ -100,7 +102,7 @@ func TestSiliconflowEmbedderFailover(t *testing.T) {
 	}))
 	defer fc.Close()
 
-	e, err := newSiliconflowEmbedder([]string{cf.URL, fc.URL}, "k", "BAAI/bge-m3", 2, false)
+	e, err := newSiliconflowEmbedder([]string{cf.URL, fc.URL}, "k", "BAAI/bge-m3", 2, false, config.DefaultConfig().Gateway)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +131,7 @@ func TestSiliconflowRerankerFailover(t *testing.T) {
 	}))
 	defer fc.Close()
 
-	r, err := newSiliconflowReranker([]string{cf.URL, fc.URL}, "k", "BAAI/bge-reranker-v2-m3")
+	r, err := newSiliconflowReranker([]string{cf.URL, fc.URL}, "k", "BAAI/bge-reranker-v2-m3", config.DefaultConfig().Gateway)
 	if err != nil {
 		t.Fatal(err)
 	}

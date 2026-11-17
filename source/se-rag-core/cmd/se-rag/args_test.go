@@ -70,7 +70,7 @@ func TestQueryOfflineNeverTouchesNetwork(t *testing.T) {
 	t.Setenv("SE_RAG_RERANK_KEY", "")
 	t.Setenv("SE_RAG_FAKE_EMBED", "")
 	rc := keyTestCtx(t)
-	rc.useBuiltin = true
+	rc.keyMode = keyModeAuto
 	if err := runBuild(rc); err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestDispatchQueryOfflineFlagAnywhere(t *testing.T) {
 	t.Setenv("SE_RAG_RERANK_KEY", "")
 	t.Setenv("SE_RAG_FAKE_EMBED", "")
 	rc := keyTestCtx(t)
-	rc.useBuiltin = true
+	rc.keyMode = keyModeAuto
 	if err := runBuild(rc); err != nil {
 		t.Fatalf("build: %v", err)
 	}

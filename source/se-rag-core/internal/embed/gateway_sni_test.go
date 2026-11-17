@@ -14,6 +14,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"se-rag-core/internal/config"
 )
 
 // rstServer 模拟「TCP 能连、ClientHello 之后被 RST」——被测主机上 CF 443 的形态。
@@ -63,8 +65,8 @@ func TestSNIBlockedFailsFast(t *testing.T) {
 	}
 	t.Logf("耗时=%v  RST 命中=%d 次", elapsed.Round(100*time.Millisecond), hits.Load())
 
-	if elapsed > failoverBudget+3*time.Second {
-		t.Errorf("耗时 %v 超出预算 %v", elapsed, failoverBudget)
+	if budget := config.DefaultFailoverBudget; elapsed > budget+3*time.Second {
+		t.Errorf("耗时 %v 超出预算 %v", elapsed, budget)
 	}
 	// RST 是硬失败：重试同一地址无意义，命中次数必须受控（≤2：443 一次 + 端口降级一次）。
 	if hits.Load() > 2 {

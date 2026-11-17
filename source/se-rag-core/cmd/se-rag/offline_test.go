@@ -87,10 +87,10 @@ func TestBuildOfflineNoEmbedderNoKey(t *testing.T) {
 		indexDir: filepath.Join(dir, "idx"),
 		product:  metaProductLabel,
 		// 故意设 -builtin-key=false 且不给 key：离线构建也不该因此报错（它不需要 key）
-		useBuiltin: false,
-		offline:    true,
-		embedF:     failEmbedderFactory(t, "build -offline"),
-		rerankF:    failRerankerFactory(t, "build -offline"),
+		keyMode: keyModeRequireUser,
+		offline: true,
+		embedF:  failEmbedderFactory(t, "build -offline"),
+		rerankF: failRerankerFactory(t, "build -offline"),
 	}
 	var err error
 	out := captureStdout(t, func() { err = runBuild(rc) })

@@ -108,13 +108,27 @@ func printUsage() {
 	fmt.Println()
 	fmt.Printf("Version: %s\n", Version)
 	fmt.Println()
+	fmt.Println("配置（在线命令 build/query/doctor 读取；offline/help/list/resolve 不依赖）:")
+	fmt.Println("  默认配置：/etc/se-rag-core/config.json（不存在则只用默认值）")
+	fmt.Println("  SE_RAG_CONFIG=<f>                      改用指定配置文件；显式指定但缺失/不可读即报错")
+	fmt.Println("  优先级：环境变量 > 配置文件 > 内置默认；每层先公共（openai）再专用（embedder/reranker）")
+	fmt.Println("  配置文件结构（JSON，未知字段报错，完整示例见 example/config.example.json）：")
+	fmt.Println(`    {"openai":{"base_url","api_key","embedding_model","reranking_model","embedding_dim"},`)
+	fmt.Println(`     "embedder":{"base_url","api_key","model","dim"},"reranker":{"base_url","api_key","model"},`)
+	fmt.Println(`     "gateway":{"primary_url","fallback_url","attempt_timeout","failover_budget","allow_http_fallback"}}`)
+	fmt.Println()
 	fmt.Println("Env:")
 	fmt.Println("  SE_RAG_DATA_DIR=<dir>                  索引改落到 <dir>/<index_dir 末级名>（技能目录只读/多 agent 共享时用）")
-	fmt.Println("  SE_RAG_EMBED_KEY / SE_RAG_RERANK_KEY   用户自备 key（放开内置限流）")
+	fmt.Println("  OPENAI_BASE_URL / OPENAI_API_KEY       自备 openai 兼容服务地址与 key（embed/rerank 共用）")
+	fmt.Println("  OPENAI_EMBEDDING_MODEL / OPENAI_RERANKING_MODEL")
+	fmt.Println("  SE_RAG_EMBED_KEY / SE_RAG_RERANK_KEY   自备 key（分 provider），优先于 OPENAI_API_KEY")
+	fmt.Println("  SE_RAG_EMBED_BASE_URL / SE_RAG_RERANK_BASE_URL / SE_RAG_EMBED_MODEL / SE_RAG_RERANK_MODEL / SE_RAG_EMBED_DIM")
+	fmt.Println("                                         分 provider 覆盖（优先于 OPENAI_*）")
 	fmt.Println("  SE_RAG_FAKE_EMBED=1                    离线假 embedding（测试/离线验证）")
-	fmt.Println("  SE_RAG_FAILOVER_BUDGET=18s             网关故障转移总预算（Go duration）")
+	fmt.Println("  SE_RAG_GATEWAY_URL / SE_RAG_FALLBACK_URL  内置链主/备网关（默认 CF / 阿里云 FC；备用显式空=单跳）")
+	fmt.Println("  SE_RAG_GATEWAY_TIMEOUT=6s              内置链单次请求上限（含响应体），到点转下一跳")
+	fmt.Println("  SE_RAG_FAILOVER_BUDGET=18s             内置链总预算（含退避；Go duration）")
 	fmt.Println("  SE_RAG_ALLOW_HTTP_FALLBACK=0           禁用明文 HTTP 兜底（保传输机密性）")
-	fmt.Println("  SE_RAG_FALLBACK_URL / SE_RAG_GATEWAY_URL  覆盖备/主网关地址（空=单跳）")
 	fmt.Println("  SE_RAG_STATE_DIR=<dir>                 熔断与粘滞状态目录（默认用户缓存目录）")
 	fmt.Println("  SE_RAG_STATE_TTL=24h                   状态标记有效期，超过即重新生成")
 	fmt.Println("Flags（可写在问题文本之前或之后）:")
@@ -132,7 +146,9 @@ func printUsage() {
 	fmt.Println("  -offline                               build/query：纯 BM25，不联网、不要 key")
 	fmt.Println("                                           build -offline 建 bm25-only 索引（dim=0，无向量）")
 	fmt.Println("                                           query -offline 对该索引做纯 BM25 检索")
-	fmt.Println("  -builtin-key=false                     用用户 key；此时上面两个 env key 必填，缺失报错退出")
+	fmt.Println("  -builtin-key=true|false                不写=按配置自动选（有自备 key 就用自备，否则内置）")
+	fmt.Println("                                         true=强制内置 key 与内置模型/地址（网关覆盖仍生效）")
+	fmt.Println("                                         false=要求自备 key（build 只需 embed，query 还需 rerank），缺失报错退出")
 }
 
 // dispatch 解析子命令并执行。返回值即进程退出码。
@@ -173,14 +189,32 @@ func dispatch(args []string) int {
 }
 
 // newRunCtx 默认运行上下文（路径模式的既有缺省值）。
+// 工厂不在这里预置：它需要最终配置里的网关策略，由在线路径（runBuild/runQuery）装配。
 func newRunCtx() runCtx {
 	return runCtx{
-		product:    metaProductLabel,
-		indexDir:   defaultIndexDir(),
-		topN:       8,
-		useBuiltin: true,
-		embedF:     realEmbed,
-		rerankF:    realRerank,
+		product:  metaProductLabel,
+		indexDir: defaultIndexDir(),
+		topN:     8,
+		keyMode:  keyModeAuto,
+	}
+}
+
+// builtinKeyFlag 注册 -builtin-key 并返回「取值 + 是否显式传入」的查询函数。
+//
+// 标准库 flag 无法直接区分「默认值」与「显式写成同一个值」，必须用 flag.Visit
+// 在解析后检查该 flag 是否真的出现过。注册表模式与路径模式共用这一套旗标语义，
+// 且 parseInterspersed 允许旗标写在问题文本前后两种位置，因此检查放在解析之后、
+// 且不看位置。
+func builtinKeyFlag(fs *flag.FlagSet, dst *bool) func() (bool, bool) {
+	fs.BoolVar(dst, "builtin-key", true, "use builtin key (default: auto by config)")
+	return func() (bool, bool) {
+		seen := false
+		fs.Visit(func(f *flag.Flag) {
+			if f.Name == "builtin-key" {
+				seen = true
+			}
+		})
+		return *dst, seen
 	}
 }
 
@@ -234,13 +268,15 @@ func dispatchBuild(rest []string) int {
 	fs := flag.NewFlagSet("build", flag.ExitOnError)
 	fs.StringVar(&rc.docsDir, "docs-dir", "", "docs dir (default <cwd>/docs)")
 	fs.StringVar(&rc.indexDir, "index-dir", defaultIndexDir(), "index dir")
-	fs.BoolVar(&rc.useBuiltin, "builtin-key", true, "use builtin key (limits concurrency)")
+	builtinKey := true
+	builtinSet := builtinKeyFlag(fs, &builtinKey)
 	fs.BoolVar(&rc.offline, "offline", false, "offline: build BM25-only index, no embedder, no key, no network")
 	regPath := fs.String("registry", defaultRegistryPath, "registry file")
 	entity := fs.String("entity", "", "entity id(s), comma separated; <sdk>@<slug> for one sdk version")
 	all := fs.Bool("all", false, "all ready entities from the registry (every sdk version)")
 	sdkVersion := fs.String("sdk-version", "", "sdk version: latest|all|<slug>")
 	warnExtraArgs("build", parseInterspersed(fs, rest))
+	rc.keyMode = builtinKeyModeFromFlag(builtinSet())
 
 	if strings.TrimSpace(*entity) != "" || *all {
 		sdkReq, err := registry.ParseSDKVersion(*sdkVersion)
@@ -280,7 +316,8 @@ func dispatchQuery(rest []string) int {
 	var indexDirs multiFlag
 	fs.Var(&indexDirs, "index-dir", "index dir (repeatable or comma separated)")
 	fs.IntVar(&rc.topN, "top-n", 8, "top N results")
-	fs.BoolVar(&rc.useBuiltin, "builtin-key", true, "use builtin key")
+	builtinKey := true
+	builtinSet := builtinKeyFlag(fs, &builtinKey)
 	fs.BoolVar(&rc.offline, "offline", false, "offline: BM25 only, no network")
 	fs.StringVar(&rc.docsDir, "docs-dir", "", "docs dir (optional; when set, warn if the index was built from different docs)")
 	regPath := fs.String("registry", defaultRegistryPath, "registry file")
@@ -295,6 +332,7 @@ func dispatchQuery(rest []string) int {
 		rc.query = pos[0]
 		warnExtraArgs("query", pos[1:])
 	}
+	rc.keyMode = builtinKeyModeFromFlag(builtinSet())
 
 	if strings.TrimSpace(*entity) != "" || *all {
 		sdkReq, err := registry.ParseSDKVersion(*sdkVersion)

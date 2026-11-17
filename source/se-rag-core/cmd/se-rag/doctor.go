@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"se-rag-core/internal/chunker"
-	"se-rag-core/internal/config"
 	"se-rag-core/internal/docstore"
 	"se-rag-core/internal/retriever"
 )
@@ -51,8 +50,17 @@ func runDoctor(rc runCtx) (needRebuild bool, err error) {
 		return false, nil
 	}
 
-	cfg := config.DefaultConfig()
-	p := cfg.Products[0]
+	// doctor 需要判断「索引是否与当前 embedding 配置匹配」，因此必须用最终配置的
+	// 模型与维度：换了模型/维度就要能报出重建提示。配置本身不合法时也无法给出
+	// 正确的期望指纹，直接报错而不是拿默认值蒙一个。
+	cfg, err := loadOnlineConfig()
+	if err != nil {
+		return false, err
+	}
+	p, err := resolveProviders(cfg, rc.keyMode, false, isFakeMode())
+	if err != nil {
+		return false, err
+	}
 	wantFp := docstore.FpFull(providerName(p.Embedder.Type), p.Embedder.Model, p.Embedder.Dim)
 	fmt.Printf("current fp    : %s\n", wantFp)
 

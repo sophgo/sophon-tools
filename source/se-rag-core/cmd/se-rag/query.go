@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"se-rag-core/internal/chunker"
-	"se-rag-core/internal/config"
 	"se-rag-core/internal/docstore"
 	"se-rag-core/internal/embed"
 	"se-rag-core/internal/retriever"
@@ -41,8 +40,6 @@ func warnStaleIndex(indexDir, product, docsDir string) {
 }
 
 func runQuery(rc runCtx) error {
-	rc.ensureFactories()
-	rc.applyFakeMode()
 	if rc.product == "" {
 		rc.product = metaProductLabel
 	}
@@ -63,13 +60,18 @@ func runQuery(rc runCtx) error {
 			rc.indexDir)
 		return runQueryOffline(rc, "index is bm25-only (built with build -offline)")
 	}
-	// 先校验 key 配置（-builtin-key=false 缺 env key 属配置错误，优先报出）
-	cfg := config.DefaultConfig()
-	p := cfg.Products[0]
-	p.Name = rc.product
-	if err := applyUserKeys(&p, rc.useBuiltin, true); err != nil {
+	// 在线路径：先加载并校验最终配置，再决定 key 归属（配置错误在发请求前报出）。
+	cfg, err := loadOnlineConfig()
+	if err != nil {
 		return err
 	}
+	p, err := resolveProviders(cfg, rc.keyMode, true, isFakeMode())
+	if err != nil {
+		return err
+	}
+	p.Name = rc.product
+	rc.ensureFactories(cfg.Gateway)
+	rc.applyFakeMode()
 	if rc.query == "" {
 		return fmt.Errorf("empty query")
 	}

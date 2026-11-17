@@ -465,7 +465,9 @@ func TestQueryNonProductEntityMatchesPathMode(t *testing.T) {
 	if entityErr != "" {
 		t.Errorf("查非 product 实体不应有 stderr 提示：\n%s", entityErr)
 	}
-	if entityOut != pathOut {
+	// 输出末行含实际耗时（`total <N>ms`），两次调用的毫秒数天然不同；
+	// 比对前把它归一化，其余部分仍要求逐字节一致（-race 下尤其容易差 1ms）。
+	if stripTiming(entityOut) != stripTiming(pathOut) {
 		t.Errorf("非 product 实体的输出必须与路径模式逐字节一致：\nentity:\n%s\npath:\n%s", entityOut, pathOut)
 	}
 }

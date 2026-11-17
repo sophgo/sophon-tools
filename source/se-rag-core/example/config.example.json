@@ -1,0 +1,27 @@
+{
+  "openai": {
+    "base_url": "https://api.siliconflow.cn/v1",
+    "api_key": "sk-your-key",
+    "embedding_model": "BAAI/bge-m3",
+    "reranking_model": "BAAI/bge-reranker-v2-m3",
+    "embedding_dim": 1024
+  },
+  "embedder": {
+    "base_url": "https://embed-proxy.example.com/v1",
+    "api_key": "sk-your-embed-key",
+    "model": "BAAI/bge-m3",
+    "dim": 1024
+  },
+  "reranker": {
+    "base_url": "https://rerank-proxy.example.com/v1",
+    "api_key": "sk-your-rerank-key",
+    "model": "BAAI/bge-reranker-v2-m3"
+  },
+  "gateway": {
+    "primary_url": "https://se-rag-gateway.zetao-zhang.workers.dev/v1",
+    "fallback_url": "https://se-rag-gateway-chrzlcfiqt.cn-hangzhou.fcapp.run/v1",
+    "attempt_timeout": "6s",
+    "failover_budget": "18s",
+    "allow_http_fallback": true
+  }
+}

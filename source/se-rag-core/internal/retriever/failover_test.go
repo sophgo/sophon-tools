@@ -14,15 +14,16 @@ import (
 // 验证检索不 panic、有界失败后降级纯 BM25 并返回结果。
 func TestSearchBM25FallbackBothGatewaysDown(t *testing.T) {
 	s := buildTestStore(t)
-	// 127.0.0.1:1 / :2 本机无服务监听，连接立即被拒（模拟 CF 与 FC 网关都不可达）
 	p := config.Provider{
-		Type:            "siliconflow",
-		Model:           "BAAI/bge-m3",
-		Dim:             1024,
-		BaseURL:         "http://127.0.0.1:1/v1",
-		FallbackBaseURL: "http://127.0.0.1:2/v1",
+		Type:  "siliconflow",
+		Model: "BAAI/bge-m3",
+		Dim:   1024,
 	}
-	emb, err := embed.NewEmbedder(p)
+	// 127.0.0.1:1 / :2 本机无服务监听，连接立即被拒（模拟 CF 与 FC 网关都不可达）
+	gw := config.DefaultConfig().Gateway
+	gw.PrimaryURL = "http://127.0.0.1:1/v1"
+	gw.FallbackURL = "http://127.0.0.1:2/v1"
+	emb, err := embed.NewEmbedderWithGateway(p, gw)
 	if err != nil {
 		t.Fatal(err)
 	}

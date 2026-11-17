@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"se-rag-core/internal/config"
 )
 
 // 限流：8 段文本按单次≤2 段拆 → 2+2+2+2 四批
@@ -62,7 +64,7 @@ func TestSiliconflowEmbedderBatchLeq2(t *testing.T) {
 	defer srv.Close()
 
 	// 用内置 key 模式构造（useBuiltinKey=true → 启用限流）
-	e, err := newSiliconflowEmbedder([]string{srv.URL}, "key", "BAAI/bge-m3", 2, true)
+	e, err := newSiliconflowEmbedder([]string{srv.URL}, "key", "BAAI/bge-m3", 2, true, config.DefaultConfig().Gateway)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +150,7 @@ func TestSiliconflowReranker(t *testing.T) {
 		w.Write([]byte(`{"results":[{"index":1,"relevance_score":0.9},{"index":0,"relevance_score":0.5}]}`))
 	}))
 	defer srv.Close()
-	r := &siliconflowReranker{baseURLs: []string{srv.URL}, apiKey: "k", model: "BAAI/bge-reranker-v2-m3"}
+	r := &siliconflowReranker{baseURLs: []string{srv.URL}, apiKey: "k", model: "BAAI/bge-reranker-v2-m3", gw: config.DefaultConfig().Gateway}
 	got, err := r.Rerank(context.Background(), "q", []string{"a", "b"}, 2)
 	if err != nil {
 		t.Fatal(err)

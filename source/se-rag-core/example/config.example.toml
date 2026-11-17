@@ -1,6 +1,13 @@
-# se-rag-core 供应商配置示例（当前由 config.DefaultConfig() 内建，此处为参考文档）
-# 内置默认：siliconflow embedding/reranker + 内置混淆 key（限流并发≤1、单次≤2段落），
-#           模型固定 BAAI/bge-m3（embedding）+ BAAI/bge-reranker-v2-m3（rerank）。
+# ⚠️ 本文件是历史参考，**不会被 se-rag-core 加载**。
+#
+# TOML 配置支持从未实现——历史上这里只是"预留"的示意，README 曾据此宣传不存在的
+# 配置能力。真正的配置入口是 JSON：
+#
+#   /etc/se-rag-core/config.json      （默认路径）
+#   SE_RAG_CONFIG=<path>              （指定替代路径）
+#
+# 可用的完整示例见同目录的 config.example.json；字段契约见 README 的「供应商配置」。
+# 下面保留原 TOML 形态仅用于对照旧文档，修改它不会产生任何效果。
 
 # [embedder]
 # type     = "siliconflow"     # siliconflow | sophnet

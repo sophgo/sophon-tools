@@ -20,7 +20,8 @@ SE 系列知识库的 **Go RAG 检索核心**，替代现行 Python 栈（numpy 
 - **多知识库兼容**：不同知识库用不同 `-index-dir` / `--docs-dir` 即可，复用同一检索核心仅换目录
 - **供应商可切换**：siliconflow / sophnet 两族 embedding 与 reranker，可配置不写死
 - **内置默认 key（混淆内嵌）**：预置 siliconflow 免费 key，源码中以 XOR 混淆字节内嵌（不落明文）；模型固定 `BAAI/bge-m3`（embedding）与 `BAAI/bge-reranker-v2-m3`（rerank）；使用内置 key 时强制限流（并发≤1、单次≤2段落）；用户自备 key 放开
-- **内置网关故障转移链**：内置 key 请求经自建网关转发 SiliconFlow——主网关阿里云函数计算（FC3.0）同协议网关（`*.fcapp.run`，国内直连免备案）不可达（连接超时 / 5xx / DNS 失败）时自动切换备用 Cloudflare Worker 网关（`*.workers.dev`，对 DNS 污染走 IP 优先 + DoH 兜底拨号）；两网关均不可达时降级纯 BM25（见下文「内置网关故障转移链」）
+- **分层配置**：`/etc/se-rag-core/config.json`（`SE_RAG_CONFIG` 可指定替代路径）+ `OPENAI_*` / `SE_RAG_*` 环境变量，逐字段合并、环境层整体优于文件层；未知字段与非法值明确报错且不泄露密钥（见下文「供应商配置」）
+- **内置网关 CF 优先 + 有界快速回退**：内置 key 请求先走 Cloudflare Worker（`*.workers.dev`，对 DNS 污染走 IP 优先 + DoH 兜底拨号），单次请求（含读完响应体）最多 6s，到点立即转阿里云函数计算 FC3.0（`*.fcapp.run`，国内直连免备案）；全链 18s 预算含退避，两者均不可达时降级纯 BM25（见下文「内置网关故障转移链」）
 - **供应商切换校验**：索引记录 embedding 指纹（`<provider>.<model>@<dim>`），切换供应商/模型后 `se-rag doctor` 检测并提示重建
 - **检索输出含来源信息**：每条结果标记源文件的相对路径与片段行号区间
 - **中文分词（BM25 兜底召回）**：汉字序列按 2-gram 滑窗切分（无词典、纯 Go 静态实现），
@@ -69,8 +70,8 @@ GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o bin/se-rag-arm64 ./cmd/se-rag
 ### 统一 release.sh（对齐 sophon-tools M1 规范）
 
 ```bash
-bash release.sh all 1.9.0        # 同时产出 arm64 + amd64
-bash release.sh arm64 1.9.0      # 仅 arm64
+bash release.sh all 1.10.0       # 同时产出 arm64 + amd64
+bash release.sh arm64 1.10.0     # 仅 arm64
 # 产物目录（可用 OUTPUT_DIR 覆盖，默认 <repo>/output/se-rag-core/）
 ```
 
@@ -159,22 +160,105 @@ cd example
 
 ## 供应商配置
 
-默认（`config.DefaultConfig`）使用 siliconflow + 内置混淆 key，模型 `BAAI/bge-m3` + `BAAI/bge-reranker-v2-m3`。
-用户自备 key 时（flag 写在问题文本之前或之后均可；位置参数之后的 flag 自 1.1.0 起生效，
-1.0.0 及更早写在后面会被静默忽略）：
+默认使用 siliconflow + 内置混淆 key，模型 `BAAI/bge-m3` + `BAAI/bge-reranker-v2-m3`（1024 维）。
+在此基础上支持**配置文件 + 环境变量分层覆盖**，不写任何旗标即可生效：
+
+```
+优先级（高 → 低）：环境变量 > 配置文件 > 内置默认值
+每层内部：     专用字段（embedder/reranker 段、SE_RAG_EMBED_*/SE_RAG_RERANK_*）> 公共字段（openai 段、OPENAI_*）
+```
+
+### 配置文件
+
+默认路径 `/etc/se-rag-core/config.json`，`SE_RAG_CONFIG=<path>` 可指定替代路径（容器挂载、测试用）。
+完整可用示例见 [`example/config.example.json`](./example/config.example.json)。
+
+```json
+{
+  "openai": {
+    "base_url": "https://api.siliconflow.cn/v1",
+    "api_key": "sk-your-key",
+    "embedding_model": "BAAI/bge-m3",
+    "reranking_model": "BAAI/bge-reranker-v2-m3",
+    "embedding_dim": 1024
+  },
+  "embedder":  { "base_url": "...", "api_key": "...", "model": "...", "dim": 1024 },
+  "reranker":  { "base_url": "...", "api_key": "...", "model": "..." },
+  "gateway": {
+    "primary_url": "https://se-rag-gateway.zetao-zhang.workers.dev/v1",
+    "fallback_url": "https://se-rag-gateway-chrzlcfiqt.cn-hangzhou.fcapp.run/v1",
+    "attempt_timeout": "6s",
+    "failover_budget": "18s",
+    "allow_http_fallback": true
+  }
+}
+```
+
+- `openai` 段是公共默认值，`embedder` / `reranker` 段各自覆盖；`reranker` 没有 `dim`
+- 时长为 Go duration 字符串（`6s`、`2500ms`、`1m`）
+- **未知字段报错**：拼错的键（如 `base_urls`）不会被静默忽略
+- 空字符串视为「未提供」，沿用下一层；唯一例外是 `gateway.fallback_url` 的显式空串
+  = 禁用备用网关（单跳）
+- 默认文件**不存在**时按默认值走；`SE_RAG_CONFIG` 显式指定的文件缺失、不可读、
+  格式/类型错误、URL/维度/时长/布尔非法，全部明确报错，**错误信息里不含密钥值**
+- 配置只在**在线命令**（`build` / `query` / `doctor`）读取，且在建索引/发请求之前完成校验；
+  `offline` / `help` / `list` / `resolve` 不依赖在线配置的有效性，损坏的配置文件不会让它们失败
+- `reload` 语义：每次进程启动读一次，没有热重载
+
+### 环境变量
+
+| 变量 | 作用 |
+|------|------|
+| `SE_RAG_CONFIG` | 配置文件路径（默认 `/etc/se-rag-core/config.json`） |
+| `OPENAI_BASE_URL` / `OPENAI_API_KEY` | 自备 openai 兼容服务地址与 key（embed / rerank 共用） |
+| `OPENAI_EMBEDDING_MODEL` / `OPENAI_RERANKING_MODEL` | 两个模型名 |
+| `SE_RAG_EMBED_KEY` / `SE_RAG_RERANK_KEY` | 分 provider 的 key（优先于 `OPENAI_API_KEY`） |
+| `SE_RAG_EMBED_BASE_URL` / `SE_RAG_RERANK_BASE_URL` | 分 provider 的地址 |
+| `SE_RAG_EMBED_MODEL` / `SE_RAG_RERANK_MODEL` / `SE_RAG_EMBED_DIM` | 分 provider 的模型与维度 |
+
+普通空字符串视为「未提供」（`export X=` 不会覆盖任何东西）。
+
+### key 归属与 `-builtin-key`
+
+| 取值 | 语义 |
+|------|------|
+| **不写** | 按最终配置自动选择：配了自备 key 就用自备，否则用内置 key |
+| `-builtin-key=true` | 强制内置 key + 内置模型/维度（`BAAI/bge-m3` / `BAAI/bge-reranker-v2-m3` / 1024），网关地址覆盖仍生效 |
+| `-builtin-key=false` | 要求自备 key：`build` 只需 embed key，`query` 还需 rerank key，缺失即报错退出（不静默回落内置 key） |
+
+旗标可写在问题文本之前或之后（位置参数之后的旗标自 1.1.0 起生效）。
 
 ```bash
-export SE_RAG_EMBED_KEY="sk-user-embedding-key"
-export SE_RAG_RERANK_KEY="sk-user-rerank-key"
-./bin/se-rag build --docs-dir example/se7/docs -index-dir ./rag-data -builtin-key=false
-./bin/se-rag query -builtin-key=false -index-dir ./rag-data "问题"
+# 1) 全部走配置文件（不写任何旗标）
+./bin/se-rag build --docs-dir example/se7/docs -index-dir ./rag-data
+
+# 2) 只用环境变量
+export OPENAI_API_KEY="sk-user-key"
+export OPENAI_BASE_URL="https://my-proxy.example.com/v1"
+./bin/se-rag build --docs-dir example/se7/docs -index-dir ./rag-data
+
+# 3) 显式要求自备 key（缺 key 会报错，便于在部署脚本里提前失败）
+SE_RAG_EMBED_KEY=sk-a SE_RAG_RERANK_KEY=sk-b \
+  ./bin/se-rag query -index-dir ./rag-data -builtin-key=false "问题"
 ```
 
 - 内置 key 启用的限流：并发 ≤ 1、单次 ≤ 2 段落（**进程内信号量**——单进程内有效；
-  多进程并发调用 se-rag 时，各进程独立限流，网关侧总体并发不受本限流约束）
-- 用户自备 key（`-builtin-key=false`）：放开限流；此时 key 必须由 `SE_RAG_EMBED_KEY` /
-  `SE_RAG_RERANK_KEY` 环境变量提供，缺失即报错退出（不静默回落内置 key）
-- 供应商切换（siliconflow ↔ sophnet）后，重建会用新指纹覆盖旧索引；用 `doctor` 校验
+  多进程并发调用 se-rag 时，各进程独立限流，网关侧总体并发不受本限流约束）。
+  限流按**各 provider 实际使用的 key** 归属判定：只给 embedder 配了自备 key 时，
+  embedder 放开限流、reranker 仍按内置 key 限流
+- 自备 key 的地址规则：显式 `base_url` **实际生效**；未提供时沿用官方 SiliconFlow
+  `https://api.siliconflow.cn/v1`。自备请求**直达该地址**，不经内置网关、不参与故障转移，
+  也不参与 CF 备用端口/明文 HTTP 降级
+- 供应商切换（siliconflow ↔ sophnet）或换模型/维度后，重建会用新指纹覆盖旧索引；
+  用 `doctor` 校验（见下文「指纹与重建」）
+- 旧的 `example/config.example.toml` **不会被加载**，仅作历史参考（TOML 支持从未实现）
+
+> **关于内置 key**：「混淆内嵌」是**伪保护**：内置 key 以 XOR 单字节掩码（0x5A）混淆字节存于
+> 源码（密文与解码逻辑同文件），持有源码或二进制者可一键还原明文，不能视为机密。
+> 其安全模型真正依赖**网关侧护栏**（模型白名单 + 限流 + 免费额度），网关侧白名单/配额/
+> 吊销机制是否真实存在需向部署运维确认（仓库代码无法自证）。生产/共享部署应通过
+> 配置文件或 `SE_RAG_*` / `OPENAI_*` 环境变量注入自备 key（也即放开限流），
+> 切勿在公共镜像或日志中泄露内置 key。
 
 > **关于内置 key**：「混淆内嵌」是**伪保护**：内置 key 以 XOR 单字节掩码（0x5A）混淆字节存于
 > 源码（密文与解码逻辑同文件），持有源码或二进制者可一键还原明文，不能视为机密。
@@ -186,18 +270,27 @@ export SE_RAG_RERANK_KEY="sk-user-rerank-key"
 ## 内置网关故障转移链
 
 内置 key 的上游链路为「网关 → SiliconFlow 源站」，网关承担鉴权与模型白名单（仅两模型）。为消除单点，
-内置网关部署了两份同协议镜像，请求按有序列表轮转、失败自动切换：
+内置网关部署了两份同协议镜像，**默认 CF 优先**，失败或超时后自动切到 FC：
 
-| 优先级 | 网关 | 地址 | 说明 |
-|--------|------|------|------|
-| 1 | 阿里云函数计算 FC3.0（主） | `se-rag-gateway-chrzlcfiqt.cn-hangzhou.fcapp.run` | 国内直连免备案；`fcapp.run` 走系统 DNS，不受 IP 优先逻辑影响 |
-| 2 | Cloudflare Worker（备） | `se-rag-gateway.zetao-zhang.workers.dev` | 对 `*.workers.dev` DNS 污染走 IP 优先 + DoH 兜底拨号，作用范围仅限该域名 |
+| 顺序 | 网关 | 地址 | 说明 |
+|------|------|------|------|
+| 1 | Cloudflare Worker（主） | `se-rag-gateway.zetao-zhang.workers.dev` | 边缘覆盖最好；对 `*.workers.dev` DNS 污染走 IP 优先 + DoH 兜底拨号，作用范围仅限该域名。单次请求（含读完响应体）最多 6s |
+| 2 | 阿里云函数计算 FC3.0（备） | `se-rag-gateway-chrzlcfiqt.cn-hangzhou.fcapp.run` | CF 超时/失败后的快速回退；国内直连免备案，实测延迟 0.07s 级；`fcapp.run` 走系统 DNS |
 | 3 | 纯 BM25（兜底） | — | 两网关均不可达时自动降级，离线可用（`mode=bm25`） |
+
+> 顺序是 CF → FC，不是 FC → CF。代码默认值、文档与 `Provider.EffectiveBaseURLs` 三处一致；
+> 无故障、无有效熔断时**第一跳一定是 CF**（已有成功粘滞不能让健康的 CF 长期排在 FC 之后）。
 
 行为约定：
 
 - 同一 key / 同路径（`/v1/embeddings`、`/v1/rerank`）/ 同模型白名单，内置 key 零改动
-- 5xx / 408 / 429 / 403 / 连接错误（超时、DNS 失败）→ 有界重试（最多 6 次）并轮转至 CF 备网关；
+- **单次尝试上限 6s**（`gateway.attempt_timeout` / `SE_RAG_GATEWAY_TIMEOUT`，含**读完响应体**）：
+  CF 卡住时到点立即让位给 FC，不让一次尝试吃光全部预算。只对多跳链生效——
+  自备 key 的单地址请求不硬套这个上限
+- **全链总预算 18s**（`gateway.failover_budget` / `SE_RAG_FAILOVER_BUDGET`），含退避，
+  并尊重更短的父 context。二者都受配置分层控制；把总预算配得比单次上限还短时，
+  单次上限会自动收紧到预算内（不会出现「链一开始就已过期」）
+- 5xx / 408 / 429 / 403 / 连接错误（超时、DNS 失败）→ 有界重试（最多 6 次）并在两跳之间轮转；
   401 / 400 / 404 快速失败不转移（这类错误换任何网关都一样复现）
 - 403 参与转移的原因：网关侧欠费/配额耗尽、以及网关特有的上游拒绝都表现为 403，
   不像 401/400 那样能断定「换网关也一样」
@@ -213,14 +306,14 @@ export SE_RAG_RERANK_KEY="sk-user-rerank-key"
 - **硬失败短路**：TLS RST/EOF、代理拒绝（`proxyconnect`/`502`）、连接被拒，都判定为
   「重试同一地址必然同样失败」，整条链跳过该网关，不再反复空试。这类形态下重试毫无收益——
   实测一次查询在降级前空等 65 秒（静默黑洞形态甚至撞满 query 的 120s 上限）
-- **转移总预算 12s**：`SE_RAG_FAILOVER_BUDGET` 可覆盖（如 `30s`）。到点即认输降级，
-  单次尝试也被同一 deadline 约束，不会因为一次 10s 级握手超时把总耗时撑到预算的倍数
+- **到点即认输**：全链预算到点立刻降级 BM25，单次尝试也被同一 deadline 约束，
+  不会因为一次 10s 级握手超时把总耗时撑到预算的倍数
 - **端口降级**：`443` 上按 SNI 定向阻断时，Cloudflare 对同一 Worker 还开放
   `2053/2083/2087/2096/8443`（实测均可正常返回向量）。`*.workers.dev` 网关首次 TLS 硬失败后，
   自动换到首个备用端口重试一次——**无需自有域名即可恢复第二跳**。其它网关（如 `fcapp.run`）
   没有这套端口，不参与降级
-- 故障转移链可配置：`Provider.BaseURL`（主）+ `Provider.FallbackBaseURL`（备，默认 CF 网关）；
-  两者相同即显式禁用故障转移；`se-rag` CLI 默认即启用
+- 故障转移链可配置：`gateway.primary_url`（主，默认 CF）+ `gateway.fallback_url`（备，默认 FC）；
+  备用地址置空或与主相同即显式禁用故障转移（单跳）；`se-rag` CLI 默认即启用
 - 环境变量覆盖（改链路不必重新编译）：`SE_RAG_GATEWAY_URL` 改主网关，
   `SE_RAG_FALLBACK_URL` 改备网关——指向自有域名（绑定 Custom Domain 后）或置空=单跳止血
 - **明文 HTTP 兜底（保第二跳）**：阻断若按 TLS SNI 匹配，则明文请求根本没有 SNI 可匹配，
@@ -232,12 +325,15 @@ export SE_RAG_RERANK_KEY="sk-user-rerank-key"
   > 网关，泄露面有限；但若你的部署对传输机密性有硬要求，请置 `SE_RAG_ALLOW_HTTP_FALLBACK=0`，
   > 此时 SNI 全端口阻断的环境会退化为降级 BM25。更彻底的方案仍是绑定 Custom Domain
   > （见下）让 SNI 不再命中被封锁的模式。
-- 转移链总预算：`SE_RAG_FAILOVER_BUDGET`（默认 18s = 明文兜底预留 12s + TLS 余量 6s）
+- 转移链总预算：18s（单次 6s + 明文兜底预留 ≤ 12s；预留不超过剩余预算的一半，
+  因此把预算配短（如 2s）时链仍然可用）
 - **熔断与粘滞跨进程持久化**：状态存于 `$SE_RAG_STATE_DIR`（默认用户缓存目录下的
   `se-rag/gateway-breaker.json`）。这一点对支撑 agent 很关键——它们每次查询都是独立 CLI
   进程，纯内存熔断等于没有：实测每次查询都要重付一遍失效链路的代价。落盘后，
-  上次成功的通道（含运行时降级出的 `:80`）会被记住并优先复用，实测连续 4 次查询
-  从 14.3s 收敛到 2.5s。粘滞有效期 `preferTTL` = 10 分钟，过期或失败即重新探测。
+  上次成功的**通道**（含运行时降级出的 `:80`、备用 HTTPS 端口）会被记住并优先复用，
+  实测连续 4 次查询从 14.3s 收敛到 2.5s。粘滞有效期 `preferTTL` = 10 分钟，过期或失败即重新探测。
+  **粘滞只换通道、不颠倒顺序**：只有在首选网关正处熔断冷却、或粘滞记录本就属于首选网关时，
+  才会把它提到首位——否则一次 FC 成功会让后续调用长期绕开健康的 CF。
   **标记 24 小时自动刷新**：状态文件带 `stamp_ns` 生成时间，超过 24 小时整份作废并
   在下次写入时重新生成（`SE_RAG_STATE_TTL` 可覆盖）。这是比单条 TTL 更外一层的兜底——
   冷却管 60s、粘滞管 10min，都只管「条目」；标记管「整份状态还能不能代表当前网络」。

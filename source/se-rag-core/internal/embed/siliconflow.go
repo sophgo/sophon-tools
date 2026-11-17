@@ -2,24 +2,27 @@ package embed
 
 import (
 	"context"
+
+	"se-rag-core/internal/config"
 )
 
 // siliconflowEmbedder：OpenAI 兼容 /embeddings 接口，内置 key 时对 Embed 整体限流。
-// baseURLs 为有序网关地址列表（CF → FC 故障转移），请求按列表轮转，首个可达网关命中。
+// baseURLs 为有序网关地址列表（默认 CF → FC），请求按网关链故障转移，首个可用网关命中。
 type siliconflowEmbedder struct {
 	baseURLs []string
 	apiKey   string
 	model    string
 	dim      int
 	limiter  *EmbeddingLimiter
-	gw       gwRecorder
+	gw       config.Gateway
+	rec      gwRecorder
 }
 
-func newSiliconflowEmbedder(baseURLs []string, key, model string, dim int, useBuiltinKey bool) (Embedder, error) {
+func newSiliconflowEmbedder(baseURLs []string, key, model string, dim int, useBuiltinKey bool, gw config.Gateway) (Embedder, error) {
 	if len(baseURLs) == 0 || baseURLs[0] == "" {
 		baseURLs = []string{"https://api.siliconflow.cn/v1"}
 	}
-	e := &siliconflowEmbedder{baseURLs: baseURLs, apiKey: key, model: model, dim: dim}
+	e := &siliconflowEmbedder{baseURLs: baseURLs, apiKey: key, model: model, dim: dim, gw: gw}
 	if useBuiltinKey {
 		e.limiter = NewEmbeddingLimiter(1) // 内置 key 并发仅 1
 	}
@@ -30,7 +33,7 @@ func (e *siliconflowEmbedder) Name() string { return "siliconflow." + e.model }
 func (e *siliconflowEmbedder) Dim() int     { return e.dim }
 
 // Gateway 返回最近一次实际服务本次进程的网关地址（可观测性：能看出当前走的是主网关还是备网关）。
-func (e *siliconflowEmbedder) Gateway() string { return e.gw.LastGateway() }
+func (e *siliconflowEmbedder) Gateway() string { return e.rec.LastGateway() }
 
 type sfEmbedResp struct {
 	Data []struct {
@@ -52,11 +55,11 @@ func (e *siliconflowEmbedder) Embed(ctx context.Context, texts []string) ([][]fl
 func (e *siliconflowEmbedder) embedBatch(ctx context.Context, texts []string) ([][]float32, error) {
 	payload := map[string]any{"model": e.model, "input": texts}
 	var resp sfEmbedResp
-	served, err := postJSONWithGateway(ctx, joinPaths(e.baseURLs, "/embeddings"), e.apiKey, payload, &resp)
+	served, err := postJSONWithPolicy(ctx, joinPaths(e.baseURLs, "/embeddings"), e.apiKey, payload, &resp, e.gw)
 	if err != nil {
 		return nil, err
 	}
-	e.gw.set(served)
+	e.rec.set(served)
 	out := make([][]float32, len(texts))
 	for _, d := range resp.Data {
 		if d.Index >= 0 && d.Index < len(out) {
@@ -68,7 +71,8 @@ func (e *siliconflowEmbedder) embedBatch(ctx context.Context, texts []string) ([
 
 // NewSiliconflowEmbedderFromURL 测试辅助：显式 baseURL
 func NewSiliconflowEmbedderFromURL(baseURL string) (Embedder, error) {
-	return newSiliconflowEmbedder([]string{baseURL}, "test-key", "BAAI/bge-m3", 1024, false)
+	return newSiliconflowEmbedder([]string{baseURL}, "test-key", "BAAI/bge-m3", 1024, false,
+		config.DefaultConfig().Gateway)
 }
 
 // ---- siliconflow reranker ----
@@ -77,20 +81,21 @@ type siliconflowReranker struct {
 	baseURLs []string
 	apiKey   string
 	model    string
-	gw       gwRecorder
+	gw       config.Gateway
+	rec      gwRecorder
 }
 
-func newSiliconflowReranker(baseURLs []string, key, model string) (Reranker, error) {
+func newSiliconflowReranker(baseURLs []string, key, model string, gw config.Gateway) (Reranker, error) {
 	if len(baseURLs) == 0 || baseURLs[0] == "" {
 		baseURLs = []string{"https://api.siliconflow.cn/v1"}
 	}
-	return &siliconflowReranker{baseURLs: baseURLs, apiKey: key, model: model}, nil
+	return &siliconflowReranker{baseURLs: baseURLs, apiKey: key, model: model, gw: gw}, nil
 }
 
 func (r *siliconflowReranker) Name() string { return "siliconflow." + r.model }
 
-// Gateway 返回最近一次实际服务本次进程的网关地址。
-func (r *siliconflowReranker) Gateway() string { return r.gw.LastGateway() }
+// Gateway 返回最近一次实际服务本次请求的网关地址。
+func (r *siliconflowReranker) Gateway() string { return r.rec.LastGateway() }
 
 type sfRerankResp struct {
 	Results []struct {
@@ -109,11 +114,11 @@ func (r *siliconflowReranker) Rerank(ctx context.Context, query string, docs []s
 	payload := map[string]any{"model": r.model, "query": query, "documents": docs, "top_n": topN}
 	var resp sfRerankResp
 	// 注：rerank 单次调用段数由调用方控制，内置 key 暂不作额外限流
-	served, err := postJSONWithGateway(ctx, joinPaths(r.baseURLs, "/rerank"), r.apiKey, payload, &resp)
+	served, err := postJSONWithPolicy(ctx, joinPaths(r.baseURLs, "/rerank"), r.apiKey, payload, &resp, r.gw)
 	if err != nil {
 		return nil, err
 	}
-	r.gw.set(served)
+	r.rec.set(served)
 	order := make([]int, 0, len(resp.Results))
 	for _, rr := range resp.Results {
 		order = append(order, rr.Index)
