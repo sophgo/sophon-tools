@@ -651,6 +651,9 @@ func (f *failover) remaining(now time.Time) time.Duration {
 // 退避同样计入 FailoverBudget：只用父 ctx 睡会把总时长撑出预算
 // （实测 40ms 预算跑成 101ms，长退避可再超 2s）。
 func (f *failover) backoffWithinBudget(ctx context.Context, attempt int) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	d := backoff(attempt)
 	remaining := f.remaining(time.Now())
 	if remaining <= 0 {
@@ -660,7 +663,10 @@ func (f *failover) backoffWithinBudget(ctx context.Context, attempt int) (bool, 
 		// 睡满也超预算：直接结束，把时间留给上层降级。
 		return false, nil
 	}
-	return sleepCtx(ctx, d), nil
+	if !sleepCtx(ctx, d) {
+		return false, ctx.Err()
+	}
+	return true, nil
 }
 
 // isHTTPS 该地址是否走 TLS。明文兜底与端口降级只对 TLS 通道有意义。
