@@ -15,14 +15,17 @@ type siliconflowEmbedder struct {
 	dim      int
 	limiter  *EmbeddingLimiter
 	gw       config.Gateway
-	rec      gwRecorder
+	// builtin 是否使用内置 key：决定是否适用内置链专属能力（单次上限、端口/明文降级）。
+	// 不能用 len(baseURLs) 代替——关闭备用网关的内置链是单地址，仍应按 Gateway 策略执行。
+	builtin bool
+	rec     gwRecorder
 }
 
 func newSiliconflowEmbedder(baseURLs []string, key, model string, dim int, useBuiltinKey bool, gw config.Gateway) (Embedder, error) {
 	if len(baseURLs) == 0 || baseURLs[0] == "" {
 		baseURLs = []string{"https://api.siliconflow.cn/v1"}
 	}
-	e := &siliconflowEmbedder{baseURLs: baseURLs, apiKey: key, model: model, dim: dim, gw: gw}
+	e := &siliconflowEmbedder{baseURLs: baseURLs, apiKey: key, model: model, dim: dim, gw: gw, builtin: useBuiltinKey}
 	if useBuiltinKey {
 		e.limiter = NewEmbeddingLimiter(1) // 内置 key 并发仅 1
 	}
@@ -55,7 +58,7 @@ func (e *siliconflowEmbedder) Embed(ctx context.Context, texts []string) ([][]fl
 func (e *siliconflowEmbedder) embedBatch(ctx context.Context, texts []string) ([][]float32, error) {
 	payload := map[string]any{"model": e.model, "input": texts}
 	var resp sfEmbedResp
-	served, err := postJSONWithPolicy(ctx, joinPaths(e.baseURLs, "/embeddings"), e.apiKey, payload, &resp, e.gw)
+	served, err := postJSONWithPolicyFor(ctx, joinPaths(e.baseURLs, "/embeddings"), e.apiKey, payload, &resp, e.gw, e.builtin)
 	if err != nil {
 		return nil, err
 	}
@@ -82,14 +85,15 @@ type siliconflowReranker struct {
 	apiKey   string
 	model    string
 	gw       config.Gateway
+	builtin  bool
 	rec      gwRecorder
 }
 
-func newSiliconflowReranker(baseURLs []string, key, model string, gw config.Gateway) (Reranker, error) {
+func newSiliconflowReranker(baseURLs []string, key, model string, gw config.Gateway, builtin bool) (Reranker, error) {
 	if len(baseURLs) == 0 || baseURLs[0] == "" {
 		baseURLs = []string{"https://api.siliconflow.cn/v1"}
 	}
-	return &siliconflowReranker{baseURLs: baseURLs, apiKey: key, model: model, gw: gw}, nil
+	return &siliconflowReranker{baseURLs: baseURLs, apiKey: key, model: model, gw: gw, builtin: builtin}, nil
 }
 
 func (r *siliconflowReranker) Name() string { return "siliconflow." + r.model }
@@ -114,7 +118,7 @@ func (r *siliconflowReranker) Rerank(ctx context.Context, query string, docs []s
 	payload := map[string]any{"model": r.model, "query": query, "documents": docs, "top_n": topN}
 	var resp sfRerankResp
 	// 注：rerank 单次调用段数由调用方控制，内置 key 暂不作额外限流
-	served, err := postJSONWithPolicy(ctx, joinPaths(r.baseURLs, "/rerank"), r.apiKey, payload, &resp, r.gw)
+	served, err := postJSONWithPolicyFor(ctx, joinPaths(r.baseURLs, "/rerank"), r.apiKey, payload, &resp, r.gw, r.builtin)
 	if err != nil {
 		return nil, err
 	}

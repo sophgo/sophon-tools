@@ -150,7 +150,7 @@ func TestSiliconflowReranker(t *testing.T) {
 		w.Write([]byte(`{"results":[{"index":1,"relevance_score":0.9},{"index":0,"relevance_score":0.5}]}`))
 	}))
 	defer srv.Close()
-	r := &siliconflowReranker{baseURLs: []string{srv.URL}, apiKey: "k", model: "BAAI/bge-reranker-v2-m3", gw: config.DefaultConfig().Gateway}
+	r := &siliconflowReranker{baseURLs: []string{srv.URL}, apiKey: "k", model: "BAAI/bge-reranker-v2-m3", gw: config.DefaultConfig().Gateway, builtin: false}
 	got, err := r.Rerank(context.Background(), "q", []string{"a", "b"}, 2)
 	if err != nil {
 		t.Fatal(err)

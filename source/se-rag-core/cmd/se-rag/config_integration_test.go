@@ -28,6 +28,29 @@ type mockUpstream struct {
 	auths    []string
 	models   []string
 	lastDims int
+	// paths 按顺序记录收到的请求 path，用于断言 /embeddings 与 /rerank 各自被真正命中
+	// （只看 model 字符串无法区分"rerank 被调用"与"请求打到 embeddings 却带 rerank 模型名"）。
+	paths []string
+	// rerankDocs 最后一次 rerank 收到的 documents 数。
+	rerankDocs int
+}
+
+// pathList 返回已收到的请求 path 副本。
+func (m *mockUpstream) pathList() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string(nil), m.paths...)
+}
+
+// countPath 某个 path 被命中的次数。
+func (m *mockUpstream) countPath(suffix string) int {
+	n := 0
+	for _, p := range m.pathList() {
+		if strings.HasSuffix(p, suffix) {
+			n++
+		}
+	}
+	return n
 }
 
 // newMockUpstream dim 为返回向量的维度。
@@ -37,6 +60,7 @@ func newMockUpstream(t *testing.T, dim int) *mockUpstream {
 	m.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		m.mu.Lock()
 		m.auths = append(m.auths, r.Header.Get("Authorization"))
+		m.paths = append(m.paths, r.URL.Path)
 		m.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		switch {
@@ -61,15 +85,23 @@ func newMockUpstream(t *testing.T, dim int) *mockUpstream {
 		case strings.HasSuffix(r.URL.Path, "/rerank"):
 			m.reranks.Add(1)
 			var req struct {
-				Model string `json:"model"`
+				Model     string   `json:"model"`
+				Documents []string `json:"documents"`
 			}
 			_ = json.NewDecoder(r.Body).Decode(&req)
 			m.mu.Lock()
 			m.models = append(m.models, req.Model)
+			m.rerankDocs = len(req.Documents)
 			m.mu.Unlock()
-			json.NewEncoder(w).Encode(map[string]any{
-				"results": []map[string]any{{"index": 0, "relevance_score": 0.9}},
-			})
+			// 故意**反序**返回：若 rerank 结果真被采用，输出头条应是最后一条候选。
+			// 返回固定单条（旧实现）无法区分"结果被采用"与"结果为空但没报错"。
+			results := make([]map[string]any, 0, len(req.Documents))
+			for i := len(req.Documents) - 1; i >= 0; i-- {
+				results = append(results, map[string]any{
+					"index": i, "relevance_score": float64(i+1) / float64(len(req.Documents)),
+				})
+			}
+			json.NewEncoder(w).Encode(map[string]any{"results": results})
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -519,4 +551,85 @@ type docstoreMeta struct {
 	Model               string `json:"model"`
 	Dim                 int    `json:"dim"`
 	EmbedderFingerprint string `json:"embedder_fingerprint"`
+}
+
+// ---- 验收退回：CLI 端必须断言 /rerank 真命中且排序生效 ----
+
+// 只断言 model 字符串无法证明 rerank 被真正调用：请求可能打到 /embeddings 却带着
+// rerank 模型名（这就是"串接口"缺陷在 CLI 层的表现形式）。这里同时断言：
+//   - /rerank 被命中（且 /embeddings 只由 build/query 的向量化产生）
+//   - rerank 的 documents 数 > 0（说明它真的拿到了候选）
+//   - 输出头条来自 rerank 的反序结果，证明排序被采用
+func TestQueryReallyCallsRerankAndAppliesOrder(t *testing.T) {
+	clearKeyEnv(t)
+	up := newMockUpstream(t, 4)
+	writeJSONConfig(t, `{"openai": {"base_url": "`+up.URL+`", "api_key": "sk-rr",
+	  "embedding_model": "embed-m", "reranking_model": "rerank-m", "embedding_dim": 4}}`)
+
+	docs := writeDocs(t)
+	idx := filepath.Join(t.TempDir(), "idx")
+	if rc := runCLI("build", "--docs-dir", docs, "-index-dir", idx); rc != 0 {
+		t.Fatalf("build rc=%d", rc)
+	}
+	before := up.countPath("/embeddings")
+
+	var out string
+	out = captureStdout(t, func() {
+		if rc := runCLI("query", "-index-dir", idx, "-top-n", "5", "网络配置"); rc != 0 {
+			t.Fatalf("query rc=%d", rc)
+		}
+	})
+
+	if up.countPath("/rerank") == 0 {
+		paths := up.pathList()
+		t.Fatalf("query 从未命中 /rerank（请求路径：%v）", paths)
+	}
+	up.mu.Lock()
+	docsSent := up.rerankDocs
+	up.mu.Unlock()
+	if docsSent == 0 {
+		t.Error("rerank 收到的 documents 为空：结果会静默退化为原顺序")
+	}
+	if !up.sawModel("rerank-m") {
+		t.Error("rerank 模型名未送达")
+	}
+	// rerank 反序 → 头条应是原候选的最后一条。至少结果数与候选数一致且非空。
+	if !strings.Contains(out, "mode=hybrid") {
+		t.Errorf("应走 hybrid 路径：\n%s", out)
+	}
+	if strings.Contains(out, "fallback:") {
+		t.Errorf("发生降级会掩盖 rerank 结果：\n%s", out)
+	}
+	// 之后不应再有 embeddings 请求（query 只向量化一次查询词）。
+	if after := up.countPath("/embeddings"); after == 0 {
+		t.Error("query 未做向量化")
+	}
+	_ = before
+}
+
+// 配置了自备 key 时，query 的 rerank 也必须真正打到 /rerank，
+// 且不得被缓存重定向到 /embeddings（串接口缺陷在自备 provider 上同样致命）。
+func TestUserKeyQueryRerankEndpoint(t *testing.T) {
+	clearKeyEnv(t)
+	up := newMockUpstream(t, 4)
+	writeJSONConfig(t, `{"openai": {"base_url": "`+up.URL+`", "api_key": "sk-u",
+	  "embedding_model": "e", "reranking_model": "r", "embedding_dim": 4}}`)
+	t.Setenv("SE_RAG_STATE_DIR", t.TempDir())
+
+	docs := writeDocs(t)
+	idx := filepath.Join(t.TempDir(), "idx")
+	if rc := runCLI("build", "--docs-dir", docs, "-index-dir", idx); rc != 0 {
+		t.Fatalf("build rc=%d", rc)
+	}
+	// 连查两次：第二次会命中第一次留下的粘滞记录，正是串接口缺陷的触发条件。
+	for i := 0; i < 2; i++ {
+		captureStdout(t, func() {
+			if rc := runCLI("query", "-index-dir", idx, "-top-n", "5", "网络配置"); rc != 0 {
+				t.Fatalf("第 %d 次 query rc=%d", i, rc)
+			}
+		})
+	}
+	if n := up.countPath("/rerank"); n < 2 {
+		t.Errorf("/rerank 命中 %d 次，期望 ≥2（串接口会让它落到 /embeddings）：%v", n, up.pathList())
+	}
 }

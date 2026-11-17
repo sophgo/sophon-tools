@@ -50,7 +50,7 @@ func NewReranker(cfg config.Provider) (Reranker, error) {
 func NewRerankerWithGateway(cfg config.Provider, gw config.Gateway) (Reranker, error) {
 	switch cfg.Type {
 	case "siliconflow":
-		return newSiliconflowReranker(cfg.EffectiveBaseURLs(gw), cfg.EffectiveKey(), cfg.Model, gw)
+		return newSiliconflowReranker(cfg.EffectiveBaseURLs(gw), cfg.EffectiveKey(), cfg.Model, gw, cfg.IsBuiltinKey())
 	case "sophnet":
 		return newSophnetReranker(cfg.BaseURL, cfg.EffectiveKey(), cfg.Model)
 	default:

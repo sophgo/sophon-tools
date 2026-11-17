@@ -306,35 +306,35 @@ func (b *gatewayBreaker) markOK(url string) {
 	}
 }
 
-// orderByPreference 把上次成功的路径排到最前。
-// 优先精确匹配；否则按「hostname + path」定位同一网关并把该槽位**替换**为上次那条
-// 已验证可用的地址（如 https://cf/v1 → http://cf:80/v1）。
-// 关键：只替换、不追加——列表长度代表网关数量，追加一个新条目会凭空多一跳，
-// 既放大尝试次数也会让「有界重试」的边界失真。
+// orderByPreference 把上次成功的路径排到最前（仅用于测试/无策略场景）。
 func orderByPreference(urls []string, prefer string) []string {
 	urls, _ = substituePreferredChannel(urls, prefer)
 	return promotePreferred(urls, prefer)
 }
 
-// substituePreferredChannel 把 prefer 所属网关的槽位换成 prefer 这个通道，返回新列表与是否改动。
-// 这一步与顺序无关：同一网关上次在明文 :80 上成功，这一次就该直接走 :80，而不是先撞一遍 443。
-// 匹配按 stickyKey（与 preferredFor 的记录键一致）。
+// substituePreferredChannel 把 prefer 所属网关槽位的**通道**换掉，返回新列表与是否改动。
+//
+// 关键：只换通道（scheme/host/port），**保留 configured 的 path 与 query**。
+// 缓存的完整地址属于某个具体接口（…/v1/embeddings），直接把槽位替换成它会让
+// rerank 请求打到 embeddings 路径上——返回空结果且 err=nil，是最难发现的串接口。
 func substituePreferredChannel(urls []string, prefer string) ([]string, bool) {
 	key := stickyKey(prefer)
 	if key == "" || countStickyKey(urls, key) != 1 {
-		// 只在身份唯一时替换：同一主机/路径出现多次说明身份不足以区分，宁可不动。
+		// 只在身份唯一时替换：同一 host+path 出现多次说明身份不足以区分，宁可不动。
 		return urls, false
 	}
 	for i, u := range urls {
-		if stickyKey(u) == key {
-			if u == prefer || !channelAllowed(u, prefer) {
-				return urls, false
-			}
-			out := make([]string, len(urls))
-			copy(out, urls)
-			out[i] = prefer
-			return out, true
+		if stickyKey(u) != key {
+			continue
 		}
+		chanURL, ok := channelURL(u, prefer)
+		if !ok || chanURL == u {
+			return urls, false
+		}
+		out := make([]string, len(urls))
+		copy(out, urls)
+		out[i] = chanURL
+		return out, true
 	}
 	return urls, false
 }
@@ -361,16 +361,15 @@ func promotePreferred(urls []string, prefer string) []string {
 }
 
 // applyPreference 应用粘滞偏好的完整规则：
-//   - 通道替换（同一网关换成上次可用的端口/scheme）总是生效；
+//   - 通道替换（同一网关换成上次可用的端口/scheme）生效，但只改通道不改接口路径；
 //   - 位置提升只在「prefer 就是配置里的第一跳」或「配置里的第一跳正在熔断冷却」时生效。
 //
-// 后半条是本次 CF 优先改造的硬约束：内置链默认 CF → FC，若允许粘滞把 FC 提到首位，
+// 后半条是 CF 优先改造的硬约束：内置链默认 CF → FC，若允许粘滞把 FC 提到首位，
 // 一次 FC 成功就会让后续调用长期绕开健康的 CF，把 CF 优先变成名义上的。
 // 而 CF 处于冷却时提升 FC 只是省掉一次注定被 pickURL 跳过的检查，不改变语义。
 //
 // 前置条件：prefer 的网关身份（host+path）必须在链里唯一。链里两跳共享同一身份时
-// （如同一主机不同端口部署了两个网关）无法判断 prefer 属于哪一跳，此时一律不动——
-// 宁可不粘滞，也不能把请求粘到错误的网关上。
+// （如同一主机不同端口部署了两个网关）无法判断 prefer 属于哪一跳，此时一律不动。
 func applyPreference(urls []string, prefer string, now time.Time) []string {
 	if prefer == "" || len(urls) == 0 {
 		return urls
@@ -385,12 +384,16 @@ func applyPreference(urls []string, prefer string, now time.Time) []string {
 	if !promotable {
 		return out
 	}
-	return promotePreferred(out, prefer)
+	for _, u := range out {
+		if stickyKey(u) == key {
+			return promotePreferred(out, u)
+		}
+	}
+	return out
 }
 
 // gatewayKey 网关身份 = hostname + path（忽略 scheme 与端口）。
 // 端口降级/明文兜底只改这两项，因此同一个网关的不同通道会得到相同的 key。
-// 注意它与接口路径无关；粘滞记录用 stickyKey（在它基础上剥掉 /embeddings 等后缀）。
 func gatewayKey(raw string) string {
 	u, err := url.Parse(raw)
 	if err != nil || u.Hostname() == "" {
@@ -398,6 +401,12 @@ func gatewayKey(raw string) string {
 	}
 	return u.Hostname() + u.Path
 }
+
+// stickyKey 粘滞记录的键。
+//
+// 传入 postJSON 的 urls 已是 joinPaths 之后的**完整接口地址**，因此 host+path
+// 就是「网关 + 接口」的身份：embeddings 与 rerank 落在不同键上，不会串接口。
+func stickyKey(raw string) string { return gatewayKey(raw) }
 
 // countStickyKey 链里有多少跳共享同一粘滞身份。
 func countStickyKey(urls []string, key string) int {
@@ -410,37 +419,81 @@ func countStickyKey(urls []string, key string) int {
 	return n
 }
 
-// preferredFor 在候选网关中找出上次成功的那个，返回它记录下来的完整接口地址
-// （含降级后的通道）；无则空串。
-//
-// 这里拿到的 urls 是 **base 地址**（如 https://gw/v1），而 markOK 记录的键来自
-// 实际发过请求的**接口地址**（https://gw/v1/embeddings）。两者 path 不同，
-// 直接用 gatewayKey 查会永远查不到——粘滞在生产上等于没实现（本次改造前的实际状态）。
-// 因此查找统一用 stickyKey：剥掉已知接口后缀后的 host+path 身份。
+// channelURL 把 configured 的通道（scheme/host/port）换成 recorded 的，
+// **保留 configured 的 path 与 query**。返回 false 表示 recorded 不是同一接口。
+func channelURL(configured, recorded string) (string, bool) {
+	cu, err := url.Parse(configured)
+	if err != nil {
+		return "", false
+	}
+	ru, err := url.Parse(recorded)
+	if err != nil || ru.Hostname() == "" {
+		return "", false
+	}
+	// 只有同一主机、同一接口路径才谈得上「同一网关的另一个通道」。
+	if ru.Hostname() != cu.Hostname() || ru.Path != cu.Path || ru.RawQuery != cu.RawQuery {
+		return "", false
+	}
+	if ru.Scheme != "http" && ru.Scheme != "https" {
+		return "", false
+	}
+	out := *cu
+	out.Scheme = ru.Scheme
+	out.Host = ru.Host // 含端口
+	return out.String(), true
+}
+
+// preferredOptions 粘滞记录在本次调用里是否可用。
+type preferredOptions struct {
+	// allowPlain 允许把 https 通道换成缓存的明文 http 通道。
+	// 必须服从本次策略的 gateway.allow_http_fallback——否则关掉开关后，
+	// 一条 10 分钟内的旧缓存就能把请求重新降级为明文。
+	allowPlain bool
+	// allowChannelSwap 允许换端口/scheme。用户自备 key 必须严格使用最终配置的
+	// 地址，任何缓存重定向（含备用端口）都不适用；内置 key 才享受通道迁移。
+	allowChannelSwap bool
+}
+
+// preferredFor 在候选网关中找出上次成功的通道（默认允许换通道与明文）。
 func (b *gatewayBreaker) preferredFor(urls []string, now time.Time) string {
+	return b.preferredForWith(urls, now, preferredOptions{allowPlain: true, allowChannelSwap: true})
+}
+
+// preferredForWith 按给定策略过滤粘滞记录，返回本次可用的地址；无则空串。
+func (b *gatewayBreaker) preferredForWith(urls []string, now time.Time, opt preferredOptions) string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if !opt.allowChannelSwap {
+		return ""
+	}
 	for _, u := range urls {
 		e, ok := b.prefer[stickyKey(u)]
 		if !ok || now.Sub(e.At) > preferTTL {
 			continue
 		}
-		// 只接受合法的通道迁移：同一网关的同端口，或已知的备用端口/明文兜底端口。
-		// 拒绝任意端口是必要的——粘滞记录跨进程存活（24h 标记 + 10min TTL），
-		// 一个早已下线、恰好同 host+path 的旧地址会把请求永久引向死端口。
-		if !channelAllowed(u, e.URL) {
+		chanURL, ok := channelURL(u, e.URL)
+		if !ok {
 			continue
 		}
-		return e.URL
+		// 本次策略禁止明文时，缓存里的 http 通道一律不可用。
+		if strings.HasPrefix(chanURL, "http://") && !opt.allowPlain {
+			continue
+		}
+		// 只接受合法通道：同一端口，或已知的备用 HTTPS 端口 / 明文兜底端口。
+		// 拒绝任意端口是必要的——粘滞记录跨进程存活，一个早已下线、恰好同
+		// host+path 的旧地址会把请求永久引向死端口。
+		if chanURL != u && !channelAllowed(u, chanURL) {
+			continue
+		}
+		return chanURL
 	}
 	return ""
 }
 
 // channelAllowed 记录的通道是否可以作为 configured 这条网关的替代。
 //
-// 允许：与 configured 端口相同（含 scheme 从 https 降为 http 的兜底只在 :80）；
-// 或记录端口属于 Cloudflare 备用 HTTPS 端口、或明文兜底端口 80。
-// 不允许：任意其它端口——那不是同一网关的另一个通道，而是另一个服务。
+// 允许：与 configured 端口相同；或记录端口属于 Cloudflare 备用 HTTPS 端口、
+// 或明文兜底端口 80。不允许：任意其它端口——那不是同一网关的另一个通道。
 func channelAllowed(configured, recorded string) bool {
 	cu, err1 := url.Parse(configured)
 	ru, err2 := url.Parse(recorded)
@@ -475,29 +528,6 @@ func portOf(u *url.URL) string {
 	return "443"
 }
 
-// apiSuffixes 各调用会拼到 base 后面的接口路径。stickyKey 据此还原网关身份。
-var apiSuffixes = []string{"/embeddings", "/rerank"}
-
-// stickyKey 粘滞记录的键：host + 去掉接口后缀的 path。
-//
-// 忽略 scheme 与端口是有意的：同一个网关的明文兜底（:80）和备用 HTTPS 端口（:2053）
-// 属于同一身份，粘滞应能在它们之间迁移通道。代价是同一主机上不同端口的两个网关
-// 无法区分——链里出现这种配置时由 applyPreference 的歧义保护兜住（不做顺序重排）。
-func stickyKey(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil || u.Hostname() == "" {
-		return ""
-	}
-	path := u.Path
-	for _, suf := range apiSuffixes {
-		if strings.HasSuffix(path, suf) {
-			path = strings.TrimSuffix(path, suf)
-			break
-		}
-	}
-	return u.Hostname() + path
-}
-
 // reset 清空全部状态（冷却 + 粘滞偏好），用于全冷却时的半开探测。
 func (b *gatewayBreaker) reset() {
 	b.mu.Lock()
@@ -517,15 +547,23 @@ func postJSON(ctx context.Context, urls []string, key string, payload, out any) 
 type failover struct {
 	urls []string // 有序网关列表（已按粘滞偏好排序）
 	gw   config.Gateway
-	// multiHop 网关列表是否多于一个。单地址（自备 key 直达）沿用旧行为：
-	// 不套用单次上限、不做 CF 端口/明文降级、只按总预算与 ctx 收敛。
+	// multiHop 网关列表是否多于一个。
 	multiHop bool
-	// deadline 全链总时限（= 开始时刻 + FailoverBudget，且不晚于父 ctx）。
+	// builtin 本次请求是否使用内置 key（内置链的策略才适用单次上限/端口降级/明文兜底）。
+	// 不能拿 len(urls) 代替：关闭 fallback 的内置链是单地址，但它仍应按 Gateway
+	// 策略执行；反过来自备 key 即使被配置成多地址也不该套用这些限制。
+	builtin bool
+	// deadline 全链总时限（= 开始时刻 + FailoverBudget）。
 	deadline time.Time
 }
 
 // newFailover 按网关策略构造执行计划。零值/非正时长一律回落到默认值。
 func newFailover(urls []string, gw config.Gateway) *failover {
+	return newFailoverFor(urls, gw, true)
+}
+
+// newFailoverFor 显式指定 key 归属（builtin = 使用内置 key）。
+func newFailoverFor(urls []string, gw config.Gateway, builtin bool) *failover {
 	d := config.DefaultConfig().Gateway
 	if gw.AttemptTimeout <= 0 {
 		gw.AttemptTimeout = d.AttemptTimeout
@@ -541,6 +579,7 @@ func newFailover(urls []string, gw config.Gateway) *failover {
 		urls:     urls,
 		gw:       gw,
 		multiHop: len(urls) > 1,
+		builtin:  builtin,
 		deadline: time.Now().Add(gw.FailoverBudget),
 	}
 }
@@ -561,27 +600,67 @@ func (f *failover) fallbackReserve(now time.Time) time.Duration {
 	return r
 }
 
+// wantsFallbackReserve 本次尝试是否需要让出明文兜底的时间。
+// 只在确有兜底候选、走 TLS、且策略允许明文时为真。
+func (f *failover) wantsFallbackReserve(u string, plainHTTPTried map[string]bool) bool {
+	return f.builtin && f.gw.AllowHTTPFallback && isHTTPS(u) &&
+		supportsAltPorts(u) && hasHTTPFallbackCandidate(f.urls, plainHTTPTried)
+}
+
 // attemptDeadline 单次尝试的截止时刻。
 //
-// 多跳链：min(全链 deadline, now+AttemptTimeout)。这是 CF 优先策略的核心——
-// 第一跳卡住（TLS 黑洞 / 响应体不返回）时最多花 AttemptTimeout 就让位给第二跳，
-// 而不是一次尝试吃光 18s 预算、让 FC 根本没机会。
-// 单地址：不设单次上限（没有第二跳可让），自备 key 的请求保持原有的合理等待时间。
-// 明文兜底候选存在时，TLS 尝试还要让出 fallbackReserve，否则兜底永远轮不到。
+// 内置链：min(全链 deadline − 明文兜底预留, now + AttemptTimeout)。
+// 这是 CF 优先策略的核心——第一跳卡住（TLS 黑洞 / 响应体不返回）时最多花
+// AttemptTimeout 就让位给第二跳，而不是一次尝试吃光 18s 预算、让 FC 根本没机会。
+//
+// 关键：预留必须从**全链** deadline 扣，再与单次上限取 min；不能先裁到
+// now+AttemptTimeout 再扣预留——默认 6s 上限 + 9s 预留会得到 now−3s，
+// 于是第一跳一开始就已过期、CF 从未被真正尝试。
+//
+// 自备 key（builtin=false）：不设单次上限、不预留兜底时间，保持原有的等待时长；
+// 用户自备地址没有第二跳可让，也不参与端口/明文降级。
 func (f *failover) attemptDeadline(now time.Time, u string, plainHTTPTried map[string]bool) time.Time {
-	d := f.deadline
-	if f.multiHop {
-		if t := now.Add(f.gw.AttemptTimeout); t.Before(d) {
-			d = t
-		}
-		// 注意必须对**每一次** TLS 尝试都生效，而不只是第一次：否则端口降级那一跳
-		// 会用掉全部余额，兜底仍然轮不到（被测主机实测正是如此）。
-		if f.gw.AllowHTTPFallback && isHTTPS(u) &&
-			supportsAltPorts(u) && hasHTTPFallbackCandidate(f.urls, plainHTTPTried) {
-			d = d.Add(-f.fallbackReserve(now))
+	chain := f.deadline
+	if f.wantsFallbackReserve(u, plainHTTPTried) {
+		if t := chain.Add(-f.fallbackReserve(now)); t.After(now) {
+			chain = t
+		} else {
+			// 剩余预算连预留都盖不住：以剩余预算为准，不留负值。
+			chain = now
 		}
 	}
-	return d
+	if !f.builtin {
+		return chain
+	}
+	if t := now.Add(f.gw.AttemptTimeout); t.Before(chain) {
+		return t
+	}
+	return chain
+}
+
+// remaining 距全链 deadline 的剩余时间（不为负）。
+func (f *failover) remaining(now time.Time) time.Duration {
+	if d := f.deadline.Sub(now); d > 0 {
+		return d
+	}
+	return 0
+}
+
+// backoffWithinBudget 在链级预算内退避，返回 false 表示预算/ctx 已耗尽。
+//
+// 退避同样计入 FailoverBudget：只用父 ctx 睡会把总时长撑出预算
+// （实测 40ms 预算跑成 101ms，长退避可再超 2s）。
+func (f *failover) backoffWithinBudget(ctx context.Context, attempt int) (bool, error) {
+	d := backoff(attempt)
+	remaining := f.remaining(time.Now())
+	if remaining <= 0 {
+		return false, nil
+	}
+	if d >= remaining {
+		// 睡满也超预算：直接结束，把时间留给上层降级。
+		return false, nil
+	}
+	return sleepCtx(ctx, d), nil
 }
 
 // isHTTPS 该地址是否走 TLS。明文兜底与端口降级只对 TLS 通道有意义。
@@ -593,7 +672,17 @@ func postJSONWithGateway(ctx context.Context, urls []string, key string, payload
 	return postJSONWithPolicy(ctx, urls, key, payload, out, config.DefaultConfig().Gateway)
 }
 
-// postJSONWithPolicy 按给定网关策略（来自最终配置）执行网关故障转移。
+// postJSONWithPolicy 按给定网关策略执行网关故障转移（视为内置 key 链路）。
+func postJSONWithPolicy(ctx context.Context, urls []string, key string, payload, out any, gw config.Gateway) (string, error) {
+	return postJSONWithPolicyFor(ctx, urls, key, payload, out, gw, true)
+}
+
+// postJSONWithPolicyFor 按给定网关策略执行网关故障转移，并显式声明 key 归属。
+//
+// builtin=true 才适用内置链专属能力（单次尝试上限、CF 备用端口降级、明文兜底、
+// 粘滞通道迁移）；builtin=false（用户自备 key）严格使用最终配置给出的地址，
+// 不被任何缓存重定向或降级——不能只看 len(urls)：关闭 fallback 的内置链是单地址，
+// 但它仍应按 Gateway 策略执行。
 //
 // 顺序语义（内置 key 默认链 CF → FC）：
 //   - 无故障、无有效熔断时 first 必须是 CF：粘滞偏好只能把「已验证可用的通道」
@@ -602,7 +691,7 @@ func postJSONWithGateway(ctx context.Context, urls []string, key string, payload
 //   - 全链 FailoverBudget（含退避）是硬时限，并尊重更短的父 ctx。
 //   - 保留既有能力：403/408/429/5xx 与连接错误触发转移、失败熔断 60s、
 //     CF 备用 HTTPS 端口降级、可关闭的明文 HTTP 兜底。
-func postJSONWithPolicy(ctx context.Context, urls []string, key string, payload, out any, gw config.Gateway) (string, error) {
+func postJSONWithPolicyFor(ctx context.Context, urls []string, key string, payload, out any, gw config.Gateway, builtin bool) (string, error) {
 	if len(urls) == 0 {
 		return "", fmt.Errorf("no gateway base urls configured")
 	}
@@ -610,12 +699,21 @@ func postJSONWithPolicy(ctx context.Context, urls []string, key string, payload,
 	if err != nil {
 		return "", err
 	}
-	f := newFailover(urls, gw)
+	f := newFailoverFor(urls, gw, builtin)
+	// 链级 context：请求与退避都被全链 deadline 约束，绝不越过 FailoverBudget。
+	// 与父 ctx 区分开，便于向调用方报告「预算耗尽」还是「父 ctx 取消」。
+	chainCtx, chainCancel := context.WithDeadline(ctx, f.deadline)
+	defer chainCancel()
+
 	// 粘滞：上次成功过的网关通道优先（跨进程有效），避免每次都先撞已知失效的跳。
 	// 排序不影响语义——所有网关最终都会被尝试，只是把最可能成功的放前面。
-	// 粘滞偏好按 endpoint 区分：embeddings 与 rerank 各自记住可用通道，互不覆盖。
-	// 但粘滞不能让健康的 CF 长期排在 FC 之后（见 applyPreference）。
-	f.urls = applyPreference(urls, breaker.preferredFor(urls, time.Now()), time.Now())
+	// 粘滞偏好按「网关+接口」区分：embeddings 与 rerank 各自记住通道，互不覆盖。
+	// 候选通道必须服从本次策略：关闭明文开关后不得复用 http 缓存，
+	// 自备 key 必须严格使用最终配置地址（不做任何缓存重定向）。
+	prefOpts := preferredOptions{allowPlain: builtin && f.gw.AllowHTTPFallback, allowChannelSwap: builtin}
+	if pref := breaker.preferredForWith(urls, time.Now(), prefOpts); pref != "" {
+		f.urls = applyPreference(urls, pref, time.Now())
+	}
 	var lastErr error
 	forbidden := map[string]bool{}
 	// hardFailed 已确认「重试无意义」的网关：SNI/TLS 被阻断、或代理层拒绝。
@@ -627,7 +725,9 @@ func postJSONWithPolicy(ctx context.Context, urls []string, key string, payload,
 	// plainHTTPTried 已对某个网关尝试过明文 HTTP 兜底（每网关一次）。
 	plainHTTPTried := map[string]bool{}
 
+	budgetExhausted := false
 	for attempt := 0; attempt < maxAttempts; attempt++ {
+		// 父 ctx 取消优先：这是调用方主动放弃，错误必须如实透传。
 		select {
 		case <-ctx.Done():
 			return "", ctx.Err()
@@ -636,6 +736,7 @@ func postJSONWithPolicy(ctx context.Context, urls []string, key string, payload,
 		now := time.Now()
 		// 总预算到点即认输：宁可立刻降级 BM25，也不让客户干等一分多钟。
 		if !now.Before(f.deadline) {
+			budgetExhausted = true
 			if lastErr == nil {
 				lastErr = fmt.Errorf("failover budget %s exceeded", f.gw.FailoverBudget)
 			}
@@ -657,7 +758,7 @@ func postJSONWithPolicy(ctx context.Context, urls []string, key string, payload,
 		}
 		// 单次尝试不能越过总预算：网关静默黑洞时一次 TLS 握手就要 10s，
 		// 仅靠循环顶部检查会让总耗时膨胀到预算的倍数（实测 20s 预算跑成 30s）。
-		attemptCtx, attemptCancel := context.WithDeadline(ctx, f.attemptDeadline(now, u, plainHTTPTried))
+		attemptCtx, attemptCancel := context.WithDeadline(chainCtx, f.attemptDeadline(now, u, plainHTTPTried))
 		req = req.WithContext(attemptCtx)
 		req.Header.Set("Authorization", "Bearer "+key)
 		req.Header.Set("Content-Type", "application/json")
@@ -670,8 +771,8 @@ func postJSONWithPolicy(ctx context.Context, urls []string, key string, payload,
 			// 相对 TLS 通道而言，超时和被 RST 是同一件事：这条路走不通。
 			// 被测主机上 TLS 尝试是静默黑洞（不是 RST），若只对显式硬失败做降级，
 			// 预算会被一次尝试整段吃光，明文 HTTP 兜底永远轮不到。
-			// 单地址（自备 key 直达）没有第二跳可让，超时按普通抖动重试。
-			tlsChannelDead := f.multiHop && (isHardFailure(err) ||
+			// 自备 key 直达：没有第二跳可让，超时按普通抖动重试。
+			tlsChannelDead := f.builtin && (isHardFailure(err) ||
 				(isTimeoutErr(err) && supportsAltPorts(u)))
 			// TLS 层被阻断 / 代理拒绝：重试同一地址必然失败，标记后跳过，
 			// 并把剩下的尝试预算留给下一个网关。
@@ -680,7 +781,7 @@ func postJSONWithPolicy(ctx context.Context, urls []string, key string, payload,
 				hardFailed[u] = true
 				// 端口降级：换到 Cloudflare 备用 HTTPS 端口再试一次（每网关一次）。
 				// 只对 workers.dev 生效——其它网关没有这套备用端口。
-				if supportsAltPorts(u) && !portDowngraded[base] && len(gatewayAltPorts) > 0 {
+				if f.builtin && supportsAltPorts(u) && !portDowngraded[base] && len(gatewayAltPorts) > 0 {
 					if alt, ok := withAltPort(u, gatewayAltPorts[0]); ok {
 						portDowngraded[base] = true
 						delete(hardFailed, u)
@@ -700,8 +801,12 @@ func postJSONWithPolicy(ctx context.Context, urls []string, key string, payload,
 				}
 				continue
 			}
-			if !sleepCtx(ctx, backoff(attempt)) {
-				return "", ctx.Err()
+			if ok, cerr := f.backoffWithinBudget(ctx, attempt); !ok {
+				if cerr != nil {
+					return "", cerr
+				}
+				budgetExhausted = true
+				break
 			}
 			continue
 		}
@@ -750,12 +855,21 @@ func postJSONWithPolicy(ctx context.Context, urls []string, key string, payload,
 		} else {
 			breaker.markFail(u, time.Now())
 		}
-		if !sleepCtx(ctx, backoff(attempt)) {
-			return "", ctx.Err()
+		if ok, cerr := f.backoffWithinBudget(ctx, attempt); !ok {
+			if cerr != nil {
+				return "", cerr
+			}
+			budgetExhausted = true
+			break
 		}
 	}
 	if lastErr == nil {
 		lastErr = fmt.Errorf("no successful response after %d attempts", maxAttempts)
+	}
+	if budgetExhausted {
+		// 预算耗尽是一种「有界认输」，与父 ctx 取消区分开：前者应触发上层降级，
+		// 后者是调用方主动放弃、错误必须如实透传。
+		return "", fmt.Errorf("failover budget %s exhausted: %w", f.gw.FailoverBudget, lastErr)
 	}
 	if len(f.urls) > 1 {
 		return "", fmt.Errorf("all %d gateway(s) unreachable (tried %s...): %w", len(f.urls), f.urls[0], lastErr)
