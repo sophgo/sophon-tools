@@ -13,8 +13,7 @@
 #     ARCH:    arm64 | amd64 | all（默认按子项目）
 #     env OUTPUT_DIR: 覆盖产物目录（默认 <repo>/output/<子项目>/）
 #
-# 范围: 17 个子项目（pmulti_video_qt 已按 MYSWY 决定排除；psoph_phytool /
-# pspacc_efuse_demo 默认不发版，2026-08-30）
+# 范围: 17 个子项目（psoph_phytool / pspacc_efuse_demo 默认不发版，2026-08-30）
 #
 # 用法:
 #   bash docker/build-all.sh                    # 构建全部子项目(默认平台)
@@ -82,7 +81,6 @@ DEFAULT_ARCH[pSophUI]=arm64
 DEFAULT_ARCH[se-rag-core]=all
 DEFAULT_ARCH[pcv84x6_llm_server]=arm64
 DEFAULT_ARCH[psewriter]=windows      # SE写卡工具: 默认只出 Windows, 不带内置镜像
-# pmulti_video_qt: 按 MYSWY 决定（2026-08-08）不需要做，从统一构建范围排除
 # psoph_phytool / pspacc_efuse_demo: 按 MYSWY 决定（2026-08-30）默认不发版——不注册
 #   到 DEFAULT_ARCH（构建清单）即不随统一 release 构建/发布；如确需发布可在源码目录
 #   手动执行 release.sh（见 RELEASE.md 发布形态）。
@@ -140,7 +138,7 @@ declare -A DEPENDS
 DEPENDS[pbmsec]=psocbak
 
 if [[ "${LIST_ONLY:-0}" = "1" ]]; then
-  echo "=== sophon-tools 17 子项目构建清单（pmulti_video_qt/phytool/spacc 已排除，单镜像 ${IMAGE}） ==="
+  echo "=== sophon-tools 17 子项目构建清单（phytool/spacc 已排除，单镜像 ${IMAGE}） ==="
   for p in $(echo "${!DEFAULT_ARCH[@]}" | tr ' ' '\n' | sort); do
     printf "  %-22s 平台: %-40s 镜像: %s\n" "$p" "${PLATFORMS[$p]}" "${IMAGE}"
   done
