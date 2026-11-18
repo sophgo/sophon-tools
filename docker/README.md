@@ -349,10 +349,9 @@ bash docker/examples/cross-test/run.sh --image sophon-tools-build:unified
    编译器用系统 apt `aarch64-linux-gnu-gcc 9.4`，Linaro GCC 6.3 已移除；
    `sophui-cross-toolchains.tar.zst` 归档导出自 cross_build_sophon_u20:v1），
    产出 `sophgo-hdmi_<ver>_arm64.deb` + `SophUI_arm64`（尾部 upx 缺失仅告警，不影响产物）。
-4. **pmulti_video_qt** 已按 MYSWY 决定从统一构建范围排除（不需要做），不再参与构建。
-5. **dfss 私有工具链**默认不内置；需要时按上文方式导出（`--with-dfss-toolchains`）。
-6. 容器内构建涉及 `sudo` 的脚本（根 `release.sh`）需以 root 运行（镜像默认 root）或调整输出目录权限。
-7. 基座由 22.04 降为 20.04 后，宿主 gcc 从 11.x 变为 9.4、Qt 从 5.15.3 变为 5.12.8；
+4. **dfss 私有工具链**默认不内置；需要时按上文方式导出（`--with-dfss-toolchains`）。
+5. 容器内构建涉及 `sudo` 的脚本（根 `release.sh`）需以 root 运行（镜像默认 root）或调整输出目录权限。
+6. 基座由 22.04 降为 20.04 后，宿主 gcc 从 11.x 变为 9.4、Qt 从 5.15.3 变为 5.12.8；
    各子项目构建回归结果见 M5 交付矩阵（16/16 全绿）。
 
 ## 目录结构

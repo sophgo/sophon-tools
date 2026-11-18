@@ -46,7 +46,6 @@ bash release.sh          # 需要统一镜像 sophon-tools-build:<IMAGE_TAG>
 
 - 镜像：`docker/versions.env` 的 `IMAGE_TAG`（当前 `unified-v1.2.1`）；镜像缺失用 `bash docker/build.sh` 构建。
 - 范围：**17 个子项目**（统一构建清单），`docker/build-all.sh --list` 查看。以下项目**默认不发版、不在统一构建范围**：
-  - `pmulti_video_qt`（产品决定不需要）
   - `psoph_phytool`、`pspacc_efuse_demo`（产品决定默认不发版，2026-08-30；如确需发布在源码目录手动 `bash release.sh`）
 - 失败隔离：单项目失败不阻塞整体，构建结束看 `output/.build-status.txt` 与 `output/MANIFEST.txt`，失败项必须修复后单独重建。
 - 产物：汇聚 `output/<工具>/`，生成 `MANIFEST.txt`（清单+md5）、`git_hash.txt`。
@@ -83,7 +82,7 @@ Release 页面保持精简，**仅含子包版本清单表**：
 | pqt_memory_edit | linux AppImage + windows exe |
 | pbmsec | deb（all 双架构） |
 | 其余工具 | 各自 release.sh 产物（zip/deb/脚本） |
-| phytool / spacc_efuse_demo / pmulti_video_qt | **默认不发版** |
+| phytool / spacc_efuse_demo | **默认不发版** |
 
 ### 5.4 PyPI 上传（dfss）
 
