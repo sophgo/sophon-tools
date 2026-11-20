@@ -277,10 +277,12 @@ socbak_gen_gpt_sector()
 	fi
 
 	# PARTITION_BASIC_DATA_GUID（与 SDK mk_sector_gpt 一致）：0700 = Microsoft basic data
+	# 末分区必须给备份 GPT（LBA total-33..total-1）留出空间：主 GPT 只截取到 LBA 33，
+	# 但刷机时落在同一块盘上，分区压到备份区会让 u-boot/内核读表异常。
 	for idx in "${!labels[@]}"; do
 		end=$(( start + sizes[idx] - 1 ))
-		if [ "${end}" -ge $(( total - 1 )) ]; then
-			echo "ERROR: ${xml}: partition ${labels[idx]} ends at LBA ${end}, beyond disk (${total} sectors)" >&2
+		if [ "${end}" -ge $(( total - 34 )) ]; then
+			echo "ERROR: ${xml}: partition ${labels[idx]} ends at LBA ${end}, does not leave room for the backup GPT (disk has ${total} sectors)" >&2
 			return 1
 		fi
 		sgdisk_args+=(-n "$(( idx + 1 )):${start}:${end}")
