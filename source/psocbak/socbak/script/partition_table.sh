@@ -293,11 +293,21 @@ socbak_gen_gpt_sector()
 		start=$(( end + 1 ))
 	done
 
-	tmp="$(dirname "${out}")/.socbak_gpt_$$.img"
-	rm -f "${tmp}"
-	if ! truncate -s $(( total * 512 )) "${tmp}" 2>/dev/null; then
-		echo "ERROR: cannot create sparse gpt image ${tmp}" >&2
-		rm -f "${tmp}"
+	# 承载整盘尺寸的稀疏文件优先放本地临时目录：/socrepack 通常是网络文件系统，
+	# 稀疏语义与出错行为取决于服务端，而这张表实际只写几十 KB。
+	# 本地不可写时退回输出文件所在目录，避免功能因环境差异失效。
+	tmp=""
+	for _dir in "${TMPDIR:-/tmp}" "$(dirname "${out}")"; do
+		[ -d "${_dir}" ] && [ -w "${_dir}" ] || continue
+		rm -f "${_dir}/.socbak_gpt_$$.img"
+		if truncate -s $(( total * 512 )) "${_dir}/.socbak_gpt_$$.img" 2>/dev/null; then
+			tmp="${_dir}/.socbak_gpt_$$.img"
+			break
+		fi
+	done
+	unset _dir
+	if [ -z "${tmp}" ]; then
+		echo "ERROR: cannot create a sparse file to build GPT for ${xml}" >&2
 		return 1
 	fi
 	# 分区起止全部按 XML 精确落位，禁止 sgdisk 做 2048 扇区对齐。
