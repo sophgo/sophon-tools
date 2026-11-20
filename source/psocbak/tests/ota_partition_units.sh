@@ -27,16 +27,12 @@ PT_SH="${REPO_ROOT}/source/psocbak/socbak/script/partition_table.sh"
 [ -f "${OTA_SH}" ] || { echo "ERROR: 找不到 ${OTA_SH}" >&2; exit 2; }
 [ -f "${PT_SH}" ] || { echo "ERROR: 找不到 ${PT_SH}" >&2; exit 2; }
 
-for t in gdisk bc; do
-	command -v "" >/dev/null 2>&1
-done
 for t in gdisk bc python3; do
 	command -v "${t}" >/dev/null 2>&1 || { echo "ERROR: 需要 ${t}" >&2; exit 2; }
 done
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "${WORK}"' EXIT
-
 PASS=0
 FAIL=0
 FAILED_NAMES=()
@@ -145,27 +141,51 @@ exec /usr/bin/gdisk "$@"
 EOF
 chmod +x "${WORK}/stub/gdisk"
 
-# 预检块依赖的外部环境（与 ota.sh 里同名变量/函数保持一致）
+# 预检块依赖的外部环境（与 ota.sh 里同名变量/函数保持一致）。
+# 生产预检块把 GPT 临时文件固定写成 /dev/shm/ota_gpt 与 /dev/shm/ota_gpt.disk（不改生产代码），
+# 直接在本机跑会和同机上其他 socbak/OTA 任务互相覆盖，还会把一份整盘大小的稀疏副本
+# 留在共享 /dev/shm 里。所以每次预检都在私有挂载命名空间内执行，并给 /dev/shm 挂一份
+# 本次独享的 tmpfs：隔离由内核保证，随命名空间退出自动消失，异常退出也不会碰到别处的文件。
+if ! unshare -rm --propagation private true >/dev/null 2>&1; then
+	echo "ERROR: 需要 unshare -rm（私有挂载命名空间）来隔离预检块的 /dev/shm/ota_gpt" >&2
+	echo "ERROR: 不在共享 /dev/shm 上跑预检，避免覆盖其他任务的临时文件" >&2
+	exit 2
+fi
+
+cat > "${WORK}/precheck_runner.sh" <<'RUNNER'
+#!/bin/bash
+# 在私有挂载命名空间里执行抽出的生产预检块
+# 参数：<pkg dir> <stub dir> <precheck block> <dev data start> <emmc bytes>
+set -u
+dir="$1"
+STUB_DIR="$2"
+BLOCK="$3"
+export PATH="${STUB_DIR}:${PATH}"
+export FAKE_DEV_DATA_START="$4"
+export FAKE_EMMC_BYTES="$5"
+cd "${dir}" || exit 1
+LOGFILE="${dir}/ota_precheck.log"
+EMMC_SECTOR_B=512
+LAST_PART_NOT_FLASH=1
+panic() { echo "[PANIC] $*"; exit 1; }
+file_validate() {
+	local f
+	f="$(printf '%s\n' "$1" | head -1)"
+	[ -r "${f}" ] || { echo "[PANIC] ${f} is not readable"; exit 1; }
+}
+# shellcheck source=/dev/null
+source "${BLOCK}"
+RUNNER
+chmod +x "${WORK}/precheck_runner.sh"
+
 run_precheck() { # <pkg dir> <dev_data_start> [emmc_bytes]
 	local dir="$1" dev_start="$2" emmc_bytes="${3:-31268536320}"
-	(
-		set +u
-		export PATH="${WORK}/stub:${PATH}"
-		export FAKE_DEV_DATA_START="${dev_start}"
-		export FAKE_EMMC_BYTES="${emmc_bytes}"
-		cd "${dir}" || exit 1
-		LOGFILE="${dir}/ota_precheck.log"
-		EMMC_SECTOR_B=512
-		LAST_PART_NOT_FLASH=1
-		panic() { echo "[PANIC] $*"; exit 1; }
-		file_validate() {
-			local f
-			f="$(printf '%s\n' "$1" | head -1)"
-			[ -r "${f}" ] || { echo "[PANIC] ${f} is not readable"; exit 1; }
-		}
-		# shellcheck source=/dev/null
-		source "${WORK}/precheck_block.sh"
-	) 2>/dev/null | grep -E '^\[(INFO|PANIC|WARRNING)\]'
+	unshare -rm --propagation private bash -c '
+		mount -t tmpfs none /dev/shm || exit 1
+		exec bash "$1" "$2" "$3" "$4" "$5" "$6"
+	' _ "${WORK}/precheck_runner.sh" "${dir}" "${WORK}/stub" \
+		"${WORK}/precheck_block.sh" "${dev_start}" "${emmc_bytes}" 2>/dev/null |
+		grep -E '^\[(INFO|PANIC|WARRNING)\]'
 }
 
 # ---------------------------------------------------------------- 夹具

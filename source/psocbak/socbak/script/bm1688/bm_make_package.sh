@@ -32,9 +32,10 @@ PARTITION_FILE=partition32G_sector.xml
 
 # 分区表单位策略与主 GPT 生成（socbak_gen_gpt）。正常由 socbak.sh 在启动时 source，
 # 这里兜底一次，保证本脚本被单独 source 时也能取到入口。
-_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# 变量名带 bm1688 前缀：两条打包链可能被同一个 shell source（测试），不能互相覆盖。
+_BM1688_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ -z "${SOCBAK_PARTITION_TABLE_SOURCED:-}" ]; then
-	source "${_SCRIPT_DIR}/../partition_table.sh"
+	source "${_BM1688_SCRIPT_DIR}/../partition_table.sh"
 fi
 BOOTCMD_SCRIPT=boot_emmc
 SPIFCMD_SCRIPT=boot_spif
@@ -170,31 +171,38 @@ function parseargs()
 function parse_partition_xml()
 {
 	local offset=${BOOT_PART_OFFSET}
-	local size_attr unit_kib val
+	local unit_kib val label size ro fmt i=0
+	local rows
 
 	# 分区表有两种单位：size_in_kb（BM1684/X 历史格式）与 size_in_sectors
 	# （CV 系，1 sector = 512 B，与 SDK 的 partition32G_sector.xml 同构）。
 	# 本脚本的分区起止、镜像尺寸、刷写偏移全部以 sector 为准，两种 XML 只在这里换算一次，
 	# 下游不再区分单位，因此同一份布局的新旧两种写法得到完全相同的产物。
-	if grep -q "size_in_sectors=" ${PARTITION_FILE}; then
-		size_attr="size_in_sectors"
+	#
+	# 分区记录统一由 script/partition_table.sh 的 socbak_xml_partition_rows 解析：
+	# 它是按分区行读属性的（某行省略 readonly/format 不会让后面的值整体错位），
+	# 主 GPT 生成器 socbak_gen_gpt 用的也是同一份解析结果，刷写布局与 gpt.gz 不会分叉。
+	unit_kib=1
+	if [ "$(socbak_xml_unit_attr "${PARTITION_FILE}")" = "size_in_sectors" ]; then
 		unit_kib=0
-	else
-		size_attr="size_in_kb"
-		unit_kib=1
 	fi
+	rows="$(socbak_xml_partition_rows "${PARTITION_FILE}")" || panic "parse ${PARTITION_FILE} failed"
 
-	#find total disk size in the xml unit
-	TOTAL_SIZE=($(grep -Po "${size_attr}=\".+\"" ${PARTITION_FILE} | awk -F\" '{print $2}'))
+	# 总容量（该 XML 自身单位），第一个元素与历史版本保持一致
+	TOTAL_SIZE=($(socbak_xml_total "${PARTITION_FILE}"))
 
-	#find partions label size, and flag
-	LABELS=($( grep -Po "label=\".+\"" ${PARTITION_FILE} | awk -F\" '{print tolower($2)}'))
-
-	PART_SIZE_IN_XML_UNIT=($(grep -Po "${size_attr}=\".+\"" ${PARTITION_FILE} | awk -F\" '{print $2}'))
-	PART_SIZE_IN_XML_UNIT=(${PART_SIZE_IN_XML_UNIT[@]:1})
-
-	for i in ${!PART_SIZE_IN_XML_UNIT[*]}; do
-		val=${PART_SIZE_IN_XML_UNIT[$i]}
+	LABELS=() PART_SIZE_IN_XML_UNIT=() PART_SIZE_IN_SECTOR=() PART_SIZE_IN_BYTE=()
+	P_FLAG=() PART_FORMAT=()
+	while IFS='|' read -r label size ro fmt; do
+		[ -n "${label}" ] || continue
+		case "${size}" in
+			''|*[!0-9]*)
+				panic "partition ${label} in ${PARTITION_FILE} has invalid size \"${size}\""
+				;;
+		esac
+		val=${size}
+		LABELS[$i]="$(echo "${label}" | tr '[:upper:]' '[:lower:]')"
+		PART_SIZE_IN_XML_UNIT[$i]=${val}
 		if [ "${unit_kib}" = "1" ]; then
 			PART_SIZE_IN_SECTOR[$i]=$(( val * KB_BYTES / SECTOR_BYTES ))
 			PART_SIZE_IN_BYTE[$i]=$(( val * KB_BYTES ))
@@ -203,10 +211,12 @@ function parse_partition_xml()
 			PART_SIZE_IN_SECTOR[$i]=${val}
 			PART_SIZE_IN_BYTE[$i]=$(( val * SECTOR_BYTES ))
 		fi
-	done
+		P_FLAG[$i]="${ro}"
+		PART_FORMAT[$i]="${fmt}"
+		i=$(( i + 1 ))
+	done <<< "${rows}"
 
-	P_FLAG=($(grep -Po "readonly=\".+\"" ${PARTITION_FILE} | awk -F\" '{print $2}'))
-	PART_FORMAT=($(grep -Po "format=\".+\"" ${PARTITION_FILE} | awk -F\" '{print $2}'))
+	[ "${i}" -gt 0 ] || panic "${PARTITION_FILE} has no partition"
 
 	# 具体文件系统直接由 format 表达：0=raw / 1=FAT32 / 2=ext4 / 3=f2fs。
 	PART_FSTYPE=()

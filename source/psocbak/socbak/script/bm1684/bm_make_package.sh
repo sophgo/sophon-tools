@@ -27,6 +27,14 @@ OUT_ADDR="\${unzip_addr}"
 
 RECOVERY_DIR=recovery_files
 PARTITION_FILE=partition32G.xml
+
+# 分区表解析与主 GPT 生成（script/partition_table.sh）。正常由 socbak.sh 在启动时 source，
+# 这里兜底一次，保证本脚本被单独 source 时也能取到 socbak_xml_partition_rows / socbak_gen_gpt。
+# 变量名带 bm1684 前缀：两条打包链可能被同一个 shell source（测试），不能互相覆盖。
+_BM1684_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -z "${SOCBAK_PARTITION_TABLE_SOURCED:-}" ]; then
+	source "${_BM1684_SCRIPT_DIR}/../partition_table.sh"
+fi
 BOOTCMD_SCRIPT=boot_emmc
 SPIFCMD_SCRIPT=boot_spif
 TOP_SCRIPT=boot
@@ -158,23 +166,37 @@ function parseargs()
 function parse_partition_xml()
 {
 	local offset=${BOOT_PART_OFFSET}
+	local label size ro fmt i=0
+	local rows
+
+	# 分区记录统一由 script/partition_table.sh 的 socbak_xml_partition_rows 解析：
+	# 它按分区行读属性，某行省略 readonly/format 不会让后面的值整体前移
+	# （各属性分别 grep 成数组再按下标配对的写法会错位）。
+	# socbak.sh 写出的 KiB 表带全部属性，这条约束主要是防手改 / 外部包。
+	rows="$(socbak_xml_partition_rows "${PARTITION_FILE}")" || panic "parse ${PARTITION_FILE} failed"
 
 	#find total disk size in kb
-	TOTAL_SIZE=($(grep -Po "physical_partition size_in_kb=\".+\"" ${PARTITION_FILE} | awk -F\" '{print $2}'))
+	TOTAL_SIZE=($(socbak_xml_total "${PARTITION_FILE}"))
 
-	#find partions label size, and flag
-	LABELS=($( grep -Po "label=\".+\"" ${PARTITION_FILE} | awk -F\" '{print tolower($2)}'))
+	LABELS=() PART_SIZE_IN_KB=() PART_SIZE_IN_SECTOR=() PART_SIZE_IN_BYTE=()
+	P_FLAG=() PART_FORMAT=()
+	while IFS='|' read -r label size ro fmt; do
+		[ -n "${label}" ] || continue
+		case "${size}" in
+			''|*[!0-9]*)
+				panic "partition ${label} in ${PARTITION_FILE} has invalid size \"${size}\""
+				;;
+		esac
+		LABELS[$i]="$(echo "${label}" | tr '[:upper:]' '[:lower:]')"
+		PART_SIZE_IN_KB[$i]=${size}
+		PART_SIZE_IN_SECTOR[$i]=$(expr ${size} \* 1024 / ${SECTOR_BYTES})
+		PART_SIZE_IN_BYTE[$i]=$(expr ${size} \* 1024)
+		P_FLAG[$i]="${ro}"
+		PART_FORMAT[$i]="${fmt}"
+		i=$(( i + 1 ))
+	done <<< "${rows}"
 
-	PART_SIZE_IN_KB=($(grep -Po "size_in_kb=\".+\"" ${PARTITION_FILE} | awk -F\" '{print $2}'))
-	PART_SIZE_IN_KB=(${PART_SIZE_IN_KB[@]:1})
-
-	for i in ${!PART_SIZE_IN_KB[*]}; do
-		PART_SIZE_IN_SECTOR[$i]=$(expr ${PART_SIZE_IN_KB[$i]} \* 1024 / ${SECTOR_BYTES})
-		PART_SIZE_IN_BYTE[$i]=$(expr ${PART_SIZE_IN_KB[$i]} \* 1024)
-	done
-
-	P_FLAG=($(grep -Po "readonly=\".+\"" ${PARTITION_FILE} | awk -F\" '{print $2}'))
-	PART_FORMAT=($(grep -Po "format=\".+\"" ${PARTITION_FILE} | awk -F\" '{print $2}'))
+	[ "${i}" -gt 0 ] || panic "${PARTITION_FILE} has no partition"
 
 	# 具体文件系统直接由 format 表达：0=raw / 1=FAT32 / 2=ext4 / 3=f2fs。
 	PART_FSTYPE=()

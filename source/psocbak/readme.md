@@ -35,6 +35,8 @@
 * 首个分区（BOOT）仍从 LBA 8192 开始，分区顺序、字节容量、只读位、文件系统都与原布局一致。
 * sector 格式的分区表由板上 `sgdisk` 生成主 GPT（`binTools/mk_gpt` 只认 KiB，无法表达奇数扇区），
   因此设备上必须存在 `sgdisk`（SE9/SE13 的出厂固件与 CV84×6 SDK rootfs 都自带）。
+  末分区可以一直用到 `total-34`（与 SDK `mk_sector_gpt` 的 `last_usable_lba` 相同），
+  最后 33 个扇区留给备份 GPT；再往后一个扇区就判打包失败。
 * `ota_update` v1.5.8 起已兼容两种单位，OTA 时不需要额外配置。
 
 ## 打包做包功能

@@ -70,11 +70,14 @@ socbak_size_attr_name()
 #   $1 配置侧“除 DATA 外”的分区合计（KiB）
 #   $2 本次打包实际“除 DATA 外”的分区合计（KiB）
 #   $3 当前 ROOTFS_RW 大小（KiB）
-# 成功：stdout 输出调整后的 ROOTFS_RW（KiB），返回 0
-# 失败：ROOTFS_RW 不足以补偿，stdout 为空，SOCBAK_FIXED_DATA_START_DIFF_KB = 需要的差额，
-#       返回 1（调用方据此报错）
+# 结果通过全局变量返回，不写 stdout —— 必须在调用者所在的 shell 里直接调用，
+# 不能写成 X="$(socbak_fixed_data_start_rw ...)"：命令替换是子 shell，
+# 失败差额留在子 shell 里，调用方读到的是未定义变量（set -u 下直接 unbound variable），
+# 真正的原因会被 "unbound variable" 掩盖掉。
+#   成功：SOCBAK_FIXED_DATA_START_RW_KB = 调整后的 ROOTFS_RW（KiB），返回 0
+#   失败：SOCBAK_FIXED_DATA_START_DIFF_KB = 需要的差额（KiB），返回 1
 # 与原实现逐字对应：扩容方向直接把差额还给 ROOTFS_RW；缩容方向要求 ROOTFS_RW 至少比差额
-# 多出 200 KiB 余量（RW_BUFFER_SIZE），否则判定打包失败。
+# 多出 200 MiB 余量（RW_BUFFER_SIZE = 200 * 1024 KiB），否则判定打包失败。
 socbak_fixed_data_start_rw()
 {
 	local old_kb="$1"
@@ -82,6 +85,7 @@ socbak_fixed_data_start_rw()
 	local rw_kb="$3"
 	local diff_kb
 
+	SOCBAK_FIXED_DATA_START_RW_KB=""
 	SOCBAK_FIXED_DATA_START_DIFF_KB=0
 	if [ "${old_kb}" -gt "${new_kb}" ]; then
 		rw_kb=$(( rw_kb + (old_kb - new_kb) ))
@@ -93,7 +97,7 @@ socbak_fixed_data_start_rw()
 		fi
 		rw_kb=$(( rw_kb - (new_kb - old_kb) ))
 	fi
-	echo -n "${rw_kb}"
+	SOCBAK_FIXED_DATA_START_RW_KB=${rw_kb}
 	return 0
 }
 
@@ -159,40 +163,79 @@ socbak_emit_partition_xml()
 	echo "</physical_partition>" >> "${out}"
 }
 
-# 从 XML 取分区行（label / 大小 / readonly），行序即分区序。
-# 输出每行：label|size|readonly|format（size 为该 XML 自身单位下的数值）
+# 分区表用哪种尺寸单位：size_in_sectors（sector，1 sector = 512 B）或 size_in_kb（KiB）
+# $1: XML 路径
+socbak_xml_unit_attr()
+{
+	if grep -q 'size_in_sectors="' "$1" 2>/dev/null; then
+		echo -n "size_in_sectors"
+	else
+		echo -n "size_in_kb"
+	fi
+}
+
+# 从一行 XML 里取某个属性的值；属性不存在时输出空串。
+# 逐属性取值（而不是把同名属性各自 grep 成一个数组）是分区行解析正确性的前提：
+# 某一行省略 readonly 时，数组下标会整体前移，把下一行的值错配到本行。
+# $1: 一行 XML 文本；$2: 属性名
+socbak_xml_attr()
+{
+	local line="$1"
+	local attr="$2"
+	if [[ "${line}" =~ [[:space:]]${attr}=\"([^\"]*)\" ]]; then
+		echo -n "${BASH_REMATCH[1]}"
+	fi
+}
+
+# 取 <physical_partition> 的总容量，单位与该 XML 自身一致
+# $1: XML 路径
+socbak_xml_total()
+{
+	local xml="$1"
+	local root
+	root="$(grep -m1 '<physical_partition' "${xml}" 2>/dev/null)"
+	socbak_xml_attr "${root}" "$(socbak_xml_unit_attr "${xml}")"
+}
+
+# 从 XML 取分区记录，行序即分区序。每次调用重新解析整个文件，
+# GPT 生成与刷写布局都消费这同一组记录，两者不会因为解析方式不同而错位。
+# 输出每行：label|size|readonly|format
+#   size 为该 XML 自身单位下的数值
+#   readonly 缺省 false、format 缺省 0（与 SDK 的 mk_sector_gpt 一致：属性缺失取 0）
 # $1: XML 路径
 socbak_xml_partition_rows()
 {
 	local xml="$1"
-	local unit_attr="size_in_kb"
-	local labels sizes readonlys formats i n
-	local pat
+	local unit_attr line label size ro fmt
+	local n=0
 
-	# 根元素与分区行可能同时含 size_in_*，用属性名区分单位
-	if grep -q 'size_in_sectors=' "${xml}" 2>/dev/null; then
-		unit_attr="size_in_sectors"
-	fi
+	unit_attr="$(socbak_xml_unit_attr "${xml}")"
 
-	labels=($(grep -Po 'label=".+"' "${xml}" | awk -F'"' '{print $2}'))
-	pat="${unit_attr}"'=".+"'
-	sizes=($(grep -Po "${pat}" "${xml}" | awk -F'"' '{print $2}'))
-	# 第一个匹配来自根元素 <physical_partition ...>，去掉
-	if [ "${#sizes[@]}" -gt 0 ]; then
-		sizes=("${sizes[@]:1}")
-	fi
-	readonlys=($(grep -Po 'readonly=".+"' "${xml}" | awk -F'"' '{print $2}'))
-	formats=($(grep -Po 'format=".+"' "${xml}" | awk -F'"' '{print $2}'))
+	while IFS= read -r line; do
+		case "${line}" in
+			*'<partition '*) ;;
+			*) continue ;;
+		esac
+		label="$(socbak_xml_attr "${line}" label)"
+		[ -n "${label}" ] || continue
+		size="$(socbak_xml_attr "${line}" "${unit_attr}")"
+		ro="$(socbak_xml_attr "${line}" readonly)"
+		fmt="$(socbak_xml_attr "${line}" format)"
+		[ -n "${ro}" ] || ro="false"
+		[ -n "${fmt}" ] || fmt="0"
+		if [ -z "${size}" ]; then
+			echo "ERROR: ${xml}: partition ${label} has no ${unit_attr} attribute" >&2
+			return 1
+		fi
+		echo "${label}|${size}|${ro}|${fmt}"
+		n=$(( n + 1 ))
+	done < "${xml}"
 
-	if [ "${#labels[@]}" -ne "${#sizes[@]}" ]; then
-		echo "ERROR: ${xml}: ${#labels[@]} partition label(s) but ${#sizes[@]} size(s)" >&2
+	if [ "${n}" -eq 0 ]; then
+		echo "ERROR: ${xml}: no partition found" >&2
 		return 1
 	fi
-
-	n=${#labels[@]}
-	for (( i = 0; i < n; i++ )); do
-		echo "${labels[$i]}|${sizes[$i]}|${readonlys[$i]:-false}|${formats[$i]:-0}"
-	done
+	return 0
 }
 
 # 主 GPT（LBA 0..33，17408 字节）生成 —— 统一入口。
@@ -204,7 +247,7 @@ socbak_gen_gpt()
 
 	[ -f "${xml}" ] || { echo "ERROR: partition xml ${xml} not found" >&2; return 1; }
 
-	if grep -q 'size_in_sectors=' "${xml}" 2>/dev/null; then
+	if [ "$(socbak_xml_unit_attr "${xml}")" = "size_in_sectors" ]; then
 		socbak_gen_gpt_sector "${xml}" "${out}"
 	else
 		socbak_gen_gpt_kib "${xml}" "${out}"
@@ -239,7 +282,7 @@ socbak_gen_gpt_sector()
 	local total=0
 	local start=8192
 	local end idx=0
-	local tmp
+	local tmp="" _dir
 	local -a labels=() sizes=() readonlys=() sgdisk_args=()
 
 	command -v sgdisk >/dev/null 2>&1 || {
@@ -247,8 +290,7 @@ socbak_gen_gpt_sector()
 		return 1
 	}
 
-	total=$(grep -Po 'physical_partition[^>]*size_in_sectors="[0-9]+"' "${xml}" |
-		head -n1 | awk -F'"' '{print $2}')
+	total="$(socbak_xml_total "${xml}")"
 	if [ -z "${total}" ] || [ "${total}" -le 0 ] 2>/dev/null; then
 		echo "ERROR: ${xml}: cannot read size_in_sectors of <physical_partition>" >&2
 		return 1
@@ -279,10 +321,12 @@ socbak_gen_gpt_sector()
 	# PARTITION_BASIC_DATA_GUID（与 SDK mk_sector_gpt 一致）：0700 = Microsoft basic data
 	# 末分区必须给备份 GPT（LBA total-33..total-1）留出空间：主 GPT 只截取到 LBA 33，
 	# 但刷机时落在同一块盘上，分区压到备份区会让 u-boot/内核读表异常。
+	# 最后一个合法 LBA 是 total-34（= SDK 的 last_usable_lba），刚好用满必须放行，
+	# 越过一个扇区才判错。
 	for idx in "${!labels[@]}"; do
 		end=$(( start + sizes[idx] - 1 ))
-		if [ "${end}" -ge $(( total - 34 )) ]; then
-			echo "ERROR: ${xml}: partition ${labels[idx]} ends at LBA ${end}, does not leave room for the backup GPT (disk has ${total} sectors)" >&2
+		if [ "${end}" -gt $(( total - 34 )) ]; then
+			echo "ERROR: ${xml}: partition ${labels[idx]} ends at LBA ${end}, does not leave room for the backup GPT (last usable LBA is $(( total - 34 )), disk has ${total} sectors)" >&2
 			return 1
 		fi
 		sgdisk_args+=(-n "$(( idx + 1 )):${start}:${end}")
@@ -298,16 +342,17 @@ socbak_gen_gpt_sector()
 	# 承载整盘尺寸的稀疏文件优先放本地临时目录：/socrepack 通常是网络文件系统，
 	# 稀疏语义与出错行为取决于服务端，而这张表实际只写几十 KB。
 	# 本地不可写时退回输出文件所在目录，避免功能因环境差异失效。
-	tmp=""
+	# 用 mktemp 原子创建：文件名由内核保证本次调用独享（$$ 在同一脚本的并发子 shell 里
+	# 是同一个值，靠它拼名字会互相覆盖），清理也只 rm 这一个文件。
 	for _dir in "${TMPDIR:-/tmp}" "$(dirname "${out}")"; do
 		[ -d "${_dir}" ] && [ -w "${_dir}" ] || continue
-		rm -f "${_dir}/.socbak_gpt_$$.img"
-		if truncate -s $(( total * 512 )) "${_dir}/.socbak_gpt_$$.img" 2>/dev/null; then
-			tmp="${_dir}/.socbak_gpt_$$.img"
+		tmp="$(mktemp "${_dir}/.socbak_gpt.XXXXXXXX.img" 2>/dev/null)" || { tmp=""; continue; }
+		if truncate -s $(( total * 512 )) "${tmp}" 2>/dev/null; then
 			break
 		fi
+		rm -f "${tmp}"
+		tmp=""
 	done
-	unset _dir
 	if [ -z "${tmp}" ]; then
 		echo "ERROR: cannot create a sparse file to build GPT for ${xml}" >&2
 		return 1

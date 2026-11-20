@@ -46,8 +46,8 @@ a8ce4ad006bcaa3e96e91771e4d24c25  ./binTools/dump.f2fs
 a8ce4ad006bcaa3e96e91771e4d24c25  ./binTools/fsck.f2fs
 f3c00f5c84b1c4697ac1514e6f8412dd  ./binTools/mkfs.f2fs
 a8ce4ad006bcaa3e96e91771e4d24c25  ./binTools/resize.f2fs
-21872b03b9d2bceb6f1d95dcd960177a  ./script/partition_table.sh
-e4e2c352c56159fa934dfa5db5319b6d  ./script/bm1684/bm_make_package.sh
+e0ecdfb25acb35ab2ae2ed41d0e1b7b9  ./script/partition_table.sh
+a46b17ca47378b3655221c26b996031a  ./script/bm1684/bm_make_package.sh
 7864745c1a0c7e0b72e2a6c68e7e78f9  ./script/bm1688/raw2cimg_edge.py
-779f2f36a3333cac90ce0972995d6f79  ./script/bm1688/bm_make_package.sh
+b4c9f885b51cb892ba0ed0749d25d1a3  ./script/bm1688/bm_make_package.sh
 43df176eacb8f9c7e52dde9a706cd478  ./script/ota_update/ota_update.sh

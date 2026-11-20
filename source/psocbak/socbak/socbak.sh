@@ -151,8 +151,8 @@ fi
 
 chmod -R +x ${TGZ_FILES_PATH}/binTools
 export PATH="${TGZ_FILES_PATH}/binTools":$PATH
-# 分区表单位策略、sector 主 GPT 生成与 KiB 主 GPT 生成共用同一入口，供本脚本与 CV 系打包脚本调用
-source "${TGZ_FILES_PATH}/script/partition_table.sh"
+# 分发完整性校验必须在 source 分发包内的任何脚本之前完成：分区表策略与 GPT 入口
+# （script/partition_table.sh）也在 socbak_md5.txt 里，先 source 后校验等于跳过了它。
 # find ./ -type f | grep -vE "md5.txt|\.log|output|sparse|\.bin|\.tgz|socbak.sh" | xargs md5sum > socbak_md5.txt
 pushd "${TGZ_FILES_PATH}"
 md5sum -c "${TGZ_FILES_PATH}/socbak_md5.txt"
@@ -162,6 +162,8 @@ if [[ "$?" != "0" ]]; then
 fi
 rm -rf ./*.xml ./*.bin ./*.tar ./*.tgz ./*.gz output sparse-*
 popd
+# 分区表单位策略、sector 主 GPT 生成与 KiB 主 GPT 生成共用同一入口，供本脚本与 CV 系打包脚本调用
+source "${TGZ_FILES_PATH}/script/partition_table.sh"
 
 ALL_IN_ONE_FLAG=""
 ALL_IN_ONE_SCRIPT=""
@@ -772,12 +774,15 @@ if [[ "${SOC_BAK_FIXED_DATA_START}" != "" ]]; then
 	done
 	PARTITIONS_SIZE_NO_DATA_NEW_KB=$((${PARTITIONS_SIZE_NO_DATA_NEW_KB} + ${ROOTFS_RW_SIZE}))
 	echo "INFO: PARTITIONS_SIZE_NO_DATA_KB -> PARTITIONS_SIZE_NO_DATA_NEW_KB: ${PARTITIONS_SIZE_NO_DATA_KB} -> ${PARTITIONS_SIZE_NO_DATA_NEW_KB}"
-	if ! ROOTFS_RW_SIZE_ADJ="$(socbak_fixed_data_start_rw "${PARTITIONS_SIZE_NO_DATA_KB}" \
-		"${PARTITIONS_SIZE_NO_DATA_NEW_KB}" "${ROOTFS_RW_SIZE}")"; then
+	# 直接在当前 shell 调用：补偿结果与失败差额都写在调用者的变量里。
+	# 不能写成 X="$(socbak_fixed_data_start_rw ...)"——命令替换是子 shell，
+	# 失败差额留在子 shell 里，父 shell 的报错行读到的是未定义变量（set -u 下直接 unbound variable）。
+	if ! socbak_fixed_data_start_rw "${PARTITIONS_SIZE_NO_DATA_KB}" \
+		"${PARTITIONS_SIZE_NO_DATA_NEW_KB}" "${ROOTFS_RW_SIZE}"; then
 		echo "ERROR: Insufficient space in rootfs_rw to compensate for the expansion of other partitions, causing packaging failure in SOC_BAK_FIXED_DATA_START mode. ROOTFS_RW_SIZE:${ROOTFS_RW_SIZE} DIFF_SIZE:${SOCBAK_FIXED_DATA_START_DIFF_KB}"
 		exit 1
 	fi
-	ROOTFS_RW_SIZE=${ROOTFS_RW_SIZE_ADJ}
+	ROOTFS_RW_SIZE=${SOCBAK_FIXED_DATA_START_RW_KB}
 	echo "INFO: rootfs_rw size change to ${ROOTFS_RW_SIZE} KiB"
 fi
 
