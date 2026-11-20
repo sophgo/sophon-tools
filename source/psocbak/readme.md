@@ -37,7 +37,7 @@
   因此设备上必须存在 `sgdisk`（SE9/SE13 的出厂固件与 CV84×6 SDK rootfs 都自带）。
   末分区可以一直用到 `total-34`（与 SDK `mk_sector_gpt` 的 `last_usable_lba` 相同），
   最后 33 个扇区留给备份 GPT；再往后一个扇区就判打包失败。
-* `ota_update` v1.5.8 起已兼容两种单位，OTA 时不需要额外配置。
+* 已用 `ota_update` v1.5.8 验证两种单位的容量换算与 DATA 起点检查，OTA 沿用现有配置。
 
 ## 打包做包功能
 

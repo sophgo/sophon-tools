@@ -163,39 +163,59 @@ socbak_emit_partition_xml()
 	echo "</physical_partition>" >> "${out}"
 }
 
-# 分区表用哪种尺寸单位：size_in_sectors（sector，1 sector = 512 B）或 size_in_kb（KiB）
-# $1: XML 路径
-socbak_xml_unit_attr()
+# SDK 的分区表是扁平的元素列表。按开始标签分记录，允许属性之间换行或用制表符。
+socbak_xml_tags()
 {
-	if grep -q 'size_in_sectors="' "$1" 2>/dev/null; then
-		echo -n "size_in_sectors"
-	else
-		echo -n "size_in_kb"
-	fi
+	awk -v tag="$2" '
+		BEGIN { RS = "<" }
+		/^!--/ { comment = 1 }
+		comment { if (index($0, "-->")) comment = 0; next }
+		$0 ~ ("^" tag "([[:space:]]|/?>)") {
+			gsub(/[\r\n]/, " ")
+			sub(/>.*/, ">")
+			print $0
+		}
+	' "$1"
 }
 
-# 从一行 XML 里取某个属性的值；属性不存在时输出空串。
-# 逐属性取值（而不是把同名属性各自 grep 成一个数组）是分区行解析正确性的前提：
-# 某一行省略 readonly 时，数组下标会整体前移，把下一行的值错配到本行。
-# $1: 一行 XML 文本；$2: 属性名
 socbak_xml_attr()
 {
-	local line="$1"
-	local attr="$2"
-	if [[ "${line}" =~ [[:space:]]${attr}=\"([^\"]*)\" ]]; then
-		echo -n "${BASH_REMATCH[1]}"
+	local prefix="[[:space:]]$2[[:space:]]*=[[:space:]]*"
+	if [[ $1 =~ ${prefix}\"([^\"]*)\" || $1 =~ ${prefix}\'([^\']*)\' ]]; then
+		printf '%s' "${BASH_REMATCH[1]}"
 	fi
 }
 
-# 取 <physical_partition> 的总容量，单位与该 XML 自身一致
-# $1: XML 路径
-socbak_xml_total()
+socbak_xml_header()
 {
-	local xml="$1"
-	local root
-	root="$(grep -m1 '<physical_partition' "${xml}" 2>/dev/null)"
-	socbak_xml_attr "${root}" "$(socbak_xml_unit_attr "${xml}")"
+	local root kib sectors unit total
+	root="$(socbak_xml_tags "$1" physical_partition)" || return 1
+	kib="$(socbak_xml_attr "${root}" size_in_kb)"
+	sectors="$(socbak_xml_attr "${root}" size_in_sectors)"
+	if [[ -n ${kib} && -z ${sectors} ]]; then
+		unit=size_in_kb
+		total=${kib}
+	elif [[ -n ${sectors} && -z ${kib} ]]; then
+		unit=size_in_sectors
+		total=${sectors}
+	else
+		echo "ERROR: $1: expected one size attribute on <physical_partition>" >&2
+		return 1
+	fi
+	if [[ ! ${total} =~ ^0*([1-9][0-9]*)$ ]]; then
+		echo "ERROR: $1: invalid disk size \"${total}\"" >&2
+		return 1
+	fi
+	total=${BASH_REMATCH[1]}
+	if [[ $2 == unit ]]; then
+		printf '%s' "${unit}"
+	else
+		printf '%s' "${total}"
+	fi
 }
+
+socbak_xml_unit_attr() { socbak_xml_header "$1" unit; }
+socbak_xml_total() { socbak_xml_header "$1" total; }
 
 # 从 XML 取分区记录，行序即分区序。每次调用重新解析整个文件，
 # GPT 生成与刷写布局都消费这同一组记录，两者不会因为解析方式不同而错位。
@@ -206,36 +226,30 @@ socbak_xml_total()
 socbak_xml_partition_rows()
 {
 	local xml="$1"
-	local unit_attr line label size ro fmt
-	local n=0
-
-	unit_attr="$(socbak_xml_unit_attr "${xml}")"
-
-	while IFS= read -r line; do
-		case "${line}" in
-			*'<partition '*) ;;
-			*) continue ;;
-		esac
-		label="$(socbak_xml_attr "${line}" label)"
-		[ -n "${label}" ] || continue
-		size="$(socbak_xml_attr "${line}" "${unit_attr}")"
-		ro="$(socbak_xml_attr "${line}" readonly)"
-		fmt="$(socbak_xml_attr "${line}" format)"
-		[ -n "${ro}" ] || ro="false"
-		[ -n "${fmt}" ] || fmt="0"
-		if [ -z "${size}" ]; then
-			echo "ERROR: ${xml}: partition ${label} has no ${unit_attr} attribute" >&2
-			return 1
-		fi
-		echo "${label}|${size}|${ro}|${fmt}"
-		n=$(( n + 1 ))
-	done < "${xml}"
-
-	if [ "${n}" -eq 0 ]; then
+	local unit_attr tags line label size ro fmt
+	unit_attr="$(socbak_xml_unit_attr "${xml}")" || return 1
+	tags="$(socbak_xml_tags "${xml}" partition)" || return 1
+	if [[ -z ${tags} ]]; then
 		echo "ERROR: ${xml}: no partition found" >&2
 		return 1
 	fi
-	return 0
+
+	while IFS= read -r line; do
+		label="$(socbak_xml_attr "${line}" label)"
+		if [[ -z ${label} ]]; then
+			echo "ERROR: ${xml}: partition has no label" >&2
+			return 1
+		fi
+		size="$(socbak_xml_attr "${line}" "${unit_attr}")"
+		if [[ ! ${size} =~ ^0*([1-9][0-9]*)$ ]]; then
+			echo "ERROR: ${xml}: invalid ${unit_attr} for partition ${label}: \"${size}\"" >&2
+			return 1
+		fi
+		size=${BASH_REMATCH[1]}
+		ro="$(socbak_xml_attr "${line}" readonly)"
+		fmt="$(socbak_xml_attr "${line}" format)"
+		printf '%s|%s|%s|%s\n' "${label}" "${size}" "${ro:-false}" "${fmt:-0}"
+	done <<< "${tags}"
 }
 
 # 主 GPT（LBA 0..33，17408 字节）生成 —— 统一入口。
@@ -244,10 +258,12 @@ socbak_gen_gpt()
 {
 	local xml="$1"
 	local out="$2"
+	local unit
 
 	[ -f "${xml}" ] || { echo "ERROR: partition xml ${xml} not found" >&2; return 1; }
 
-	if [ "$(socbak_xml_unit_attr "${xml}")" = "size_in_sectors" ]; then
+	unit="$(socbak_xml_unit_attr "${xml}")" || return 1
+	if [ "${unit}" = "size_in_sectors" ]; then
 		socbak_gen_gpt_sector "${xml}" "${out}"
 	else
 		socbak_gen_gpt_kib "${xml}" "${out}"
@@ -263,12 +279,14 @@ socbak_gen_gpt_kib()
 	local tools_dir="${TGZ_FILES_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 	local mk_gpt="${SOCBAK_MK_GPT:-${tools_dir}/binTools/mk_gpt}"
 
+	# 旧 mk_gpt 遇到缺少尺寸的分区也会写出带头签名的文件。
+	socbak_xml_partition_rows "${xml}" >/dev/null || return 1
 	[ -f "${mk_gpt}" ] || { echo "ERROR: ${mk_gpt} not found" >&2; return 1; }
 	[ -x "${mk_gpt}" ] || chmod +x "${mk_gpt}" 2>/dev/null
 	rm -f "${out}"
 
 	# mk_gpt 成功时也返回 255（main 里 ret 初值为 -1），只能靠产物校验判定
-	"${mk_gpt}" -p "${xml}" -d "${out}" 1 >/dev/null 2>&1
+	"${mk_gpt}" -p "${xml}" -d "${out}" 1 >/dev/null 2>&1 || [ "$?" -eq 255 ] || return 1
 	socbak_validate_gpt "${out}"
 }
 
@@ -278,66 +296,40 @@ socbak_gen_gpt_sector()
 {
 	local xml="$1"
 	local out="$2"
-	local label size ro fmt
+	local rows label size ro fmt
 	local total=0
 	local start=8192
 	local end idx=0
 	local tmp="" _dir
-	local -a labels=() sizes=() readonlys=() sgdisk_args=()
+	local -a sgdisk_args=()
 
 	command -v sgdisk >/dev/null 2>&1 || {
 		echo "ERROR: sgdisk not found, it is required to build a sector-unit partition table (${xml})" >&2
 		return 1
 	}
 
-	total="$(socbak_xml_total "${xml}")"
-	if [ -z "${total}" ] || [ "${total}" -le 0 ] 2>/dev/null; then
-		echo "ERROR: ${xml}: cannot read size_in_sectors of <physical_partition>" >&2
-		return 1
-	fi
-
-	while IFS='|' read -r label size ro fmt; do
-		[ -n "${label}" ] || continue
-		case "${size}" in
-			''|*[!0-9]*)
-				echo "ERROR: ${xml}: partition ${label} has invalid size \"${size}\"" >&2
-				return 1
-				;;
-		esac
-		if [ "${size}" -le 0 ]; then
-			echo "ERROR: ${xml}: partition ${label} has non-positive size ${size}" >&2
-			return 1
-		fi
-		labels+=("${label}")
-		sizes+=("${size}")
-		readonlys+=("${ro}")
-	done < <(socbak_xml_partition_rows "${xml}")
-
-	if [ "${#labels[@]}" -eq 0 ]; then
-		echo "ERROR: ${xml}: no partition found" >&2
-		return 1
-	fi
+	total="$(socbak_xml_total "${xml}")" || return 1
+	rows="$(socbak_xml_partition_rows "${xml}")" || return 1
 
 	# PARTITION_BASIC_DATA_GUID（与 SDK mk_sector_gpt 一致）：0700 = Microsoft basic data
 	# 末分区必须给备份 GPT（LBA total-33..total-1）留出空间：主 GPT 只截取到 LBA 33，
 	# 但刷机时落在同一块盘上，分区压到备份区会让 u-boot/内核读表异常。
 	# 最后一个合法 LBA 是 total-34（= SDK 的 last_usable_lba），刚好用满必须放行，
 	# 越过一个扇区才判错。
-	for idx in "${!labels[@]}"; do
-		end=$(( start + sizes[idx] - 1 ))
+	while IFS='|' read -r label size ro fmt; do
+		idx=$(( idx + 1 ))
+		end=$(( start + size - 1 ))
 		if [ "${end}" -gt $(( total - 34 )) ]; then
-			echo "ERROR: ${xml}: partition ${labels[idx]} ends at LBA ${end}, does not leave room for the backup GPT (last usable LBA is $(( total - 34 )), disk has ${total} sectors)" >&2
+			echo "ERROR: ${xml}: partition ${label} ends at LBA ${end}, does not leave room for the backup GPT (last usable LBA is $(( total - 34 )), disk has ${total} sectors)" >&2
 			return 1
 		fi
-		sgdisk_args+=(-n "$(( idx + 1 )):${start}:${end}")
-		sgdisk_args+=(-t "$(( idx + 1 )):0700")
-		sgdisk_args+=(-c "$(( idx + 1 )):${labels[idx]}")
+		sgdisk_args+=(-n "${idx}:${start}:${end}" -t "${idx}:0700" -c "${idx}:${label}")
 		# readonly=true -> GPT 属性位 60（与 mk_gpt 的 1<<60 一致）
-		if [ "${readonlys[idx]}" = "true" ]; then
-			sgdisk_args+=(-A "$(( idx + 1 )):set:60")
+		if [ "${ro}" = "true" ]; then
+			sgdisk_args+=(-A "${idx}:set:60")
 		fi
 		start=$(( end + 1 ))
-	done
+	done <<< "${rows}"
 
 	# 承载整盘尺寸的稀疏文件优先放本地临时目录：/socrepack 通常是网络文件系统，
 	# 稀疏语义与出错行为取决于服务端，而这张表实际只写几十 KB。
@@ -378,7 +370,7 @@ socbak_gen_gpt_sector()
 	socbak_validate_gpt "${out}"
 }
 
-# 校验产物确实是主 GPT：34 个扇区、GPT 头签名正确、分区项 CRC 可被 gdisk 接受
+# 打包时检查主 GPT 的长度和头签名。
 socbak_validate_gpt()
 {
 	local out="$1"

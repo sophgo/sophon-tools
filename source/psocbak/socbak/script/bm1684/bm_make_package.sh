@@ -173,20 +173,15 @@ function parse_partition_xml()
 	# 它按分区行读属性，某行省略 readonly/format 不会让后面的值整体前移
 	# （各属性分别 grep 成数组再按下标配对的写法会错位）。
 	# socbak.sh 写出的 KiB 表带全部属性，这条约束主要是防手改 / 外部包。
+	[ "$(socbak_xml_unit_attr "${PARTITION_FILE}")" = size_in_kb ] || panic "expected a KiB partition table: ${PARTITION_FILE}"
 	rows="$(socbak_xml_partition_rows "${PARTITION_FILE}")" || panic "parse ${PARTITION_FILE} failed"
 
 	#find total disk size in kb
-	TOTAL_SIZE=($(socbak_xml_total "${PARTITION_FILE}"))
+	TOTAL_SIZE=("$(socbak_xml_total "${PARTITION_FILE}")") || panic "parse ${PARTITION_FILE} failed"
 
 	LABELS=() PART_SIZE_IN_KB=() PART_SIZE_IN_SECTOR=() PART_SIZE_IN_BYTE=()
 	P_FLAG=() PART_FORMAT=()
 	while IFS='|' read -r label size ro fmt; do
-		[ -n "${label}" ] || continue
-		case "${size}" in
-			''|*[!0-9]*)
-				panic "partition ${label} in ${PARTITION_FILE} has invalid size \"${size}\""
-				;;
-		esac
 		LABELS[$i]="$(echo "${label}" | tr '[:upper:]' '[:lower:]')"
 		PART_SIZE_IN_KB[$i]=${size}
 		PART_SIZE_IN_SECTOR[$i]=$(expr ${size} \* 1024 / ${SECTOR_BYTES})
@@ -587,7 +582,8 @@ function make_gpt_img()
 	local filename=${RECOVERY_DIR}/gpt
 	local desc="mmc gpt file"
 
-	./mk_gpt -p ${PARTITION_FILE} -d ${filename} 1 >/dev/null || true
+	SOCBAK_MK_GPT="${SOCBAK_MK_GPT:-./mk_gpt}" socbak_gen_gpt "${PARTITION_FILE}" "${filename}" ||
+		panic "generate GPT from ${PARTITION_FILE} failed"
 
 	create_partition_script $(basename ${filename}) "${desc}"
 

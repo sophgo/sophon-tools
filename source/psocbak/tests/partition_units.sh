@@ -164,6 +164,25 @@ for tag in se9_default se7_default; do
 		"$(socbak_xml_partition_rows "${sec_xml}" | awk -F'|' '{printf "%s|%s|%s\n", $1, $3, $4}')"
 done
 
+# SDK 表的空白和注释不影响布局。把同一份表重排，并在注释中放一个不同单位的示例。
+for unit in kib sector; do
+	awk '
+		/<physical_partition / {
+			print "<!-- example: <partition label=\"IGNORED\" size_in_sectors=\"99\" /> -->"
+			sub(/<physical_partition /, "<physical_partition\n\t")
+		}
+		/<partition label="DATA"/ {sub(/<partition /, "<partition\n\t")}
+		/<partition label="BOOT"/ {sub(/<partition /, "<partition\t")}
+		{print}
+	' "${WORK}/se7_default_${unit}.xml" > "${WORK}/wrapped_${unit}.xml"
+	check_eq "${unit} 表按根元素识别单位" "$(socbak_xml_unit_attr "${WORK}/se7_default_${unit}.xml")" \
+		"$(socbak_xml_unit_attr "${WORK}/wrapped_${unit}.xml")"
+	check_eq "${unit} 表跨行读取总容量" "$(socbak_xml_total "${WORK}/se7_default_${unit}.xml")" \
+		"$(socbak_xml_total "${WORK}/wrapped_${unit}.xml")"
+	check_eq "${unit} 表换行、制表和注释不改变分区记录" "$(socbak_xml_partition_rows "${WORK}/se7_default_${unit}.xml")" \
+		"$(socbak_xml_partition_rows "${WORK}/wrapped_${unit}.xml")"
+done
+
 # 奇数扇区：131073 个扇区 = 67109376 B，无法用整 KiB 表达，必须按扇区精确处理
 cat > "${WORK}/odd_sector.xml" <<'XML'
 <physical_partition size_in_sectors="40000001">
@@ -284,6 +303,28 @@ XML
 	fi
 	check_ne "越界时不留下半成品 GPT" "1" "$([ -s "${WORK}/overflow.gpt" ] && echo 1 || echo 0)"
 
+	cat > "${WORK}/incomplete.xml" <<'XML'
+<physical_partition size_in_sectors="32768">
+  <partition label="BOOT" size_in_sectors="4096" format="1" />
+  <partition label="DATA" format="2" />
+</physical_partition>
+XML
+	if socbak_gen_gpt "${WORK}/incomplete.xml" "${WORK}/incomplete.gpt" 2>/dev/null; then
+		bad "后续分区缺少尺寸时 GPT 生成失败"
+	else
+		ok "后续分区缺少尺寸时 GPT 生成失败"
+	fi
+	check_eq "后续分区解析失败时不写出部分 GPT" "0" "$([ -e "${WORK}/incomplete.gpt" ] && echo 1 || echo 0)"
+	if [ "${HAS_MKGPT}" = 1 ]; then
+		sed 's/size_in_sectors/size_in_kb/g' "${WORK}/incomplete.xml" > "${WORK}/incomplete_kib.xml"
+		if socbak_gen_gpt "${WORK}/incomplete_kib.xml" "${WORK}/incomplete_kib.gpt" 2>/dev/null; then
+			bad "KiB 分区缺少尺寸时在调用旧生成器前报错"
+		else
+			ok "KiB 分区缺少尺寸时在调用旧生成器前报错"
+		fi
+		check_eq "KiB 表解析失败时不写出部分 GPT" "0" "$([ -e "${WORK}/incomplete_kib.gpt" ] && echo 1 || echo 0)"
+	fi
+
 	# 最后可用的 LBA 是 total-34（= SDK mk_sector_gpt 的 last_usable_lba，
 	# 之后 total-33..total-1 是备份 GPT 与备份分区项数组）。刚好用满必须放行，
 	# 再多一个扇区（压到备份 GPT）必须拒绝 —— 两个方向都测，避免把合法边界判错。
@@ -384,6 +425,7 @@ drive_offsets() { # <xml>
 
 off_old="$(drive_offsets "${WORK}/se7_default_kib.xml")"
 off_new="$(drive_offsets "${WORK}/se7_default_sector.xml")"
+check_eq "CV 打包链读取跨行 sector 表的全部偏移" "${off_new}" "$(drive_offsets "${WORK}/wrapped_sector.xml")"
 check_ne "CV 打包链能读到分区偏移" "" "${off_new}"
 check_eq "新旧 XML 的刷写偏移与镜像尺寸一致" "${off_old}" "${off_new}"
 check_eq "首分区从 LBA 8192 开始" "1" "$(echo "${off_new}" | grep -c 'start=8192 ')"
@@ -462,6 +504,7 @@ drive_offsets_1684() { # <xml>
 	)
 }
 off7_1684="$(drive_offsets_1684 "${WORK}/se7_default_kib.xml")"
+check_eq "SE7 打包链读取跨行 KiB 表的全部偏移" "${off7_1684}" "$(drive_offsets_1684 "${WORK}/wrapped_kib.xml")"
 check_ne "SE7 KiB 打包链能读到分区偏移" "" "${off7_1684}"
 # 与 KiB XML 自身的期望值逐分区对照（起止 LBA、字节数、只读位、format）
 check_eq "SE7 KiB 打包链的起止/字节/只读位/format 与 XML 一致" \
@@ -661,8 +704,10 @@ if [ -z "${SDK_XML}" ]; then
 		[ -f "${c}" ] && { SDK_XML="${c}"; break; }
 	done
 fi
-if [ -z "${SDK_XML}" ] || [ ! -f "${SDK_XML}" ]; then
+if [ -z "${SDK_XML}" ]; then
 	echo "  skip 未提供 CV84×6 SDK 的 partition32G_sector.xml（可用 SOCBAK_SDK_SECTOR_XML 指定）"
+elif [ ! -f "${SDK_XML}" ]; then
+	bad "读取指定的 CV84×6 SDK 夹具" "${SDK_XML} 文件不存在"
 else
 	SDK_XML="$(readlink -f "${SDK_XML}")"
 	echo "  fixture: ${SDK_XML}"

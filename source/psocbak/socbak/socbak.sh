@@ -880,8 +880,7 @@ function socbak_allinone_pack()
 {
 	if [[ "${ALL_IN_ONE_FLAG}" != "" ]] && [[ "${ALL_IN_ONE_SCRIPT}" != "" ]]; then
 		advmv -g ${TGZ_FILES_PATH}/*.bin output &>/dev/null
-		# BM1684/BM1684X 的打包链（script/bm1684）直接调用 ./mk_gpt，仍需把工具放到 output；
-		# CV 系的 GPT 由 socbak_gen_gpt（sgdisk）生成，不依赖这个副本。
+		# SE7 打包脚本从当前工作目录调用原版 KiB 生成器。
 		advcp -g  ${TGZ_FILES_PATH}/binTools/mk_gpt output
 		pushd $TGZ_FILES_PATH/output
 		echo "INFO: start pack image mode($1)"

@@ -171,7 +171,7 @@ function parseargs()
 function parse_partition_xml()
 {
 	local offset=${BOOT_PART_OFFSET}
-	local unit_kib val label size ro fmt i=0
+	local unit label size ro fmt i=0
 	local rows
 
 	# 分区表有两种单位：size_in_kb（BM1684/X 历史格式）与 size_in_sectors
@@ -182,34 +182,24 @@ function parse_partition_xml()
 	# 分区记录统一由 script/partition_table.sh 的 socbak_xml_partition_rows 解析：
 	# 它是按分区行读属性的（某行省略 readonly/format 不会让后面的值整体错位），
 	# 主 GPT 生成器 socbak_gen_gpt 用的也是同一份解析结果，刷写布局与 gpt.gz 不会分叉。
-	unit_kib=1
-	if [ "$(socbak_xml_unit_attr "${PARTITION_FILE}")" = "size_in_sectors" ]; then
-		unit_kib=0
-	fi
+	unit="$(socbak_xml_unit_attr "${PARTITION_FILE}")" || panic "parse ${PARTITION_FILE} failed"
 	rows="$(socbak_xml_partition_rows "${PARTITION_FILE}")" || panic "parse ${PARTITION_FILE} failed"
 
 	# 总容量（该 XML 自身单位），第一个元素与历史版本保持一致
-	TOTAL_SIZE=($(socbak_xml_total "${PARTITION_FILE}"))
+	TOTAL_SIZE=("$(socbak_xml_total "${PARTITION_FILE}")") || panic "parse ${PARTITION_FILE} failed"
 
 	LABELS=() PART_SIZE_IN_XML_UNIT=() PART_SIZE_IN_SECTOR=() PART_SIZE_IN_BYTE=()
 	P_FLAG=() PART_FORMAT=()
 	while IFS='|' read -r label size ro fmt; do
-		[ -n "${label}" ] || continue
-		case "${size}" in
-			''|*[!0-9]*)
-				panic "partition ${label} in ${PARTITION_FILE} has invalid size \"${size}\""
-				;;
-		esac
-		val=${size}
 		LABELS[$i]="$(echo "${label}" | tr '[:upper:]' '[:lower:]')"
-		PART_SIZE_IN_XML_UNIT[$i]=${val}
-		if [ "${unit_kib}" = "1" ]; then
-			PART_SIZE_IN_SECTOR[$i]=$(( val * KB_BYTES / SECTOR_BYTES ))
-			PART_SIZE_IN_BYTE[$i]=$(( val * KB_BYTES ))
+		PART_SIZE_IN_XML_UNIT[$i]=${size}
+		if [ "${unit}" = size_in_kb ]; then
+			PART_SIZE_IN_SECTOR[$i]=$(( size * KB_BYTES / SECTOR_BYTES ))
+			PART_SIZE_IN_BYTE[$i]=$(( size * KB_BYTES ))
 		else
 			# sector 单位：字节与 LBA 按扇区精确换算，奇数扇区不做任何取整
-			PART_SIZE_IN_SECTOR[$i]=${val}
-			PART_SIZE_IN_BYTE[$i]=$(( val * SECTOR_BYTES ))
+			PART_SIZE_IN_SECTOR[$i]=${size}
+			PART_SIZE_IN_BYTE[$i]=$(( size * SECTOR_BYTES ))
 		fi
 		P_FLAG[$i]="${ro}"
 		PART_FORMAT[$i]="${fmt}"
@@ -674,7 +664,7 @@ function make_gpt_img()
 	# 统一走 socbak_gen_gpt（script/partition_table.sh）：按 XML 单位选择生成器，
 	# KiB 格式仍用 binTools/mk_gpt，sector 格式用 sgdisk。生成失败必须中断打包，
 	# 否则会打进一个空/错的 gpt，刷机时静默破坏分区表。
-	socbak_gen_gpt ${PARTITION_FILE} ${filename} ||
+	socbak_gen_gpt "${PARTITION_FILE}" "${filename}" ||
 		panic "failed to generate gpt from ${PARTITION_FILE}"
 
 	create_partition_script $(basename ${filename}) "${desc}"
