@@ -13,7 +13,7 @@ LOGFILE="$(readlink -f "${BASH_SOURCE[0]}").log"
 rm -f $LOGFILE*
 exec > >(tee -a "$LOGFILE") 2>&1
 
-echo "VERSION: v1.4.4"
+echo "VERSION: v1.5.0"
 date '+%Y-%m-%d %H:%M:%S'
 
 export SOC_BAK_ALL_IN_ONE=${SOC_BAK_ALL_IN_ONE:-}
@@ -88,6 +88,9 @@ TGZ_ALL_SIZE=$((100*1024))
 EMMC_ALL_SIZE=20971520
 EMMC_MAX_SIZE=30000000
 TAR_SIZE=0
+# 分区表单位与文件名按芯片决定：CV 系（BM1688/CV186AH/CV84X6）出 sector 格式，
+# BM1684/BM1684X 保持历史 KiB 格式。芯片识别完成后按 script/partition_table.sh 的策略落定。
+PARTITION_SIZE_IN_SECTOR=0
 SOCBAK_PARTITION_FILE=partition32G.xml
 BM1684_SOC_VERSION=0
 NEED_BAK_FLASH=1
@@ -148,6 +151,8 @@ fi
 
 chmod -R +x ${TGZ_FILES_PATH}/binTools
 export PATH="${TGZ_FILES_PATH}/binTools":$PATH
+# 分区表单位策略、sector 主 GPT 生成与 KiB 主 GPT 生成共用同一入口，供本脚本与 CV 系打包脚本调用
+source "${TGZ_FILES_PATH}/script/partition_table.sh"
 # find ./ -type f | grep -vE "md5.txt|\.log|output|sparse|\.bin|\.tgz|socbak.sh" | xargs md5sum > socbak_md5.txt
 pushd "${TGZ_FILES_PATH}"
 md5sum -c "${TGZ_FILES_PATH}/socbak_md5.txt"
@@ -254,6 +259,16 @@ if [[ "${SOC_NAME}" == "" ]]; then
 else
 	echo "INFO: get chip id success!"
 fi
+
+# 分区表单位策略：CV 系（BM1688/CV186AH/CV84X6，即 SE9/SE13）出 sector 格式，
+# partition32G_sector.xml、属性 size_in_sectors（1 sector = 512 B）；
+# BM1684/BM1684X（SE7 及更早）保持历史 KiB 格式与 partition32G.xml。
+# socbak 内部所有尺寸计算仍以 KiB 进行，只在写 XML 时换算，避免扩容/补偿算法分叉。
+if socbak_partition_uses_sector "${SOC_NAME}"; then
+	PARTITION_SIZE_IN_SECTOR=1
+fi
+SOCBAK_PARTITION_FILE="$(socbak_partition_file_name "${SOC_NAME}")"
+echo "INFO: partition table ${SOCBAK_PARTITION_FILE} ($([[ "${PARTITION_SIZE_IN_SECTOR}" == "1" ]] && echo "size_in_sectors, 1 sector = 512 B" || echo "size_in_kb"))"
 
 # 配置区校验：分区名必须是已知的 format="2"/"3" 分区（写错了会静默退回 ext4，必须拦），
 # 取值只能是 ext4/f2fs
@@ -757,17 +772,12 @@ if [[ "${SOC_BAK_FIXED_DATA_START}" != "" ]]; then
 	done
 	PARTITIONS_SIZE_NO_DATA_NEW_KB=$((${PARTITIONS_SIZE_NO_DATA_NEW_KB} + ${ROOTFS_RW_SIZE}))
 	echo "INFO: PARTITIONS_SIZE_NO_DATA_KB -> PARTITIONS_SIZE_NO_DATA_NEW_KB: ${PARTITIONS_SIZE_NO_DATA_KB} -> ${PARTITIONS_SIZE_NO_DATA_NEW_KB}"
-	if [ $PARTITIONS_SIZE_NO_DATA_KB -gt $PARTITIONS_SIZE_NO_DATA_NEW_KB ]; then
-		ROOTFS_RW_SIZE=$((${ROOTFS_RW_SIZE} + (${PARTITIONS_SIZE_NO_DATA_KB} - ${PARTITIONS_SIZE_NO_DATA_NEW_KB})))
-	elif [ $PARTITIONS_SIZE_NO_DATA_KB -lt $PARTITIONS_SIZE_NO_DATA_NEW_KB ]; then
-		RW_BUFFER_SIZE=$((200 * 1024))
-		DIFF_SIZE=$((${PARTITIONS_SIZE_NO_DATA_NEW_KB} - ${PARTITIONS_SIZE_NO_DATA_KB} + ${RW_BUFFER_SIZE}))
-		if [ $ROOTFS_RW_SIZE -lt $DIFF_SIZE ]; then
-			echo "ERROR: Insufficient space in rootfs_rw to compensate for the expansion of other partitions, causing packaging failure in SOC_BAK_FIXED_DATA_START mode. ROOTFS_RW_SIZE:${ROOTFS_RW_SIZE} DIFF_SIZE:${DIFF_SIZE}"
-			exit 1
-		fi
-		ROOTFS_RW_SIZE=$((${ROOTFS_RW_SIZE} - (${PARTITIONS_SIZE_NO_DATA_NEW_KB} - ${PARTITIONS_SIZE_NO_DATA_KB})))
+	if ! ROOTFS_RW_SIZE_ADJ="$(socbak_fixed_data_start_rw "${PARTITIONS_SIZE_NO_DATA_KB}" \
+		"${PARTITIONS_SIZE_NO_DATA_NEW_KB}" "${ROOTFS_RW_SIZE}")"; then
+		echo "ERROR: Insufficient space in rootfs_rw to compensate for the expansion of other partitions, causing packaging failure in SOC_BAK_FIXED_DATA_START mode. ROOTFS_RW_SIZE:${ROOTFS_RW_SIZE} DIFF_SIZE:${SOCBAK_FIXED_DATA_START_DIFF_KB}"
+		exit 1
 	fi
+	ROOTFS_RW_SIZE=${ROOTFS_RW_SIZE_ADJ}
 	echo "INFO: rootfs_rw size change to ${ROOTFS_RW_SIZE} KiB"
 fi
 
@@ -806,54 +816,67 @@ part_format_attr() {
 		echo -n '2'
 	fi
 }
-echo "<physical_partition size_in_kb=\"$EMMC_ALL_SIZE\">" > $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
-# boot data opt system recovery rootfs
+# 分区表单位与尺寸换算：CV 系（BM1688/CV186AH/CV84X6）用 size_in_sectors（1 sector = 512 B），
+# BM1684/BM1684X 用 size_in_kb。两种单位一一对应、不会混用；KiB 单位的输出与本次改动前逐字节相同。
+# 每个分区行是 "LABEL|大小(KiB)|readonly|format"，尺寸换算与写盘集中在
+# script/partition_table.sh 的 socbak_emit_partition_xml，便于脱离真机单独跑回归。
+SOCBAK_PARTITION_ROWS=()
 if [[ " ${TGZ_FILES[@]} " =~ " boot " ]]; then
-	echo "  <partition label=\"BOOT\"       size_in_kb=\"${TGZ_FILES_SIZE[boot]}\"  readonly=\"false\"  format=\"1\" />" >> $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
+	SOCBAK_PARTITION_ROWS+=("BOOT|${TGZ_FILES_SIZE[boot]}|false|1")
 fi
 if [[ " ${TGZ_FILES[@]} " =~ " recovery " ]]; then
-	echo "  <partition label=\"RECOVERY\"   size_in_kb=\"${TGZ_FILES_SIZE[recovery]}\"  readonly=\"false\" format=\"$(part_format_attr recovery)\" />" >> $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
+	SOCBAK_PARTITION_ROWS+=("RECOVERY|${TGZ_FILES_SIZE[recovery]}|false|$(part_format_attr recovery)")
 fi
-echo "  <partition label=\"MISC\"       size_in_kb=\"10240\"  readonly=\"false\"   format=\"0\" />" >> $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
+SOCBAK_PARTITION_ROWS+=("MISC|10240|false|0")
 if [[ " ${TGZ_FILES[@]} " =~ " rootfs " ]]; then
-	echo "  <partition label=\"ROOTFS\"     size_in_kb=\"${TGZ_FILES_SIZE[rootfs]}\" readonly=\"true\"   format=\"$(part_format_attr rootfs)\" />" >> $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
+	SOCBAK_PARTITION_ROWS+=("ROOTFS|${TGZ_FILES_SIZE[rootfs]}|true|$(part_format_attr rootfs)")
 fi
-echo "  <partition label=\"ROOTFS_RW\"  size_in_kb=\"${ROOTFS_RW_SIZE}\" readonly=\"false\"  format=\"$(part_format_attr rootfs_rw)\" />" >> $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
+SOCBAK_PARTITION_ROWS+=("ROOTFS_RW|${ROOTFS_RW_SIZE}|false|$(part_format_attr rootfs_rw)")
 if [[ " ${TGZ_FILES[@]} " =~ " opt " ]]; then
-	echo "  <partition label=\"OPT\"       size_in_kb=\"${TGZ_FILES_SIZE[opt]}\" readonly=\"false\"  format=\"$(part_format_attr opt)\" />" >> $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
+	SOCBAK_PARTITION_ROWS+=("OPT|${TGZ_FILES_SIZE[opt]}|false|$(part_format_attr opt)")
 fi
 if [[ " ${TGZ_FILES[@]} " =~ " system " ]]; then
-	echo "  <partition label=\"SYSTEM\"     size_in_kb=\"${TGZ_FILES_SIZE[system]}\" readonly=\"false\"  format=\"$(part_format_attr system)\" />" >> $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
+	SOCBAK_PARTITION_ROWS+=("SYSTEM|${TGZ_FILES_SIZE[system]}|false|$(part_format_attr system)")
 fi
 if [[ " ${TGZ_FILES[@]} " =~ " data " ]]; then
-	echo "  <partition label=\"DATA\"       size_in_kb=\"${TGZ_FILES_SIZE[data]}\" readonly=\"false\"  format=\"$(part_format_attr data)\" />" >> $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
+	SOCBAK_PARTITION_ROWS+=("DATA|${TGZ_FILES_SIZE[data]}|false|$(part_format_attr data)")
 fi
-echo "</physical_partition>" >> $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
+socbak_emit_partition_xml "$TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE" \
+	"$PARTITION_SIZE_IN_SECTOR" "$EMMC_ALL_SIZE" "${SOCBAK_PARTITION_ROWS[@]}"
 cat $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
 
 # output 目录仅在 all-in-one 模式下提前创建，tgz-only 模式走到这里不存在，
 # 直接 pushd 会报 "No such file or directory"（CV84X2 真机实测踩坑，不影响产物）
 mkdir -p $TGZ_FILES_PATH/output
-pushd $TGZ_FILES_PATH/output
+# SOC_BAK_FIXED_DATA_START 的末分区起点检查与正式 gpt.gz 使用同一份 GPT 生成代码
+# （socbak_gen_gpt，按 XML 单位分派），避免检查通过与实际刷机包不一致。
+# 旧实现此处直接调 ./mk_gpt，只认 size_in_kb，sector 格式会得到空表。
 if [[ "${SOC_BAK_FIXED_DATA_START}" != "" ]]; then
-	advcp -g  ${TGZ_FILES_PATH}/binTools/mk_gpt .
-	./mk_gpt -p "$TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE" -d "$TGZ_FILES_PATH/output/gpt.test" 1 >/dev/null || true
-	dd if="$TGZ_FILES_PATH/output/gpt.test" of="$TGZ_FILES_PATH/output/gpt.test.disk"
+	echo "INFO: SOC_BAK_FIXED_DATA_START mode, check last part start ..."
+	if ! socbak_gen_gpt "$TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE" "$TGZ_FILES_PATH/output/gpt.test"; then
+		echo "ERROR: SOC_BAK_FIXED_DATA_START mode, generate gpt from $SOCBAK_PARTITION_FILE failed"
+		socbak_cleanup
+		exit 1
+	fi
+	dd if="$TGZ_FILES_PATH/output/gpt.test" of="$TGZ_FILES_PATH/output/gpt.test.disk" status=none
 	EMMC_SIZE_B=$(lsblk -b | grep '^mmcblk0' | head -n1 | awk -F' ' '{print $4}')
-	dd if=/dev/null of="$TGZ_FILES_PATH/output/gpt.test.disk" bs=1 count=1 seek=${EMMC_SIZE_B}
+	dd if=/dev/null of="$TGZ_FILES_PATH/output/gpt.test.disk" bs=1 count=1 seek=${EMMC_SIZE_B} 2>/dev/null
 	NEW_GPT_END_PART_START=$(gdisk -l "$TGZ_FILES_PATH/output/gpt.test.disk" 2>&1 | tail -n1 | awk -F' ' '{print $2}')
 	OLD_GPT_END_PART_START=$(gdisk -l /dev/mmcblk0 2>&1 | tail -n 1 | awk '{print $2}')
 	if [[ "$OLD_GPT_END_PART_START" != "$NEW_GPT_END_PART_START" ]] || [[ "$NEW_GPT_END_PART_START" == "" ]]; then
 		echo "WARRNING: SOC_BAK_FIXED_DATA_START mode, check last part start [NEW: $NEW_GPT_END_PART_START] != [DEV: $OLD_GPT_END_PART_START]"
-	fi
+	else
 		echo "INFO: SOC_BAK_FIXED_DATA_START mode, check last part start [NEW: $NEW_GPT_END_PART_START] = [DEV: $OLD_GPT_END_PART_START]"
+	fi
+	rm -f "$TGZ_FILES_PATH/output/gpt.test" "$TGZ_FILES_PATH/output/gpt.test.disk"
 fi
-popd
 
 function socbak_allinone_pack()
 {
 	if [[ "${ALL_IN_ONE_FLAG}" != "" ]] && [[ "${ALL_IN_ONE_SCRIPT}" != "" ]]; then
 		advmv -g ${TGZ_FILES_PATH}/*.bin output &>/dev/null
+		# BM1684/BM1684X 的打包链（script/bm1684）直接调用 ./mk_gpt，仍需把工具放到 output；
+		# CV 系的 GPT 由 socbak_gen_gpt（sgdisk）生成，不依赖这个副本。
 		advcp -g  ${TGZ_FILES_PATH}/binTools/mk_gpt output
 		pushd $TGZ_FILES_PATH/output
 		echo "INFO: start pack image mode($1)"

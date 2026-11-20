@@ -17,6 +17,26 @@
     * 做包功能只要求有一个打包做包的设备
 * SOCBAK做的刷机包目前不支持和官网的刷机包互相做ota升级
 
+## 刷机包的分区表格式（V1.5.0）
+
+不同芯片产出的分区表单位不同，工具会自动选择，不需要手工切换：
+
+| 芯片 | 分区表文件 | 尺寸单位 | 说明 |
+| --- | --- | --- | --- |
+| BM1688 / CV186AH（SE9 16 / SE9 8） | `partition32G_sector.xml` | `size_in_sectors` | 与 CV84×6 SDK 的 `scripts/partition32G_sector.xml` 同构，1 sector = 512 B |
+| CV84X6（SE13） | `partition32G_sector.xml` | `size_in_sectors` | 同上 |
+| BM1684X（SE7/SE8）/ BM1684 | `partition32G.xml` | `size_in_kb` | 与历史版本逐字节相同 |
+
+要点：
+
+* `socbak.sh` 里所有分区大小配置（`TGZ_FILES_SIZE*`、`ROOTFS_RW_SIZE*`）仍然是 **KiB**，
+  写分区表时按 ×2 换算成扇区。已有的布局调整方法不受影响。
+* 每个刷机包内只有一份 `partition*xml`，与单位的切换无关。
+* 首个分区（BOOT）仍从 LBA 8192 开始，分区顺序、字节容量、只读位、文件系统都与原布局一致。
+* sector 格式的分区表由板上 `sgdisk` 生成主 GPT（`binTools/mk_gpt` 只认 KiB，无法表达奇数扇区），
+  因此设备上必须存在 `sgdisk`（SE9/SE13 的出厂固件与 CV84×6 SDK rootfs 都自带）。
+* `ota_update` v1.5.8 起已兼容两种单位，OTA 时不需要额外配置。
+
 ## 打包做包功能
 
 1. 本功能84&4和1688/186平台使用方式完全一致，下方有该功能的完整示例视频。
@@ -93,6 +113,7 @@
    2. 如果是BM1688/CV186AH平台，修改`TGZ_FILES_SIZE`、`ROOTFS_RW_SIZE_BM1688`或者`TGZ_FILES_SIZE_BM1688`即可
    3. 如果是CV84X6平台，修改`TGZ_FILES_SIZE`、`ROOTFS_RW_SIZE_CV84X6`或者`TGZ_FILES_SIZE_CV84X6`即可
    4. 修改后的总大小不得大于emmc大小，工具会自动检测，如果遇到`ERROR: bakpack size(XXX) > emmc size(XXX), please del some file and rework.`的报错，请检查文件是否太多了，或者自定义修改的分区期望大小太大了
+   5. 上表的数值单位统一是 **KiB**。BM1688/CV186AH/CV84X6 的刷机包分区表按 sector 输出，换算由工具完成，配置侧不需要改成扇区数
 5. 保存`socbak.sh`文件，继续执行`bash socbak.sh`命令，开始打包
 
 ### 固定分区大小功能
