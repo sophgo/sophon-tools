@@ -12,6 +12,7 @@ LOAD_PARTITION_NUM=1
 LOAD_COMMAND=fatload
 
 SECTOR_BYTES=512
+KB_BYTES=1024
 CHUNK_SIZE=200704
 
 # f2fs 分区（xml 里 format="3"）的 mkfs 特性，与 socbak.sh、SDK 打包链
@@ -26,7 +27,16 @@ IN_ADDR_B="\${ramdisk_addr_b}"
 OUT_ADDR="\${unzip_addr}"
 
 RECOVERY_DIR=recovery_files
-PARTITION_FILE=partition32G.xml
+# 实际使用的分区表由 socbak.sh 通过 parseargs 传入，这里只是缺省值
+PARTITION_FILE=partition32G_sector.xml
+
+# 分区表单位策略与主 GPT 生成（socbak_gen_gpt）。正常由 socbak.sh 在启动时 source，
+# 这里兜底一次，保证本脚本被单独 source 时也能取到入口。
+# 变量名带 bm1688 前缀：两条打包链可能被同一个 shell source（测试），不能互相覆盖。
+_BM1688_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -z "${SOCBAK_PARTITION_TABLE_SOURCED:-}" ]; then
+	source "${_BM1688_SCRIPT_DIR}/../partition_table.sh"
+fi
 BOOTCMD_SCRIPT=boot_emmc
 SPIFCMD_SCRIPT=boot_spif
 FIPCMD_SCRIPT=boot_fip
@@ -161,23 +171,42 @@ function parseargs()
 function parse_partition_xml()
 {
 	local offset=${BOOT_PART_OFFSET}
+	local unit label size ro fmt i=0
+	local rows
 
-	#find total disk size in kb
-	TOTAL_SIZE=($(grep -Po "physical_partition size_in_kb=\".+\"" ${PARTITION_FILE} | awk -F\" '{print $2}'))
+	# 分区表有两种单位：size_in_kb（BM1684/X 历史格式）与 size_in_sectors
+	# （CV 系，1 sector = 512 B，与 SDK 的 partition32G_sector.xml 同构）。
+	# 本脚本的分区起止、镜像尺寸、刷写偏移全部以 sector 为准，两种 XML 只在这里换算一次，
+	# 下游不再区分单位，因此同一份布局的新旧两种写法得到完全相同的产物。
+	#
+	# 分区记录统一由 script/partition_table.sh 的 socbak_xml_partition_rows 解析：
+	# 它是按分区行读属性的（某行省略 readonly/format 不会让后面的值整体错位），
+	# 主 GPT 生成器 socbak_gen_gpt 用的也是同一份解析结果，刷写布局与 gpt.gz 不会分叉。
+	unit="$(socbak_xml_unit_attr "${PARTITION_FILE}")" || panic "parse ${PARTITION_FILE} failed"
+	rows="$(socbak_xml_partition_rows "${PARTITION_FILE}")" || panic "parse ${PARTITION_FILE} failed"
 
-	#find partions label size, and flag
-	LABELS=($( grep -Po "label=\".+\"" ${PARTITION_FILE} | awk -F\" '{print tolower($2)}'))
+	# 总容量（该 XML 自身单位），第一个元素与历史版本保持一致
+	TOTAL_SIZE=("$(socbak_xml_total "${PARTITION_FILE}")") || panic "parse ${PARTITION_FILE} failed"
 
-	PART_SIZE_IN_KB=($(grep -Po "size_in_kb=\".+\"" ${PARTITION_FILE} | awk -F\" '{print $2}'))
-	PART_SIZE_IN_KB=(${PART_SIZE_IN_KB[@]:1})
+	LABELS=() PART_SIZE_IN_XML_UNIT=() PART_SIZE_IN_SECTOR=() PART_SIZE_IN_BYTE=()
+	P_FLAG=() PART_FORMAT=()
+	while IFS='|' read -r label size ro fmt; do
+		LABELS[$i]="$(echo "${label}" | tr '[:upper:]' '[:lower:]')"
+		PART_SIZE_IN_XML_UNIT[$i]=${size}
+		if [ "${unit}" = size_in_kb ]; then
+			PART_SIZE_IN_SECTOR[$i]=$(( size * KB_BYTES / SECTOR_BYTES ))
+			PART_SIZE_IN_BYTE[$i]=$(( size * KB_BYTES ))
+		else
+			# sector 单位：字节与 LBA 按扇区精确换算，奇数扇区不做任何取整
+			PART_SIZE_IN_SECTOR[$i]=${size}
+			PART_SIZE_IN_BYTE[$i]=$(( size * SECTOR_BYTES ))
+		fi
+		P_FLAG[$i]="${ro}"
+		PART_FORMAT[$i]="${fmt}"
+		i=$(( i + 1 ))
+	done <<< "${rows}"
 
-	for i in ${!PART_SIZE_IN_KB[*]}; do
-		PART_SIZE_IN_SECTOR[$i]=$(expr ${PART_SIZE_IN_KB[$i]} \* 1024 / ${SECTOR_BYTES})
-		PART_SIZE_IN_BYTE[$i]=$(expr ${PART_SIZE_IN_KB[$i]} \* 1024)
-	done
-
-	P_FLAG=($(grep -Po "readonly=\".+\"" ${PARTITION_FILE} | awk -F\" '{print $2}'))
-	PART_FORMAT=($(grep -Po "format=\".+\"" ${PARTITION_FILE} | awk -F\" '{print $2}'))
+	[ "${i}" -gt 0 ] || panic "${PARTITION_FILE} has no partition"
 
 	# 具体文件系统直接由 format 表达：0=raw / 1=FAT32 / 2=ext4 / 3=f2fs。
 	PART_FSTYPE=()
@@ -632,7 +661,11 @@ function make_gpt_img()
 	local filename=${RECOVERY_DIR}/gpt
 	local desc="mmc gpt file"
 
-	./mk_gpt -p ${PARTITION_FILE} -d ${filename} 1 >/dev/null || true
+	# 统一走 socbak_gen_gpt（script/partition_table.sh）：按 XML 单位选择生成器，
+	# KiB 格式仍用 binTools/mk_gpt，sector 格式用 sgdisk。生成失败必须中断打包，
+	# 否则会打进一个空/错的 gpt，刷机时静默破坏分区表。
+	socbak_gen_gpt "${PARTITION_FILE}" "${filename}" ||
+		panic "failed to generate gpt from ${PARTITION_FILE}"
 
 	create_partition_script $(basename ${filename}) "${desc}"
 
