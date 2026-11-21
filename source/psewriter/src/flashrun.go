@@ -57,12 +57,26 @@ func (o *FlashOutcome) OK() bool {
 
 // RunFlash 执行完整写入流程 (含锁卷)。logf 可为 nil。
 func RunFlash(d *DiskInfo, prep *PreparedSource, verify bool, cb Progress, logf func(string, ...interface{})) (*FlashOutcome, error) {
+	return runFlash(d, prep, verify, cb, logf, flashAccess{
+		lock:  func(log func(string, ...interface{})) (func(), error) { return lockVolumes(d.Index, log) },
+		write: func() (DiskDevice, error) { return openDiskDevice(d.Path) },
+		read:  func() (DiskDevice, error) { return openDiskDeviceRO(d.Path) },
+	})
+}
+
+type flashAccess struct {
+	lock        func(func(string, ...interface{})) (func(), error)
+	write, read func() (DiskDevice, error)
+	beforeWrite func()
+}
+
+func runFlash(d *DiskInfo, prep *PreparedSource, verify bool, cb Progress, logf func(string, ...interface{}), access flashAccess) (*FlashOutcome, error) {
 	log := func(format string, a ...interface{}) {
 		if logf != nil {
 			logf(format, a...)
 		}
 	}
-	unlock, err := lockVolumes(d.Index, log)
+	unlock, err := access.lock(log)
 	if err != nil {
 		return nil, fmt.Errorf("锁定卷失败: %w", err)
 	}
@@ -71,9 +85,12 @@ func RunFlash(d *DiskInfo, prep *PreparedSource, verify bool, cb Progress, logf 
 	out := &FlashOutcome{IsCard: prep.IsCard(), FormatOnly: prep.IsFormatOnly()}
 
 	// ---- ① 写盘 ----
-	dev, err := openDiskDevice(d.Path)
+	dev, err := access.write()
 	if err != nil {
 		return nil, err
+	}
+	if access.beforeWrite != nil {
+		access.beforeWrite()
 	}
 	if out.IsCard {
 		res, werr := BuildCardOnDevice(dev, prep.Archive, prep.Plan, cb)
@@ -132,7 +149,7 @@ func RunFlash(d *DiskInfo, prep *PreparedSource, verify bool, cb Progress, logf 
 
 	// ---- ③ + ④ 换新句柄回读校验 ----
 	tv := time.Now()
-	dev2, err := openDiskDeviceRO(d.Path)
+	dev2, err := access.read()
 	if err != nil {
 		return out, fmt.Errorf("写入已完成, 但重新打开设备校验失败: %w", err)
 	}
@@ -172,6 +189,8 @@ type syncNoter interface{ SyncNote() string }
 // phaseName 进度阶段的中文名 (CLI 与 GUI 共用)
 func phaseName(p string) string {
 	switch p {
+	case "write":
+		return "写入镜像"
 	case "verify":
 		return "校验"
 	case "skeleton":
