@@ -119,11 +119,9 @@ socbak_emit_partition_xml()
 	shift 3
 	local attr row label size_kib ro fmt sz
 
-	if [ "${uses_sector}" = "1" ]; then
-		attr="size_in_sectors"
-	else
-		attr="size_in_kb"
-	fi
+	# 属性名统一由 socbak_size_attr_name 决定：写盘与解析共用同一份单位名逻辑，
+	# 避免两处 if/else 各自维护后漂移（测试也只验证这一处）。
+	attr="$(socbak_size_attr_name "${uses_sector}")"
 
 	echo "<physical_partition ${attr}=\"$(socbak_size_in_unit "${total_kib}" "${uses_sector}")\">" > "${out}"
 	for row in "$@"; do
@@ -164,6 +162,8 @@ socbak_emit_partition_xml()
 }
 
 # SDK 的分区表是扁平的元素列表。按开始标签分记录，允许属性之间换行或用制表符。
+# 截断到标签真正的结尾时必须跳过引号内的 ">"：XML 允许属性值含 ">"，
+# 直接 sub(/>.*/, ">") 会把 label="A>B" 截成 label="A，属性一起丢掉。
 socbak_xml_tags()
 {
 	awk -v tag="$2" '
@@ -172,8 +172,21 @@ socbak_xml_tags()
 		comment { if (index($0, "-->")) comment = 0; next }
 		$0 ~ ("^" tag "([[:space:]]|/?>)") {
 			gsub(/[\r\n]/, " ")
-			sub(/>.*/, ">")
-			print $0
+			out = ""
+			quote = ""
+			for (i = 1; i <= length($0); i++) {
+				ch = substr($0, i, 1)
+				if (quote != "") {
+					if (ch == quote) quote = ""
+				} else if (ch == "\"" || ch == "\047") {
+					quote = ch
+				} else if (ch == ">") {
+					out = out ch
+					break
+				}
+				out = out ch
+			}
+			print out
 		}
 	' "$1"
 }
@@ -290,6 +303,26 @@ socbak_gen_gpt_kib()
 	socbak_validate_gpt "${out}"
 }
 
+# 定位 sgdisk：优先用分发包自带的 binTools/sgdisk（aarch64 静态链接，随 socbak_md5.txt
+# 一起校验，版本与行为可控），没有才回退到系统 PATH 里的 sgdisk。
+# 与 binTools 里其它工具一致：自带优先，避免不同批次固件自带的 sgdisk 版本差异
+# 改变 last_usable_lba / 对齐语义。找不到时返回非 0。
+socbak_sgdisk_bin()
+{
+	local tools_dir="${TGZ_FILES_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+	local bundled="${tools_dir}/binTools/sgdisk"
+
+	if [ -x "${bundled}" ]; then
+		echo -n "${bundled}"
+		return 0
+	fi
+	if command -v sgdisk >/dev/null 2>&1; then
+		command -v sgdisk
+		return 0
+	fi
+	return 1
+}
+
 # size_in_sectors 格式：板上 sgdisk 建表后截取主 GPT。
 # 用稀疏文件承载整盘尺寸，实际只写 MBR + 主 GPT + 备份 GPT，磁盘占用几十 KB。
 socbak_gen_gpt_sector()
@@ -300,10 +333,10 @@ socbak_gen_gpt_sector()
 	local total=0
 	local start=8192
 	local end idx=0
-	local tmp="" _dir
+	local tmp="" _dir _sgdisk
 	local -a sgdisk_args=()
 
-	command -v sgdisk >/dev/null 2>&1 || {
+	_sgdisk="$(socbak_sgdisk_bin)" || {
 		echo "ERROR: sgdisk not found, it is required to build a sector-unit partition table (${xml})" >&2
 		return 1
 	}
@@ -354,7 +387,7 @@ socbak_gen_gpt_sector()
 	# 一旦让 sgdisk 对齐就会平移 DATA 起点，OTA 保留末分区的检查随之失效。
 	# -a 必须排在 -n 之前：sgdisk 按命令行顺序处理，后置的 -a 对已解析的分区不生效。
 	sgdisk_args=(-a 1 "${sgdisk_args[@]}")
-	if ! sgdisk "${sgdisk_args[@]}" "${tmp}" >/dev/null 2>&1; then
+	if ! "${_sgdisk}" "${sgdisk_args[@]}" "${tmp}" >/dev/null 2>&1; then
 		echo "ERROR: sgdisk failed to build GPT for ${xml}" >&2
 		rm -f "${tmp}"
 		return 1
