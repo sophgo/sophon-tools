@@ -750,6 +750,83 @@ else
 	bad "分发包自带 binTools/sgdisk" "文件不存在或不可执行"
 fi
 
+echo "== K. 末分区边界守卫（桩 sgdisk，不依赖 sgdisk 自身的拒绝能力） =="
+# 为什么需要这一节：socbak_gen_gpt_sector 里有一条"末分区不得压到备份 GPT 区"的守卫，
+# 边界是 end <= total-34（= SDK 的 last_usable_lba）。问题在于 sgdisk 自己也会拒绝同样的
+# 越界布局，所以任何"越界必须失败"的负向用例都会被 sgdisk 兜住而通过 ——
+# 实测把守卫放宽到 total-20 甚至整块删掉，本节以外的用例仍全绿。
+# 也就是说守卫的边界值此前没有任何测试保护，改错一个数字不会有人发现。
+#
+# 这里用一个假 sgdisk 把 sgdisk 自身的判断摘掉，只观察守卫：
+#   - 桩只记录收到的参数并固定返回非 0（返回值无所谓，本用例只关心"守卫有没有放行"）
+#   - 断言落在"sgdisk 是否被调用"以及传给它的 -n 起止 LBA，而不是退出码
+# 这样守卫一旦放宽或删除，越界布局就会出现在传给 sgdisk 的参数里，用例立刻失败。
+STUB_DIR="${WORK}/stubsgdisk"
+rm -rf "${STUB_DIR}"; mkdir -p "${STUB_DIR}"
+cat > "${STUB_DIR}/sgdisk" <<'STUB'
+#!/bin/sh
+printf '%s\n' "$*" >> "${STUB_SGDISK_LOG}"
+exit 4
+STUB
+chmod +x "${STUB_DIR}/sgdisk"
+
+# 用桩跑一次 socbak_gen_gpt，输出"守卫放行时传给 sgdisk 的 -n 参数"或"守卫拦下"
+stub_guard_probe() { # <total_sectors> <last_part_sectors> <log>
+	local total="$1" size="$2" log="$3"
+	local xml="${WORK}/guard.xml"
+	{
+		printf '<physical_partition size_in_sectors="%s">\n' "${total}"
+		printf '  <partition label="BOOT" size_in_sectors="%s" format="1" />\n' "${size}"
+		printf '</physical_partition>\n'
+	} > "${xml}"
+	: > "${log}"
+	(
+		# 覆盖定位函数，让被测代码用桩；其余逻辑保持原样
+		# shellcheck source=/dev/null
+		source "${PT_SH}"
+		socbak_sgdisk_bin() { printf '%s' "${STUB_DIR}/sgdisk"; }
+		TGZ_FILES_PATH="${SOCBAK_DIR}"
+		STUB_SGDISK_LOG="${log}" socbak_gen_gpt "${xml}" "${WORK}/guard.gpt" >/dev/null 2>&1
+	)
+	if [ -s "${log}" ]; then
+		grep -o -- '-n [^ ]*' "${log}" | head -n1
+	else
+		printf 'BLOCKED'
+	fi
+}
+
+# total=32768 -> last_usable_lba=32734。首分区从 LBA 8192 起：
+#   size=24543 -> end=32734 == total-34，是合法边界，必须放行
+#   size=24544 -> end=32735 == total-33，压到备份 GPT，必须拦下
+GUARD_LOG="${WORK}/guard_args.log"
+check_eq "合法边界 end=total-34 放行到 sgdisk" "-n 1:8192:32734" \
+	"$(stub_guard_probe 32768 24543 "${GUARD_LOG}")"
+check_eq "越界一扇区 end=total-33 被守卫拦下（未调用 sgdisk）" "BLOCKED" \
+	"$(stub_guard_probe 32768 24544 "${GUARD_LOG}")"
+# 边界值本身：把 total 换成 40000，合法末 LBA 应为 39966，确保 34 这个常量不是巧合命中
+check_eq "换一个盘容量后边界随 total 平移（total=40000 -> 39966）" "-n 1:8192:39966" \
+	"$(stub_guard_probe 40000 31775 "${GUARD_LOG}")"
+check_eq "total=40000 时 end=39967 被拦下" "BLOCKED" \
+	"$(stub_guard_probe 40000 31776 "${GUARD_LOG}")"
+# 多分区时守卫必须逐个分区检查，不能只看最后一个
+cat > "${WORK}/guard_multi.xml" <<'XML'
+<physical_partition size_in_sectors="32768">
+  <partition label="BOOT"       size_in_sectors="8192"  format="1" />
+  <partition label="DATA"       size_in_sectors="16415" format="2" />
+</physical_partition>
+XML
+: > "${GUARD_LOG}"
+(
+	# shellcheck source=/dev/null
+	source "${PT_SH}"
+	socbak_sgdisk_bin() { printf '%s' "${STUB_DIR}/sgdisk"; }
+	TGZ_FILES_PATH="${SOCBAK_DIR}"
+	STUB_SGDISK_LOG="${GUARD_LOG}" socbak_gen_gpt "${WORK}/guard_multi.xml" "${WORK}/gm.gpt" >/dev/null 2>&1
+)
+# 第一个分区 8192..16383 合法；第二个 16384..32798 越界（> 32734）
+check_eq "多分区布局里靠后的分区越界同样被拦下" "BLOCKED" \
+	"$([ -s "${GUARD_LOG}" ] && grep -o -- '-n [^ ]*' "${GUARD_LOG}" | head -n1 || printf 'BLOCKED')"
+
 echo "== F. CV84×6 SDK 夹具核查（SE13） =="
 SDK_XML="${SOCBAK_SDK_SECTOR_XML:-}"
 if [ -z "${SDK_XML}" ]; then
