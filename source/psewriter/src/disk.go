@@ -25,7 +25,7 @@ const (
 func (s Safety) String() string {
 	switch s {
 	case SafetySafe:
-		return "可安全烧录"
+		return "可选，仍需核对"
 	case SafetyUnknown:
 		return "需人工确认"
 	default:
@@ -59,7 +59,7 @@ type DiskInfo struct {
 
 // DescribeLine 列表单行
 func (d *DiskInfo) DescribeLine() string {
-	flag := "[安全]"
+	flag := "[可选]"
 	switch d.Safety {
 	case SafetyDangerous:
 		flag = "[禁止]"

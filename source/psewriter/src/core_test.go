@@ -442,7 +442,7 @@ func TestDiskPropertyRows(t *testing.T) {
 	for _, r := range rows {
 		joined += r[0] + "=" + r[1] + ";"
 	}
-	for _, want := range []string{"设备路径=/dev/sdb", "磁盘号=磁盘 2", "容量=8.00 GiB", "安全判定=可安全烧录"} {
+	for _, want := range []string{"设备路径=/dev/sdb", "磁盘号=磁盘 2", "容量=8.00 GiB", "安全判定=可选，仍需核对"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("属性行缺少 %q, 实得 %s", want, joined)
 		}

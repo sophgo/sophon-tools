@@ -1,20 +1,6 @@
 //go:build windows
 
-// Windows 图形界面 (lxn/walk)
-//
-// 布局按「先想清楚要做什么, 再选东西」的顺序排:
-//
-//	① 选择目标设备 → ② 选择要做什么 (模式 + 该模式的设置) → ③ 开始 → 日志
-//
-// 模式提到最前面 (MYS-1237): 现场第一件要想清楚的事是"我要干什么", 而不是
-// "我要选哪个文件"。三个模式各自只显示自己需要的设置, 用不上的控件直接收起来 ——
-// 以前"写入方式"这种少数情况下才要动的开关摆在主界面上, 容易让人以为必须选。
-//
-// 两条硬规则 (MYS-1062 七轮, 针对"控件乱/缩进错位"的反馈):
-//  1. 只读信息一律用**两列「项目/内容」表格**展示, 不用空格对齐 —— 中文是双宽字符,
-//     用 ASCII 空格补位必然错位 (且 TextEdit 默认是比例字体, 补位也白补)。
-//  2. 每个区块一个 GroupBox (带边框与标题), 内部首行是"控件 + 右侧按钮",
-//     按钮固定宽度, 不使用会把文字挤到边上的超长标签。
+// Windows 图形界面 (lxn/walk)：目标设备 → 操作与数据源 → 核对写入计划。
 package main
 
 import (
@@ -31,21 +17,14 @@ import (
 	"github.com/lxn/win"
 )
 
-// taskMode 界面上"要做什么"
-type taskMode int
-
-const (
-	modeMakeCard   taskMode = iota // 制作刷机卡: 文件包/目录 → 格式化成 MBR+FAT32 的卡
-	modeWriteImage                 // 写入整盘镜像: 逐字节写 .img
-	modeFormatOnly                 // 只格式化 TF 卡: 只建 MBR+FAT32, 不写文件
-)
-
 type ui struct {
-	mw *walk.MainWindow
+	mw   *walk.MainWindow
+	font Font
 
 	// ① 目标设备
-	devBox  *walk.ComboBox
-	showAll *walk.CheckBox
+	devBox                                                     *walk.ComboBox
+	refreshBtn, pickFileBtn, pickDirBtn, embeddedBtn, btnClose *walk.PushButton
+	showAll                                                    *walk.CheckBox
 
 	// ② 要做什么
 	modeCard   *walk.RadioButton
@@ -57,9 +36,7 @@ type ui struct {
 	srcRow  *walk.Composite
 	imgEdit *walk.LineEdit
 	imgInfo *walk.TextEdit
-	advChk  *walk.CheckBox // 「高级选项」: 收起时下面的控件不生效
-	advRow  *walk.Composite
-	modeBox *walk.ComboBox
+	fsRow   *walk.Composite
 	fastFS  *walk.CheckBox
 
 	// ② 只格式化
@@ -71,7 +48,7 @@ type ui struct {
 	propModel *kvModel
 	partView  *walk.TableView
 	partModel *partTableModel
-	confirm   *walk.CheckBox
+	planInfo  *walk.TextEdit
 
 	// 底部: 状态 / 进度 / 操作 / 日志
 	progress  *walk.ProgressBar
@@ -80,15 +57,15 @@ type ui struct {
 	btnStart  *walk.PushButton
 	btnCancel *walk.PushButton
 
-	disks    []*DiskInfo
-	prep       *PreparedSource // 当前来源的解析结果 (分析完成后可用)
-	prepTarget int64           // 解析时用的目标盘容量 (判据: 换盘后需重算分区大小)
-	prepFull   bool            // 解析时用的"按整卡建分区"选项
-	imgPath    string          // 空 = 使用内置数据源
-	useEmbed bool
-	ready    bool // 来源已解析可用 (内置数据源恒为 true)
-	busy     bool
-	dedup    logDedup // 连续重复的日志不再刷屏
+	disks      []*DiskInfo
+	diskStamps map[int]diskStamp
+	prep       *PreparedSource
+	sources    []sourceFileStamp
+	imgPath    string
+	useEmbed   bool
+	ready      bool
+	busy       bool
+	dedup      logDedup
 
 	// 分析 (探测) 状态 —— 大压缩包解析很慢, 必须在后台线程做并给出进度
 	analyzing   atomic.Bool  // 正在分析
@@ -172,6 +149,7 @@ const btnW = 96
 
 func runGUI() int {
 	u := &ui{
+		font:      uiFont(),
 		propModel: &kvModel{},
 		partModel: &partTableModel{},
 	}
@@ -212,10 +190,10 @@ func runGUI() int {
 		MinSize:  Size{Width: 660, Height: 700},
 		Layout:   VBox{Margins: Margins{Left: 8, Top: 6, Right: 8, Bottom: 8}, Spacing: 6},
 		// 内置中文字体 —— 现场有机器系统字体不全, 中文会画成豆腐块 (见 uifont_windows.go)
-		Font: uiFont(),
+		Font: u.font,
 		MenuItems: []MenuItem{
 			Menu{Text: "文件(&F)", Items: []MenuItem{
-				Action{Text: "刷新设备列表(&R)", OnTriggered: func() { u.refresh() }},
+				Action{Text: "刷新设备列表(&R)", Shortcut: Shortcut{Key: walk.KeyF5}, OnTriggered: func() { u.refresh() }},
 				Separator{},
 				Action{Text: "退出(&X)", OnTriggered: func() { u.quit() }},
 			}},
@@ -237,13 +215,14 @@ func runGUI() int {
 				row(
 					ComboBox{
 						AssignTo:              &u.devBox,
-						Model:                 []string{"(未发现可写入的设备)"},
+						Model:                 []string{"请选择目标设备"},
 						CurrentIndex:          0,
 						StretchFactor:         1,
-						ToolTipText:           "选择要写入的目标 TF 卡。系统盘永远不会出现在这里。",
+						ToolTipText:           "请选择目标设备并核对型号、容量和分区。识别出的系统盘不显示；无法确认系统盘时停止。",
 						OnCurrentIndexChanged: func() { u.onSelect() },
 					},
 					PushButton{
+						AssignTo:    &u.refreshBtn,
 						Text:        "刷新",
 						MaxSize:     Size{Width: 64},
 						ToolTipText: "重新扫描本机磁盘（插拔读卡器后点这里，快捷键 F5）",
@@ -251,8 +230,8 @@ func runGUI() int {
 					},
 					CheckBox{
 						AssignTo:         &u.showAll,
-						Text:             "全部",
-						ToolTipText:      "勾选后也会列出被判定为「需人工确认」的固定盘（SATA/NVMe 等）。\n系统盘始终不会出现在列表里。",
+						Text:             "显示固定磁盘",
+						ToolTipText:      "仅在确需操作非 TF 卡时使用。USB 磁盘不一定是 TF 卡，请核对实际设备。",
 						OnCheckedChanged: func() { u.refresh() },
 					},
 				),
@@ -264,7 +243,7 @@ func runGUI() int {
 					ColumnsOrderable: false,
 					// 同 kvTable: LastColumnStretched 放到窗口建好之后再设
 					MinSize:     Size{Height: 56},
-					ToolTipText: "目标设备上现有的分区。写入会覆盖这里的全部分区。",
+					ToolTipText: "目标设备现有的分区。先核对容量、卷标和盘符，再继续。",
 					Columns: []TableViewColumn{
 						{Title: "分区", Width: 46},
 						{Title: "大小", Width: 84},
@@ -277,13 +256,13 @@ func runGUI() int {
 			),
 			// ② 要做什么 (模式) + 该模式要用的设置
 			// 顺序 = 默认项在最前: 只格式化 → 制作刷机卡 → 写入整盘镜像
-			group("② 选择要做什么",
-				RadioButtonGroup{
+			group("② 操作与数据源",
+				row(RadioButtonGroup{
 					Buttons: []RadioButton{
 						{
 							AssignTo: &u.modeFormat,
-							Text:     "只格式化 TF 卡 — 只建 MBR+FAT32，不写入任何文件",
-							ToolTipText: "整张卡格式化为 MBR + 1×FAT32（与写卡时先建的那种格式完全一样）。\n" +
+							Text:     "只格式化",
+							ToolTipText: "重建 MBR + FAT32，不写文件，不作安全擦除。\n" +
 								"卡被格成 exFAT/NTFS/GPT、或 FAT32 被写坏时，用它快速恢复；\n" +
 								"格式化完成后可以直接用资源管理器把文件拷进去。",
 							// 单选框自己不定宽, 不写 Alignment 会被 VBox 居中
@@ -292,7 +271,7 @@ func runGUI() int {
 						},
 						{
 							AssignTo: &u.modeCard,
-							Text:     "制作刷机卡 — 把文件包 / 目录写进卡里",
+							Text:     "制作刷机卡",
 							ToolTipText: "卡会被格式化为 MBR+FAT32，再把文件包/目录里的文件写进去。\n" +
 								"SE5 / SE7 / SE9 的恢复卡用这个。",
 							Alignment: AlignHNearVCenter,
@@ -300,14 +279,14 @@ func runGUI() int {
 						},
 						{
 							AssignTo: &u.modeImage,
-							Text:     "写入整盘镜像 — 逐字节写入 .img 等整卡镜像",
+							Text:     "写入整盘镜像",
 							ToolTipText: "把 .img/.raw/.iso（或其 gz/xz/bz2/zst 压缩体）逐字节写到卡上。\n" +
-								"卡上原有的分区表会被镜像里的分区表取代。",
+								"从盘首写入；只回读校验镜像覆盖的范围。",
 							Alignment: AlignHNearVCenter,
 							OnClicked: func() { u.onModeChanged() },
 						},
 					},
-				},
+				}),
 				// 当前模式在做什么 (跟着模式换)
 				TextEdit{
 					AssignTo: &u.modeInfo,
@@ -326,20 +305,22 @@ func runGUI() int {
 								ReadOnly:      true,
 								Text:          "(未选择)",
 								StretchFactor: 1,
-								ToolTipText:   "当前使用的数据源（镜像 / 压缩包 / 目录）。默认是程序内置的。",
+								ToolTipText:   "显示你明确选中的来源；不会自动选中内置来源。",
 							},
 							PushButton{
-								Text:    "浏览文件…",
-								MaxSize: Size{Width: 84},
+								AssignTo: &u.pickFileBtn,
+								Text:     "选文件…",
+								MaxSize:  Size{Width: 84},
 								ToolTipText: "选择镜像文件或压缩包：\n" +
 									"· 整盘镜像 .img/.raw/.iso，或其 gz/xz/bz2/zst 压缩体\n" +
-									"· 归档 zip/7z/rar/tar/tar.gz/tar.xz（内含单个镜像 → 整盘写入）\n" +
-									"· 文件包（内含一批文件）→ 把卡格式化为 MBR+FAT32 后写入文件",
+									"· 整盘镜像归档内须为一个未再压缩的镜像文件。\n" +
+									"· 筛选结果必须符合当前模式；不会自动切换。",
 								OnClicked: func() { u.pickImage() },
 							},
 							PushButton{
-								Text:    "浏览目录…",
-								MaxSize: Size{Width: 84},
+								AssignTo: &u.pickDirBtn,
+								Text:     "选目录…",
+								MaxSize:  Size{Width: 84},
 								ToolTipText: "直接选一个目录当数据源（不必先打包）：\n" +
 									"· 目录内容原样写进卡根目录（等价于把该目录打成文件包）\n" +
 									"· 目录里若多套了一层（如 se7/sdbootrecoveryfiles/…），自动定位到刷机包那一层\n" +
@@ -347,9 +328,10 @@ func runGUI() int {
 								OnClicked: func() { u.pickDir() },
 							},
 							PushButton{
-								Text:        "内置数据源",
+								AssignTo:    &u.embeddedBtn,
+								Text:        "使用内置",
 								MaxSize:     Size{Width: 84},
-								ToolTipText: "切回程序自带的内置数据源（默认来源）",
+								ToolTipText: "明确选用程序自带的来源；仍需与当前模式匹配。",
 								OnClicked:   func() { u.useEmbedded() },
 							},
 						),
@@ -358,39 +340,14 @@ func runGUI() int {
 							ReadOnly:    true,
 							VScroll:     true,
 							MinSize:     Size{Height: 60},
-							ToolTipText: "当前数据源的说明。默认使用程序内置的数据源。",
+							ToolTipText: "查看已选来源的类型、大小和预检结果。",
 						},
-						row(
-							CheckBox{
-								AssignTo: &u.advChk,
-								Text:     "高级选项",
-								ToolTipText: "默认：写入方式自动识别，分区按整卡容量建（推荐）。\n" +
-									"只有自动识别不准、或想按内容大小建分区时才需要展开。\n" +
-									"收起时下面两项不生效。",
-								OnCheckedChanged: func() { u.onAdvancedChanged() },
-							},
-							HSpacer{},
-						),
 						Composite{
-							AssignTo: &u.advRow,
-							Layout:   HBox{MarginsZero: true, Spacing: 6},
-							Visible:  false,
+							AssignTo: &u.fsRow, Layout: HBox{MarginsZero: true, Spacing: 6},
 							Children: []Widget{
-								Label{Text: "写入方式", ToolTipText: "自动识别：归档里只有一个镜像文件 → 整盘写入；否则按文件包格式化建卡。\n识别不准时可在这里强制指定。"},
-								ComboBox{
-									AssignTo:              &u.modeBox,
-									Model:                 []string{"自动识别", "整盘镜像", "文件包 → MBR+FAT32"},
-									CurrentIndex:          0,
-									MaxSize:               Size{Width: 160},
-									ToolTipText:           "自动识别 / 强制整盘镜像 / 强制按文件包格式化建卡",
-									OnCurrentIndexChanged: func() { u.repreview() },
-								},
-								CheckBox{
-									AssignTo:         &u.fastFS,
-									Text:             "按内容建分区",
-									ToolTipText:      "勾选：只按文件内容大小建 FAT32 分区 —— 快，但卡上剩余空间不属于该分区。\n不勾（推荐）：按整卡容量格式化，整张卡都能用。\n（两种都是快速格式化，只写文件系统结构与文件，不擦除空白区）",
-									OnCheckedChanged: func() { u.repreview() },
-								},
+								CheckBox{AssignTo: &u.fastFS, Text: "按文件大小并留余量建分区",
+									ToolTipText:      "仅制作刷机卡时可用。默认按目标容量建分区；容量超过 FAT32 上限时保留未分配空间。",
+									OnCheckedChanged: func() { u.repreview() }},
 								HSpacer{},
 							},
 						},
@@ -403,12 +360,17 @@ func runGUI() int {
 					Visible:  false,
 					Children: []Widget{
 						row(
-							Label{Text: "卷标", ToolTipText: "格式化后卡在资源管理器里显示的名字（≤11 字符，仅 A-Z 0-9 _ -）"},
+							Label{Text: "卷标", ToolTipText: "最终卷标显示在写入计划中；最多 11 字符。"},
 							LineEdit{
-								AssignTo:    &u.labelEdt,
-								Text:        "SE",
-								MaxSize:     Size{Width: 140},
-								ToolTipText: "留空则用默认卷标 SE。卷标只是给人看的，不影响设备引导。",
+								AssignTo: &u.labelEdt,
+								Text:     "SE",
+								MaxSize:  Size{Width: 140},
+								OnTextChanged: func() {
+									if u.planInfo != nil {
+										u.updateHint()
+									}
+								},
+								ToolTipText: "转大写；空格、句点转短横线，移除其他不支持字符。留空或无有效字符时用 SE。",
 							},
 							HSpacer{},
 						),
@@ -416,13 +378,9 @@ func runGUI() int {
 				},
 			),
 			// ③ 开始
-			group("③ 开始",
-				CheckBox{
-					AssignTo:         &u.confirm,
-					Text:             "我已核对目标设备，确认覆盖且不可恢复",
-					ToolTipText:      "写入会覆盖目标设备上的全部分区与数据，且不可恢复。\n请确认上面选中的确实是 TF 卡，不是本机硬盘。",
-					OnCheckedChanged: func() { u.updateHint() },
-				},
+			group("③ 核对写入计划",
+				TextEdit{AssignTo: &u.planInfo, ReadOnly: true, VScroll: true, MinSize: Size{Height: 63}},
+
 				Label{AssignTo: &u.status, Text: "第 1 步：请选择目标设备"},
 				ProgressBar{AssignTo: &u.progress, MaxValue: 1000},
 				row(
@@ -438,13 +396,14 @@ func runGUI() int {
 					},
 					PushButton{
 						AssignTo:    &u.btnStart,
-						Text:        "开始写入",
+						Text:        "核对并继续",
 						MinSize:     Size{Width: 120, Height: 32},
 						MaxSize:     Size{Width: 120},
-						ToolTipText: "开始写入。写完后会自动做两级校验：\n① 回读逐字节比对  ② 从卡上挂 FAT32 逐文件比对 sha256",
+						ToolTipText: "下一步仅展示确认框，不会立即写盘。",
 						OnClicked:   func() { u.start() },
 					},
 					PushButton{
+						AssignTo:    &u.btnClose,
 						Text:        "关闭",
 						MinSize:     Size{Width: 80, Height: 32},
 						MaxSize:     Size{Width: 80},
@@ -475,24 +434,19 @@ func runGUI() int {
 		return 1
 	}
 
+	u.mw.Closing().Attach(func(canceled *bool, _ walk.CloseReason) {
+		if u.busy {
+			*canceled = true
+			return
+		}
+		u.closed.Store(true)
+		u.cancelProbe()
+	})
 	u.stretchLastColumns()
-
-	// 默认模式是「只格式化 TF 卡」—— 显式设一下, 不依赖 Win32 对单选框组的默认勾选行为
-	if u.modeFormat != nil {
-		u.modeFormat.SetChecked(true)
-	}
-	// 「取消分析」只在分析期间出现
-	if u.btnCancel != nil {
-		u.btnCancel.SetVisible(false)
-	}
+	u.modeFormat.SetChecked(true)
+	u.btnCancel.SetVisible(false)
+	u.applyMode()
 	u.refresh()
-	u.applyMode() // 按默认模式摆好各区块的显隐与说明
-	if u.mode() == modeFormatOnly {
-		// 只格式化不用数据源, 别去初始化它 —— 否则日志里会多一行无关的「数据源」
-		u.prep, u.ready = nil, true
-	} else {
-		u.useEmbedded() // 默认使用内置数据源
-	}
 	u.updateHint()
 	u.mw.Run()
 	return 0
@@ -544,79 +498,34 @@ func (u *ui) applyMode() {
 	m := u.mode()
 	u.srcRow.SetVisible(m != modeFormatOnly)
 	u.fmtRow.SetVisible(m == modeFormatOnly)
+	u.fsRow.SetVisible(m == modeMakeCard)
+	u.pickDirBtn.SetVisible(m == modeMakeCard)
+	u.embeddedBtn.SetEnabled(!u.busy && HasEmbeddedImage())
 	u.setModeInfo(m)
-	if m == modeFormatOnly {
-		u.btnStart.SetText("开始格式化")
-		u.btnStart.SetToolTipText("开始格式化。写完后回读核对分区表 / BPB / FAT 两份副本。\n" +
-			"只格式化模式不写入任何文件，所以没有文件级校验。")
-	} else {
-		u.btnStart.SetText("开始写入")
-		u.btnStart.SetToolTipText("开始写入。写完后会自动做两级校验：\n① 回读逐字节比对  ② 从卡上挂 FAT32 逐文件比对 sha256")
-	}
 }
 
 // setModeInfo ② 里那行说明: 一句话讲清"选了这个模式会发生什么"
 func (u *ui) setModeInfo(m taskMode) {
-	if u.modeInfo == nil {
-		return
-	}
-	var s string
 	switch m {
 	case modeWriteImage:
-		s = "把整卡镜像（.img/.raw/.iso，或 gz/xz/bz2/zst/zip/7z/rar/tar 压缩体）逐字节写到卡上。\r\n" +
-			"卡上原有的分区表会被镜像里的分区表取代。"
+		u.modeInfo.SetText("从盘首写入选中的整盘镜像。不会把文件包当镜像写入；只核对镜像范围内的回读。")
 	case modeFormatOnly:
-		s = "整张卡格式化为 MBR + 1×FAT32（与写卡时先建的那种格式完全一样），不写入任何文件。\r\n" +
-			"卡被格成 exFAT/NTFS/GPT、或 FAT32 被写坏时用它快速恢复；格式化完成后可以直接用资源管理器往里拷文件。"
+		u.modeInfo.SetText("重建 MBR 和 FAT32，不写入文件。原有分区和文件访问会丢失；这不是安全擦除。")
 	default:
-		s = "卡会被格式化为 MBR + FAT32，再把文件包 / 目录里的文件写进去 —— SE5/SE7/SE9 的刷机卡用这个。\r\n" +
-			"数据源优先用 .zip 发版包（打开即分析完），也可以选目录或程序内置的包。"
+		u.modeInfo.SetText("在目标卡上重建 MBR 和 FAT32，再写入刷机包文件。通过文件校验不代表设备已验证可启动。")
 	}
-	u.modeInfo.SetText(s)
 }
 
 // onModeChanged 用户换了模式
 func (u *ui) onModeChanged() {
-	m := u.mode()
+	if u.busy || u.planInfo == nil || u.imgEdit == nil {
+		return
+	}
 	u.applyMode()
-	// 换了模式就重新确认一次: 勾选确认是对"这次要做的操作"的确认, 不该跟着模式一起搬过去
-	u.confirm.SetChecked(false)
-	if m == modeFormatOnly {
-		// 只格式化不需要数据源: 在途的分析作废, 也不再显示数据源信息
-		u.cancelAnalyze()
-		u.prep, u.ready = nil, true
-		u.imgEdit.SetText("（只格式化不使用数据源）")
-		u.appendLog("模式: 只格式化 TF 卡 — 只建 MBR+FAT32, 不写入任何文件")
-	} else {
-		if !u.useEmbed && u.imgPath == "" {
-			u.ready = false
-		}
-		u.imgEdit.SetText(u.srcDisplayText())
-		u.repreview()
-	}
-	u.updateHint()
-}
-
-// onAdvancedChanged 展开/收起高级选项。
-// 收起时下面两个控件不生效 (forcedMode / fastFSWanted 都看这个勾), 所以这里要重新解析。
-func (u *ui) onAdvancedChanged() {
-	on := u.advChk.Checked()
-	u.advRow.SetVisible(on)
-	if !on {
-		u.appendLog("高级选项已收起: 写入方式自动识别, 分区按整卡容量")
-	}
+	// A source from another mode is never silently carried into this one.
+	u.useEmbed, u.imgPath = false, ""
+	u.imgEdit.SetText("未选择来源")
 	u.repreview()
-}
-
-// srcDisplayText 数据源输入框该显示的文字
-func (u *ui) srcDisplayText() string {
-	switch {
-	case u.imgPath != "":
-		return u.imgPath
-	case u.useEmbed:
-		return "内置数据源（默认）"
-	}
-	return "(未选择)"
 }
 
 // ---------- 辅助 ----------
@@ -632,35 +541,39 @@ func deviceLabel(d *DiskInfo) string {
 
 // updateHint 刷新状态行的"下一步该做什么"与开始按钮可用性
 func (u *ui) updateHint() {
-	if u.busy || u.status == nil || u.btnStart == nil || u.analyzing.Load() {
+	if u.busy || u.planInfo == nil || u.analyzing.Load() {
 		return
 	}
+	enabled := false
+	plan, status := "", ""
 	d := u.current()
 	switch {
 	case d == nil:
-		u.setStatus("第 1 步：请选择目标设备（没有可选项时点「刷新」）")
-		u.btnStart.SetEnabled(false)
+		status = "请选择目标设备。刷新后也不会自动选中磁盘。"
 	case u.mode() == modeFormatOnly:
-		if u.confirm.Checked() {
-			u.setStatus(fmt.Sprintf("就绪：把磁盘 %d (%s) 整盘格式化为 MBR+FAT32（不写入文件）",
-				d.Index, HumanBytes(d.Size)))
+		p, err := PrepareFormat(d.Size, u.labelEdt.Text())
+		if err != nil {
+			status = err.Error()
 		} else {
-			u.setStatus("第 3 步：勾选上面的确认框，然后点「开始格式化」")
+			plan, status, enabled = operatorPlanText(d, p), "下一步只核对，不会立即格式化。", true
 		}
-		u.btnStart.SetEnabled(true)
 	case !u.useEmbed && u.imgPath == "":
-		u.setStatus("第 2 步：请选择数据源（或点「内置数据源」用自带的）")
-		u.btnStart.SetEnabled(true)
-	case !u.ready:
-		u.setStatus("第 2 步：数据源尚未就绪（重新选择文件，或点「内置数据源」）")
-		u.btnStart.SetEnabled(false)
-	case !u.confirm.Checked():
-		u.setStatus("第 3 步：勾选上面的确认框，然后点「开始写入」")
-		u.btnStart.SetEnabled(true)
+		status = "请选择与当前模式匹配的数据源。"
+	case !u.ready || u.prep == nil:
+		status = "预检未通过；请查看数据源区的原因。"
 	default:
-		u.setStatus(fmt.Sprintf("就绪：%s → 磁盘 %d (%s)", u.sourceName(), d.Index, HumanBytes(d.Size)))
-		u.btnStart.SetEnabled(true)
+		plan, status, enabled = operatorPlanDetails(d, u.prep, u.sourceName()), "预检通过。下一步只核对，不会立即写盘。", true
 	}
+	if plan != "" {
+		note := "原分区与文件访问会丢失；这不是安全擦除。"
+		if u.mode() == modeWriteImage {
+			note = "可能使原分区不可用；镜像范围外不校验。"
+		}
+		plan += "\r\n" + note
+	}
+	u.planInfo.SetText(plan)
+	u.setStatus(status)
+	u.btnStart.SetEnabled(enabled)
 }
 
 // sourceName 当前镜像来源的短名
@@ -676,6 +589,9 @@ func (u *ui) sourceName() string {
 
 // showEmbeddedInfo 菜单: 查看内置数据源信息
 func (u *ui) showEmbeddedInfo() {
+	if u.busy {
+		return
+	}
 	lines := EmbeddedLines()
 	msg := ""
 	for _, l := range lines {
@@ -688,6 +604,9 @@ func (u *ui) showEmbeddedInfo() {
 
 // about 菜单: 关于
 func (u *ui) about() {
+	if u.busy {
+		return
+	}
 	walk.MsgBox(u.mw, "关于 SE写卡工具",
 		fmt.Sprintf("SE写卡工具 v%s\n\n"+
 			"制作 SE 系列设备（SE5/SE7/SE9）的 TF 卡，三种模式：\n"+
@@ -696,7 +615,7 @@ func (u *ui) about() {
 			"· 写入整盘镜像：.img/.raw/.iso（或 gz/xz/bz2/zst/zip/7z/rar/tar 压缩体）逐字节写入\n\n"+
 			"写后回读校验：文件包模式回读比对 + 从卡上挂 FAT32 逐文件 sha256；\n"+
 			"只格式化模式回读核对分区表 / BPB / FAT 两份副本。\n\n"+
-			"安全: 系统盘永不出现在设备列表里；写盘前需勾选确认并二次确认。", toolVersion),
+			"安全：不预选目标。系统盘未能确认时禁止写入；写入前核对设备及本次计划。", toolVersion),
 		walk.MsgBoxIconInformation)
 }
 
@@ -717,35 +636,39 @@ func (u *ui) setStatus(s string) {
 
 // refresh 重新枚举磁盘; 结果与上次相同则不重复记日志
 func (u *ui) refresh() {
-	disks, err := enumerateDisks()
-	if err != nil {
-		u.setStatus("枚举磁盘失败")
-		u.appendLog("× 枚举磁盘失败: " + err.Error())
+	if u.busy {
 		return
 	}
-	shown := SelectableDisks(disks, u.showAll.Checked())
-	u.disks = shown
-	labels := make([]string, 0, len(shown))
-	for _, d := range shown {
-		labels = append(labels, deviceLabel(d))
-	}
-	if len(labels) == 0 {
-		labels = []string{"(未发现可写入的设备 — 插入读卡器后点「刷新」)"}
-		u.appendLog(fmt.Sprintf("发现 %d 个磁盘, 没有可安全烧录的设备 (插入 TF 卡读卡器; 勾选「全部」可查看固定盘)", len(disks)))
-	} else {
-		u.appendLog(fmt.Sprintf("发现 %d 个磁盘, 可写入 %d 个", len(disks), len(shown)))
+	u.cancelAnalyze()
+	u.disks = nil
+	u.diskStamps = map[int]diskStamp{}
+	labels := []string{"请选择目标设备"}
+	disks, err := enumerateDisks()
+	if err == nil {
+		for _, d := range SelectableDisks(disks, u.showAll.Checked()) {
+			stamp, err := operatorDiskTarget(d)
+			if err != nil {
+				u.appendLog(fmt.Sprintf("磁盘 %d 无法复核，不可选：%v", d.Index, err))
+				continue
+			}
+			u.diskStamps[d.Index] = stamp
+			u.disks = append(u.disks, d)
+			labels = append(labels, deviceLabel(d))
+		}
 	}
 	u.devBox.SetModel(labels)
-	if len(shown) > 0 {
-		u.devBox.SetCurrentIndex(0)
-	} else {
-		u.devBox.SetCurrentIndex(0)
-	}
+	u.devBox.SetCurrentIndex(0)
 	u.onSelect()
+	if err != nil {
+		u.setStatus(err.Error())
+		u.appendLog("无法扫描设备：" + err.Error())
+	} else if len(u.disks) == 0 {
+		u.setStatus("没有可核对的设备。连接读卡器后刷新。")
+	}
 }
 
 func (u *ui) current() *DiskInfo {
-	i := u.devBox.CurrentIndex()
+	i := u.devBox.CurrentIndex() - 1
 	if i < 0 || i >= len(u.disks) {
 		return nil
 	}
@@ -753,46 +676,34 @@ func (u *ui) current() *DiskInfo {
 }
 
 func (u *ui) onSelect() {
+	if u.busy || u.planInfo == nil {
+		return
+	}
 	d := u.current()
 	if d == nil {
 		u.propModel.Set([][2]string{{"状态", "未选择设备"}})
 		u.partModel.Set(nil)
-		u.updateHint()
-		return
+	} else {
+		u.propModel.Set(d.PropertyRows())
+		u.partModel.Set(d.PartitionRows())
 	}
-	u.propModel.Set(d.PropertyRows())
-	u.partModel.Set(d.PartitionRows())
-	u.confirm.SetChecked(false)
 	u.repreview()
-	u.updateHint()
-	if d.Safety == SafetyUnknown {
-		u.appendLog(fmt.Sprintf("⚠ 磁盘 %d 判定为「%s」— 若非 TF 卡请立即改选其它设备", d.Index, d.Safety))
-	}
 }
 
 // useEmbedded 切回程序内置镜像 (默认源)
 func (u *ui) useEmbedded() {
-	u.cancelAnalyze() // 让在途的分析结果作废
-	u.prep, u.ready = nil, true
-	u.setImageInfo(SourceInfoText(nil, nil))
-	if !HasEmbeddedImage() {
-		u.useEmbed = false
-		u.imgPath = ""
-		u.ready = false
-		u.imgEdit.SetText("(本程序未内置数据源 — 请点「浏览文件…」/「浏览目录…」选择)")
-		u.appendLog("数据源: 未内置")
-		u.updateHint()
+	if u.busy || !HasEmbeddedImage() {
 		return
 	}
-	u.useEmbed = true
-	u.imgPath = ""
-	u.imgEdit.SetText("内置数据源（默认）")
-	u.appendLog("数据源: 内置 — " + EmbeddedSummary())
-	// 内置数据源也要解析 (可能是整盘镜像, 也可能是文件包/压缩包): 走同一条异步分析
+	u.useEmbed, u.imgPath = true, ""
+	u.imgEdit.SetText("内置数据源")
 	u.repreview()
 }
 
 func (u *ui) pickImage() {
+	if u.busy {
+		return
+	}
 	fd := walk.FileDialog{
 		Title: "选择镜像或文件包",
 		Filter: "镜像 / 压缩包 (*.img;*.raw;*.iso;*.gz;*.xz;*.bz2;*.zst;*.zip;*.7z;*.rar;*.tar;*.tgz)|" +
@@ -811,6 +722,9 @@ func (u *ui) pickImage() {
 
 // pickDir 选一个目录当数据源 (MYS-1062 十八轮④)
 func (u *ui) pickDir() {
+	if u.busy || u.mode() != modeMakeCard {
+		return
+	}
 	dir := pickDirectory(uintptr(u.mw.Handle()), "选择作为写卡数据源的目录")
 	if strings.TrimSpace(dir) == "" {
 		return
@@ -821,28 +735,6 @@ func (u *ui) pickDir() {
 	u.imgEdit.SetText(dir)
 	u.appendLog("数据源: 目录 " + dir)
 	u.repreview()
-}
-
-// forcedMode 界面下拉框 → 强制模式 (nil = 自动)。
-// 高级选项收起时一律自动识别 —— 看不见的开关不该在背后生效。
-func (u *ui) forcedMode() *SourceMode {
-	if u.advChk == nil || !u.advChk.Checked() {
-		return nil
-	}
-	switch u.modeBox.CurrentIndex() {
-	case 1:
-		m := ModeRawDisk
-		return &m
-	case 2:
-		m := ModeFilePackage
-		return &m
-	}
-	return nil
-}
-
-// fastFSWanted 勾选 = 按内容大小建分区 (同样只在高级选项展开时生效)
-func (u *ui) fastFSWanted() bool {
-	return u.advChk != nil && u.advChk.Checked() && u.fastFS.Checked()
 }
 
 // setImageInfo 更新 ② 的说明文字
@@ -862,41 +754,35 @@ func (u *ui) setImageInfo(text string) {
 //
 // 用 probeGen 作代数: 用户连续换文件时, 先发起的那次分析结果回来直接丢弃。
 func (u *ui) repreview() {
-	// 只格式化没有数据源可解析 —— 分区大小按当前这张卡现算 (见 currentPrep)
-	if u.mode() == modeFormatOnly {
-		u.cancelAnalyze()
-		u.prep, u.ready = nil, true
+	if u.busy || u.planInfo == nil {
+		return
+	}
+	u.cancelAnalyze()
+	u.prep, u.sources, u.ready = nil, nil, false
+	d, m := u.current(), u.mode()
+	if m == modeFormatOnly || d == nil || (u.imgPath == "" && !u.useEmbed) {
+		note := "选中目标后预检数据源。"
+		if d != nil {
+			note = "请选择文件，或使用已有的内置数据源。"
+		}
+		if !HasEmbeddedImage() {
+			note += " 当前程序未内置数据源。"
+		}
+		u.setImageInfo(note)
 		u.updateHint()
 		return
 	}
-	// 没有内置数据源又没选文件 → 没什么可分析的
-	if u.imgPath == "" && !HasEmbeddedImage() {
-		u.cancelAnalyze()
-		u.prep, u.ready = nil, false
-		u.setImageInfo(SourceInfoText(nil, nil))
-		u.updateHint()
-		return
-	}
-	target := int64(0)
-	if d := u.current(); d != nil {
-		target = d.Size
-	}
-	// 内置数据源同样要解析: 它可能是整盘镜像, 也可能是文件包/压缩包 (十九轮修正)
-	path, mode, full := u.imgPath, u.forcedMode(), !u.fastFSWanted()
-	u.prepTarget, u.prepFull = target, full
-
-	u.probeGen++
+	p := u.imgPath
+	full := m != modeMakeCard || !u.fastFS.Checked()
+	u.planInfo.SetText("")
 	gen := u.probeGen
-	// 每次分析一个**独立的**取消令牌。共用一个标志的话, 新一轮分析一开始就把它清成
-	// false, 上一轮那条还在解压 14 GiB 压缩包的 goroutine 会以为自己没被取消,
-	// 继续把整条流跑完 (连点几下就是几路并发解压)。
 	cancel := &atomic.Bool{}
 	u.probeCancel = cancel
+	u.setImageInfo("来源：" + dataSourceLabel(p) + "\r\n正在预检；压缩镜像会提前核对完整解压大小。")
 	u.beginAnalyze()
-
 	go func() {
 		ctl := &ProbeCtl{
-			Progress: func(phase string, done, total int64) {
+			Progress: func(_ string, done, total int64) {
 				u.syncUI(func() {
 					if gen == u.probeGen {
 						u.showAnalyzeProgress(done, total)
@@ -905,36 +791,48 @@ func (u *ui) repreview() {
 			},
 			Canceled: cancel.Load,
 		}
-		prep, err := PrepareSource(path, mode, target, full, 0, "", ctl)
+		var prep *PreparedSource
+		var stamps []sourceFileStamp
+		src := p
+		if src == "" {
+			src = SelfExePath()
+		}
+		check := operatorSourceVolumeCheck(d.Index)
+		initial, err := readSourceStamp(src)
+		if err == nil {
+			err = check(src)
+		}
+		if err == nil {
+			prep, err = prepareOperatorSource(m, p, d.Size, full, "", ctl)
+		}
+		if err == nil {
+			stamps, err = operatorSourceStamps(p, prep, check, ctl)
+		}
+		if err == nil && !initial.current() {
+			err = errors.New("来源在预检时已变化，请重新选择")
+		}
+		if cancel.Load() {
+			err = ErrProbeCanceled
+		}
 		u.syncUI(func() {
 			if gen != u.probeGen {
-				return // 已有更新的分析, 这次结果作废
+				return
 			}
 			u.endAnalyze()
 			if err != nil {
-				u.prep, u.ready = nil, false
 				msg := err.Error()
 				if errors.Is(err, ErrProbeCanceled) {
-					msg = "分析已取消"
+					msg = "分析已取消；可重新选择来源。"
 				}
-				u.setImageInfo("来源：" + dataSourceLabel(path) + "\r\n状态：" + msg)
-				u.appendLog("× 来源不可用: " + msg)
-				u.updateHint()
-				return
-			}
-			u.prep, u.ready = prep, true
-			u.prepTarget, u.prepFull = target, full
-			u.setImageInfo(SourceInfoText(prep.Archive, prep.Plan))
-			if prep.Archive != nil {
-				u.appendLog(fmt.Sprintf("来源: %s  格式 %s  写入方式 %s",
-					dataSourceLabel(path), formatLabel(prep.Archive.Format), prep.Archive.Mode))
-				for _, kv := range prep.Archive.BootRootLines() {
-					if strings.HasPrefix(kv[0], "⚠") {
-						u.appendLog("⚠ " + kv[1])
-					} else {
-						u.appendLog(kv[0] + "：" + kv[1])
-					}
+				u.setImageInfo("来源：" + dataSourceLabel(p) + "\r\n" + msg)
+				u.appendLog("预检未通过：" + msg)
+			} else {
+				u.prep, u.sources, u.ready = prep, stamps, true
+				info := SourceInfoText(prep.Archive, prep.Plan)
+				if prep.Archive != nil && prep.Archive.Skipped > 0 {
+					u.appendLog(fmt.Sprintf("预检警告：忽略 %d 个不受支持的来源条目", prep.Archive.Skipped))
 				}
+				u.setImageInfo(info)
 			}
 			u.updateHint()
 		})
@@ -964,9 +862,9 @@ func (u *ui) cancelProbe() {
 
 // quit 关窗: 先让在途的后台分析知道别再往界面派发了
 func (u *ui) quit() {
-	u.closed.Store(true)
-	u.cancelProbe()
-	u.mw.Close()
+	if !u.busy {
+		u.mw.Close()
+	}
 }
 
 // syncUI 把界面更新派发回 UI 线程 (窗口已关就丢弃)
@@ -1073,24 +971,6 @@ func (u *ui) endAnalyze() {
 // 预览阶段已经解析过 (repview → u.prep), 正常情况下直接复用 —— 解析一个几百 MB 的
 // 压缩包要好几秒, 不能在点"开始写入"时再卡一次。只有当**目标盘或分区选项变了**
 // (预览参数与当前不一致) 时才重新解析, 避免"预览显示 A、实际按 B 写"。
-func (u *ui) currentPrep() (*PreparedSource, error) {
-	target := int64(0)
-	if d := u.current(); d != nil {
-		target = d.Size
-	}
-	// 只格式化: 计划只跟"当前这张卡 + 卷标"有关, 每次现算 (换卡必须重算分区大小)
-	if u.mode() == modeFormatOnly {
-		return PrepareFormat(target, u.labelEdt.Text())
-	}
-	full := !u.fastFSWanted()
-	if u.prep != nil && u.ready && u.prepTarget == target && u.prepFull == full {
-		return u.prep, nil
-	}
-	if u.prep == nil && !u.ready {
-		return nil, fmt.Errorf("数据源尚未解析完成 (请稍候或重新选择)")
-	}
-	return PrepareSource(u.imgPath, u.forcedMode(), target, full, 0, "", nil)
-}
 
 // dataSourceLabel 来源展示名 (内置数据源没有路径)
 func dataSourceLabel(path string) string {
@@ -1107,7 +987,7 @@ func dataSourceLabel(path string) string {
 
 // repackDialog 换镜像生成第二个自带镜像的程序 (无需构建机)
 func (u *ui) repackDialog() {
-	if u.busy {
+	if u.busy || u.analyzing.Load() {
 		return
 	}
 	fd := walk.FileDialog{
@@ -1157,8 +1037,7 @@ func (u *ui) repackDialog() {
 		return
 	}
 
-	u.busy = true
-	u.btnStart.SetEnabled(false)
+	u.setBusy(true)
 	u.progress.SetValue(0)
 	u.setStatus("正在生成新程序…")
 	u.appendLog(fmt.Sprintf("开始换镜像生成新程序: %s → %s", filepath.Base(imgPath), out))
@@ -1176,8 +1055,7 @@ func (u *ui) repackDialog() {
 			})
 		})
 		u.mw.Synchronize(func() {
-			u.busy = false
-			u.btnStart.SetEnabled(true)
+			u.setBusy(false)
 			if err != nil {
 				u.progress.SetValue(0)
 				u.setStatus("生成失败 — 见日志")
@@ -1207,224 +1085,174 @@ func sidecarOrEmpty(imgPath string) string {
 
 // ---------- 烧录 ----------
 
+func (u *ui) setBusy(b bool) {
+	u.busy = b
+	for _, w := range []walk.Widget{u.devBox, u.showAll, u.refreshBtn, u.modeCard, u.modeImage, u.modeFormat, u.pickFileBtn, u.pickDirBtn, u.fastFS, u.labelEdt, u.btnClose} {
+		w.SetEnabled(!b)
+	}
+	u.embeddedBtn.SetEnabled(!b && HasEmbeddedImage())
+	u.btnStart.SetEnabled(false)
+	if !b {
+		u.updateHint()
+	}
+}
+
+func (u *ui) confirmPlan(d *DiskInfo, detail, verb string, p *PreparedSource) bool {
+	var dlg *walk.Dialog
+	var accept, back *walk.PushButton
+	var checked *walk.CheckBox
+	note := "原有分区和文件访问会丢失。这不是安全擦除。"
+	if !p.IsCard() {
+		note = "将覆盖盘首起的镜像范围，可能使原分区不可用。镜像范围外不校验；这不是安全擦除。"
+	}
+	if d.Safety == SafetyUnknown {
+		note = "注意：这是需人工确认的磁盘。\r\n" + note
+	}
+	if err := (Dialog{AssignTo: &dlg, Title: "确认" + verb, MinSize: Size{Width: 540}, Layout: VBox{}, Font: u.font,
+		DefaultButton: &back, CancelButton: &back, Children: []Widget{
+			Label{Text: fmt.Sprintf("请再次核对目标：磁盘 %d · %s · %s · %s", d.Index, d.Model, HumanBytes(d.Size), d.BusType)},
+			TextEdit{ReadOnly: true, VScroll: true, MinSize: Size{Height: 128}, Text: detail},
+			TextEdit{ReadOnly: true, MinSize: Size{Height: 48}, Text: note},
+			CheckBox{AssignTo: &checked, Text: "我已核对目标磁盘和本次计划，确认覆盖。", OnCheckedChanged: func() {
+				if accept != nil {
+					accept.SetEnabled(checked.Checked())
+				}
+			}},
+			Composite{Layout: HBox{MarginsZero: true}, Children: []Widget{
+				HSpacer{}, PushButton{AssignTo: &back, Text: "返回", OnClicked: func() { dlg.Cancel() }},
+				PushButton{AssignTo: &accept, Text: "开始" + verb, Enabled: false, OnClicked: func() {
+					if checked.Checked() {
+						dlg.Accept()
+					}
+				}},
+			}},
+		},
+	}).Create(u.mw); err != nil {
+		u.appendLog("无法打开确认窗口：" + err.Error())
+		return false
+	}
+	defer dlg.Dispose()
+	back.SetFocus()
+	return dlg.Run() == walk.DlgCmdOK
+}
+
 func (u *ui) start() {
 	if u.busy || u.analyzing.Load() {
 		return
 	}
 	d := u.current()
 	if d == nil {
-		walk.MsgBox(u.mw, "未选择磁盘", "请先在上方列表选择一个目标磁盘。", walk.MsgBoxIconWarning)
 		return
 	}
-	formatOnly := u.mode() == modeFormatOnly
-	if !formatOnly && !u.useEmbed && u.imgPath == "" {
-		walk.MsgBox(u.mw, "未选择镜像", "请先选择镜像文件, 或点「内置数据源」。", walk.MsgBoxIconWarning)
+	stamp, ok := u.diskStamps[d.Index]
+	if !ok {
+		u.setStatus("目标身份不可用，请重新扫描。")
 		return
 	}
-	if !u.confirm.Checked() {
-		walk.MsgBox(u.mw, "未确认", "请先勾选「我已核对上述磁盘与分区…」。", walk.MsgBoxIconWarning)
-		return
-	}
-	// 来源已经解析好了 (分析阶段完成), 这里不再有"生成卡镜像"的等待
-	prep, err := u.currentPrep()
-	if err != nil {
-		u.setStatus("来源不可用")
-		walk.MsgBox(u.mw, "来源不可用", err.Error(), walk.MsgBoxIconError)
-		return
-	}
-	u.progress.SetValue(0)
-	if !formatOnly {
-		if n := prep.TotalSize(); n > 0 && d.Size < n {
-			walk.MsgBox(u.mw, "容量不足",
-				fmt.Sprintf("目标 %s 小于镜像 %s", HumanBytes(d.Size), HumanBytes(n)), walk.MsgBoxIconError)
+	p := u.prep
+	verb := "制作刷机卡"
+	switch u.mode() {
+	case modeFormatOnly:
+		var err error
+		p, err = PrepareFormat(d.Size, u.labelEdt.Text())
+		if err != nil {
+			u.updateHint()
 			return
 		}
+		verb = "格式化"
+	case modeWriteImage:
+		verb = "写入整盘镜像"
 	}
-
-	// 二次确认: 只格式化与写入的措辞分开, 让人一眼看清这次要做什么
-	var title, msg, imgTag string
-	if formatOnly {
-		title = "二次确认 — 开始格式化?"
-		msg = fmt.Sprintf("即将格式化:\n\n目标磁盘: %s (磁盘 %d, %s)\n型号: %s\n分区数: %d\n\n"+
-			"操作: 只格式化 — 在卡上建 MBR + 1×FAT32, 不写入任何文件\n卷标: %s\n分区大小: %s\n\n"+
-			"该磁盘全部分区与数据将被覆盖, 不可恢复。确认执行?",
-			d.Path, d.Index, HumanBytes(d.Size), d.Model, len(d.Partitions),
-			prep.Plan.Label, HumanBytes(prep.Plan.PartSize))
-	} else {
-		imgTag = "文件包 → MBR+FAT32"
-		if prep.Src != nil {
-			imgTag = prep.Src.Display()
-			if prep.Src.Embedded() {
-				imgTag += "  [内置镜像]"
-			}
-		}
-		extra := ""
-		if prep.Archive != nil {
-			extra = fmt.Sprintf("\n来源: %s\n格式: %s\n写入方式: %s\n",
-				filepath.Base(prep.Archive.Path), formatLabel(prep.Archive.Format), prep.Archive.Mode)
-			if prep.IsCard() {
-				extra += "（目标卡将被格式化为 MBR + FAT32, 原有分区与数据全部丢失）\n"
-			}
-		}
-		title = "二次确认 — 开始烧录?"
-		msg = fmt.Sprintf("即将烧录:\n\n目标磁盘: %s (磁盘 %d, %s)\n型号: %s\n分区数: %d\n%s\n镜像: %s (%s)\n\n该磁盘全部分区将被覆盖, 数据不可恢复。确认执行?",
-			d.Path, d.Index, HumanBytes(d.Size), d.Model, len(d.Partitions), extra, imgTag, HumanBytes(prep.TotalSize()))
-	}
-	if d.Safety == SafetyUnknown {
-		msg = "⚠ 目标被判为「" + d.Safety.String() + "」: " + d.Reason + "\n\n" + msg
-	}
-	if walk.MsgBox(u.mw, title, msg,
-		walk.MsgBoxYesNo|walk.MsgBoxIconWarning|walk.MsgBoxDefButton2) != walk.DlgCmdYes {
-		u.appendLog("已取消 (用户未确认)")
+	if p == nil || (u.mode() != modeFormatOnly && !u.ready) {
 		return
 	}
-
-	u.busy = true
-	u.btnStart.SetEnabled(false)
-	u.log.SetText("")
-	u.dedup.Reset()
+	sources := u.sources
+	detail := operatorPlanDetails(d, p, u.sourceName())
+	for _, part := range d.Partitions {
+		detail += fmt.Sprintf("\r\n现有分区 %d：%s %s %s %s", part.Index, part.DriveLetter, HumanBytes(part.Size), part.FSType, part.Label)
+	}
+	if !u.confirmPlan(d, detail, verb, p) {
+		return
+	}
+	u.setBusy(true)
 	u.progress.SetValue(0)
-	verb := "写入"
-	if formatOnly {
-		verb = "格式化"
-	}
-	u.setStatus("正在" + verb + "…")
-	if formatOnly {
-		u.appendLog(fmt.Sprintf("开始格式化 %s → %s (只建 MBR+FAT32, 不写入任何文件)", prep.Plan.Label, d.Path))
-	} else {
-		u.appendLog(fmt.Sprintf("开始写入 %s → %s", imgTag, d.Path))
-		if prep.IsCard() {
-			u.appendLog("写入方式: 直接在卡上建 MBR+FAT32 (不生成中间镜像, 未用空间不擦除)")
-		}
-	}
-
+	u.setStatus("正在重新核对设备与来源，请勿拔卡或关闭窗口…")
+	u.appendLog("核对计划：" + detail)
 	go func() {
 		start := time.Now()
-		code := flashToDiskGUI(u, d, prep)
-		u.mw.Synchronize(func() {
-			u.busy = false
-			u.btnStart.SetEnabled(true)
-			u.appendLog(fmt.Sprintf("总耗时 %s", time.Since(start).Round(time.Second)))
-			if code == 0 {
-				u.setStatus("完成 — 校验通过，可以拔卡使用")
-				walk.MsgBox(u.mw, verb+"完成", verb+"并回读校验通过, 可以拔卡使用。", walk.MsgBoxIconInformation)
-			} else {
-				u.setStatus("失败 — 见日志；请勿使用该卡")
-				walk.MsgBox(u.mw, verb+"失败", "见窗口下方日志; 请勿直接使用该卡。", walk.MsgBoxIconError)
+		mayWrite := false
+		access := operatorFlashAccess(d, stamp, sources, func() { mayWrite = true })
+		out, err := runFlash(d, p, true, u.flashProgress, func(format string, a ...interface{}) {
+			u.syncUI(func() { u.appendLog(fmt.Sprintf(format, a...)) })
+		}, access)
+		u.syncUI(func() {
+			if err == nil && !out.OK() {
+				err = errors.New(u.flashFailure(out))
 			}
+			u.setBusy(false)
+			u.appendLog(fmt.Sprintf("总耗时 %s", time.Since(start).Round(time.Second)))
+			if err != nil {
+				title, tip := "操作已停止，未写入数据", "请刷新并重新选卡或来源。"
+				if mayWrite {
+					title, tip = "写入或校验失败", "卡可能已部分写入，请勿直接使用。"
+				}
+				u.appendLog("失败：" + err.Error())
+				u.setStatus(title + "。" + tip)
+				walk.MsgBox(u.mw, title, err.Error()+"\r\n"+tip, walk.MsgBoxIconError)
+				u.refresh()
+				u.setStatus(title + "。" + tip)
+				return
+			}
+			title, desc := u.flashSuccess(out)
+			u.progress.SetValue(1000)
+			u.refresh() // own writes changed the baseline; every new attempt starts with a new selection
+			u.setStatus(title)
+			u.appendLog(title + "：" + desc)
+			walk.MsgBox(u.mw, title, desc+"\r\n设备已释放，可以移除。", walk.MsgBoxIconInformation)
 		})
 	}()
 }
 
-// flashToDiskGUI = RunFlash 的 GUI 版 (进度与日志都同步到窗口)
-func flashToDiskGUI(u *ui, d *DiskInfo, prep *PreparedSource) int {
-	prog := func(phase string, done, total int64, rate float64) {
-		u.mw.Synchronize(func() {
-			if total > 0 {
-				u.progress.SetValue(int(float64(done) * 1000 / float64(total)))
-				u.setStatus(fmt.Sprintf("%s %5.1f%%  %s/%s  %s",
-					phaseName(phase), float64(done)*100/float64(total), HumanBytes(done), HumanBytes(total), HumanRate(rate)))
-			} else {
-				u.setStatus(fmt.Sprintf("%s %s  %s", phaseName(phase), HumanBytes(done), HumanRate(rate)))
+func (u *ui) flashProgress(phase string, done, total int64, rate float64) {
+	u.syncUI(func() {
+		if total > 0 {
+			value := int(float64(done) * 1000 / float64(total))
+			if value > 1000 {
+				value = 1000
 			}
-		})
-	}
-	out, err := RunFlash(d, prep, true, prog, func(format string, a ...interface{}) {
-		u.mw.Synchronize(func() { u.appendLog(fmt.Sprintf(format, a...)) })
-	})
-	if err != nil {
-		u.mw.Synchronize(func() { u.appendLog("× " + err.Error()) })
-		return 1
-	}
-
-	if out.IsCard {
-		res := out.Card
-		doneWord := "写入完成"
-		if out.FormatOnly {
-			doneWord = "格式化完成"
-		}
-		u.mw.Synchronize(func() {
-			u.progress.SetValue(1000)
-			u.appendLog(fmt.Sprintf("%s: %s / %s (%.1f MiB/s)", doneWord, HumanBytes(res.WrittenBytes),
-				res.Elapsed.Round(time.Millisecond), mibPerSec(res.WrittenBytes, res.Elapsed)))
-			tail := "剩余空间不擦除"
-			if out.FormatOnly {
-				tail = "剩余空间不擦除, 卡上没有写入任何文件"
-			}
-			u.appendLog(fmt.Sprintf("快速格式化: 卡容量 %s, 实写 %s, 未触碰 %s (%s)",
-				HumanBytes(res.TotalSize), HumanBytes(res.WrittenBytes), HumanBytes(res.SkippedBytes), tail))
-			if out.Layout != nil {
-				if out.Layout.OK() {
-					u.appendLog("✓ 回读校验: " + out.Layout.Summary())
-				} else {
-					u.appendLog("× 文件系统结构核对失败: " + strings.Join(out.Layout.Problems, "; "))
-				}
-			}
-		})
-		if out.Layout == nil || !out.Layout.OK() {
-			return 1
-		}
-		fv := out.FileVerify
-		if fv == nil {
-			// 只格式化: 卡上本来就没有文件, 结构核对通过即可交付
-			u.mw.Synchronize(func() {
-				walk.MsgBox(u.mw, "格式化完成",
-					"卡已格式化为 MBR + FAT32 并通过回读校验, 可以直接用资源管理器往里拷文件。",
-					walk.MsgBoxIconInformation)
-			})
-			return 0
-		}
-		u.mw.Synchronize(func() {
-			u.appendLog("文件级校验 (" + fv.Summary() + "):")
-			for _, f := range fv.Files {
-				mark := "✓"
-				note := ""
-				if !f.OK {
-					mark = "×"
-					note = "  " + f.Err
-				}
-				u.appendLog(fmt.Sprintf("  %s %-40s %10s  sha256 %s%s", mark, f.Name, HumanBytes(f.Size), shortHash(f.GotSHA), note))
-			}
-			if fv.OK() {
-				u.appendLog(fmt.Sprintf("✓ 文件级校验通过: 卡上 %d 个文件与源压缩包完全一致", fv.OKCount))
-				layoutDesc := "文件系统结构已回读确认"
-				if out.Layout != nil {
-					layoutDesc = out.Layout.Summary()
-				}
-				walk.MsgBox(u.mw, "写入完成",
-					fmt.Sprintf("卡已写入并通过两级校验:\n\n① 回读校验: %s\n② 文件级校验: %s\n\n可以拔卡使用。",
-						layoutDesc, fv.Summary()), walk.MsgBoxIconInformation)
-			} else {
-				u.appendLog("× 文件级校验失败: " + fv.FirstError())
-				walk.MsgBox(u.mw, "文件级校验失败",
-					"卡上文件与源压缩包不一致, 请勿使用该卡:\n\n"+fv.FirstError(), walk.MsgBoxIconError)
-			}
-		})
-		if !fv.OK() {
-			return 1
-		}
-		return 0
-	}
-
-	res := out.Image
-	u.mw.Synchronize(func() {
-		u.progress.SetValue(1000)
-		u.appendLog(fmt.Sprintf("写入完成: 实写 %s / %s (%.1f MiB/s)", HumanBytes(res.WrittenBytes),
-			res.WriteElapsed.Round(time.Millisecond), mibPerSec(res.WrittenBytes, res.WriteElapsed)))
-		if res.SkippedBytes > 0 {
-			u.appendLog(fmt.Sprintf("稀疏写入: 镜像共 %s, 其中 %s 全零且卡上本就是零 → 未写",
-				HumanBytes(res.ImageBytes), HumanBytes(res.SkippedBytes)))
-		}
-		u.appendLog("镜像 sha256: " + res.SHA256)
-		u.appendLog("回读 sha256: " + res.ReadSHA256)
-		if res.VerifyOK {
-			u.appendLog("✓ 回读校验通过: " + HumanBytes(res.VerifyBytes))
+			u.progress.SetValue(value)
+			u.setStatus(fmt.Sprintf("%s · %s / %s · 请勿拔卡", phaseName(phase), HumanBytes(done), HumanBytes(total)))
 		} else {
-			u.appendLog(fmt.Sprintf("× 回读校验失败: 首个不一致偏移 %d, 不一致字节 %d", res.MismatchOff, res.MismatchCnt))
+			u.setStatus(phaseName(phase) + " · 请勿拔卡")
 		}
 	})
-	if res.VerifyOK {
-		return 0
+}
+
+func (u *ui) flashFailure(o *FlashOutcome) string {
+	if o != nil && o.FileVerify != nil && !o.FileVerify.OK() {
+		for _, f := range o.FileVerify.Files {
+			if !f.OK {
+				u.appendLog(fmt.Sprintf("文件失败 %s：%s", f.Name, f.Err))
+			}
+		}
+		return "文件级校验失败：" + o.FileVerify.FirstError()
 	}
-	return 1
+	if o != nil && o.Image != nil && !o.Image.VerifyOK {
+		return fmt.Sprintf("镜像回读不一致：首个偏移 %d，不一致字节 %d", o.Image.MismatchOff, o.Image.MismatchCnt)
+	}
+	return "未取得完整的写后校验结果"
+}
+func (u *ui) flashSuccess(o *FlashOutcome) (string, string) {
+	if o.FormatOnly {
+		return "格式化完成，未写入文件", "已回读核对 " + o.Layout.Summary() + "。这不是刷机卡，也不是安全擦除。"
+	}
+	if o.IsCard {
+		for _, f := range o.FileVerify.Files {
+			u.appendLog(fmt.Sprintf("通过 %s · SHA-256 %s", f.Name, shortHash(f.GotSHA)))
+		}
+		return "文件写入及校验通过", o.Layout.Summary() + "；" + o.FileVerify.Summary() + "。未验证设备启动。"
+	}
+	u.appendLog("镜像 SHA-256：" + o.Image.SHA256)
+	u.appendLog("回读 SHA-256：" + o.Image.ReadSHA256)
+	return "镜像写入范围内回读一致", "已核对 " + HumanBytes(o.Image.VerifyBytes) + "。未核验范围外区域，未验证设备启动。"
 }

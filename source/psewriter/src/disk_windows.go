@@ -41,6 +41,9 @@ type diskExtent struct {
 // enumerateDisks 枚举全部物理盘并按安全策略分级
 func enumerateDisks() ([]*DiskInfo, error) {
 	sysDisk, sysParts := systemDiskNumbers()
+	if len(sysDisk) == 0 {
+		return nil, fmt.Errorf("无法识别系统盘，已禁止选择写入目标；请以管理员身份重新扫描")
+	}
 	var out []*DiskInfo
 	for i := 0; i < maxPhysicalDrives; i++ {
 		path := fmt.Sprintf(`\\.\PhysicalDrive%d`, i)
@@ -100,7 +103,7 @@ func openDiskDeviceRO(path string) (DiskDevice, error) {
 	return newAlignedDevice(d, nil), nil
 }
 
-func openDisk(path string, ro bool) (DiskDevice, error) {
+func openDisk(path string, ro bool) (*winDisk, error) {
 	access := uint32(windows.GENERIC_READ | windows.GENERIC_WRITE)
 	if ro {
 		access = windows.GENERIC_READ
@@ -216,6 +219,9 @@ func (d *winDisk) Close() error { return windows.CloseHandle(d.h) }
 // 但文件系统照样挂着, 不卸载就会在写盘中途被回写 —— 所以这里用 FindFirstVolume
 // 枚举**所有**卷, 再按 extent 匹配到目标盘。
 func lockVolumes(diskNumber int, logf func(string, ...interface{})) (func(), error) {
+	return lockWindowsVolumes(diskNumber, false, nil, logf)
+}
+func lockWindowsVolumes(diskNumber int, strict bool, expected []Partition, logf func(string, ...interface{})) (func(), error) {
 	log := func(format string, a ...interface{}) {
 		if logf != nil {
 			logf(format, a...)
@@ -230,18 +236,50 @@ func lockVolumes(diskNumber int, logf func(string, ...interface{})) (func(), err
 		}
 	}
 
-	vols := volumesOnDisk(diskNumber)
-	log("目标盘上的卷: %d 个 — 逐个强制卸载后锁定", len(vols))
+	vols, scanErr := volumesOnDisk(diskNumber)
+	if strict && scanErr != nil {
+		return nil, fmt.Errorf("无法核对目标盘上的卷: %w", scanErr)
+	}
+	if strict {
+		for _, p := range expected {
+			if p.DriveLetter == "" || p.DriveLetter == "-" {
+				continue
+			}
+			found := false
+			for _, v := range vols {
+				for _, part := range strings.FieldsFunc(v.letters, func(r rune) bool { return r == ',' || r == ';' || r == ' ' }) {
+					if strings.EqualFold(strings.TrimRight(part, `\`), strings.TrimRight(p.DriveLetter, `\`)) {
+						found = true
+					}
+				}
+			}
+			if !found {
+				return nil, fmt.Errorf("无法定位目标分区 %s 的卷，已停止", p.DriveLetter)
+			}
+		}
+	}
+	if strict {
+		log("目标盘上的卷：%d 个，先锁定再尝试卸载", len(vols))
+	} else {
+		log("目标盘上的卷: %d 个 — 逐个强制卸载后锁定", len(vols))
+	}
 	for _, v := range vols {
 		h, err := openVolumeHandle(v.name)
 		if err != nil {
+			if strict {
+				release()
+				return nil, fmt.Errorf("无法打开目标卷 %s: %w", v.display(), err)
+			}
 			// 打不开通常是正被别的进程独占; 不致命 (它可能马上释放, 也可能只是只读挂载)
 			log("⚠ 卷 %s 打开失败: %v", v.display(), err)
 			continue
 		}
 		// 1) 先强制卸载 —— 这一步不要求"没人用", 是解开 ACCESS_DENIED 的关键
 		var ret uint32
-		dismounted := windows.DeviceIoControl(h, fsctlDismountVolume, nil, 0, nil, 0, &ret, nil) == nil
+		dismounted := false
+		if !strict {
+			dismounted = windows.DeviceIoControl(h, fsctlDismountVolume, nil, 0, nil, 0, &ret, nil) == nil
+		}
 
 		// 2) 再锁定。索引器/杀毒软件释放句柄要一点时间, 所以带重试
 		locked := false
@@ -254,6 +292,9 @@ func lockVolumes(diskNumber int, logf func(string, ...interface{})) (func(), err
 			time.Sleep(lockRetryDelay)
 		}
 
+		if strict && locked {
+			dismounted = windows.DeviceIoControl(h, fsctlDismountVolume, nil, 0, nil, 0, &ret, nil) == nil
+		}
 		switch {
 		case locked && dismounted:
 			log("卷 %s: 已卸载并锁定", v.display())
@@ -296,29 +337,37 @@ func (v volRef) display() string {
 }
 
 // volumesOnDisk 列出某块物理盘上的所有卷 (含没有盘符的)
-func volumesOnDisk(diskNumber int) []volRef {
+func volumesOnDisk(diskNumber int) ([]volRef, error) {
 	var out []volRef
 	buf := make([]uint16, windows.MAX_PATH+1)
 	h, err := windows.FindFirstVolume(&buf[0], uint32(len(buf)))
 	if err != nil {
-		return out
+		return out, err
 	}
 	defer windows.FindVolumeClose(h)
 	for {
 		name := strings.TrimSuffix(windows.UTF16ToString(buf), `\`)
 		if name != "" {
-			if vh, oerr := openVolumeHandle(name); oerr == nil {
-				if n, eerr := volumeDiskNumber(vh); eerr == nil && n == uint32(diskNumber) {
-					out = append(out, volRef{name: name, letters: volumeLettersOf(name)})
+			if vh, oerr := openVolumeReadMetadata(name); oerr == nil {
+				if exts, eerr := volumeExtents(vh); eerr == nil {
+					for _, e := range exts {
+						if e.DiskNumber == uint32(diskNumber) {
+							out = append(out, volRef{name: name, letters: volumeLettersOf(name)})
+							break
+						}
+					}
 				}
 				windows.CloseHandle(vh)
 			}
 		}
 		if err := windows.FindNextVolume(h, &buf[0], uint32(len(buf))); err != nil {
-			break
+			if err == windows.ERROR_NO_MORE_FILES {
+				break
+			}
+			return out, err
 		}
 	}
-	return out
+	return out, nil
 }
 
 // openVolumeHandle 打开卷设备 (锁/卸载用, 需要读写权限)
@@ -328,20 +377,29 @@ func openVolumeHandle(name string) (windows.Handle, error) {
 		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, nil, windows.OPEN_EXISTING, 0, 0)
 }
 
-// volumeLettersOf 取卷的盘符 (可能多个挂载点, 只取第一个 "X:" 形式的)
+// volumeLettersOf 取卷的所有盘符（不包括挂载到文件夹的路径）。
 func volumeLettersOf(name string) string {
 	buf := make([]uint16, windows.MAX_PATH+1)
 	var ret uint32
-	if err := windows.GetVolumePathNamesForVolumeName(windows.StringToUTF16Ptr(name),
+	if err := windows.GetVolumePathNamesForVolumeName(windows.StringToUTF16Ptr(strings.TrimRight(name, `\`)+`\`),
 		&buf[0], uint32(len(buf)), &ret); err != nil {
 		return ""
 	}
-	for _, p := range strings.Split(windows.UTF16ToString(buf), "\x00") {
-		if len(p) >= 2 && p[1] == ':' {
-			return p[:2]
+	var letters []string
+	for start, end := 0, 0; end < len(buf); end++ {
+		if buf[end] != 0 {
+			continue
+		}
+		if start == end {
+			break
+		}
+		path := windows.UTF16ToString(buf[start:end])
+		start = end + 1
+		if len(path) == 3 && path[1] == ':' {
+			letters = append(letters, path[:2])
 		}
 	}
-	return ""
+	return strings.Join(letters, ",")
 }
 
 // ---- 内部工具 ----
@@ -469,6 +527,11 @@ func attachVolumeLabels(diskNumber int, parts []Partition) {
 			for i := range parts {
 				if parts[i].Offset == e.StartingOffset {
 					parts[i].DriveLetter = l + ":"
+					var label, fs [260]uint16
+					if err := windows.GetVolumeInformation(windows.StringToUTF16Ptr(l+`:\`), &label[0], 260, nil, nil, nil, &fs[0], 260); err == nil {
+						parts[i].Label = windows.UTF16ToString(label[:])
+						parts[i].FSType = windows.UTF16ToString(fs[:])
+					}
 				}
 			}
 		}
