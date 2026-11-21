@@ -13,7 +13,7 @@ LOGFILE="$(readlink -f "${BASH_SOURCE[0]}").log"
 rm -f $LOGFILE*
 exec > >(tee -a "$LOGFILE") 2>&1
 
-echo "VERSION: v1.5.0"
+echo "VERSION: v1.5.1"
 date '+%Y-%m-%d %H:%M:%S'
 
 export SOC_BAK_ALL_IN_ONE=${SOC_BAK_ALL_IN_ONE:-}
@@ -271,6 +271,17 @@ if socbak_partition_uses_sector "${SOC_NAME}"; then
 fi
 SOCBAK_PARTITION_FILE="$(socbak_partition_file_name "${SOC_NAME}")"
 echo "INFO: partition table ${SOCBAK_PARTITION_FILE} ($([[ "${PARTITION_SIZE_IN_SECTOR}" == "1" ]] && echo "size_in_sectors, 1 sector = 512 B" || echo "size_in_kb"))"
+
+# sector 格式的主 GPT 由 sgdisk 生成（binTools/mk_gpt 只认 KiB，无法表达奇数扇区）。
+# 工具随分发包放在 binTools/sgdisk（aarch64 静态链接，与其它 48 个工具一样进 socbak_md5.txt），
+# 板上系统自带的 sgdisk 也可用。这里必须提前检查：真正的调用点在 make_gpt_img，
+# 那之前已经跑完整个备份/打包（几十分钟），缺工具拖到那时才报错会让整轮工作白做
+# —— 与上面 f2fs 工具预检同样的理由。
+if [[ "${PARTITION_SIZE_IN_SECTOR}" == "1" ]] && ! socbak_sgdisk_bin >/dev/null 2>&1; then
+	echo "ERROR: ${SOC_NAME} needs sgdisk to build a sector-unit partition table, but none was found"
+	echo "ERROR: expected ${TGZ_FILES_PATH}/binTools/sgdisk (bundled with socbak) or a system-installed sgdisk in PATH"
+	exit 1
+fi
 
 # 配置区校验：分区名必须是已知的 format="2"/"3" 分区（写错了会静默退回 ext4，必须拦），
 # 取值只能是 ext4/f2fs

@@ -179,11 +179,10 @@ function parse_partition_xml()
 	#find total disk size in kb
 	TOTAL_SIZE=("$(socbak_xml_total "${PARTITION_FILE}")") || panic "parse ${PARTITION_FILE} failed"
 
-	LABELS=() PART_SIZE_IN_KB=() PART_SIZE_IN_SECTOR=() PART_SIZE_IN_BYTE=()
+	LABELS=() PART_SIZE_IN_SECTOR=() PART_SIZE_IN_BYTE=()
 	P_FLAG=() PART_FORMAT=()
 	while IFS='|' read -r label size ro fmt; do
 		LABELS[$i]="$(echo "${label}" | tr '[:upper:]' '[:lower:]')"
-		PART_SIZE_IN_KB[$i]=${size}
 		PART_SIZE_IN_SECTOR[$i]=$(expr ${size} \* 1024 / ${SECTOR_BYTES})
 		PART_SIZE_IN_BYTE[$i]=$(expr ${size} \* 1024)
 		P_FLAG[$i]="${ro}"

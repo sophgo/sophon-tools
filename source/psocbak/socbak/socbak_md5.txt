@@ -38,6 +38,7 @@ bb3291056ad6e04adaa6244cac412c29  ./binTools/mklost+found
 c404535e7cc8a4fa1f64524e33211ff7  ./binTools/pigz
 6fb7cbf88f19f5dd2a4816a5d148461b  ./binTools/resize2fs
 8a3453d77d939c577f3fdd00b98db33d  ./binTools/rsync
+76f5d166828389633501a2efd5def017  ./binTools/sgdisk
 7119124d0e95fb33d364b8886a0ef612  ./binTools/tune2fs
 c404535e7cc8a4fa1f64524e33211ff7  ./binTools/unpigz
 7af141f019a16db2fd3a1d925b9e1a44  ./binTools/uuidd
@@ -46,8 +47,8 @@ a8ce4ad006bcaa3e96e91771e4d24c25  ./binTools/dump.f2fs
 a8ce4ad006bcaa3e96e91771e4d24c25  ./binTools/fsck.f2fs
 f3c00f5c84b1c4697ac1514e6f8412dd  ./binTools/mkfs.f2fs
 a8ce4ad006bcaa3e96e91771e4d24c25  ./binTools/resize.f2fs
-5009e9124224cee5a6875631e2d5db56  ./script/partition_table.sh
-29acd64cbeccdb4716c348c5eebb72a6  ./script/bm1684/bm_make_package.sh
+2e96a8a9b3580fb2cfb316e95e09cd30  ./script/partition_table.sh
+a45e4c7c85fe27659685a42d4f1b33ff  ./script/bm1684/bm_make_package.sh
 7864745c1a0c7e0b72e2a6c68e7e78f9  ./script/bm1688/raw2cimg_edge.py
-59d6ed4d18c80e42f2472832e0af4237  ./script/bm1688/bm_make_package.sh
+e2ad29207b8e3d2e2b15aa63169d1cef  ./script/bm1688/bm_make_package.sh
 43df176eacb8f9c7e52dde9a706cd478  ./script/ota_update/ota_update.sh

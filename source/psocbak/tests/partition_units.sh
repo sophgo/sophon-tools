@@ -695,6 +695,61 @@ else
 	echo "  skip GPT 临时文件并发隔离（环境里没有 sgdisk）"
 fi
 
+echo "== I. 属性值含 \">\"（XML 合法输入） =="
+# XML 允许属性值里出现 ">"。按 "<" 分记录后如果直接 sub(/>.*/, ">") 截断，
+# label="A>B" 会被截成 label="A，整个属性解析失败。老解析器（逐行 grep）能正确处理，
+# 这里保证统一解析器不退步。
+cat > "${WORK}/gt_in_attr.xml" <<'XML'
+<physical_partition size_in_sectors="40000">
+  <partition label="A>B" size_in_sectors="8192" readonly="true" format="1" />
+  <partition label="PLAIN" size_in_sectors="4096" readonly="false" format="2" />
+</physical_partition>
+XML
+check_eq "属性值含 > 时标签被完整保留" \
+	"A>B|8192|true|1
+PLAIN|4096|false|2" \
+	"$(socbak_xml_partition_rows "${WORK}/gt_in_attr.xml")"
+check_eq "属性值含 > 时总容量仍可读" "40000" \
+	"$(socbak_xml_total "${WORK}/gt_in_attr.xml")"
+# 单引号属性值同理
+cat > "${WORK}/gt_in_attr_sq.xml" <<'XML'
+<physical_partition size_in_sectors='40000'>
+  <partition label='A>B' size_in_sectors='8192' readonly='true' format='1' />
+</physical_partition>
+XML
+check_eq "单引号属性值含 > 时同样完整保留" "A>B|8192|true|1" \
+	"$(socbak_xml_partition_rows "${WORK}/gt_in_attr_sq.xml")"
+# 注释里出现 ">" 不能干扰后续真实分区
+cat > "${WORK}/gt_in_comment.xml" <<'XML'
+<physical_partition size_in_sectors="40000">
+  <!-- a > b: <partition label="GHOST" size_in_sectors="9" /> -->
+  <partition label="BOOT" size_in_sectors="8192" format="1" />
+</physical_partition>
+XML
+check_eq "注释内的 > 与伪分区都被忽略" "BOOT|8192|false|1" \
+	"$(socbak_xml_partition_rows "${WORK}/gt_in_comment.xml")"
+
+echo "== J. sgdisk 定位与写盘属性名共用单一定义 =="
+# 写盘与解析必须共用同一个属性名来源，否则 unit 名可能两处漂移
+check_eq "emit 使用 socbak_size_attr_name 而非内联分支" "0" \
+	"$(sed -n '/^socbak_emit_partition_xml()/,/^}/p' "${PT_SH}" | grep -c 'attr="size_in_')"
+for u in 0 1; do
+	attr="$(socbak_size_attr_name "${u}")"
+	out="${WORK}/attr_${u}.xml"
+	socbak_emit_partition_xml "${out}" "${u}" 40000 "BOOT|8192|false|1"
+	check_eq "emit(${u}) 的根元素用 ${attr}" "1" \
+		"$(grep -c "<physical_partition ${attr}=" "${out}")"
+	check_eq "emit(${u}) 的分区行用 ${attr}" "1" \
+		"$(grep -c "<partition label=\"BOOT\"[^>]* ${attr}=" "${out}")"
+done
+# SOCBAK_SGDISK_BIN 优先取分发包自带的那份
+if [ -x "${SOCBAK_DIR}/binTools/sgdisk" ]; then
+	bundled="$(TGZ_FILES_PATH="${SOCBAK_DIR}" socbak_sgdisk_bin)"
+	check_eq "优先选中自带 binTools/sgdisk" "${SOCBAK_DIR}/binTools/sgdisk" "${bundled}"
+else
+	bad "分发包自带 binTools/sgdisk" "文件不存在或不可执行"
+fi
+
 echo "== F. CV84×6 SDK 夹具核查（SE13） =="
 SDK_XML="${SOCBAK_SDK_SECTOR_XML:-}"
 if [ -z "${SDK_XML}" ]; then
