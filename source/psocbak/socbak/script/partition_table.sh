@@ -65,40 +65,643 @@ socbak_size_attr_name()
 	fi
 }
 
+# ROOTFS_RW 吸收其他分区扩容/缩容的通用实现，单位由调用方决定（KiB 或扇区，
+# 只要 old/new/rw/margin 四者同单位即可）。两条既有/新增模式共用这一份规则，
+# 避免 200 MiB 余量在两处各写一遍后漂移。
+#   $1 原“除 RW 所在分区组外”的合计（例如固定 DATA 起点模式里除 DATA 外的合计）
+#   $2 新“除 RW 所在分区组外”的合计
+#   $3 当前 ROOTFS_RW 大小
+#   $4 扩容余量（与 $1..$3 同单位）
+# 结果通过全局变量返回，不写 stdout —— 必须在调用者所在的 shell 里直接调用，
+# 不能写成 X="$(...)"：命令替换是子 shell，失败差额留在子 shell 里，
+# 调用方读到的是未定义变量（set -u 下直接 unbound variable），真正的原因会被掩盖。
+#   成功：SOCBAK_RW_COMPENSATE_RW = 调整后的 ROOTFS_RW，返回 0
+#   失败：SOCBAK_RW_COMPENSATE_DIFF = 需要的差额（含余量），返回 1
+socbak_rw_compensate()
+{
+	local old_size="$1"
+	local new_size="$2"
+	local rw_size="$3"
+	local margin="$4"
+	local diff
+
+	SOCBAK_RW_COMPENSATE_RW=""
+	SOCBAK_RW_COMPENSATE_DIFF=0
+	if [ "${old_size}" -gt "${new_size}" ]; then
+		rw_size=$(( rw_size + (old_size - new_size) ))
+	elif [ "${old_size}" -lt "${new_size}" ]; then
+		diff=$(( new_size - old_size + margin ))
+		if [ "${rw_size}" -lt "${diff}" ]; then
+			SOCBAK_RW_COMPENSATE_DIFF=${diff}
+			return 1
+		fi
+		rw_size=$(( rw_size - (new_size - old_size) ))
+	fi
+	SOCBAK_RW_COMPENSATE_RW=${rw_size}
+	return 0
+}
+
 # SOC_BAK_FIXED_DATA_START：用 ROOTFS_RW 吸收其他分区的扩容/缩容，使最后一个分区
 # （DATA）的起始扇区保持不变，OTA 才能在升级时保留 DATA。
 #   $1 配置侧“除 DATA 外”的分区合计（KiB）
 #   $2 本次打包实际“除 DATA 外”的分区合计（KiB）
 #   $3 当前 ROOTFS_RW 大小（KiB）
-# 结果通过全局变量返回，不写 stdout —— 必须在调用者所在的 shell 里直接调用，
-# 不能写成 X="$(socbak_fixed_data_start_rw ...)"：命令替换是子 shell，
-# 失败差额留在子 shell 里，调用方读到的是未定义变量（set -u 下直接 unbound variable），
-# 真正的原因会被 "unbound variable" 掩盖掉。
 #   成功：SOCBAK_FIXED_DATA_START_RW_KB = 调整后的 ROOTFS_RW（KiB），返回 0
 #   失败：SOCBAK_FIXED_DATA_START_DIFF_KB = 需要的差额（KiB），返回 1
-# 与原实现逐字对应：扩容方向直接把差额还给 ROOTFS_RW；缩容方向要求 ROOTFS_RW 至少比差额
+# 与历史实现逐字对应：扩容方向直接把差额还给 ROOTFS_RW；缩容方向要求 ROOTFS_RW 至少比差额
 # 多出 200 MiB 余量（RW_BUFFER_SIZE = 200 * 1024 KiB），否则判定打包失败。
 socbak_fixed_data_start_rw()
 {
-	local old_kb="$1"
-	local new_kb="$2"
-	local rw_kb="$3"
 	local diff_kb
 
 	SOCBAK_FIXED_DATA_START_RW_KB=""
 	SOCBAK_FIXED_DATA_START_DIFF_KB=0
-	if [ "${old_kb}" -gt "${new_kb}" ]; then
-		rw_kb=$(( rw_kb + (old_kb - new_kb) ))
-	elif [ "${old_kb}" -lt "${new_kb}" ]; then
-		diff_kb=$(( new_kb - old_kb + 200 * 1024 ))
-		if [ "${rw_kb}" -lt "${diff_kb}" ]; then
-			SOCBAK_FIXED_DATA_START_DIFF_KB=${diff_kb}
+	if ! socbak_rw_compensate "$1" "$2" "$3" $(( 200 * 1024 )); then
+		diff_kb=${SOCBAK_RW_COMPENSATE_DIFF}
+		SOCBAK_FIXED_DATA_START_DIFF_KB=${diff_kb}
+		return 1
+	fi
+	SOCBAK_FIXED_DATA_START_RW_KB=${SOCBAK_RW_COMPENSATE_RW}
+	return 0
+}
+# ==================== SOC_BAK_LOCAL_UPDATE_LAYOUT（SE9/SE13 local_update） ====================
+# SDK 的 local_update 把升级指令写进 MISC(p3) 交给 recovery，写盘前用
+# scripts/check_partition_start_sector.sh 逐项比较源机与包内 partition32G_sector.xml 的
+# DATA、MISC、ROOTFS 起点，任何一项不同就拒绝升级。所以打包源机上的 GPT 前缀必须原样
+# 复制到新包：BOOT/RECOVERY/MISC 的起点与长度、ROOTFS 起点、DATA 起点全部冻结，
+# 只允许 ROOTFS 长度、ROOTFS_RW 起点、ROOTFS_RW 长度、DATA 长度这四个数值随内容变化。
+# 本节只做「只读读取源表」与「按内容算出新几何」两件事，不碰设备、不写任何文件。
+
+SOCBAK_LU_PART_ORDER=(BOOT RECOVERY MISC ROOTFS ROOTFS_RW DATA)
+# 与该 SDK 分区顺序一一对应的分区号。这些编号是硬约束，不是装饰：
+#   local_update.sh 把升级指令 `dd ... /dev/mmcblk0p3`（MISC），
+#   check_partition_start_sector.sh 的 convert_label_to_device 把
+#   BOOT/RECOVERY/MISC/ROOTFS/ROOTFS_RW/DATA 映射成 p1/p2/p3/p4/p5/p6。
+# 所以只要编号错位，即使标签与几何完全正确，升级程序也会写错分区。
+SOCBAK_LU_PART_NUMBERS=(1 2 3 4 5 6)
+# 首分区固定 LBA（与 SDK 的 PARTITION_TABLE_OFFSET / BOOT_PART_OFFSET 一致）
+SOCBAK_LU_FIRST_LBA=8192
+# 末分区之后必须留给备份 GPT 的扇区数（= SDK mk_sector_gpt 的 last_usable_lba = total-34）
+SOCBAK_LU_BACKUP_GPT_SECTORS=34
+# ROOTFS 增长时 ROOTFS_RW 必须保留的余量，与 SOC_BAK_FIXED_DATA_START 的 200 MiB 同源
+SOCBAK_LU_RW_MARGIN_SECTORS=$(( 200 * 1024 * 2 ))
+
+# 只读抓取 sgdisk -p 的表头与分区行，并确认这是一块**已有 GPT** 的盘。
+# sgdisk -p 遇到没有 GPT 的文件不会报错，而是打印 "Creating new GPT entries in memory."
+# 并给出一个空表 + 按文件大小折算的盘容量；那会把任意普通文件当成合法源表，必须显式拒绝。
+# 输出：第 1 行是总扇区数，其余是分区行（Number Start End）。
+# $1 设备/镜像路径
+socbak_local_update_read_table()
+{
+	local dev="$1" _sgdisk out
+
+	_sgdisk="$(socbak_sgdisk_bin)" || return 1
+	out="$(LC_ALL=C "${_sgdisk}" -p "${dev}" 2>&1)" || {
+		echo "ERROR: cannot read the partition table of ${dev} with sgdisk" >&2
+		return 1
+	}
+	if printf '%s\n' "${out}" | grep -q 'Creating new GPT entries in memory'; then
+		echo "ERROR: ${dev} has no GPT partition table (sgdisk would create a new one)" >&2
+		return 1
+	fi
+	if ! printf '%s\n' "${out}" | grep -q '^Number  Start'; then
+		echo "ERROR: ${dev} has no GPT partition table" >&2
+		return 1
+	fi
+	# "Disk /dev/mmcblk0: 61071360 sectors, 29.1 GiB" -> 61071360。
+	# 只认表头里的 "<N> sectors"，不按固定列取（不同 sgdisk 版本的空白与列数不同）；
+	# 字段上可能带逗号（"sectors,"），去掉非数字再比。
+	printf '%s\n' "${out}" | awk '/^Disk / {
+		for (i = 1; i <= NF; i++) {
+			f = $i; gsub(/[^a-z]/, "", f)
+			if (f == "sectors") { n = $(i - 1); gsub(/[^0-9]/, "", n); print n; exit } } }'
+	printf '%s\n' "${out}" |
+		awk '$1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ && $3 ~ /^[0-9]+$/ {print $1, $2, $3}'
+}
+
+# 只读读取磁盘的 GPT 分区表：分区号、标签、起点、长度（单位 512 B 扇区）。
+# 输出每行 "LABEL|PARTNO|START|LEN"，按分区号升序；标签为空时写 "-"。
+# 只读：sgdisk -p / -i 都不改写设备内容（块设备与镜像文件同理，已实测镜像 md5 不变）。
+# $1 设备/镜像路径
+socbak_read_disk_layout()
+{
+	local dev="$1" _sgdisk table num start end label
+
+	_sgdisk="$(socbak_sgdisk_bin)" || return 1
+	# 先取表再逐行读标签：不能用管道把 read_table 的输出交给 sed，
+	# 管道会吞掉 read_table 的失败退出码，"没有 GPT" 就会被当成"零个分区"。
+	table="$(socbak_local_update_read_table "${dev}")" || return 1
+	# Size 列可能是 "512 bytes" / "80.0 KiB" / "17.0 GiB"，按列数取标签会错位，
+	# 所以标签一律用 sgdisk -i 单独读（单引号包裹，允许标签含空格）。
+	while read -r num start end; do
+		[ -n "${num}" ] || continue
+		label="$(LC_ALL=C "${_sgdisk}" -i "${num}" "${dev}" 2>/dev/null |
+			awk -F"'" '/^Partition name:/ {print $2; exit}')"
+		printf '%s|%s|%s|%s\n' "${label:--}" "${num}" "${start}" "$(( end - start + 1 ))"
+	done <<< "$(printf '%s\n' "${table}" | sed '1d')"
+}
+
+# 只读读取磁盘的总扇区数（来自 GPT 表头）。
+# $1 设备/镜像路径
+socbak_read_disk_total_sectors()
+{
+	local table
+
+	table="$(socbak_local_update_read_table "$1")" || return 1
+	printf '%s\n' "${table}" | sed -n '1p'
+}
+
+# 校验源布局文件本身（形状、标签顺序、首尾相接、冻结区为整 KiB），不涉及本次内容。
+# 供 socbak.sh 在备份开始前先跑一遍：布局不对就没必要再备份几个 GB。
+#   $1 源布局文件（socbak_read_disk_layout 的输出）
+# 成功返回 0，并把冻结区尺寸（KiB）写进全局：
+#   SOCBAK_LU_SRC_BOOT_KB / SOCBAK_LU_SRC_RECOVERY_KB / SOCBAK_LU_SRC_MISC_KB
+#   SOCBAK_LU_SRC_ROOTFS_START / SOCBAK_LU_SRC_ROOTFS_LEN / SOCBAK_LU_SRC_DATA_START
+socbak_local_update_check_source()
+{
+	local layout="$1"
+	local -a labels=() nums=() starts=() lens=()
+	local label num start len i c
+
+	SOCBAK_LU_SRC_BOOT_KB=""
+	SOCBAK_LU_SRC_RECOVERY_KB=""
+	SOCBAK_LU_SRC_MISC_KB=""
+	SOCBAK_LU_SRC_ROOTFS_START=""
+	SOCBAK_LU_SRC_ROOTFS_LEN=""
+	SOCBAK_LU_SRC_DATA_START=""
+
+	[ -f "${layout}" ] || { echo "ERROR: source layout file ${layout} not found" >&2; return 1; }
+	while IFS='|' read -r label num start len; do
+		[ -n "${num}" ] || continue
+		labels+=("${label}")
+		nums+=("${num}")
+		starts+=("${start}")
+		lens+=("${len}")
+	done < "${layout}"
+
+	# 用标签与分区号双重辨认：数量、顺序、标签任一不符都说明这不是该 SDK 的布局
+	if [ "${#labels[@]}" -ne "${#SOCBAK_LU_PART_ORDER[@]}" ]; then
+		echo "ERROR: ${layout}: expected the ${#SOCBAK_LU_PART_ORDER[@]}-partition local_update layout (${SOCBAK_LU_PART_ORDER[*]}), found ${#labels[@]}: ${labels[*]}" >&2
+		return 1
+	fi
+	for i in "${!SOCBAK_LU_PART_ORDER[@]}"; do
+		if [ "${labels[$i]}" != "${SOCBAK_LU_PART_ORDER[$i]}" ]; then
+			echo "ERROR: ${layout}: partition $(( i + 1 )) is \"${labels[$i]}\", expected \"${SOCBAK_LU_PART_ORDER[$i]}\"" >&2
 			return 1
 		fi
-		rw_kb=$(( rw_kb - (new_kb - old_kb) ))
+	done
+	# 分区号必须与 SDK 一致：local_update.sh 直接 dd 到 /dev/mmcblk0p3 传升级指令，
+	# check_partition_start_sector.sh 也按 BOOT=p1..DATA=p6 映射设备节点。
+	# 只比标签不够 —— 几何和标签都一样、编号却是 2..7 的盘必须被拒绝。
+	# SOCBAK_LU_PART_NUMBERS 的语义见其定义（p3=MISC、p4=ROOTFS、p6=DATA 是硬约束）。
+	for i in "${!SOCBAK_LU_PART_NUMBERS[@]}"; do
+		if [ "${nums[$i]}" != "${SOCBAK_LU_PART_NUMBERS[$i]}" ]; then
+			echo "ERROR: ${layout}: partition \"${labels[$i]}\" is number ${nums[$i]}, but the SDK local_update tools address it as p${SOCBAK_LU_PART_NUMBERS[$i]} (they write the recovery command to p3 and map BOOT..DATA to p1..p6)" >&2
+			return 1
+		fi
+	done
+	for i in "${!labels[@]}"; do
+		for c in "${starts[$i]}" "${lens[$i]}"; do
+			[[ "${c}" =~ ^[0-9]+$ ]] || {
+				echo "ERROR: ${layout}: invalid geometry for ${labels[$i]}: \"${c}\"" >&2
+				return 1; }
+		done
+		[ "${lens[$i]}" -gt 0 ] || {
+			echo "ERROR: ${layout}: partition ${labels[$i]} has zero length" >&2
+			return 1; }
+	done
+
+	# 源表必须从 LBA 8192 起首尾相接：打包链按 XML 行序连续落位，
+	# 源表有空洞时无法只靠 XML 复现已冻结的起点，属于「无法精确表达」。
+	if [ "${starts[0]}" -ne "${SOCBAK_LU_FIRST_LBA}" ]; then
+		echo "ERROR: ${layout}: BOOT starts at LBA ${starts[0]}, expected ${SOCBAK_LU_FIRST_LBA}" >&2
+		return 1
 	fi
-	SOCBAK_FIXED_DATA_START_RW_KB=${rw_kb}
+	for i in $(seq 1 $(( ${#labels[@]} - 1 ))); do
+		if [ "${starts[$i]}" -ne $(( starts[i - 1] + lens[i - 1] )) ]; then
+			echo "ERROR: ${layout}: ${labels[$i]} starts at LBA ${starts[$i]}, but ${labels[$i - 1]} ends at LBA $(( starts[i - 1] + lens[i - 1] - 1 )); a non-contiguous source layout cannot be reproduced from the partition table" >&2
+			return 1
+		fi
+	done
+
+	# 冻结区必须能用整 KiB 表达（socbak 内部以 KiB 计）：
+	# 不能悄悄取整，否则冻结项的起点会平移，local_update 的起点检查随即失败。
+	for i in 0 1 2; do
+		if [ $(( lens[i] % 2 )) -ne 0 ]; then
+			echo "ERROR: ${layout}: fixed prefix partition ${labels[$i]} length ${lens[$i]} sectors is odd; socbak stores sizes in KiB and cannot express it exactly" >&2
+			return 1
+		fi
+		if [ $(( starts[i] % 2 )) -ne 0 ]; then
+			echo "ERROR: ${layout}: fixed prefix partition ${labels[$i]} starts at odd LBA ${starts[$i]}; socbak stores sizes in KiB and cannot express it exactly" >&2
+			return 1
+		fi
+	done
+	# ROOTFS 起点同样被冻结（SDK 的 check_partition_start_sector.sh 直接比较它）
+	if [ $(( starts[3] % 2 )) -ne 0 ] || [ $(( starts[5] % 2 )) -ne 0 ]; then
+		echo "ERROR: ${layout}: ROOTFS start ${starts[3]} / DATA start ${starts[5]} must be even LBAs; socbak stores sizes in KiB and cannot express odd offsets" >&2
+		return 1
+	fi
+
+	SOCBAK_LU_SRC_BOOT_KB=$(( lens[0] / 2 ))
+	SOCBAK_LU_SRC_RECOVERY_KB=$(( lens[1] / 2 ))
+	SOCBAK_LU_SRC_MISC_KB=$(( lens[2] / 2 ))
+	SOCBAK_LU_SRC_ROOTFS_START=${starts[3]}
+	SOCBAK_LU_SRC_ROOTFS_LEN=${lens[3]}
+	SOCBAK_LU_SRC_DATA_START=${starts[5]}
+	# 源表原样的几何，规划时除四个自由度外逐项照抄
+	SOCBAK_LU_SRC_ROWS=()
+	for i in "${!labels[@]}"; do
+		SOCBAK_LU_SRC_ROWS+=("${labels[$i]}|${starts[$i]}|${lens[$i]}")
+	done
 	return 0
+}
+
+# 规划 local_update 布局：源表逐项冻结，只按内容改四个数值。
+#   $1 源布局文件（socbak_read_disk_layout 的输出）
+#   $2 源盘总扇区数
+#   $3 新 ROOTFS 长度（扇区）
+#   $4 新 DATA 长度（扇区）
+#   $5 打包策略给出的总容量（扇区）；DATA 装不下时抬高，上限是源盘
+# 结果（全局，单位一律 512 B 扇区）：
+#   SOCBAK_LU_ROWS   每行 "LABEL|START|LEN"，顺序 BOOT..DATA，冻结项与源表逐项相同
+#   SOCBAK_LU_TOTAL  分区表总容量（偶数扇区）
+# 失败：原因写 stderr，返回 1，且不留下 SOCBAK_LU_ROWS / SOCBAK_LU_TOTAL。
+#
+# 源表本身的形状由 socbak_local_update_check_source 把关（标签顺序、首尾相接、偶数 LBA）；
+# 这里只负责「按内容算新几何」和「容量是否装得下」。
+socbak_local_update_plan()
+{
+	local layout="$1"
+	local disk_sectors="$2"
+	local rootfs_len="$3"
+	local data_len="$4"
+	local strategy_total="$5"
+	local label len needed total rw_len pair
+	local r_start r_len_old rw_len_old d_start
+
+	SOCBAK_LU_ROWS=()
+	SOCBAK_LU_TOTAL=""
+
+	socbak_local_update_check_source "${layout}" || return 1
+
+	[ -n "${disk_sectors}" ] || { echo "ERROR: source disk sector count is empty" >&2; return 1; }
+	[[ "${disk_sectors}" =~ ^[0-9]+$ ]] || {
+		echo "ERROR: invalid source disk sector count \"${disk_sectors}\"" >&2; return 1; }
+
+	r_start=${SOCBAK_LU_SRC_ROOTFS_START}
+	r_len_old=${SOCBAK_LU_SRC_ROOTFS_LEN}
+	d_start=${SOCBAK_LU_SRC_DATA_START}
+	rw_len_old=$(( d_start - r_start - r_len_old ))
+
+	# 随内容变化的两个长度也必须能用整 KiB 表达（同样是为了不取整）
+	for pair in "ROOTFS:${rootfs_len}" "DATA:${data_len}"; do
+		label="${pair%%:*}"
+		len="${pair##*:}"
+		if ! [[ "${len}" =~ ^[0-9]+$ ]] || [ "${len}" -le 0 ]; then
+			echo "ERROR: local_update layout: invalid new ${label} length \"${len}\"" >&2
+			return 1
+		fi
+		if [ $(( len % 2 )) -ne 0 ]; then
+			echo "ERROR: local_update layout: new ${label} length ${len} sectors is odd; socbak stores sizes in KiB and cannot express it exactly" >&2
+			return 1
+		fi
+	done
+
+	# ROOTFS 起点冻结、长度随内容；ROOTFS_RW 起点 = R + 新 ROOTFS 长度，
+	# 长度 = 原 DATA 起点 - 新 ROOTFS_RW 起点（ROOTFS 增长时保留 200 MiB 余量）。
+	# 复用与 SOC_BAK_FIXED_DATA_START 同一个补偿函数，只把单位换成扇区，规则只有一份。
+	if ! socbak_rw_compensate "${d_start}" $(( d_start + rootfs_len - r_len_old )) \
+		"${rw_len_old}" "${SOCBAK_LU_RW_MARGIN_SECTORS}"; then
+		echo "ERROR: local_update layout: ROOTFS grows from ${r_len_old} to ${rootfs_len} sectors, ROOTFS_RW (${rw_len_old} sectors) cannot absorb that and keep the $(( SOCBAK_LU_RW_MARGIN_SECTORS / 2048 )) MiB margin (needs ${SOCBAK_RW_COMPENSATE_DIFF} sectors)" >&2
+		return 1
+	fi
+	rw_len=${SOCBAK_RW_COMPENSATE_RW}
+	if [ "${rw_len}" -ne $(( d_start - r_start - rootfs_len )) ]; then
+		echo "ERROR: local_update layout: ROOTFS_RW length ${rw_len} != DATA start ${d_start} - ROOTFS end $(( r_start + rootfs_len )); the result is not self-consistent" >&2
+		return 1
+	fi
+	if [ $(( rw_len % 2 )) -ne 0 ]; then
+		echo "ERROR: local_update layout: derived ROOTFS_RW length ${rw_len} sectors is odd; socbak stores sizes in KiB and cannot express it exactly" >&2
+		return 1
+	fi
+
+	# 容量：沿用原打包策略给出的总容量，只在 DATA 需要更多空间时抬到刚好够用；
+	# 上限是源盘自身（超过就越过源机备份 GPT 的位置，刷上去必坏表）。
+	needed=$(( d_start + data_len + SOCBAK_LU_BACKUP_GPT_SECTORS ))
+	[[ "${strategy_total}" =~ ^[0-9]+$ ]] || {
+		echo "ERROR: local_update layout: invalid strategy total \"${strategy_total}\"" >&2
+		return 1; }
+	total=${strategy_total}
+	if [ "${total}" -lt "${needed}" ]; then
+		total=${needed}
+	fi
+	# 总容量按 2 扇区（1 KiB）对齐，保证写进 XML 的总容量与内部 KiB 值一一对应
+	if [ $(( total % 2 )) -ne 0 ]; then
+		total=$(( total + 1 ))
+	fi
+	if [ "${total}" -gt "${disk_sectors}" ]; then
+		echo "ERROR: local_update layout: DATA (start ${d_start}, length ${data_len}) needs the partition table to be ${total} sectors, but the source disk has only ${disk_sectors} sectors; the data does not fit" >&2
+		return 1
+	fi
+
+	SOCBAK_LU_ROWS=(
+		"${SOCBAK_LU_SRC_ROWS[0]}"
+		"${SOCBAK_LU_SRC_ROWS[1]}"
+		"${SOCBAK_LU_SRC_ROWS[2]}"
+		"ROOTFS|${r_start}|${rootfs_len}"
+		"ROOTFS_RW|$(( r_start + rootfs_len ))|${rw_len}"
+		"DATA|${d_start}|${data_len}"
+	)
+	SOCBAK_LU_TOTAL=${total}
+	return 0
+}
+
+# 把一份分区表 XML 换算成 "LABEL|START|LEN" 几何（起点从 LBA 8192 连续累加）。
+# 供写盘后与最终 gpt.gz 解码结果交叉验证：包内 XML 与 GPT 不能各说各话。
+# $1 分区表 XML
+socbak_xml_geometry()
+{
+	local xml="$1" label size ro fmt lba=8192
+
+	socbak_xml_partition_rows "${xml}" | while IFS='|' read -r label size ro fmt; do
+		[ -n "${label}" ] || continue
+		printf '%s|%s|%s\n' "${label}" "${lba}" "${size}"
+		lba=$(( lba + size ))
+	done
+}
+
+# 从主 GPT 文件解码 "LABEL|START|LEN" 几何（只读分区项数组，不重算落位）。
+# 与 socbak_gen_gpt_sector 的落位规则无关地重算，才能作为独立对照。
+#
+# 解析一律用 bash 内置算术 + od，**不用 awk**：
+#   - 板上 /usr/bin/awk 是 mawk（SE9 镜像实测 mawk 1.3.4），没有 strtonum、
+#     也没有 gensub，GNU awk 的写法在板上直接报 "function strtonum never defined"；
+#   - bash 的 $(( )) 是 64 位整数，比 awk 的 double 更精确，正好适合解 LBA；
+#   - od 用 busybox 也支持的 -tu1（十进制字节）+ -j/-N，不需要 GNU 扩展。
+# 这样同一份代码在 x86 回归主机与板上（mawk / busybox od）都跑得动。
+
+# 把一段二进制读成十进制字节数组（全局 SOCBAK_GPT_BYTES）
+# $1 文件；$2 起始偏移；$3 字节数
+socbak_read_bytes()
+{
+	local i
+	SOCBAK_GPT_BYTES=()
+	# tr 的字符类比 '\t' 这样的转义更可移植（busybox/coreutils 都认）
+	while read -r i; do
+		[ -n "${i}" ] && SOCBAK_GPT_BYTES+=("${i}")
+	done < <(od -An -tu1 -v -j "$2" -N "$3" "$1" 2>/dev/null | tr -s '[:space:]' '\n')
+	[ "${#SOCBAK_GPT_BYTES[@]}" -eq "$3" ] || return 1
+	return 0
+}
+
+# 把 SOCBAK_GPT_BYTES 里的一段按 ASCII 读成字符串（GPT 头签名等）
+# $1 起始偏移；$2 字节数
+socbak_le_ascii()
+{
+	local off="$1" n="$2" k s=""
+
+	for (( k = 0; k < n; k++ )); do
+		s="${s}$(printf "\\$(printf '%03o' "${SOCBAK_GPT_BYTES[off + k]}")")"
+	done
+	printf '%s' "${s}"
+}
+
+# 从 SOCBAK_GPT_BYTES 解小端无符号整数（纯 bash，64 位精确）
+# $1 起始偏移；$2 字节数
+# 超过 6 字节（48 位 = 281 TB）视为非法：eMMC 远达不到，提前拦住比静默溢出好。
+socbak_le_uint()
+{
+	local off="$1" n="$2" k v=0 p=1
+
+	if [ "${n}" -gt 6 ]; then
+		for (( k = 6; k < n; k++ )); do
+			[ "${SOCBAK_GPT_BYTES[off + k]}" -eq 0 ] || return 1
+		done
+		n=6
+	fi
+	for (( k = 0; k < n; k++ )); do
+		v=$(( v + SOCBAK_GPT_BYTES[off + k] * p ))
+		p=$(( p * 256 ))
+	done
+	printf '%s' "${v}"
+}
+
+# 从 SOCBAK_GPT_BYTES 解 GPT 分区名（UTF-16LE，最多 36 个字符）
+# 非 ASCII 字符用 "?" 代替：只影响报错可读性，不影响几何比对。
+# $1 起始偏移
+socbak_le_name()
+{
+	local off="$1" k lo hi s=""
+
+	for (( k = 0; k < 36; k++ )); do
+		lo=${SOCBAK_GPT_BYTES[off + k * 2]}
+		hi=${SOCBAK_GPT_BYTES[off + k * 2 + 1]}
+		if [ "${lo}" -eq 0 ] && [ "${hi}" -eq 0 ]; then break; fi
+		if [ "${hi}" -eq 0 ] && [ "${lo}" -ge 32 ] && [ "${lo}" -lt 127 ]; then
+			s="${s}$(printf "\\$(printf '%03o' "${lo}")")"
+		else
+			s="${s}?"
+		fi
+	done
+	printf '%s' "${s}"
+}
+
+# 从主 GPT 文件解码 "LABEL|START|LEN" 几何（只读分区项数组，不重算落位）。
+# 与 socbak_gen_gpt_sector 的落位规则无关地重算，才能作为独立对照。
+# $1 主 GPT 文件（17408 字节，LBA 0..33）
+socbak_gpt_geometry()
+{
+	local gpt="$1" num esz base i off start end nm
+
+	[ -s "${gpt}" ] || { echo "ERROR: gpt file ${gpt} is empty" >&2; return 1; }
+	# 头签名 "EFI PART"（LBA 1 的前 8 字节）
+	socbak_read_bytes "${gpt}" 512 8 || {
+		echo "ERROR: ${gpt}: cannot read the GPT header" >&2; return 1; }
+	[ "$(socbak_le_ascii 0 8)" = "EFI PART" ] || {
+		echo "ERROR: ${gpt}: no valid GPT header signature" >&2
+		return 1; }
+
+	socbak_read_bytes "${gpt}" 512 88 || {
+		echo "ERROR: ${gpt}: short GPT header" >&2; return 1; }
+	num="$(socbak_le_uint 80 4)" || { echo "ERROR: ${gpt}: invalid entry count" >&2; return 1; }
+	esz="$(socbak_le_uint 84 4)" || { echo "ERROR: ${gpt}: invalid entry size" >&2; return 1; }
+	[ "${esz}" -gt 0 ] || esz=128
+	if [ "${num}" -lt 1 ] || [ "${num}" -gt 128 ] || [ "${esz}" -lt 128 ]; then
+		echo "ERROR: ${gpt}: invalid GPT geometry (entries=${num} entry_size=${esz})" >&2
+		return 1
+	fi
+
+	# 分区项数组从 LBA 2（偏移 1024）起；只读实际用到的那些项
+	socbak_read_bytes "${gpt}" 1024 $(( num * esz )) || {
+		echo "ERROR: ${gpt}: short GPT partition array" >&2; return 1; }
+
+	base=0
+	for (( i = 0; i < num; i++ )); do
+		off=$(( base + i * esz ))
+		start="$(socbak_le_uint $(( off + 32 )) 8)" || {
+			echo "ERROR: ${gpt}: partition $(( i + 1 )) has an out-of-range start LBA" >&2
+			return 1; }
+		end="$(socbak_le_uint $(( off + 40 )) 8)" || {
+			echo "ERROR: ${gpt}: partition $(( i + 1 )) has an out-of-range end LBA" >&2
+			return 1; }
+		if [ "${start}" -eq 0 ] && [ "${end}" -eq 0 ]; then continue; fi
+		nm="$(socbak_le_name $(( off + 56 )))"
+		[ -n "${nm}" ] || nm="-"
+		printf '%s|%s|%s\n' "${nm}" "${start}" "$(( end - start + 1 ))"
+	done
+}
+
+# 从主 GPT 文件读分区表总容量（扇区数）：主头里的 AlternateLBA + 1。
+# 同样纯 bash 解析，不依赖 GNU awk。
+# $1 主 GPT 文件
+socbak_gpt_total_sectors()
+{
+	local alt
+
+	socbak_read_bytes "$1" 512 56 || return 1
+	alt="$(socbak_le_uint 32 8)" || return 1
+	printf '%s\n' "$(( alt + 1 ))"
+}
+
+# 逐项比较两份几何（"LABEL|START|LEN"）。不同则打印差异并返回 1。
+# 用于「计划 vs XML」与「计划 vs gpt.gz」两处交叉验证。
+#   $1 期望几何文件
+#   $2 实际几何文件
+#   $3 说明（出现在报错里）
+socbak_local_update_match()
+{
+	local want="$1" got="$2" what="$3"
+
+	if ! diff -u <(sed '/^$/d' "${want}") <(sed '/^$/d' "${got}") >/dev/null 2>&1; then
+		echo "ERROR: ${what} does not match the planned local_update layout:" >&2
+		diff -u <(sed '/^$/d' "${want}") <(sed '/^$/d' "${got}") >&2
+		return 1
+	fi
+	return 0
+}
+
+# checksum 与 socbak.sh 里 SOC_BAK_LOCAL_UPDATE_LAYOUT 的固定区判定共用这一份定义：
+# 固定区 = 起点与长度都来自源机 GPT 的分区（BOOT 与 RECOVERY 有内容镜像，MISC 没有）。
+# 这些分区的镜像必须正好是源机容量，不能因 shrink 搜索或余量被放大/缩小。
+# $1 分区名（小写，与 TGZ_FILES 一致）
+socbak_lu_is_frozen_part()
+{
+	case "$1" in
+		boot|recovery) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
+# 核对一份**将要交付的刷机包**的分区表是否满足 local_update 的冻结要求：
+# BOOT/RECOVERY/MISC 的起点与长度、ROOTFS 起点、DATA 起点必须与源机逐项相等，
+# 只允许 ROOTFS 长度、ROOTFS_RW 起点/长度、DATA 长度这四个数值与源机不同。
+# 这是 SDK check_partition_start_sector.sh 的本地等价物，但更严：SDK 只比三个起点，
+# 这里连冻结区的长度一起比，才能挡住「MISC 挪了位置但 DATA 起点没动」这种包
+# （旧版 socbak 的固定 DATA 起点模式就产出过这种包，DATA 起点对得上却无法 local_update）。
+#   $1 待检查的分区表 XML
+#   $2 源布局文件（socbak_read_disk_layout 的输出）
+# 通过返回 0；否则打印每一项的差异并返回 1。
+socbak_local_update_verify_xml()
+{
+	local xml="$1"
+	local layout="$2"
+	local -a want_label=() want_start=() want_len=() got_label=() got_start=() got_len=()
+	local label num start len lba=8192 i rc=0
+
+	[ -f "${xml}" ] || { echo "ERROR: partition xml ${xml} not found" >&2; return 1; }
+	[ -f "${layout}" ] || { echo "ERROR: source layout ${layout} not found" >&2; return 1; }
+
+	while IFS='|' read -r label num start len; do
+		[ -n "${num}" ] || continue
+		want_label+=("${label}")
+		want_start+=("${start}")
+		want_len+=("${len}")
+	done < "${layout}"
+	while IFS='|' read -r label len _rest; do
+		[ -n "${label}" ] || continue
+		got_label+=("${label}")
+		got_start+=("${lba}")
+		got_len+=("${len}")
+		lba=$(( lba + len ))
+	done <<< "$(socbak_xml_partition_rows "${xml}" | awk -F'|' '{printf "%s|%s\n", $1, $2}')"
+
+	if [ "${#got_label[@]}" -ne "${#want_label[@]}" ]; then
+		echo "ERROR: ${xml}: has ${#got_label[@]} partition(s), the source layout has ${#want_label[@]}" >&2
+		return 1
+	fi
+	for i in "${!want_label[@]}"; do
+		if [ "${got_label[$i]}" != "${want_label[$i]}" ]; then
+			echo "ERROR: ${xml}: partition $(( i + 1 )) is ${got_label[$i]}, expected ${want_label[$i]}" >&2
+			rc=1
+			continue
+		fi
+		# 冻结项：起点与长度都必须与源机相同。
+		# 逐项列出（而不是只断言"三个起点"或"非 DATA 分区总量"）：漏掉任何一项，
+		# 刷进去之后 u-boot 按 XML 写的边界与设备实际分区边界就会对不上。
+		case "${want_label[$i]}" in
+			BOOT|RECOVERY|MISC)
+				if [ "${got_start[$i]}" -ne "${want_start[$i]}" ] || [ "${got_len[$i]}" -ne "${want_len[$i]}" ]; then
+					echo "ERROR: ${xml}: ${want_label[$i]} is [start=${got_start[$i]} len=${got_len[$i]}], source device has [start=${want_start[$i]} len=${want_len[$i]}]" >&2
+					rc=1
+				fi
+				;;
+			ROOTFS)
+				# 起点冻结、长度随内容。前缀三项已核对过，起点理论上已被隐含确定；
+				# 这里仍显式比一次，是为了在"前缀长度恰好互相抵消"的输入上给出
+				# 直接指向 ROOTFS 的报错（而不是让读者自己去推是哪一项把起点顶偏了）。
+				if [ "${got_start[$i]}" -ne "${want_start[$i]}" ]; then
+					echo "ERROR: ${xml}: ROOTFS starts at ${got_start[$i]}, source device has ${want_start[$i]}" >&2
+					rc=1
+				fi
+				;;
+			ROOTFS_RW)
+				# 起点必须紧接新 ROOTFS 末尾（= 四个自由度里的"RW 起点"），
+				# 长度必须正好填到 DATA 起点（= "RW 长度"）。两者都由前一项与 DATA 起点推出，
+				# 所以改坏任何一项都会同时被这里和 DATA 起点检查抓到；留两份报错是为了
+				# 让人一眼看出是"RW 没跟着缩"还是"DATA 被挪了"。
+				if [ "${got_start[$i]}" -ne $(( got_start[i - 1] + got_len[i - 1] )) ]; then
+					echo "ERROR: ${xml}: ROOTFS_RW starts at ${got_start[$i]}, expected $(( got_start[i - 1] + got_len[i - 1] )) (= ROOTFS end)" >&2
+					rc=1
+				fi
+				if [ "${got_len[$i]}" -ne $(( want_start[i + 1] - got_start[i] )) ]; then
+					echo "ERROR: ${xml}: ROOTFS_RW is ${got_len[$i]} sectors, expected $(( want_start[i + 1] - got_start[i] )) to reach DATA start ${want_start[i + 1]}" >&2
+					rc=1
+				fi
+				;;
+			DATA)
+				if [ "${got_start[$i]}" -ne "${want_start[$i]}" ]; then
+					echo "ERROR: ${xml}: DATA starts at ${got_start[$i]}, source device has ${want_start[$i]}" >&2
+					rc=1
+				fi
+				;;
+		esac
+	done
+	return "${rc}"
+}
+
+# 按 SDK check_partition_start_sector.sh 的口径逐项核对三个起点（DATA/MISC/ROOTFS），
+# 并把源机与包的实值都打印出来 —— 交付证据直接用它，不依赖板上 fdisk。
+#   $1 待检查的分区表 XML
+#   $2 源布局文件
+# 三项全等返回 0，否则打印不匹配项并返回 1。
+socbak_local_update_check_starts()
+{
+	local xml="$1"
+	local layout="$2"
+	local label cur new rc=0
+
+	for label in DATA MISC ROOTFS; do
+		cur="$(awk -F'|' -v l="${label}" '$1==l{print $3; exit}' "${layout}")"
+		new="$(socbak_xml_geometry "${xml}" | awk -F'|' -v l="${label}" '$1==l{print $2; exit}')"
+		printf '%s: source=%s package=%s' "${label}" "${cur:-?}" "${new:-?}"
+		if [ -n "${cur}" ] && [ "${cur}" = "${new}" ]; then
+			printf ' OK\n'
+		else
+			printf ' MISMATCH\n'
+			rc=1
+		fi
+	done
+	return "${rc}"
 }
 
 # 写分区表 XML —— socbak.sh 里唯一的写分区表入口。
