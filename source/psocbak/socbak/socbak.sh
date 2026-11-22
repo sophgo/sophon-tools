@@ -612,7 +612,7 @@ function socbak_spool_partition_content()
 {
 	local part="$1"
 	local dest="$2"
-	local -a rc=()
+	local -a rc=() extract_opts=()
 	local ret=0
 
 	case $part in
@@ -644,7 +644,9 @@ function socbak_spool_partition_content()
 			set +u
 			EXT_FLAG="${PART_EXCLUDE_FLAGS["$part"]}"
 			set -u
-			tar --checkpoint=500 --checkpoint-action=ttyout='[%d sec]: C%u, %T%*\r' --ignore-failed-read --numeric-owner -cpSf - ${EXT_FLAG} "./" | tar -xpSf - -C "$dest"
+			# FAT records ownership in its mount options, not per file.
+			[[ "$part" == boot ]] && extract_opts+=(--no-same-owner)
+			tar --checkpoint=500 --checkpoint-action=ttyout='[%d sec]: C%u, %T%*\r' --ignore-failed-read --numeric-owner -cpSf - ${EXT_FLAG} "./" | tar -xpSf - "${extract_opts[@]}" -C "$dest"
 			rc=("${PIPESTATUS[@]}")
 			if (( rc[0] > 1 || rc[1] != 0 )); then
 				echo "ERROR: cp files $part error, exit."
@@ -708,9 +710,12 @@ function socbak_gen_partition_subimg()
 {
 	declare -g partition_subimg_size_kb
 	echo "INFO: gen partition($1) to img file"
-	umount ./sparse-path* &>/dev/null
-	rm ./sparse-file* &>/dev/null
-	rm ./sparse-path* -rf &>/dev/null
+	local staging="sparse-path-$1"
+	if [ -d "$staging" ]; then
+		if mountpoint -q "$staging"; then umount "$staging" || exit 1; fi
+		rmdir "$staging" || exit 1
+	fi
+	rm -f "sparse-file-$1" || exit 1
 	echo "INFO: creat partition($1) size: $((${2})) B ..."
 	# f2fs 与 ext4 走同一条路：建镜像 → mkfs → 挂载 → tar 灌内容 → 卸载 → 收缩到最小。
 	# 只有三处不同：建镜像用稀疏文件（mkfs.f2fs 只写元数据，不必 dd 铺零）、
@@ -729,7 +734,7 @@ function socbak_gen_partition_subimg()
 		fi
 	else
 		dd if=/dev/zero of="sparse-file-$1" bs=$((1024 * 4)) count=$(($2 / 1024 / 4)) conv=notrunc status=progress
-		if [[ "$?" != "0" ]]; then echo "ERROR: dd $1 error, exit."; socbak_cleanup; fi
+		if [[ "$?" != "0" ]]; then echo "ERROR: dd $1 error, exit."; socbak_cleanup; exit 1; fi
 		# 同上：冻结区的镜像长度是源机分区长度的精确值，不能被 dd 的块大小向下取整。
 		if [[ "${SOC_BAK_LOCAL_UPDATE_LAYOUT}" != "" ]] && socbak_lu_is_frozen_part "$1"; then
 			truncate -s "$2" "sparse-file-$1"
@@ -737,13 +742,13 @@ function socbak_gen_partition_subimg()
 		fi
 		if [[ "$3" == "fat" ]]; then
 			mkfs.fat "sparse-file-$1"
-			if [[ "$?" != "0" ]]; then echo "ERROR: mkfs.fat $1 error, exit."; socbak_cleanup; fi
+			if [[ "$?" != "0" ]]; then echo "ERROR: mkfs.fat $1 error, exit."; socbak_cleanup; exit 1; fi
 		else
 			mkfs.ext4 -b 4096 -i 16384 "sparse-file-$1"
-			if [[ "$?" != "0" ]]; then echo "ERROR: mkfs.ext4 $1 error, exit."; socbak_cleanup; fi
+			if [[ "$?" != "0" ]]; then echo "ERROR: mkfs.ext4 $1 error, exit."; socbak_cleanup; exit 1; fi
 		fi
 	fi
-	mkdir "sparse-path-$1"
+	mkdir "$staging" || exit 1
 	MOUNT_TYPE_OPT=""
 	if [[ "$3" == "f2fs" ]]; then
 		MOUNT_TYPE_OPT="-t f2fs"
@@ -755,16 +760,14 @@ function socbak_gen_partition_subimg()
 	# 返回非 0 时同时把退出码交给调用方（见 socbak_allinone_pack 的检查）。
 	if ! socbak_spool_partition_content "$1" "$TGZ_FILES_PATH/sparse-path-$1"; then
 		echo "ERROR: local_update/partition $1: restoring content into the image failed, refusing to continue"
-		umount "sparse-path-$1" &>/dev/null
-		rm -rf "sparse-path-$1"
+		umount "$staging" && rmdir "$staging"
 		socbak_cleanup
 		exit 1
 	fi
 	#e4defrag "sparse-path-$1"
-	#if [[ "$?" != "0" ]]; then echo "ERROR: e4defrag $1 error, exit."; socbak_cleanup; fi
+	#if [[ "$?" != "0" ]]; then echo "ERROR: e4defrag $1 error, exit."; socbak_cleanup; exit 1; fi
 	if ! umount "sparse-path-$1"; then
 		echo "ERROR: umount $1 error, exit."
-		rm -rf "sparse-path-$1"
 		socbak_cleanup
 		exit 1
 	fi
@@ -819,9 +822,10 @@ function socbak_gen_partition_subimg()
 		fi
 		# 镜像必须正好是源机分区大小：灌内容时已按这个尺寸建镜像，
 		# 这里回读确认一遍，装不下或尺寸不符都不留交付包。
-		local got_b=$(( $(stat -c %s "sparse-file-$1") / 1024 ))
-		if [ "${got_b}" -ne "${size_cap_kb}" ]; then
-			echo "ERROR: local_update mode: $1 image is ${got_b} KiB, the source partition is ${size_cap_kb} KiB; refusing to deliver a mismatched image"
+		local got_bytes
+		got_bytes="$(stat -c %s "sparse-file-$1")" || exit 1
+		if [ "${got_bytes}" -ne "$2" ]; then
+			echo "ERROR: local_update mode: $1 image is ${got_bytes} bytes, expected $2"
 			socbak_cleanup
 			exit 1
 		fi
@@ -829,9 +833,9 @@ function socbak_gen_partition_subimg()
 		echo "INFO: partition $1 size is : ${TGZ_FILES_SIZE["${1}"]} KB (frozen by the source GPT)"
 	elif [[ "$3" == "ext4" ]]; then
 		e2fsck -fy "sparse-file-$1"
-		if [[ "$?" != "0" ]]; then echo "ERROR: e2fsck $1 error, exit."; socbak_cleanup; fi
+		if (( $? > 1 )); then echo "ERROR: e2fsck $1 error, exit."; socbak_cleanup; exit 1; fi
 		resize2fs "sparse-file-$1"
-		if [[ "$?" != "0" ]]; then echo "ERROR: resize2fs $1 error, exit."; socbak_cleanup; fi
+		if [[ "$?" != "0" ]]; then echo "ERROR: resize2fs $1 error, exit."; socbak_cleanup; exit 1; fi
 		resize_min_size "$TGZ_FILES_PATH/sparse-file-$1" $((${TGZ_FILES_SIZE["${1}"]} / 1024)) ${size_step} ${step_num}
 		TGZ_FILES_SIZE["${1}"]=$socbak_resize_min_size_kb
 	elif [[ "$3" == "f2fs" ]]; then
@@ -850,14 +854,15 @@ function socbak_gen_partition_subimg()
 	if [[ "$?" != "0" ]]; then echo "ERROR: mount(2) $1 error, exit."; socbak_cleanup; exit 1; fi
 	echo "INFO: print sparse-file-$1 files:"
 	ls "sparse-path-$1" -lah
-	umount "sparse-path-$1"
+	umount "$staging" || exit 1
 	if [[ "$3" == "ext4" ]]; then
 		e2fsck -fy "sparse-file-$1"
+		(( $? <= 1 )) || exit 1
 	elif [[ "$3" == "f2fs" ]]; then
 		fsck.f2fs -f "sparse-file-$1"
 		if [[ "$?" != "0" ]]; then echo "ERROR: fsck.f2fs $1 error, exit."; socbak_cleanup; exit 1; fi
 	fi
-	rm -rf "sparse-path-$1"
+	rmdir "$staging" || exit 1
 }
 
 if [[ "${SOC_BAK_NOT_TGZ}" == "1" ]]; then
@@ -919,7 +924,7 @@ if [[ "${ALL_IN_ONE_FLAG}" != "" ]] && [[ "${ALL_IN_ONE_SCRIPT}" != "" ]]; then
 			part_size_max=$(( ${TGZ_FILES_SIZE[$TGZ_FILE]} * 1024 ))
 		fi
 		socbak_gen_partition_subimg "$TGZ_FILE" "$part_size_max" "$partition_format"
-		advmv -g "sparse-file-$TGZ_FILE" output
+		advmv -g "sparse-file-$TGZ_FILE" output || exit 1
 	done
 	popd
 else

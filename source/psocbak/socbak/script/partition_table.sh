@@ -395,13 +395,13 @@ socbak_local_update_plan()
 	if [ "${total}" -lt "${needed}" ]; then
 		total=${needed}
 	fi
-	if [ "${total}" -gt "${disk_sectors}" ]; then
-		echo "ERROR: local_update layout: DATA (start ${d_start}, length ${data_len}) needs the partition table to be ${total} sectors, but the source disk has only ${disk_sectors} sectors; the data does not fit" >&2
-		return 1
-	fi
 	# 总容量按 2 扇区（1 KiB）对齐，保证写进 XML 的总容量与内部 KiB 值一一对应
 	if [ $(( total % 2 )) -ne 0 ]; then
 		total=$(( total + 1 ))
+	fi
+	if [ "${total}" -gt "${disk_sectors}" ]; then
+		echo "ERROR: local_update layout: DATA (start ${d_start}, length ${data_len}) needs the partition table to be ${total} sectors, but the source disk has only ${disk_sectors} sectors; the data does not fit" >&2
+		return 1
 	fi
 
 	SOCBAK_LU_ROWS=(

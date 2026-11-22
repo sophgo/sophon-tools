@@ -22,7 +22,6 @@
 #
 # 可选：
 #   SOCBAK_SDK_SECTOR_XML=<path>  CV84×6 SDK 的 partition32G_sector.xml（SE13 样例）。
-#                                 缺省自动探测 /home/zzt/workspace/cv84x2/build/scripts/ 下的副本。
 # 依赖：sgdisk、gzip、od（busybox 版同样可用）。
 set -u
 
@@ -299,6 +298,9 @@ err="$(socbak_local_update_plan "${SE9_LAYOUT}" "${SE9_TOTAL}" "${SE9_ROOTFS_LEN
 	$(( SE9_TOTAL - SE9_DATA_START - 34 + 2 )) 35943040 2>&1)"; rc=$?
 check_eq "DATA 越过源盘末可用 LBA 时失败" "1" "${rc}"
 check_eq "并报出源盘容量" "1" "$(echo "${err}" | grep -c 'but the source disk has only')"
+# 按 KiB 对齐后仍需装入源盘；奇数策略与奇数盘尾重合时不能越过盘尾。
+socbak_local_update_plan "${SE9_LAYOUT}" "$(( SE9_TOTAL + 1 ))" "${SE9_ROOTFS_LEN}" 4194304 "$(( SE9_TOTAL + 1 ))" 2>/dev/null
+check_eq "总容量向上对齐后超出源盘一扇区时失败" "1" "$?"
 # 正好用到最后可用 LBA 必须放行（边界另一侧）
 socbak_local_update_plan "${SE9_LAYOUT}" "${SE9_TOTAL}" "${SE9_ROOTFS_LEN}" \
 	$(( SE9_TOTAL - SE9_DATA_START - 34 )) 35943040
@@ -657,12 +659,6 @@ fi
 
 # SDK 原文里的本地副本：有则顺带核对它自己算出的起点与本工具的几何一致
 SDK_XML="${SOCBAK_SDK_SECTOR_XML:-}"
-if [ -z "${SDK_XML}" ]; then
-	for c in /home/zzt/workspace/cv84x2/build/scripts/partition32G_sector.xml \
-		"${SOCBAK_DIR}/../../../cv84x2/build/scripts/partition32G_sector.xml"; do
-		[ -f "${c}" ] && { SDK_XML="${c}"; break; }
-	done
-fi
 if [ -z "${SDK_XML}" ] || [ ! -f "${SDK_XML}" ]; then
 	echo "  skip 未提供 CV84×6 SDK 的 partition32G_sector.xml（可用 SOCBAK_SDK_SECTOR_XML 指定）"
 else
@@ -1097,6 +1093,13 @@ pushd() {
 cd "${TGZ_FILES_PATH}" || exit 1
 socbak_gen_partition_subimg "$1" "$2" "$3"
 RC=$?
+if [[ "$RC" = 0 && -f "$TGZ_FILES_PATH/input/payload.bin" ]]; then
+	mkdir "$TGZ_FILES_PATH/readback" || exit 1
+	mount -o ro "sparse-file-$1" "$TGZ_FILES_PATH/readback" || exit 1
+	cmp "$TGZ_FILES_PATH/input/payload.bin" "$TGZ_FILES_PATH/readback/payload.bin" || exit 1
+	umount "$TGZ_FILES_PATH/readback" || exit 1
+	echo "PAYLOAD_MATCH=1"
+fi
 echo "SUBIMG_RC=${RC}"
 stat -c 'IMGSIZE=%s' "sparse-file-$1" 2>/dev/null || echo "IMGSIZE=none"
 exit "${RC}"
@@ -1122,6 +1125,7 @@ RUNNER
 		check_eq "内容装得下时固定区镜像生成成功" "0" "${rc}"
 		check_eq "内容装得下时镜像字节数精确" "IMGSIZE=$(( 131072 * 1024 ))" \
 			"$(echo "${out}" | grep '^IMGSIZE=')"
+		check_eq "从只读 BOOT 镜像读回的文件逐字节一致" "1" "$(echo "${out}" | grep -c '^PAYLOAD_MATCH=1$')"
 		# 内容装不下（24 MiB 内容塞进 16 MiB 固定区）：必须非 0，且不能留下成品
 		out="$(run_subimg boot $(( 16 * 1024 * 1024 )) fat 16384 24)"; rc=$?
 		echo "${out}" | grep -E 'No space left|Cannot write|cp files' >/dev/null &&
