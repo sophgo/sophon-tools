@@ -223,6 +223,15 @@ fi
 echo "== C. 布局规划（SE9 夹具） =="
 # 必须在当前 shell 调用：冻结量通过全局变量返回，$(...) 会被子 shell 吞掉
 socbak_local_update_check_source "${SE9_LAYOUT}" >/dev/null
+# 分区号必须与 SDK 一致：几何与标签都对、但编号是 2..7 的盘必须被拒绝
+awk -F'|' -v OFS='|' '{$2 = $2 + 1; print}' "${SE9_LAYOUT}" > "${WORK}/num_2_7.layout"
+err="$(socbak_local_update_check_source "${WORK}/num_2_7.layout" 2>&1)"; rc=$?
+check_eq "分区号 2..7（几何与标签完全相同）被拒绝" "1" "${rc}"
+check_eq "并指出编号与 SDK 的 p1..p6 不符" "1" \
+	"$(echo "${err}" | grep -c 'but the SDK local_update tools address it as p1')"
+# 编号正确时通过（对照，避免把编号检查写成恒失败）
+check_eq "分区号 1..6 时通过" "0" \
+	"$(socbak_local_update_check_source "${SE9_LAYOUT}" >/dev/null 2>&1; echo $?)"
 check_eq "源布局校验通过" "0" "$?"
 check_eq "冻结区尺寸取自源表（KiB）" "131072 131072 10240" \
 	"${SOCBAK_LU_SRC_BOOT_KB} ${SOCBAK_LU_SRC_RECOVERY_KB} ${SOCBAK_LU_SRC_MISC_KB}"
@@ -699,37 +708,30 @@ echo "== H. socbak.sh 生产块串联（不是重写逻辑，是从脚本里原�
 # `if [[ "${SOC_BAK_LOCAL_UPDATE_LAYOUT}" != "" ]]; then`，向下按 if/fi 配平找到它的 `fi`。
 # 不能用"从第一个匹配行往下找第一个 fi"——那会撞进嵌套 if 的 fi 里。
 extract_if_block() { # <anchor_line> <out_file>
-	local anchor="$1" out="$2"
-	awk -v anchor="${anchor}" '
-		# 第一遍：记录每行所属的最外层块起点
-		{
-			line[NR] = $0
-		}
-		END {
-			# 向上找：从 anchor 往上，第一个顶格且是 local_update 的 if 开头
-			from = 0
-			for (i = anchor; i >= 1; i--) {
-				if (line[i] ~ /^if \[\[ "\$\{SOC_BAK_LOCAL_UPDATE_LAYOUT\}" != "" \]\]; then$/) { from = i; break }
-				# 撞到上一个顶格 fi 说明 anchor 不在任何 local_update 块里
-				if (line[i] == "fi") break
-			}
-			if (from == 0) exit 1
-			# 向下配平：fi 与 if 计数
-			depth = 0
-			to = 0
-			for (i = from; i <= NR; i++) {
-				l = line[i]
-				if (l ~ /^[ \t]*(if |elif )/) depth++
-				else if (l ~ /(^|; )[ \t]*fi[ \t]*$/) {
-					depth--
-					if (depth == 0) { to = i; break }
-				}
-			}
-			if (to == 0) exit 1
-			for (i = from; i <= to; i++) print line[i]
-		}
-	' "${SOCBAK_SH}" > "${out}"
+	local anchor="$1" out="$2" start n line indent
+	# 用 bash 自己的语法判断块边界，比正则可靠得多：
+	#   - 单行 `if ...; then ...; fi` 会让按行数 if/fi 的写法算错层级；
+	#   - `$(...)` 里的 if/fi 也会被误计；
+	#   - elif 与同层 if 共用一个 fi。
+	# 做法：向上找到第一条**顶格**的 `if [[ "${SOC_BAK_LOCAL_UPDATE_LAYOUT}" != "" ]]; then`；
+	# 向下则逐行把候选前缀喂给 `bash -n`，第一次能通过语法检查的位置就是块的结尾。
+	start=$(awk -v anchor="${anchor}" '
+		NR <= anchor && /^if \[\[ "\$\{SOC_BAK_LOCAL_UPDATE_LAYOUT\}" != "" \]\]; then$/ { n = NR }
+		END { if (n) print n }
+	' "${SOCBAK_SH}")
+	[ -n "${start}" ] || return 1
+	n=$(wc -l < "${SOCBAK_SH}")
+	# 从 start 开始逐行加，直到这段代码自身语法完整（含 fi 收尾）
+	for (( line = start + 1; line <= n; line++ )); do
+		sed -n "${start},${line}p" "${SOCBAK_SH}" > "${out}"
+		if bash -n "${out}" 2>/dev/null; then
+			return 0
+		fi
+	done
+	rm -f "${out}"
+	return 1
 }
+
 
 if [ "${HAS_SGDISK}" = "0" ]; then
 	bad "生产块串联" "环境里没有 sgdisk"
@@ -777,14 +779,19 @@ else
 			# 抽出块里的失败路径用的是 exit 1；包一层子 shell 把它变成返回码
 			source "${WORK}/blk_setup.sh" || exit 1
 			echo "boot=${TGZ_FILES_SIZE[boot]} recovery=${TGZ_FILES_SIZE[recovery]} misc=${SOCBAK_MISC_SIZE_KB}"
+			echo "geom=${SOCBAK_LU_SRC_BOOT_KB} ${SOCBAK_LU_SRC_RECOVERY_KB} ${SOCBAK_LU_SRC_MISC_KB} ${SOCBAK_LU_SRC_ROOTFS_START} ${SOCBAK_LU_SRC_DATA_START}"
 			echo "total=${SOCBAK_LU_TOTAL_SECTORS}"
 			echo "layout_file=$([ -s "${SOCBAK_LU_SOURCE_LAYOUT}" ] && echo yes || echo no)"
 		) 2>&1
 	}
 	out="$(run_setup_block "${SE9_IMG}")"; rc=$?
 	check_eq "① 源表读取块成功" "0" "${rc}"
-	check_eq "① 冻结尺寸被源表值覆盖（不是配置常量）" \
-		"boot=131072 recovery=131072 misc=10240" "$(echo "${out}" | grep '^boot=')"
+	# 冻结尺寸的**回填**刻意不在这一段：芯片默认值（bm1688/cv84x6 分支）在它之后执行，
+	# 若在这里赋值就会被静默覆盖（首次验收缺陷 4）。这一段只负责读表 + 校验 + 记录。
+	check_eq "① 源表读取块不在这里改 TGZ_FILES_SIZE（留给芯片默认值之后）" \
+		"boot=999999 recovery=888888 misc=12345" "$(echo "${out}" | grep '^boot=')"
+	check_eq "① 但源机几何已读进全局变量" "131072 131072 10240 552960 25427328" \
+		"$(echo "${out}" | grep '^geom=' | sed 's/^geom=//')"
 	check_eq "① 源盘总扇区数已读出" "total=${SE9_TOTAL}" "$(echo "${out}" | grep '^total=')"
 	check_eq "① 源表明细已落盘供后续核对" "layout_file=yes" "$(echo "${out}" | grep '^layout_file=')"
 	# 读不出布局时必须以非零退出（不能带着配置默认值继续打包）
@@ -833,7 +840,7 @@ else
 	# ---------------- ③ 写盘后守卫块 ----------------
 	# 用②的真实产物作为计划，再与不同来源的 XML 比对
 	printf '%s\n' "${SOCBAK_LU_ROWS[@]}" > "${WORK}/guard_plan.layout"
-	# 生产块用 "$TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE" 定位 XML，
+	# 生产块用 "$TGZ_FILES_PATH/$SOCBAK_PARTITION_PATH" 定位 XML，
 	# 所以夹具要放进 TGZ_FILES_PATH、并且只传文件名 —— 传绝对路径会拼成
 	# "$TGZ_FILES_PATH//tmp/..."，测到的就不是真实调用了。
 	run_guard() { # <xml_name_under_SETUP_DIR> <source_layout>
@@ -845,7 +852,7 @@ else
 			SOC_BAK_LOCAL_UPDATE_LAYOUT=1
 			SOCBAK_LU_PLAN_FILE="${WORK}/guard_plan.layout"
 			SOCBAK_LU_SOURCE_LAYOUT="$2"
-			SOCBAK_PARTITION_FILE="$1"
+			SOCBAK_PARTITION_PATH="$1"
 			# 块里的 socbak_cleanup 在真机上会关服务、卸载；这里换成空实现
 			socbak_cleanup() { :; }
 			source "${WORK}/blk_guard.sh" || exit 1
@@ -1038,73 +1045,357 @@ EOF
 fi
 
 
-# ---------------------------------------------------------------- J. 冻结区镜像尺寸
-echo "== J. 冻结区镜像按源机容量精确落地（socbak_gen_partition_subimg） =="
+# ---------------------------------------------------------------- J. 冻结区镜像与内容装不下
+echo "== J. 冻结区镜像按源机容量精确落地 + 内容装不下必须失败 =="
 # local_update 的固定区长度来自源机 GPT，镜像必须**正好**是这个字节数。
 # 这条特别容易被 dd 的块大小向下取整破坏：dd bs=4096 对不是 4096 倍数的尺寸会截短，
 # 之后按 XML 长度刷写就少写一段 —— 分区表说 128 MiB、盘上只写了 127 MiB。
-# 这里从 socbak.sh 抽出真实的 socbak_gen_partition_subimg 跑，验三种尺寸：
-#   - 131072 KiB（4096 的整数倍，dd 路径本来就没问题）
-#   - 131073 KiB（不是 4096 的倍数，dd 会截断 —— 必须被补齐）
-#   - 装不下（内容超过源机分区）时必须失败而不是静默截断
+# 更严重的是"内容装不下"：tar 短写后如果错误被 cleanup/popd 掩盖，脚本会返回 0，
+# 交付一个被静默截断的包（首次验收就是这条）。
+# 这里跑**真实的** spool / tar / mkfs / fsck，只把 systemctl 换成空函数。
 if [ "$(id -u)" = "0" ] || sudo -n true 2>/dev/null; then
 	SOCBAK_SH="${SOCBAK_DIR}/socbak.sh"
-	SUBIMG_ANCHOR=$(grep -n '^function socbak_gen_partition_subimg()$' "${SOCBAK_SH}" | cut -d: -f1)
-	SUBIMG_TO=$(awk -v s="${SUBIMG_ANCHOR}" 'NR > s && $0 == "}" {print NR; exit}' "${SOCBAK_SH}")
-	if [ -n "${SUBIMG_ANCHOR}" ] && [ -n "${SUBIMG_TO}" ]; then
-		sed -n "${SUBIMG_ANCHOR},${SUBIMG_TO}p" "${SOCBAK_SH}" > "${WORK}/blk_subimg.sh"
-		ok "抽出 socbak.sh 的 socbak_gen_partition_subimg（${SUBIMG_ANCHOR}-${SUBIMG_TO}）"
-		# 被测函数依赖的最小环境：cleanup/err 处理挂成空实现，内容目录直接给空
-		# 被测代码里要 mount 镜像灌内容，普通用户没有权限。
-		# 用 sudo 在私有挂载命名空间里跑（--propagation private 之外的挂载不会外泄），
-		# 与 ota_partition_units.sh 隔离 /dev/shm 的做法同一思路。
+	extract_fn() { # <fn name> <out>
+		local a b
+		a=$(grep -n "^function $1()$" "${SOCBAK_SH}" | cut -d: -f1)
+		[ -n "${a}" ] || return 1
+		b=$(awk -v s="${a}" 'NR > s && $0 == "}" {print NR; exit}' "${SOCBAK_SH}")
+		[ -n "${b}" ] || return 1
+		sed -n "${a},${b}p" "${SOCBAK_SH}" > "$2"
+	}
+	if extract_fn socbak_gen_partition_subimg "${WORK}/fn_subimg.sh" &&
+		extract_fn socbak_spool_partition_content "${WORK}/fn_spool.sh"; then
+		ok "抽出 socbak.sh 的 socbak_gen_partition_subimg 与 socbak_spool_partition_content"
+		cat "${WORK}/fn_subimg.sh" "${WORK}/fn_spool.sh" > "${WORK}/fn_both.sh"
+		# 在私有挂载命名空间里跑：真的建镜像、真的 tar、真的 fsck；只隔离 systemctl
 		SUBIMG_RUNNER="${WORK}/subimg_runner.sh"
 		cat > "${SUBIMG_RUNNER}" <<'RUNNER'
 #!/bin/bash
-# 参数：<part> <bytes> <fmt> <frozen_kib> <TGZ_FILES_PATH> <PT_SH> <BLOCK>
+# 参数：<part> <bytes> <fmt> <frozen_kib> <workdir> <PT_SH> <FN_SH> <content_mib|null>
 set +u
 export TGZ_FILES_PATH="$5"
+PT_SH="$6"; FN_SH="$7"; CONTENT_MIB="${8:-null}"
 declare -A -g TGZ_FILES_SIZE=([boot]="$4" [recovery]="$4" [rootfs]=0 [data]=0)
 SOC_BAK_LOCAL_UPDATE_LAYOUT=1
 SOC_BAK_FIXED_SIZE=""
+SOCBAK_F2FS_PARTS=""
 # shellcheck source=/dev/null
-source "$6"
+source "${PT_SH}"
 socbak_cleanup() { :; }
-socbak_spool_partition_content() { :; }
+systemctl() { :; }              # 只隔离 systemctl
+e2fsck() { :; }                 # 固定区只做 fsck 校验，这里不关心退出码
+tune2fs() { :; }
 socbak_resize_min_size_kb=0
 resize_min_size() { socbak_resize_min_size_kb=0; }
-resize2fs() { :; }
-tune2fs() { :; }
-e2fsck() { :; }
-source "$7"
+source "${FN_SH}"
+# 私有 /boot：放一个内容镜像（null = 空），mount 命名空间保证不影响外面
+umount /boot 2>/dev/null
+rm -rf /boot && mkdir -p /boot
+if [ "${CONTENT_MIB}" != "null" ]; then
+	dd if=/dev/zero of=/boot/payload.bin bs=1M count="${CONTENT_MIB}" status=none
+fi
 cd "${TGZ_FILES_PATH}" || exit 1
-socbak_gen_partition_subimg "$1" "$2" "$3" || exit 1
-stat -c %s "sparse-file-$1"
+socbak_gen_partition_subimg "$1" "$2" "$3"
+RC=$?
+echo "SUBIMG_RC=${RC}"
+stat -c 'IMGSIZE=%s' "sparse-file-$1" 2>/dev/null || echo "IMGSIZE=none"
+exit "${RC}"
 RUNNER
 		chmod +x "${SUBIMG_RUNNER}"
-		run_subimg() { # <part> <bytes> <fmt> <frozen_kib>
+		run_subimg() { # <part> <bytes> <fmt> <frozen_kib> [content_mib]
 			local dir="${WORK}/subimg"
 			rm -rf "${dir}"; mkdir -p "${dir}"
 			sudo -n unshare -m --propagation private \
-				bash "${SUBIMG_RUNNER}" "$1" "$2" "$3" "$4" "${dir}" "${PT_SH}" "${WORK}/blk_subimg.sh" 2>&1
+				bash "${SUBIMG_RUNNER}" "$1" "$2" "$3" "$4" "${dir}" "${PT_SH}" \
+				"${WORK}/fn_both.sh" "${5:-null}" 2>&1
 		}
-		# 尺寸是 4096 倍数：镜像应当正好等于它
-		out="$(run_subimg boot $(( 131072 * 1024 )) fat 131072)"; rc=$?
-		check_eq "4096 倍数尺寸（131072 KiB）的冻结镜像可生成" "0" "${rc}"
-		check_eq "4096 倍数尺寸的镜像字节数精确" "$(( 131072 * 1024 ))" "$(echo "${out}" | tail -n1)"
 		# 尺寸不是 4096 倍数：dd 会截短，冻结路径必须补齐到精确值
 		out="$(run_subimg recovery $(( 131073 * 1024 )) ext4 131073)"; rc=$?
 		check_eq "非 4096 倍数尺寸（131073 KiB）的冻结镜像可生成" "0" "${rc}"
 		check_eq "非 4096 倍数尺寸的镜像字节数仍精确（未被 dd 截短）" \
-			"$(( 131073 * 1024 ))" "$(echo "${out}" | tail -n1)"
-		# 非冻结分区（不在 boot/recovery 名单里）走原路径，不应被强制成源机尺寸
-		out="$(run_subimg data $(( 65536 * 1024 )) ext4 131072)"; rc=$?
-		check_eq "非冻结分区仍按原 shrink 路径处理" "0" "${rc}"
+			"IMGSIZE=$(( 131073 * 1024 ))" "$(echo "${out}" | grep '^IMGSIZE=')"
+		# 内容装得下：镜像仍是精确尺寸，且返回 0
+		out="$(run_subimg boot $(( 131072 * 1024 )) fat 131072 8)"; rc=$?
+		check_eq "内容装得下时固定区镜像生成成功" "0" "${rc}"
+		check_eq "内容装得下时镜像字节数精确" "IMGSIZE=$(( 131072 * 1024 ))" \
+			"$(echo "${out}" | grep '^IMGSIZE=')"
+		# 内容装不下（24 MiB 内容塞进 16 MiB 固定区）：必须非 0，且不能留下成品
+		out="$(run_subimg boot $(( 16 * 1024 * 1024 )) fat 16384 24)"; rc=$?
+		echo "${out}" | grep -E 'No space left|Cannot write|cp files' >/dev/null &&
+			ok "内容装不下时 tar 确实报短写（回归真的写满，不是空函数桩）" ||
+			bad "内容装不下时 tar 确实报短写" "没有看到短写证据，回归可能没真的写内容"
+		check_eq "内容装不下时制镜像函数返回非 0" "1" "${rc}"
+		check_eq "内容装不下时明确报"拒绝继续"" "1" \
+			"$(echo "${out}" | grep -c 'refusing to continue')"
 	else
-		bad "抽出 socbak_gen_partition_subimg" "定位失败"
+		bad "抽出 socbak_gen_partition_subimg / socbak_spool_partition_content" "定位失败"
 	fi
 else
 	echo "  skip 冻结区镜像尺寸（需要 root 或 sudo 才能 mount 镜像）"
+fi
+
+# ---------------------------------------------------------------- K. 板上可用的解析方法
+echo "== K. GPT 解析不依赖 GNU awk（板上是 mawk 1.3.4） =="
+# 板上 /usr/bin/awk 是 mawk（SE9 镜像实测），没有 strtonum / gensub。
+# 首次交付的密码解码用了 strtonum，在板上直接 "function strtonum never defined" 返回 2。
+# 现在的解码是纯 bash + od，这里验证三件事：
+#   ① 源码里不再出现 GNU-only 的 awk 内建；
+#   ② 有 mawk 时用它当 awk 仍能正确解码；
+#   ③ 完全没有 awk 时也能解码。
+if [ "${HAS_SGDISK}" = "1" ]; then
+	# 只数**代码行**：注释里提到 strtonum/gensub 是解释为什么不能用，不算违规
+	check_eq "partition_table.sh 的代码不再使用 strtonum" "0" \
+		"$(grep -vE '^[[:space:]]*#' "${PT_SH}" | grep -c 'strtonum')"
+	check_eq "partition_table.sh 的代码不再使用 gensub" "0" \
+		"$(grep -vE '^[[:space:]]*#' "${PT_SH}" | grep -c 'gensub')"
+	# 造一块真实 GPT 夹具（六个分区），供解码交叉验证用
+	truncate -s $(( 7000098 * 512 )) "${WORK}/fix.img"
+	sgdisk -a 1 \
+		-n 1:8192:270335 -t 1:0700 -c 1:BOOT \
+		-n 2:270336:532479 -t 2:0700 -c 2:RECOVERY \
+		-n 3:532480:552959 -t 3:0700 -c 3:MISC \
+		-n 4:552960:757759 -t 4:0700 -c 4:ROOTFS -A 4:set:60 \
+		-n 5:757760:2805759 -t 5:0700 -c 5:ROOTFS_RW \
+		-n 6:2805760:7000064 -t 6:0700 -c 6:DATA \
+		"${WORK}/fix.img" >/dev/null 2>&1
+	dd if="${WORK}/fix.img" of="${WORK}/fix.gpt" bs=512 count=34 status=none
+	# 用真实 GPT 交叉验证：新解码器与 sgdisk -p 的分区起止一致
+	socbak_gpt_geometry "${WORK}/fix.gpt" > "${WORK}/k_geo.txt" 2>/dev/null || true
+	if [ -s "${WORK}/k_geo.txt" ]; then
+		check_eq "纯 bash 解码的几何与 sgdisk -p 一致" \
+			"$(sgdisk -p "${WORK}/fix.img" 2>/dev/null | awk '$1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ {print $NF"|"$2"|"($3-$2+1)}')" \
+			"$(cat "${WORK}/k_geo.txt")"
+		check_eq "纯 bash 解出的总容量与 sgdisk 一致" "7000098" \
+			"$(socbak_gpt_total_sectors "${WORK}/fix.gpt")"
+	else
+		bad "纯 bash 解码 GPT" "解不出几何"
+	fi
+	# 找一个 mawk：板上是 /usr/bin/awk -> mawk；本机若装了 mawk/original-awk 也用它
+	MAWK=""
+	for c in mawk original-awk; do
+		command -v "$c" >/dev/null 2>&1 && { MAWK="$(command -v "$c")"; break; }
+	done
+	if [ -z "${MAWK}" ] && [ -n "${SOCBAK_TEST_MAWK:-}" ] && [ -x "${SOCBAK_TEST_MAWK}" ]; then
+		MAWK="${SOCBAK_TEST_MAWK}"
+	fi
+	# 板上 mawk 是 aarch64 的；本机没有 x86 mawk 时，用 qemu 包一层去跑板上的那份，
+	# 这样"板上 awk 能不能解 GPT"就是真的验证过，而不是只靠"没用到 awk"推断。
+	if [ -z "${MAWK}" ] && command -v qemu-aarch64 >/dev/null 2>&1; then
+		for c in /home/zzt/workspace/kylin_final/rootfs/usr/bin/mawk \
+			/opt/sophgo/rootfs/usr/bin/mawk; do
+			[ -x "${c}" ] || continue
+			root="$(cd "$(dirname "${c}")/../.." && pwd)"
+			printf '#!/bin/sh\nexec qemu-aarch64 -L %s %s "$@"\n' "${root}" "${c}" \
+				> "${WORK}/mawk_qemu"
+			chmod +x "${WORK}/mawk_qemu"
+			if "${WORK}/mawk_qemu" -W version 2>/dev/null | grep -q mawk; then
+				MAWK="${WORK}/mawk_qemu"
+				break
+			fi
+		done
+	fi
+	if [ -n "${MAWK}" ]; then
+		mkdir -p "${WORK}/mawkshim"
+		ln -sf "${MAWK}" "${WORK}/mawkshim/awk"
+		out="$(PATH="${WORK}/mawkshim:${PATH}" bash -c "
+			source '${PT_SH}'
+			socbak_gpt_geometry '${WORK}/fix.gpt'
+			echo \"total=\$(socbak_gpt_total_sectors '${WORK}/fix.gpt')\"" 2>&1)"
+		check_eq "以 mawk 充当 awk 时几何解码正确" "$(cat "${WORK}/k_geo.txt")" \
+			"$(echo "${out}" | grep -v '^total=')"
+		check_eq "以 mawk 充当 awk 时总容量正确" "total=7000098" \
+			"$(echo "${out}" | grep '^total=')"
+	else
+		echo "  skip mawk 交叉验证（本机无 mawk；可用 SOCBAK_TEST_MAWK 指定）"
+	fi
+	# 解码路径不能调用 awk：用一个必然失败的 awk 垫片挡住整条 PATH，
+	# 如果解码仍然成功，就证明它真的没用 awk（比"PATH 里找不到 awk"更可靠，
+	# 因为 od/tr 也都在 /usr/bin，没法把整个目录从 PATH 里摘掉）。
+	mkdir -p "${WORK}/badawk"
+	printf '#!/bin/sh\necho "awk-stub: must not be called" >&2\nexit 9\n' > "${WORK}/badawk/awk"
+	chmod +x "${WORK}/badawk/awk"
+	out="$(PATH="${WORK}/badawk:${PATH}" bash -c "
+		source '${PT_SH}'
+		socbak_gpt_geometry '${WORK}/fix.gpt' | head -n1" 2>&1)"
+	check_eq "解码全程不调用 awk（awk 垫片存在时仍正确）" "BOOT|8192|262144" "${out}"
+
+else
+	echo "  skip 解析方法验证（环境里没有 sgdisk，无法造夹具）"
+fi
+
+# ---------------------------------------------------------------- L. 交付前逐项把关
+echo "== L. 最终把关：缺脚本 / 缺数据块 / 越界 / 正常包 =="
+# 这一节直接驱动 socbak.sh 的**最终检查块**（原样抽出），在真实产出的包上做四种情形：
+#   正常包 -> 通过；缺一份 boot_emmc-<分区>.cmd -> 失败；缺一个被引用的数据块 -> 失败；
+#   把某段写的起始扇区改到分区之前 -> 失败。
+# 首次交付的缺陷是"只遍历存在的脚本"，所以删掉全部脚本仍打印 passed —— 这里逐个断言。
+if [ "${HAS_SGDISK}" = "1" ]; then
+	SOCBAK_SH="${SOCBAK_DIR}/socbak.sh"
+	GUARD_ANCHOR=$(grep -n 'SOCBAK_LU_PKG_DIR="\${TGZ_FILES_PATH}/output/' "${SOCBAK_SH}" | cut -d: -f1)
+	# 最终检查块以 `if [[ "${SOC_BAK_LOCAL_UPDATE_LAYOUT}" != "" ]]; then` 开头，
+	# 以该块内第一条顶格 `SOCBAK_LU_PKG_DIR=` 为锚点定位（块内嵌套了两层 if，不能按 RC 行找）
+	VERIFY_ANCHOR=$(grep -nF 'SOCBAK_LU_PKG_DIR="${TGZ_FILES_PATH}/output/' "${SOCBAK_SH}" | cut -d: -f1 | head -n1)
+	if [ -n "${VERIFY_ANCHOR}" ] && extract_if_block "${VERIFY_ANCHOR}" "${WORK}/blk_verify.sh"; then
+		ok "抽出 socbak.sh 的最终检查块（锚点 ${VERIFY_ANCHOR}）"
+		# 造一个形状正确的假包：XML + gpt.gz + 六份刷写脚本 + 数据块
+		mk_fake_pkg() { # <dir>
+			local d="$1"
+			rm -rf "${d}"; mkdir -p "${d}"
+			cp "${WORK}/fix.xml" "${d}/partition32G_sector.xml"
+			socbak_gen_gpt "${WORK}/fix.xml" "${WORK}/fix.gpt" || return 1
+			gzip -c "${WORK}/fix.gpt" > "${d}/gpt.gz"
+			local label start len
+			while IFS='|' read -r label start len; do
+				[ -n "${label}" ] || continue
+				local lo="${label,,}"
+				# 按真实打包链的形状造脚本：先 load 数据块，再 mmc write 到分区起点
+				printf 'load ${devtype} ${devnum}:${distro_bootpart} ${ramdisk_addr_r} /gpt/%s.1-of-1.gz\nunzip ${ramdisk_addr_r} ${unzip_addr} 1024\nmmc write ${unzip_addr} 0x%08x 0x%08x\n' \
+					"${lo}" "${start}" 512 > "${d}/boot_emmc-${lo}.cmd"
+				dd if=/dev/urandom of="${d}/${lo}.1-of-1.gz" bs=512 count=2 status=none
+			done < "${WORK}/k_plan.layout"
+		}
+		{
+			printf '<physical_partition size_in_sectors="7000098">\n'
+			printf '  <partition label="BOOT" size_in_sectors="262144" readonly="false" format="1" />\n'
+			printf '  <partition label="RECOVERY" size_in_sectors="262144" readonly="false" format="2" />\n'
+			printf '  <partition label="MISC" size_in_sectors="20480" readonly="false" format="0" />\n'
+			printf '  <partition label="ROOTFS" size_in_sectors="204800" readonly="true" format="2" />\n'
+			printf '  <partition label="ROOTFS_RW" size_in_sectors="2048000" readonly="false" format="2" />\n'
+			printf '  <partition label="DATA" size_in_sectors="4194305" readonly="false" format="2" />\n'
+			printf '</physical_partition>\n'
+		} > "${WORK}/fix.xml"
+		socbak_xml_geometry "${WORK}/fix.xml" > "${WORK}/k_plan.layout"
+
+		run_verify() { # <pkgdir>
+			(
+				set +u
+				# shellcheck source=/dev/null
+				source "${PT_SH}"
+				export TGZ_FILES_PATH="${WORK}/vroot"
+				rm -rf "${TGZ_FILES_PATH}"; mkdir -p "${TGZ_FILES_PATH}/output"
+				mkdir -p "${TGZ_FILES_PATH}/output/sdcard"
+				rm -rf "${TGZ_FILES_PATH}/output/sdcard"
+				cp -a "$1" "${TGZ_FILES_PATH}/output/sdcard"
+				SOC_BAK_LOCAL_UPDATE_LAYOUT=1
+				SOC_BAK_ALL_IN_ONE=1
+				SOCBAK_LU_PKG_DIR="${TGZ_FILES_PATH}/output/sdcard"
+				SOCBAK_LU_PLAN_FILE="${WORK}/k_plan.layout"
+				SOCBAK_LU_SOURCE_LAYOUT="${WORK}/k_source.layout"
+				SOCBAK_PARTITION_NAME=partition32G_sector.xml
+				socbak_cleanup() { :; }
+				source "${WORK}/blk_verify.sh"
+			) 2>&1
+		}
+		# 源布局（编号 1..6，几何与 fix.xml 相同）—— 让 verify_xml 的冻结前缀检查能过
+		awk -F'|' '{printf "%s|%d|%s|%s\n", $1, NR, $2, $3}' "${WORK}/k_plan.layout" > "${WORK}/k_source.layout"
+
+		mk_fake_pkg "${WORK}/pkg_ok" && ok "构造正常假包"
+		out="$(run_verify "${WORK}/pkg_ok")"; rc=$?
+		check_eq "正常包：最终检查通过" "0" "${rc}"
+		check_eq "正常包：打印 passed" "1" "$(echo "${out}" | grep -c 'verification passed')"
+
+		# 缺一份刷写脚本（MISC）——首次交付的缺陷就是这种情形被放行
+		rm -rf "${WORK}/pkg_miss_scr"; cp -a "${WORK}/pkg_ok" "${WORK}/pkg_miss_scr"
+		rm -f "${WORK}/pkg_miss_scr/boot_emmc-misc.cmd"
+		out="$(run_verify "${WORK}/pkg_miss_scr")"; rc=$?
+		check_eq "缺一份 boot_emmc-<分区>.cmd：失败" "1" "${rc}"
+		check_eq "缺脚本时报出缺哪一份" "1" "$(echo "${out}" | grep -c 'required flashing script boot_emmc-misc.cmd')"
+		check_eq "缺脚本时不打印 passed" "0" "$(echo "${out}" | grep -c 'verification passed')"
+
+		# 全部刷写脚本都删掉
+		rm -rf "${WORK}/pkg_no_scr"; cp -a "${WORK}/pkg_ok" "${WORK}/pkg_no_scr"
+		rm -f "${WORK}/pkg_no_scr"/boot_emmc-*.cmd
+		out="$(run_verify "${WORK}/pkg_no_scr")"; rc=$?
+		check_eq "全部刷写脚本都缺失：失败" "1" "${rc}"
+		check_eq "六份脚本各报一次缺失" "6" "$(echo "${out}" | grep -c 'required flashing script')"
+
+		# 缺数据块
+		rm -rf "${WORK}/pkg_miss_blk"; cp -a "${WORK}/pkg_ok" "${WORK}/pkg_miss_blk"
+		rm -f "${WORK}/pkg_miss_blk/data.1-of-1.gz"
+		out="$(run_verify "${WORK}/pkg_miss_blk")"; rc=$?
+		check_eq "缺数据块：失败" "1" "${rc}"
+		check_eq "缺数据块时报出是哪一个" "1" "$(echo "${out}" | grep -c 'data.1-of-1.gz')"
+
+		# 越界：把 DATA 的写入起点改到分区之前一个扇区
+		rm -rf "${WORK}/pkg_over"; cp -a "${WORK}/pkg_ok" "${WORK}/pkg_over"
+		data_start=$(awk -F'|' '$1=="DATA"{print $2}' "${WORK}/k_plan.layout")
+		printf 'mmc write ${unzip_addr} 0x%08x 0x%08x\n' $(( data_start - 1 )) 4 \
+			> "${WORK}/pkg_over/boot_emmc-data.cmd"
+		out="$(run_verify "${WORK}/pkg_over")"; rc=$?
+		check_eq "写入越界（起点早于分区）：失败" "1" "${rc}"
+		check_eq "越界时报出区间" "1" "$(echo "${out}" | grep -c "outside DATA's")"
+
+		# 合法收缩：内容比分区短是允许的（ROOTFS_RW 常见 —— 空文件系统只写前段），
+		# 不能被判越界。脚本仍需引用自己的数据块（形状与真实包一致）。
+		rm -rf "${WORK}/pkg_short"; cp -a "${WORK}/pkg_ok" "${WORK}/pkg_short"
+		rw_start=$(awk -F'|' '$1=="ROOTFS_RW"{print $2}' "${WORK}/k_plan.layout")
+		printf 'load ${devtype} ${devnum}:${distro_bootpart} ${ramdisk_addr_r} /gpt/rootfs_rw.1-of-1.gz\nunzip ${ramdisk_addr_r} ${unzip_addr} 1024\nmmc write ${unzip_addr} 0x%08x 0x%08x\n' \
+			"${rw_start}" 512 > "${WORK}/pkg_short/boot_emmc-rootfs_rw.cmd"
+		out="$(run_verify "${WORK}/pkg_short")"; rc=$?
+		check_eq "合法收缩（只写分区前段）：通过" "0" "${rc}"
+	else
+		bad "抽出 socbak.sh 的最终检查块" "定位失败"
+	fi
+fi
+
+
+# ---------------------------------------------------------------- M. 正常入口到成品
+echo "== M. 正常打包入口一路跑到成品（真实 socbak.sh） =="
+# 这一节是首次验收缺陷 1 的直接回归：只有从 `bash socbak.sh ...` 跑到成品，
+# 才能发现"XML 变量被改成 output/<file>、最终检查又把它拼进包目录"这类错误。
+# 用容器模拟设备相关信号（CPU part -> cv84x6、/dev/mmcblk0 -> 夹具镜像、/socrepack），
+# socbak.sh 本身一行不改。需要 docker + 一个 aarch64 sysroot 来跑 binTools。
+E2E_RUNNER="${TESTS_SRC_DIR}/helpers/socbak_e2e_runner.sh"
+AARCH64_ROOT="${SOCBAK_TEST_AARCH64_ROOT:-/home/zzt/workspace/kylin_final/rootfs}"
+if ! command -v docker >/dev/null 2>&1; then
+	echo "  skip 正常入口到成品（本机没有 docker）"
+elif [ ! -x "${E2E_RUNNER}" ]; then
+	bad "正常入口到成品" "缺少 ${E2E_RUNNER}"
+elif [ ! -d "${AARCH64_ROOT}" ]; then
+	echo "  skip 正常入口到成品（未找到 aarch64 sysroot，可用 SOCBAK_TEST_AARCH64_ROOT 指定）"
+else
+	# 容器里需要一个 CPU part=0xd05 的 /proc/cpuinfo（cv84x6 识别信号）
+	printf 'processor\t: 0\nCPU implementer\t: 0x41\nCPU part\t: 0xd05\n' > "${WORK}/fakecpuinfo"
+	# 源机镜像：BOOT/RECOVERY/MISC 用真实 SE9 数值，盘容量按夹具
+	# 盘容量按真机量级给：打包链会把 ROOTFS 撑到 3 GiB、DATA 撑到 4 GiB，
+	# 盘太小会在"DATA 装不下"处失败（正确行为，但不是这一节要测的东西）。
+	truncate -s $(( 61071360 * 512 )) "${WORK}/e2e.img"
+	sgdisk -a 1 \
+		-n 1:8192:270335 -t 1:0700 -c 1:BOOT \
+		-n 2:270336:532479 -t 2:0700 -c 2:RECOVERY \
+		-n 3:532480:552959 -t 3:0700 -c 3:MISC \
+		-n 4:552960:757759 -t 4:0700 -c 4:ROOTFS -A 4:set:60 \
+		-n 5:757760:28565887 -t 5:0700 -c 5:ROOTFS_RW \
+		-n 6:28565888:61071326 -t 6:0700 -c 6:DATA \
+		"${WORK}/e2e.img" >/dev/null 2>&1
+	e2e_out="$(timeout 900 docker run --rm --privileged \
+		-v "${WORK}/fakecpuinfo:/fakecpuinfo:ro" \
+		-v "${WORK}/e2e.img:/src.img:ro" \
+		-v "${AARCH64_ROOT}:/socrepack/sysroot-src:ro" \
+		-v "${SOCBAK_DIR}:/socbak_src:ro" \
+		-v "${E2E_RUNNER}:/runner.sh:ro" \
+		alpine:latest sh -c \
+		'mkdir -p /socrepack/sysroot-src; apk add --no-cache bash coreutils e2fsprogs dosfstools util-linux sgdisk pigz gzip tar qemu-aarch64 >/dev/null 2>&1; bash /runner.sh /src.img /socbak_src ok' 2>&1)"
+	e2e_rc=$?
+	check_eq "正常入口：socbak.sh 退出码 0" "0" "${e2e_rc}"
+	check_eq "正常入口：最终检查通过" "1" \
+		"$(echo "${e2e_out}" | grep -c 'SOC_BAK_LOCAL_UPDATE_LAYOUT verification passed')"
+	check_eq "正常入口：包内恰好一份 partition*xml" "1" \
+		"$(echo "${e2e_out}" | grep -c 'local_update verification: partition\*xml count=1')"
+	check_eq "正常入口：SDK 三项起点与源机一致" "3" \
+		"$(echo "${e2e_out}" | grep -cE 'verification: (DATA|MISC|ROOTFS): source=[0-9]+ package=[0-9]+ OK')"
+	check_eq "正常入口：gpt.gz 与计划逐项相同" "1" \
+		"$(echo "${e2e_out}" | grep -c 'gpt.gz matches the planned layout')"
+	check_eq "正常入口：六个分区都有刷写范围且未越界" "6" \
+		"$(echo "${e2e_out}" | grep -c 'write range .* inside .* OK')"
+	check_eq "正常入口：成品目录里有 sdcard 包" "1" \
+		"$(echo "${e2e_out}" | sed -n '/HARNESS: delivery dir/,/package files/p' | grep -c '^sdcard$')"
+	check_eq "正常入口：没有把包判成 .rejected" "0" \
+		"$(echo "${e2e_out}" | grep -c 'rejected')"
+	if [ "${e2e_rc}" != "0" ]; then
+		echo "  --- 失败时的尾部输出（便于排查）---"
+		echo "${e2e_out}" | tail -n 12 | sed 's/^/    /'
+	fi
 fi
 
 

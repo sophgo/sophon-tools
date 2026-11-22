@@ -133,6 +133,12 @@ socbak_fixed_data_start_rw()
 # 本节只做「只读读取源表」与「按内容算出新几何」两件事，不碰设备、不写任何文件。
 
 SOCBAK_LU_PART_ORDER=(BOOT RECOVERY MISC ROOTFS ROOTFS_RW DATA)
+# 与该 SDK 分区顺序一一对应的分区号。这些编号是硬约束，不是装饰：
+#   local_update.sh 把升级指令 `dd ... /dev/mmcblk0p3`（MISC），
+#   check_partition_start_sector.sh 的 convert_label_to_device 把
+#   BOOT/RECOVERY/MISC/ROOTFS/ROOTFS_RW/DATA 映射成 p1/p2/p3/p4/p5/p6。
+# 所以只要编号错位，即使标签与几何完全正确，升级程序也会写错分区。
+SOCBAK_LU_PART_NUMBERS=(1 2 3 4 5 6)
 # 首分区固定 LBA（与 SDK 的 PARTITION_TABLE_OFFSET / BOOT_PART_OFFSET 一致）
 SOCBAK_LU_FIRST_LBA=8192
 # 末分区之后必须留给备份 GPT 的扇区数（= SDK mk_sector_gpt 的 last_usable_lba = total-34）
@@ -214,7 +220,7 @@ socbak_read_disk_total_sectors()
 socbak_local_update_check_source()
 {
 	local layout="$1"
-	local -a labels=() starts=() lens=()
+	local -a labels=() nums=() starts=() lens=()
 	local label num start len i c
 
 	SOCBAK_LU_SRC_BOOT_KB=""
@@ -228,6 +234,7 @@ socbak_local_update_check_source()
 	while IFS='|' read -r label num start len; do
 		[ -n "${num}" ] || continue
 		labels+=("${label}")
+		nums+=("${num}")
 		starts+=("${start}")
 		lens+=("${len}")
 	done < "${layout}"
@@ -240,6 +247,16 @@ socbak_local_update_check_source()
 	for i in "${!SOCBAK_LU_PART_ORDER[@]}"; do
 		if [ "${labels[$i]}" != "${SOCBAK_LU_PART_ORDER[$i]}" ]; then
 			echo "ERROR: ${layout}: partition $(( i + 1 )) is \"${labels[$i]}\", expected \"${SOCBAK_LU_PART_ORDER[$i]}\"" >&2
+			return 1
+		fi
+	done
+	# 分区号必须与 SDK 一致：local_update.sh 直接 dd 到 /dev/mmcblk0p3 传升级指令，
+	# check_partition_start_sector.sh 也按 BOOT=p1..DATA=p6 映射设备节点。
+	# 只比标签不够 —— 几何和标签都一样、编号却是 2..7 的盘必须被拒绝。
+	# SOCBAK_LU_PART_NUMBERS 的语义见其定义（p3=MISC、p4=ROOTFS、p6=DATA 是硬约束）。
+	for i in "${!SOCBAK_LU_PART_NUMBERS[@]}"; do
+		if [ "${nums[$i]}" != "${SOCBAK_LU_PART_NUMBERS[$i]}" ]; then
+			echo "ERROR: ${layout}: partition \"${labels[$i]}\" is number ${nums[$i]}, but the SDK local_update tools address it as p${SOCBAK_LU_PART_NUMBERS[$i]} (they write the recovery command to p3 and map BOOT..DATA to p1..p6)" >&2
 			return 1
 		fi
 	done
@@ -416,66 +433,134 @@ socbak_xml_geometry()
 # 从主 GPT 文件解码 "LABEL|START|LEN" 几何（只读分区项数组，不重算落位）。
 # 与 socbak_gen_gpt_sector 的落位规则无关地重算，才能作为独立对照。
 #
-# 用 `od -An -tx1 -v` 十六进制逐字节读出后在 awk 里拼小端整数：
-#   - 板上只有 busybox 的 od，它不支持 -tu8 也不支持 --endian；
-#   - 目标机没有 iconv（busybox 未内置），标签只能按 UTF-16LE 自己解。
-# 这样同一份代码在 x86 回归主机与板上都跑得动，不依赖 GNU coreutils。
+# 解析一律用 bash 内置算术 + od，**不用 awk**：
+#   - 板上 /usr/bin/awk 是 mawk（SE9 镜像实测 mawk 1.3.4），没有 strtonum、
+#     也没有 gensub，GNU awk 的写法在板上直接报 "function strtonum never defined"；
+#   - bash 的 $(( )) 是 64 位整数，比 awk 的 double 更精确，正好适合解 LBA；
+#   - od 用 busybox 也支持的 -tu1（十进制字节）+ -j/-N，不需要 GNU 扩展。
+# 这样同一份代码在 x86 回归主机与板上（mawk / busybox od）都跑得动。
+
+# 把一段二进制读成十进制字节数组（全局 SOCBAK_GPT_BYTES）
+# $1 文件；$2 起始偏移；$3 字节数
+socbak_read_bytes()
+{
+	local i
+	SOCBAK_GPT_BYTES=()
+	# tr 的字符类比 '\t' 这样的转义更可移植（busybox/coreutils 都认）
+	while read -r i; do
+		[ -n "${i}" ] && SOCBAK_GPT_BYTES+=("${i}")
+	done < <(od -An -tu1 -v -j "$2" -N "$3" "$1" 2>/dev/null | tr -s '[:space:]' '\n')
+	[ "${#SOCBAK_GPT_BYTES[@]}" -eq "$3" ] || return 1
+	return 0
+}
+
+# 把 SOCBAK_GPT_BYTES 里的一段按 ASCII 读成字符串（GPT 头签名等）
+# $1 起始偏移；$2 字节数
+socbak_le_ascii()
+{
+	local off="$1" n="$2" k s=""
+
+	for (( k = 0; k < n; k++ )); do
+		s="${s}$(printf "\\$(printf '%03o' "${SOCBAK_GPT_BYTES[off + k]}")")"
+	done
+	printf '%s' "${s}"
+}
+
+# 从 SOCBAK_GPT_BYTES 解小端无符号整数（纯 bash，64 位精确）
+# $1 起始偏移；$2 字节数
+# 超过 6 字节（48 位 = 281 TB）视为非法：eMMC 远达不到，提前拦住比静默溢出好。
+socbak_le_uint()
+{
+	local off="$1" n="$2" k v=0 p=1
+
+	if [ "${n}" -gt 6 ]; then
+		for (( k = 6; k < n; k++ )); do
+			[ "${SOCBAK_GPT_BYTES[off + k]}" -eq 0 ] || return 1
+		done
+		n=6
+	fi
+	for (( k = 0; k < n; k++ )); do
+		v=$(( v + SOCBAK_GPT_BYTES[off + k] * p ))
+		p=$(( p * 256 ))
+	done
+	printf '%s' "${v}"
+}
+
+# 从 SOCBAK_GPT_BYTES 解 GPT 分区名（UTF-16LE，最多 36 个字符）
+# 非 ASCII 字符用 "?" 代替：只影响报错可读性，不影响几何比对。
+# $1 起始偏移
+socbak_le_name()
+{
+	local off="$1" k lo hi s=""
+
+	for (( k = 0; k < 36; k++ )); do
+		lo=${SOCBAK_GPT_BYTES[off + k * 2]}
+		hi=${SOCBAK_GPT_BYTES[off + k * 2 + 1]}
+		if [ "${lo}" -eq 0 ] && [ "${hi}" -eq 0 ]; then break; fi
+		if [ "${hi}" -eq 0 ] && [ "${lo}" -ge 32 ] && [ "${lo}" -lt 127 ]; then
+			s="${s}$(printf "\\$(printf '%03o' "${lo}")")"
+		else
+			s="${s}?"
+		fi
+	done
+	printf '%s' "${s}"
+}
+
+# 从主 GPT 文件解码 "LABEL|START|LEN" 几何（只读分区项数组，不重算落位）。
+# 与 socbak_gen_gpt_sector 的落位规则无关地重算，才能作为独立对照。
 # $1 主 GPT 文件（17408 字节，LBA 0..33）
 socbak_gpt_geometry()
 {
-	local gpt="$1" sig
+	local gpt="$1" num esz base i off start end nm
 
 	[ -s "${gpt}" ] || { echo "ERROR: gpt file ${gpt} is empty" >&2; return 1; }
-	sig=$(od -An -tx1 -j 512 -N 8 -v "${gpt}" | tr -d ' \n')
-	[ "${sig}" = "4546492050415254" ] || {
+	# 头签名 "EFI PART"（LBA 1 的前 8 字节）
+	socbak_read_bytes "${gpt}" 512 8 || {
+		echo "ERROR: ${gpt}: cannot read the GPT header" >&2; return 1; }
+	[ "$(socbak_le_ascii 0 8)" = "EFI PART" ] || {
 		echo "ERROR: ${gpt}: no valid GPT header signature" >&2
 		return 1; }
 
-	od -An -tx1 -v "${gpt}" | awk '
-		function le(off, n,    v, k) {
-			v = 0
-			for (k = 0; k < n; k++) v += b[off + k] * (2 ^ (8 * k))
-			return v
-		}
-		function name(off,    k, lo, hi, s, ch) {
-			s = ""
-			for (k = 0; k < 36; k++) {
-				lo = b[off + k * 2]; hi = b[off + k * 2 + 1]
-				if (lo == 0 && hi == 0) break
-				# 标签是 UTF-16LE；本地化标签里的非 ASCII 字符用 ? 代替，不影响几何比对
-				ch = (hi == 0 && lo >= 32 && lo < 127) ? sprintf("%c", lo) : "?"
-				s = s ch
-			}
-			return s
-		}
-		{ for (i = 1; i <= NF; i++) b[n++] = strtonum("0x" $i) }
-		END {
-			if (n < 17408) { print "ERROR: short gpt" > "/dev/stderr"; exit 1 }
-			num = le(512 + 80, 4)
-			esz = le(512 + 84, 4)
-			if (esz <= 0) esz = 128
-			base = 1024
-			for (i = 0; i < num; i++) {
-				off = base + i * esz
-				start = le(off + 32, 8)
-				end = le(off + 40, 8)
-				if (start == 0 && end == 0) continue
-				nm = name(off + 56)
-				if (nm == "") nm = "-"
-				printf "%s|%.0f|%.0f\n", nm, start, end - start + 1
-			}
-		}
-	'
+	socbak_read_bytes "${gpt}" 512 88 || {
+		echo "ERROR: ${gpt}: short GPT header" >&2; return 1; }
+	num="$(socbak_le_uint 80 4)" || { echo "ERROR: ${gpt}: invalid entry count" >&2; return 1; }
+	esz="$(socbak_le_uint 84 4)" || { echo "ERROR: ${gpt}: invalid entry size" >&2; return 1; }
+	[ "${esz}" -gt 0 ] || esz=128
+	if [ "${num}" -lt 1 ] || [ "${num}" -gt 128 ] || [ "${esz}" -lt 128 ]; then
+		echo "ERROR: ${gpt}: invalid GPT geometry (entries=${num} entry_size=${esz})" >&2
+		return 1
+	fi
+
+	# 分区项数组从 LBA 2（偏移 1024）起；只读实际用到的那些项
+	socbak_read_bytes "${gpt}" 1024 $(( num * esz )) || {
+		echo "ERROR: ${gpt}: short GPT partition array" >&2; return 1; }
+
+	base=0
+	for (( i = 0; i < num; i++ )); do
+		off=$(( base + i * esz ))
+		start="$(socbak_le_uint $(( off + 32 )) 8)" || {
+			echo "ERROR: ${gpt}: partition $(( i + 1 )) has an out-of-range start LBA" >&2
+			return 1; }
+		end="$(socbak_le_uint $(( off + 40 )) 8)" || {
+			echo "ERROR: ${gpt}: partition $(( i + 1 )) has an out-of-range end LBA" >&2
+			return 1; }
+		if [ "${start}" -eq 0 ] && [ "${end}" -eq 0 ]; then continue; fi
+		nm="$(socbak_le_name $(( off + 56 )))"
+		[ -n "${nm}" ] || nm="-"
+		printf '%s|%s|%s\n' "${nm}" "${start}" "$(( end - start + 1 ))"
+	done
 }
 
 # 从主 GPT 文件读分区表总容量（扇区数）：主头里的 AlternateLBA + 1。
+# 同样纯 bash 解析，不依赖 GNU awk。
 # $1 主 GPT 文件
 socbak_gpt_total_sectors()
 {
-	od -An -tx1 -j $(( 512 + 32 )) -N 8 -v "$1" | awk '
-		{ for (i = 1; i <= NF; i++) b[n++] = strtonum("0x" $i) }
-		END { v = 0; for (k = 0; k < n; k++) v += b[k] * (2 ^ (8 * k)); printf "%.0f\n", v + 1 }
-	'
+	local alt
+
+	socbak_read_bytes "$1" 512 56 || return 1
+	alt="$(socbak_le_uint 32 8)" || return 1
+	printf '%s\n' "$(( alt + 1 ))"
 }
 
 # 逐项比较两份几何（"LABEL|START|LEN"）。不同则打印差异并返回 1。

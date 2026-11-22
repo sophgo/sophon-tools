@@ -158,26 +158,41 @@ DATA 长度。其余全部照抄源机 GPT。
   逐项取分区号、标签、起点、长度，单位为 512 B 扇区。开关打开后立即读取并校验，
   布局不对就当场退出，不会等到备份几十分钟之后才失败。
 * 用标签**和**分区号双重辨认，要求恰好是
-  `BOOT / RECOVERY / MISC / ROOTFS / ROOTFS_RW / DATA` 这六个分区、从 LBA 8192 起首尾相接。
+  `BOOT / RECOVERY / MISC / ROOTFS / ROOTFS_RW / DATA` 这六个分区、编号为 **p1–p6**、
+  从 LBA 8192 起首尾相接。编号是硬约束：`local_update.sh` 把升级指令 `dd` 到
+  `/dev/mmcblk0p3`（MISC），SDK 的检查脚本也按 p1–p6 映射设备节点，编号错位就会写错分区。
   SE7（BM1684/BM1684X）或没有 MISC/ROOTFS_RW 的布局直接拒绝。
+* 不支持 **USB** 包：CV 的 USB 打包分支会给每个 `.gz`（含 `gpt.gz`）套一层 64 字节
+  CIMG 头，而 SDK 的 `local_update` / `ota_update` 都是直接 `gzip -cd gpt.gz`，读不了。
+  开关与 USB 同时使用时在动手前就报错退出，请用 `sdcard` 或 `tftp`。
 * 源机当前的 DATA 长度通常已经扩到盘尾，**不**作为打包需要的最小 DATA 镜像长度；
   DATA 长度按内容重新计算，容量沿用原打包策略，只在其装不下时抬高到刚好够用，上限是源盘。
 * ROOTFS 变长时 ROOTFS_RW 要同时缩短，并保留原有的 **200 MiB** 余量
   （与 `SOC_BAK_FIXED_DATA_START` 同一套补偿规则）。余量不够就非零退出。
-* 固定区（BOOT / RECOVERY）的镜像按源机容量制做，内容装不下也非零退出 ——
-  不会只把 XML 里的数字改小、也不会静默截断镜像。
+* 固定区（BOOT / RECOVERY）的镜像按源机容量**精确**制做（长度不是 4 KiB 倍数时也补齐），
+  内容装不下也非零退出 —— 不会只把 XML 里的数字改小、也不会静默截断镜像。
+  灌内容失败（tar 短写）会直接中断打包，不会留下"尺寸对、内容残缺"的包。
 * 与 `SOC_BAK_FIXED_SIZE` / `SOC_BAK_FIXED_DATA_START` 互斥，并且要求同时开启
   `SOC_BAK_ALL_IN_ONE`；任一条件不满足都明确报错退出。
-* 打包结束前会做四项交叉核对，任一项不符就非零退出、不留交付包：
+* 打包结束前会做四项交叉核对，任一项不符就非零退出、并把包移出成品目录
+  （改名为 `<包>.rejected`，便于排查但不会被误当成交付物）：
   ① 分区表 XML 与规划逐项相同；② `gpt.gz` 解出的主 GPT 与规划逐项相同；
-  ③ 每个分区镜像的字节数等于 XML 给它的长度；④ 刷写脚本 `boot_emmc-*.cmd` 里
-  每个分区的 `mmc write` 起始扇区等于规划的起点。
+  ③ **逐个计划分区**检查 `boot_emmc-<分区>.cmd` 是否存在、`mmc write` 的起点是否等于
+  分区起点、写入范围是否都在本分区内、引用的数据块是否存在且非空
+  （镜像比分区短是合法的缩小文件系统，允许）；
+  ④ DATA/MISC/ROOTFS 起点与源机一致。
 * 逐项核对比 SDK 更严：SDK 只比 DATA/MISC/ROOTFS 三个起点，本模式连 BOOT/RECOVERY/MISC 的
   **长度**一起比，所以「起点全对但冻结区长度被改坏」的包会被拦住（前次 SE9 旧包就是
   MISC 从 532480 挪到 552960、ROOTFS 从 552960 挪到 573440，会被拒绝）。
+* GPT 解析用 bash 内置算术 + `od`，**不依赖 awk**：板上 `/usr/bin/awk` 是 mawk 1.3.4，
+  没有 GNU awk 的 `strtonum`。
 * 可复跑的回归：`bash source/psocbak/tests/local_update_layout.sh`（仓库根目录），
-  覆盖参数入口、源表只读解析、四个自由度的组合、余量边界、DATA 越界、非法源布局、
-  旧包反例、以及 XML → gpt.gz → 刷写偏移的端到端一致性。
+  覆盖参数入口、源表只读解析、GPT 解析在 mawk 下的可用性、四个自由度的组合、余量边界、
+  DATA 越界、非法源布局、旧包反例、冻结区镜像尺寸与"内容装不下"、缺脚本/缺数据块/越界等
+  最终把关用例，以及**从正常打包入口一路跑到成品**（真实 `socbak.sh`，容器内模拟设备信号）；
+  后者是唯一能发现"变量名把生成路径和包内文件名搞混"这类问题的用例。
+  需要 docker 与一个 aarch64 sysroot（`SOCBAK_TEST_AARCH64_ROOT`，缺省用本机现有的
+  aarch64 rootfs）才能跑端到端那一节，否则自动 skip。
 
 ### 对ota_update工具的兼容性说明
 
