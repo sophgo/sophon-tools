@@ -3,6 +3,9 @@
 # env SOC_BAK_ALL_IN_ONE!="" for socbak allinone
 # env SOC_BAK_FIXED_SIZE!="" for socbak fixed size mode
 # env SOC_BAK_FIXED_DATA_START!="" for socbak fixed data partition start mode
+# env SOC_BAK_LOCAL_UPDATE_LAYOUT!="" for socbak SE9/SE13 local_update mode
+#     (freeze the whole GPT prefix BOOT/RECOVERY/MISC/ROOTFS-start/DATA-start on the
+#      source device; only ROOTFS length, ROOTFS_RW start/length and DATA length move)
 #
 # 分区文件系统在下面的 PART_FSTYPE_CONF 配置区按分区指定（没有全局开关）
 
@@ -13,12 +16,13 @@ LOGFILE="$(readlink -f "${BASH_SOURCE[0]}").log"
 rm -f $LOGFILE*
 exec > >(tee -a "$LOGFILE") 2>&1
 
-echo "VERSION: v1.5.1"
+echo "VERSION: v1.6.0"
 date '+%Y-%m-%d %H:%M:%S'
 
 export SOC_BAK_ALL_IN_ONE=${SOC_BAK_ALL_IN_ONE:-}
 export SOC_BAK_FIXED_SIZE=${SOC_BAK_FIXED_SIZE:-}
 export SOC_BAK_FIXED_DATA_START=${SOC_BAK_FIXED_DATA_START:-}
+export SOC_BAK_LOCAL_UPDATE_LAYOUT=${SOC_BAK_LOCAL_UPDATE_LAYOUT:-}
 
 for arg in "$@"; do
     case $arg in
@@ -34,6 +38,10 @@ for arg in "$@"; do
             export SOC_BAK_FIXED_DATA_START="${arg#*=}"
             shift
             ;;
+		SOC_BAK_LOCAL_UPDATE_LAYOUT=*)
+            export SOC_BAK_LOCAL_UPDATE_LAYOUT="${arg#*=}"
+            shift
+            ;;
     esac
 done
 
@@ -44,6 +52,19 @@ fi
 if [[ "${SOC_BAK_ALL_IN_ONE}" == "" ]] && [[ "${SOC_BAK_FIXED_DATA_START}" != "" ]]; then
 	echo "ERROR: SOC_BAK_ALL_IN_ONE cannot be closed after SOC_BAK_FIXED_DATA_START is opened"
 	exit 1
+fi
+# local_update 模式要按内容重排 ROOTFS/ROOTFS_RW/DATA 的长度，与另外两种固定模式
+# 的语义互斥：FIXED_SIZE 固定所有分区大小，FIXED_DATA_START 用配置的 ROOTFS_RW 去
+# 补偿，两者都会与「前缀按源机冻结、四个数值随内容变化」冲突。
+if [[ "${SOC_BAK_LOCAL_UPDATE_LAYOUT}" != "" ]]; then
+	if [[ "${SOC_BAK_FIXED_SIZE}" != "" ]] || [[ "${SOC_BAK_FIXED_DATA_START}" != "" ]]; then
+		echo "ERROR: SOC_BAK_LOCAL_UPDATE_LAYOUT cannot be enabled together with SOC_BAK_FIXED_SIZE or SOC_BAK_FIXED_DATA_START"
+		exit 1
+	fi
+	if [[ "${SOC_BAK_ALL_IN_ONE}" == "" ]]; then
+		echo "ERROR: SOC_BAK_LOCAL_UPDATE_LAYOUT requires SOC_BAK_ALL_IN_ONE (it only produces all-in-one update packages)"
+		exit 1
+	fi
 fi
 
 # These parameters are used to exclude irrelevant files
@@ -99,6 +120,16 @@ PIGZ_GZIP_COM=""
 export GZIP=-1
 export PIGZ=-1
 PARTITIONS_SIZE_NO_DATA_KB=$((0))
+
+# SOC_BAK_LOCAL_UPDATE_LAYOUT 的打包源：只读读取它的 eMMC GPT，把 BOOT/RECOVERY/MISC 的
+# 起点与长度、ROOTFS 起点、DATA 起点原样搬进新包。缺省是板上 eMMC；置为镜像文件即可
+# 用夹具（隔离磁盘镜像/普通文件）跑同一套代码，仓库回归就是这么做的。
+SOCBAK_LOCAL_UPDATE_SOURCE="${SOCBAK_LOCAL_UPDATE_SOURCE:-/dev/mmcblk0}"
+# 源表读数、规划结果与中间产物的落盘位置（打包成功后保留在 output/ 里作为证据）
+SOCBAK_LU_DIR=""
+SOCBAK_LU_SOURCE_LAYOUT=""
+SOCBAK_LU_PLAN_FILE=""
+SOCBAK_LU_TOTAL_SECTORS=""
 
 # format 的分区（RECOVERY/ROOTFS/ROOTFS_RW/OPT/SYSTEM/DATA）生成 ext4 还是 f2fs
 # 镜像，由上面的 PART_FSTYPE_CONF 按分区指定；缺省全 ext4，与历史版本行为一致。
@@ -281,6 +312,44 @@ if [[ "${PARTITION_SIZE_IN_SECTOR}" == "1" ]] && ! socbak_sgdisk_bin >/dev/null 
 	echo "ERROR: ${SOC_NAME} needs sgdisk to build a sector-unit partition table, but none was found"
 	echo "ERROR: expected ${TGZ_FILES_PATH}/binTools/sgdisk (bundled with socbak) or a system-installed sgdisk in PATH"
 	exit 1
+fi
+
+# SOC_BAK_LOCAL_UPDATE_LAYOUT 的平台范围：只有 CV 系（SE9 = BM1688/CV186AH、SE13 = CV84X6）
+# 的 sector 表才带 local_update 需要的六个分区与 512 B 扇区语义。
+# SE7（BM1684/BM1684X）的 KiB 表没有 MISC/ROOTFS_RW 这一套布局，SDK 也没有对应升级程序，
+# 在这里直接拒绝，而不是产出一个看起来成功、实际刷不了或用不了 local_update 的包。
+if [[ "${SOC_BAK_LOCAL_UPDATE_LAYOUT}" != "" ]]; then
+	if ! socbak_partition_uses_sector "${SOC_NAME}"; then
+		echo "ERROR: SOC_BAK_LOCAL_UPDATE_LAYOUT is only supported on the CV series (SE9 bm1688/cv186ah, SE13 cv84x6), got ${SOC_NAME}"
+		exit 1
+	fi
+	# 只读读取源机 GPT 并在这里就校验布局：真正用到它是在几十分钟的备份之后，
+	# 拖到那时才发现「这不是 local_update 布局」等于整轮白做（与 f2fs/sgdisk 预检同理）。
+	SOCBAK_LU_SOURCE_LAYOUT="${TGZ_FILES_PATH}/local_update_source.layout"
+	if ! socbak_read_disk_layout "${SOCBAK_LOCAL_UPDATE_SOURCE}" > "${SOCBAK_LU_SOURCE_LAYOUT}"; then
+		echo "ERROR: SOC_BAK_LOCAL_UPDATE_LAYOUT cannot read the GPT of ${SOCBAK_LOCAL_UPDATE_SOURCE}"
+		exit 1
+	fi
+	SOCBAK_LU_TOTAL_SECTORS="$(socbak_read_disk_total_sectors "${SOCBAK_LOCAL_UPDATE_SOURCE}")"
+	if [ -z "${SOCBAK_LU_TOTAL_SECTORS}" ]; then
+		echo "ERROR: SOC_BAK_LOCAL_UPDATE_LAYOUT cannot read the sector count of ${SOCBAK_LOCAL_UPDATE_SOURCE}"
+		exit 1
+	fi
+	if ! socbak_local_update_check_source "${SOCBAK_LU_SOURCE_LAYOUT}"; then
+		echo "ERROR: SOC_BAK_LOCAL_UPDATE_LAYOUT: ${SOCBAK_LOCAL_UPDATE_SOURCE} does not carry the local_update layout this SDK needs, refusing to package"
+		exit 1
+	fi
+	echo "INFO: SOC_BAK_LOCAL_UPDATE_LAYOUT open: source ${SOCBAK_LOCAL_UPDATE_SOURCE} (${SOCBAK_LU_TOTAL_SECTORS} sectors)"
+	printf '%s\n' "${SOCBAK_LU_SRC_ROWS[@]}" | while IFS='|' read -r _lu_label _lu_start _lu_len; do
+		echo "INFO: source partition ${_lu_label}: start=${_lu_start} len=${_lu_len} sectors"
+	done
+	unset _lu_label _lu_start _lu_len
+	# 冻结区尺寸直接来自源表：配置里的 TGZ_FILES_SIZE{,_BM1688,_CV84X6}[boot/recovery]
+	# 与 MISC 常量在本次运行中不再生效 —— local_update 要的就是源机原值。
+	TGZ_FILES_SIZE["boot"]=${SOCBAK_LU_SRC_BOOT_KB}
+	TGZ_FILES_SIZE["recovery"]=${SOCBAK_LU_SRC_RECOVERY_KB}
+	SOCBAK_MISC_SIZE_KB=${SOCBAK_LU_SRC_MISC_KB}
+	echo "INFO: local_update frozen sizes: BOOT=${SOCBAK_LU_SRC_BOOT_KB} KiB RECOVERY=${SOCBAK_LU_SRC_RECOVERY_KB} KiB MISC=${SOCBAK_LU_SRC_MISC_KB} KiB, ROOTFS start=${SOCBAK_LU_SRC_ROOTFS_START} DATA start=${SOCBAK_LU_SRC_DATA_START} sectors"
 fi
 
 # 配置区校验：分区名必须是已知的 format="2"/"3" 分区（写错了会静默退回 ext4，必须拦），
@@ -596,9 +665,21 @@ function socbak_gen_partition_subimg()
 		if [[ "$?" != "0" ]]; then echo "ERROR: truncate $1 error, exit."; socbak_cleanup; exit 1; fi
 		mkfs.f2fs ${F2FS_MKFS_OPTS} -f "sparse-file-$1"
 		if [[ "$?" != "0" ]]; then echo "ERROR: mkfs.f2fs $1 error, exit."; socbak_cleanup; exit 1; fi
+		# 冻结区（local_update 的 BOOT/RECOVERY）：长度由源机 GPT 定死，
+		# 镜像必须**正好**是这个字节数。dd 的 bs=4096 会向下取整，把 131072 KiB
+		# 之外的尺寸悄悄截短，之后按 XML 长度刷写就会少写一段 —— 这里显式补齐。
+		if [[ "${SOC_BAK_LOCAL_UPDATE_LAYOUT}" != "" ]] && socbak_lu_is_frozen_part "$1"; then
+			truncate -s "$2" "sparse-file-$1"
+			if [[ "$?" != "0" ]]; then echo "ERROR: truncate $1 error, exit."; socbak_cleanup; exit 1; fi
+		fi
 	else
 		dd if=/dev/zero of="sparse-file-$1" bs=$((1024 * 4)) count=$(($2 / 1024 / 4)) conv=notrunc status=progress
 		if [[ "$?" != "0" ]]; then echo "ERROR: dd $1 error, exit."; socbak_cleanup; fi
+		# 同上：冻结区的镜像长度是源机分区长度的精确值，不能被 dd 的块大小向下取整。
+		if [[ "${SOC_BAK_LOCAL_UPDATE_LAYOUT}" != "" ]] && socbak_lu_is_frozen_part "$1"; then
+			truncate -s "$2" "sparse-file-$1"
+			if [[ "$?" != "0" ]]; then echo "ERROR: truncate $1 error, exit."; socbak_cleanup; exit 1; fi
+		fi
 		if [[ "$3" == "fat" ]]; then
 			mkfs.fat "sparse-file-$1"
 			if [[ "$?" != "0" ]]; then echo "ERROR: mkfs.fat $1 error, exit."; socbak_cleanup; fi
@@ -619,6 +700,18 @@ function socbak_gen_partition_subimg()
 	#if [[ "$?" != "0" ]]; then echo "ERROR: e4defrag $1 error, exit."; socbak_cleanup; fi
 	umount "sparse-path-$1"
 	if [[ "$?" != "0" ]]; then echo "ERROR: umount $1 error, exit."; socbak_cleanup; fi
+	# 容量上限（KiB）：缺省就是建镜像时给的 $2。local_update 模式下冻结区（BOOT/RECOVERY）
+	# 的上限是源机容量 —— 内容装不下时必须在这里失败，不能把超长镜像打进包里。
+	local size_cap_kb=$(( $2 / 1024 ))
+	if [[ "${SOC_BAK_LOCAL_UPDATE_LAYOUT}" != "" ]] && socbak_lu_is_frozen_part "$1"; then
+		size_cap_kb=$(( ${TGZ_FILES_SIZE["$1"]} ))
+		echo "INFO: local_update mode: $1 is capped at the source size ${size_cap_kb} KiB"
+	fi
+	# 冻结区不做 shrink 搜索：长度由源机 GPT 定死，search 只会把分区改短。
+	local do_shrink=1
+	if [[ "${SOC_BAK_LOCAL_UPDATE_LAYOUT}" != "" ]] && socbak_lu_is_frozen_part "$1"; then
+		do_shrink=0
+	fi
 	size_kb="0"
 	# 收缩的搜索步长：ext4 的 resize_min_size 与 f2fs 的 resize_min_size_f2fs 用同一套
 	size_step=$(($2 / 1024 / 1024 / 20))
@@ -630,12 +723,43 @@ function socbak_gen_partition_subimg()
 		size_step=1000
 		step_num=$(($2 / 1024 / 1024 / $size_step))
 	fi
-	if [[ "$SOC_BAK_FIXED_SIZE" != "" ]]; then
+	if [[ "$SOC_BAK_FIXED_SIZE" != "" ]] || [ "${do_shrink}" = "0" ]; then
 		echo "INFO: fixed size"
 		size_step=0
 		step_num=0
 	fi
-	if [[ "$3" == "ext4" ]]; then
+	# 冻结区（local_update 的 BOOT/RECOVERY）：镜像在上面就按源机容量建好并灌满了内容，
+	# 文件系统本来就铺满整块分区。这里既不能收缩（会把分区改短、前缀平移），
+	# 也不能被 shrink 搜索放大 —— 长度是源机 GPT 给的常数，只有内容装不下才算失败。
+	if [ "${do_shrink}" = "0" ]; then
+		# 冻结区只可能是 BOOT（FAT）与 RECOVERY（ext4）：RECOVERY 配 f2fs 已在配置区
+		# 校验处直接拒绝（u-boot 的 recovery 通道没有 f2fs 驱动），所以这里不需要 f2fs 分支。
+		if [[ "$3" == "ext4" ]]; then
+			e2fsck -fy "sparse-file-$1"
+			if [[ "$?" != "0" ]]; then
+				echo "ERROR: local_update mode: $1 has filesystem damage after restoring its content, exit."
+				socbak_cleanup
+				exit 1
+			fi
+		elif [[ "$3" == "fat" ]]; then
+			fsck.fat -f "sparse-file-$1" >/dev/null 2>&1
+			if [[ "$?" != "0" ]]; then
+				echo "ERROR: local_update mode: $1 has filesystem damage after restoring its content, exit."
+				socbak_cleanup
+				exit 1
+			fi
+		fi
+		# 镜像必须正好是源机分区大小：灌内容时已按这个尺寸建镜像，
+		# 这里回读确认一遍，装不下或尺寸不符都不留交付包。
+		local got_b=$(( $(stat -c %s "sparse-file-$1") / 1024 ))
+		if [ "${got_b}" -ne "${size_cap_kb}" ]; then
+			echo "ERROR: local_update mode: $1 image is ${got_b} KiB, the source partition is ${size_cap_kb} KiB; refusing to deliver a mismatched image"
+			socbak_cleanup
+			exit 1
+		fi
+		TGZ_FILES_SIZE["${1}"]=${size_cap_kb}
+		echo "INFO: partition $1 size is : ${TGZ_FILES_SIZE["${1}"]} KB (frozen by the source GPT)"
+	elif [[ "$3" == "ext4" ]]; then
 		e2fsck -fy "sparse-file-$1"
 		if [[ "$?" != "0" ]]; then echo "ERROR: e2fsck $1 error, exit."; socbak_cleanup; fi
 		resize2fs "sparse-file-$1"
@@ -718,7 +842,15 @@ if [[ "${ALL_IN_ONE_FLAG}" != "" ]] && [[ "${ALL_IN_ONE_SCRIPT}" != "" ]]; then
 		if [ $part_size_max -lt $fixsize ]; then
 			part_size_max=${fixsize}
 		fi
-		socbak_gen_partition_subimg "$TGZ_FILE" "$part_size_max" "$partition_format" 
+		# local_update 模式：BOOT/RECOVERY 的长度由源机 GPT 冻结，镜像必须正好是这个容量。
+		# 内容比它少时不能借 shrink 搜索收小（那会把分区改短、前缀随之平移），
+		# 内容比它多时由 socbak_gen_partition_subimg 里的检查判失败 —— 不能只改小 XML
+		# 里的数字而把超长镜像打进包里。
+		if [[ "${SOC_BAK_LOCAL_UPDATE_LAYOUT}" != "" ]] && socbak_lu_is_frozen_part "${TGZ_FILE}"; then
+			echo "INFO: local_update mode: ${TGZ_FILE} keeps the source size ${TGZ_FILES_SIZE[$TGZ_FILE]} KiB"
+			part_size_max=$(( ${TGZ_FILES_SIZE[$TGZ_FILE]} * 1024 ))
+		fi
+		socbak_gen_partition_subimg "$TGZ_FILE" "$part_size_max" "$partition_format"
 		advmv -g "sparse-file-$TGZ_FILE" output
 	done
 	popd
@@ -816,6 +948,34 @@ if [ $EMMC_ALL_SIZE -gt $SOCBAK_EMMC_SIZE_ALL ]; then
 	socbak_cleanup
 fi
 
+# SOC_BAK_LOCAL_UPDATE_LAYOUT：此时 ROOTFS/DATA 的内容尺寸已由上面的打包流程定稿
+# （all-in-one 分支把每个分区的 TGZ_FILES_SIZE 收缩到了内容所需的最小值），
+# 用它们和源机 GPT 一起算出最终几何，替换掉默认布局里的 ROOTFS/ROOTFS_RW/DATA。
+# 冻结项（BOOT/RECOVERY/MISC 的起点与长度、ROOTFS 起点、DATA 起点）全部来自源表。
+if [[ "${SOC_BAK_LOCAL_UPDATE_LAYOUT}" != "" ]]; then
+	SOCBAK_LU_PLAN_FILE="${TGZ_FILES_PATH}/local_update_plan.layout"
+	# 配置侧（socbak.sh 里的常量）"除 DATA 外"的原始总量，供容量策略沿用；
+	# local_update 模式不改变「分区表总容量不小于各分区之和」这一条。
+	SOCBAK_LU_STRATEGY_TOTAL_KB=$(( EMMC_ALL_SIZE ))
+	if ! socbak_local_update_plan "${SOCBAK_LU_SOURCE_LAYOUT}" "${SOCBAK_LU_TOTAL_SECTORS}" \
+		"$(( ${TGZ_FILES_SIZE[rootfs]} * 2 ))" "$(( ${TGZ_FILES_SIZE[data]} * 2 ))" \
+		"$(( SOCBAK_LU_STRATEGY_TOTAL_KB * 2 ))"; then
+		echo "ERROR: SOC_BAK_LOCAL_UPDATE_LAYOUT: cannot build a local_update layout from ${SOCBAK_LOCAL_UPDATE_SOURCE}"
+		socbak_cleanup
+		exit 1
+	fi
+	printf '%s\n' "${SOCBAK_LU_ROWS[@]}" > "${SOCBAK_LU_PLAN_FILE}"
+	echo "INFO: SOC_BAK_LOCAL_UPDATE_LAYOUT planned layout (sectors), total=${SOCBAK_LU_TOTAL}:"
+	sed 's/^/INFO:   /' "${SOCBAK_LU_PLAN_FILE}"
+	# 用计划值回填内部 KiB 变量：后面写 XML、生成 GPT、以及打包脚本的镜像尺寸都读它们，
+	# 因此 XML / gpt.gz / 刷写偏移三处必然同源。
+	TGZ_FILES_SIZE["rootfs"]=$(( $(awk -F'|' '$1=="ROOTFS"{print $3}' "${SOCBAK_LU_PLAN_FILE}") / 2 ))
+	TGZ_FILES_SIZE["data"]=$(( $(awk -F'|' '$1=="DATA"{print $3}' "${SOCBAK_LU_PLAN_FILE}") / 2 ))
+	ROOTFS_RW_SIZE=$(( $(awk -F'|' '$1=="ROOTFS_RW"{print $3}' "${SOCBAK_LU_PLAN_FILE}") / 2 ))
+	EMMC_ALL_SIZE=$(( SOCBAK_LU_TOTAL / 2 ))
+	echo "INFO: SOC_BAK_LOCAL_UPDATE_LAYOUT sizes: ROOTFS=${TGZ_FILES_SIZE[rootfs]} KiB ROOTFS_RW=${ROOTFS_RW_SIZE} KiB DATA=${TGZ_FILES_SIZE[data]} KiB total=${EMMC_ALL_SIZE} KiB"
+fi
+
 if [[ "${ALL_IN_ONE_FLAG}" != "" ]] && [[ "${ALL_IN_ONE_SCRIPT}" != "" ]]; then
 	SOCBAK_PARTITION_FILE="output/$SOCBAK_PARTITION_FILE"
 fi
@@ -843,7 +1003,13 @@ fi
 if [[ " ${TGZ_FILES[@]} " =~ " recovery " ]]; then
 	SOCBAK_PARTITION_ROWS+=("RECOVERY|${TGZ_FILES_SIZE[recovery]}|false|$(part_format_attr recovery)")
 fi
-SOCBAK_PARTITION_ROWS+=("MISC|10240|false|0")
+# MISC 在两种单位下都是固定值：local_update 模式取源机 GPT 的长度（必须逐字节保留），
+# 其余模式沿用历史常量 10240 KiB。
+if [[ "${SOC_BAK_LOCAL_UPDATE_LAYOUT}" != "" ]]; then
+	SOCBAK_PARTITION_ROWS+=("MISC|${SOCBAK_MISC_SIZE_KB}|false|0")
+else
+	SOCBAK_PARTITION_ROWS+=("MISC|10240|false|0")
+fi
 if [[ " ${TGZ_FILES[@]} " =~ " rootfs " ]]; then
 	SOCBAK_PARTITION_ROWS+=("ROOTFS|${TGZ_FILES_SIZE[rootfs]}|true|$(part_format_attr rootfs)")
 fi
@@ -860,6 +1026,23 @@ fi
 socbak_emit_partition_xml "$TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE" \
 	"$PARTITION_SIZE_IN_SECTOR" "$EMMC_ALL_SIZE" "${SOCBAK_PARTITION_ROWS[@]}"
 cat $TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE
+
+# local_update 模式：写完 XML 立刻核对「只允许四个字段变化」这条硬约束。
+# 这里用的是刚写出的 XML 本身（不是中间变量），所以布局写错、MISC 被挪动、
+# ROOTFS/DATA 起点漂移都会在这里被拦下，不会留一个看似成功的交付包。
+if [[ "${SOC_BAK_LOCAL_UPDATE_LAYOUT}" != "" ]]; then
+	if ! socbak_local_update_match "${SOCBAK_LU_PLAN_FILE}" \
+		<(socbak_xml_geometry "$TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE") "partition table ${SOCBAK_PARTITION_FILE}"; then
+		echo "ERROR: SOC_BAK_LOCAL_UPDATE_LAYOUT: the partition table does not match the planned layout"
+		socbak_cleanup
+		exit 1
+	fi
+	if ! socbak_local_update_check_starts "$TGZ_FILES_PATH/$SOCBAK_PARTITION_FILE" "${SOCBAK_LU_SOURCE_LAYOUT}"; then
+		echo "ERROR: SOC_BAK_LOCAL_UPDATE_LAYOUT: DATA/MISC/ROOTFS starts differ from the source device; local_update would reject this package"
+		socbak_cleanup
+		exit 1
+	fi
+fi
 
 # output 目录仅在 all-in-one 模式下提前创建，tgz-only 模式走到这里不存在，
 # 直接 pushd 会报 "No such file or directory"（CV84X2 真机实测踩坑，不影响产物）
@@ -955,6 +1138,120 @@ if [[ "${ALL_IN_ONE_FLAG}" != "" ]] && [[ "${ALL_IN_ONE_SCRIPT}" != "" ]]; then
 	else
 		socbak_allinone_pack sdcard
 	fi
+fi
+
+# SOC_BAK_LOCAL_UPDATE_LAYOUT 的最终交付前把关：把包里真正会被刷进设备的四处
+# —— 分区表 XML、gpt.gz 解出的主 GPT、各分区镜像的实际尺寸、刷写脚本里的 mmc write
+# 起始扇区 —— 逐一与源机 GPT 对照。四处同源才算交付，缺一不可：
+# XML 与 GPT 不一致时机器刷完分区表就和包里的镜像对不上；镜像尺寸与 XML 不一致时
+# u-boot 会按 XML 的长度截断/补零；刷写偏移偏了一个扇区就会写坏相邻分区。
+if [[ "${SOC_BAK_LOCAL_UPDATE_LAYOUT}" != "" ]]; then
+	# 包目录由 all-in-one 的类型决定（sdcard/tftp/usb），与打包链里 RECOVERY_DIR
+	# 的算法一致（<output>/<UPTYPE>）。写死 sdcard 会让 tftp/usb 包跳过全部核对。
+	if [[ "${SOC_BAK_ALL_IN_ONE}" =~ "tftp" ]]; then
+		SOCBAK_LU_UPTYPE=tftp
+	elif [[ "${SOC_BAK_ALL_IN_ONE}" =~ "usb" ]]; then
+		SOCBAK_LU_UPTYPE=usb
+	else
+		SOCBAK_LU_UPTYPE=sdcard
+	fi
+	SOCBAK_LU_PKG_DIR="${TGZ_FILES_PATH}/output/${SOCBAK_LU_UPTYPE}"
+	echo "INFO: SOC_BAK_LOCAL_UPDATE_LAYOUT final verification in ${SOCBAK_LU_PKG_DIR}"
+	SOCBAK_LU_VERIFY_RC=0
+	if [ ! -d "${SOCBAK_LU_PKG_DIR}" ]; then
+		echo "ERROR: local_update verification: package directory ${SOCBAK_LU_PKG_DIR} not found"
+		SOCBAK_LU_VERIFY_RC=1
+	else
+		# ① 包里必须恰好一份 partition*xml，且就是 SDK 认识的那个文件名
+		lu_xml_count=$(find "${SOCBAK_LU_PKG_DIR}" -type f -name 'partition*xml' | wc -l)
+		echo "INFO: local_update verification: partition*xml count=${lu_xml_count}"
+		if [ "${lu_xml_count}" != "1" ]; then
+			echo "ERROR: local_update verification: expected exactly one partition*xml in the package, found ${lu_xml_count}"
+			SOCBAK_LU_VERIFY_RC=1
+		fi
+		lu_xml="${SOCBAK_LU_PKG_DIR}/${SOCBAK_PARTITION_FILE}"
+		if [ ! -f "${lu_xml}" ]; then
+			echo "ERROR: local_update verification: ${SOCBAK_PARTITION_FILE} missing from the package"
+			SOCBAK_LU_VERIFY_RC=1
+		elif ! socbak_local_update_verify_xml "${lu_xml}" "${SOCBAK_LU_SOURCE_LAYOUT}"; then
+			echo "ERROR: local_update verification: packed ${SOCBAK_PARTITION_FILE} violates the frozen prefix"
+			SOCBAK_LU_VERIFY_RC=1
+		else
+			echo "INFO: local_update verification: ${SOCBAK_PARTITION_FILE} keeps the frozen prefix"
+			socbak_local_update_check_starts "${lu_xml}" "${SOCBAK_LU_SOURCE_LAYOUT}" | sed 's/^/INFO: local_update verification: /'
+		fi
+
+		# ② gpt.gz 解出的主 GPT 必须与计划逐项相同（不能只看 XML 算得对不对）
+		if [ ! -f "${SOCBAK_LU_PKG_DIR}/gpt.gz" ]; then
+			echo "ERROR: local_update verification: gpt.gz missing from the package"
+			SOCBAK_LU_VERIFY_RC=1
+		elif ! gzip -cd "${SOCBAK_LU_PKG_DIR}/gpt.gz" > "${TGZ_FILES_PATH}/local_update_pkg.gpt"; then
+			echo "ERROR: local_update verification: cannot decompress gpt.gz"
+			SOCBAK_LU_VERIFY_RC=1
+		else
+			if socbak_gpt_geometry "${TGZ_FILES_PATH}/local_update_pkg.gpt" > "${TGZ_FILES_PATH}/local_update_pkg.layout"; then
+				if socbak_local_update_match "${SOCBAK_LU_PLAN_FILE}" \
+					"${TGZ_FILES_PATH}/local_update_pkg.layout" "gpt.gz"; then
+					echo "INFO: local_update verification: gpt.gz matches the planned layout"
+					sed 's/^/INFO: local_update verification:   gpt /' "${TGZ_FILES_PATH}/local_update_pkg.layout"
+				else
+					echo "ERROR: local_update verification: gpt.gz does not match the planned layout"
+					SOCBAK_LU_VERIFY_RC=1
+				fi
+			else
+				echo "ERROR: local_update verification: cannot decode gpt.gz"
+				SOCBAK_LU_VERIFY_RC=1
+			fi
+			rm -f "${TGZ_FILES_PATH}/local_update_pkg.gpt"
+		fi
+
+		# ③ 各分区的刷写覆盖范围必须正好落在它在分区表里的区间内。
+		#    包里没有 .img：split_and_compress_img 把每个分区切成 <label>.N-of-M 再 pigz，
+		#    每段对应的盘上位置写在该分区的 boot_emmc-<label>.cmd 里（mmc write 的起始扇区）。
+		#    这里把每段的「起始扇区 + 段内扇区数」与计划区间比对：
+		#    越过自己分区的末尾就会覆盖下一个分区（DATA 越过盘尾就直接坏表），
+		#    而分区的长度是源机 GPT 给的常数，短了或长了都不能算成功。
+		lu_range_bad=0
+		for lu_scr in "${SOCBAK_LU_PKG_DIR}"/boot_emmc-*.cmd; do
+			[ -f "${lu_scr}" ] || continue
+			lu_part=$(basename "${lu_scr}" .cmd)
+			lu_part=${lu_part#boot_emmc-}
+			lu_plan=$(awk -F'|' -v l="${lu_part}" 'tolower($1)==l{print $2 "|" $3; exit}' "${SOCBAK_LU_PLAN_FILE}")
+			[ -n "${lu_plan}" ] || continue
+			lu_want_start=${lu_plan%%|*}
+			lu_want_len=${lu_plan##*|}
+			lu_want_end=$(( lu_want_start + lu_want_len ))
+			lu_low=""
+			lu_high=""
+			while read -r lu_addr lu_size; do
+				lu_addr=$(( lu_addr ))
+				lu_size=$(( lu_size ))
+				[ "${lu_size}" -gt 0 ] || continue
+				lu_end=$(( lu_addr + lu_size ))
+				if [ -z "${lu_low}" ] || [ "${lu_addr}" -lt "${lu_low}" ]; then lu_low=${lu_addr}; fi
+				if [ -z "${lu_high}" ] || [ "${lu_end}" -gt "${lu_high}" ]; then lu_high=${lu_end}; fi
+				if [ "${lu_addr}" -lt "${lu_want_start}" ] || [ "${lu_end}" -gt "${lu_want_end}" ]; then
+					echo "ERROR: local_update verification: $(basename "${lu_scr}") writes sectors ${lu_addr}..$(( lu_end - 1 )), outside ${lu_part}'s ${lu_want_start}..$(( lu_want_end - 1 ))"
+					lu_range_bad=1
+				fi
+			done < <(grep -a '^mmc write' "${lu_scr}" | awk '{print $4, $5}')
+			if [ -z "${lu_low}" ]; then
+				echo "ERROR: local_update verification: $(basename "${lu_scr}") has no mmc write for ${lu_part}"
+				lu_range_bad=1
+			elif [ "${lu_low}" -ne "${lu_want_start}" ]; then
+				echo "ERROR: local_update verification: ${lu_part} is written from sector ${lu_low}, the plan says ${lu_want_start}"
+				lu_range_bad=1
+			else
+				echo "INFO: local_update verification: ${lu_part} write range ${lu_low}..$(( lu_high - 1 )) inside ${lu_want_start}..$(( lu_want_end - 1 )) OK"
+			fi
+		done
+		[ "${lu_range_bad}" = "0" ] || SOCBAK_LU_VERIFY_RC=1
+	fi
+	if [ "${SOCBAK_LU_VERIFY_RC}" != "0" ]; then
+		echo "ERROR: SOC_BAK_LOCAL_UPDATE_LAYOUT verification failed; the package is not usable for local_update and must not be delivered"
+		exit 1
+	fi
+	echo "INFO: SOC_BAK_LOCAL_UPDATE_LAYOUT verification passed"
 fi
 echo "INFO: pack success, wait sync..."
 sync
