@@ -30,6 +30,14 @@ PT_SH="${REPO_ROOT}/source/psocbak/socbak/script/partition_table.sh"
 for t in gdisk bc python3; do
 	command -v "${t}" >/dev/null 2>&1 || { echo "ERROR: 需要 ${t}" >&2; exit 2; }
 done
+# 桩 gdisk 的兜底分支要转调真 gdisk。gdisk 不在 POSIX 规定的位置：Debian/Ubuntu 放在
+# /usr/sbin，而 gptfdisk 自行编译时常见 /usr/bin。这里在脚本启动时解析一次绝对路径，
+# 不能写死 —— 硬化过的 PATH（普通用户默认不含 sbin）会让 `command -v` 也找不到它。
+REAL_GDISK="$(command -v gdisk)"
+case "${REAL_GDISK}" in
+	/*) ;;
+	*) echo "ERROR: 解析不到 gdisk 的绝对路径（得到: ${REAL_GDISK}）" >&2; exit 2 ;;
+esac
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "${WORK}"' EXIT
@@ -124,20 +132,20 @@ chmod +x "${WORK}/stub/lsblk"
 
 # 假 gdisk：预检用 `gdisk -l /dev/mmcblk0` 取当前设备末分区起点。
 # 这里模拟两台板子的真实布局（与真机 gdisk 输出同格式），不接触任何块设备。
-cat > "${WORK}/stub/gdisk" <<'EOF'
+cat > "${WORK}/stub/gdisk" <<EOF
 #!/bin/sh
-# 只模拟 `gdisk -l /dev/mmcblk0`：末分区 = DATA，起点取自 FAKE_DEV_DATA_START
-if [ "$1" = "-l" ] && [ "$2" = "/dev/mmcblk0" ]; then
+# 只模拟 \`gdisk -l /dev/mmcblk0\`：末分区 = DATA，起点取自 FAKE_DEV_DATA_START
+if [ "\$1" = "-l" ] && [ "\$2" = "/dev/mmcblk0" ]; then
 	cat <<EOT
 Number  Start (sector)    End (sector)  Size       Code  Name
    1            8192          270335   128.0 MiB   0700  BOOT
    5        13135872        25427327   5.9 GiB     0700  ROOTFS_RW
-   6        ${FAKE_DEV_DATA_START}        61071326   17.0 GiB    0700  DATA
+   6        \${FAKE_DEV_DATA_START}        61071326   17.0 GiB    0700  DATA
 EOT
 	exit 0
 fi
 # 其余调用（预检里的 OTA_GPT_TEMP_DISK_FILE）走真 gdisk
-exec /usr/bin/gdisk "$@"
+exec "${REAL_GDISK}" "\$@"
 EOF
 chmod +x "${WORK}/stub/gdisk"
 
