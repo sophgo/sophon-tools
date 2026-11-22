@@ -1083,17 +1083,17 @@ SOCBAK_F2FS_PARTS=""
 source "${PT_SH}"
 socbak_cleanup() { :; }
 systemctl() { :; }              # 只隔离 systemctl
-e2fsck() { :; }                 # 固定区只做 fsck 校验，这里不关心退出码
-tune2fs() { :; }
 socbak_resize_min_size_kb=0
 resize_min_size() { socbak_resize_min_size_kb=0; }
 source "${FN_SH}"
-# 私有 /boot：放一个内容镜像（null = 空），mount 命名空间保证不影响外面
-umount /boot 2>/dev/null
-rm -rf /boot && mkdir -p /boot
-if [ "${CONTENT_MIB}" != "null" ]; then
-	dd if=/dev/zero of=/boot/payload.bin bs=1M count="${CONTENT_MIB}" status=none
-fi
+# 生产 spool 用 pushd 进入源分区。只把源目录映射到本次夹具；
+# 制镜像、tar、fsck 和私有命名空间内的镜像挂载仍走原实现。
+pushd() {
+	case "$1" in
+		/boot|/recovery) builtin pushd "${TGZ_FILES_PATH}/input" ;;
+		*) return 1 ;;
+	esac
+}
 cd "${TGZ_FILES_PATH}" || exit 1
 socbak_gen_partition_subimg "$1" "$2" "$3"
 RC=$?
@@ -1104,7 +1104,10 @@ RUNNER
 		chmod +x "${SUBIMG_RUNNER}"
 		run_subimg() { # <part> <bytes> <fmt> <frozen_kib> [content_mib]
 			local dir="${WORK}/subimg"
-			rm -rf "${dir}"; mkdir -p "${dir}"
+			rm -rf "${dir}"; mkdir -p "${dir}/input" || return 1
+			if [ "${5:-null}" != null ]; then
+				dd if=/dev/zero of="${dir}/input/payload.bin" bs=1M count="$5" status=none || return 1
+			fi
 			sudo -n unshare -m --propagation private \
 				bash "${SUBIMG_RUNNER}" "$1" "$2" "$3" "$4" "${dir}" "${PT_SH}" \
 				"${WORK}/fn_both.sh" "${5:-null}" 2>&1
@@ -1177,22 +1180,6 @@ if [ "${HAS_SGDISK}" = "1" ]; then
 	done
 	if [ -z "${MAWK}" ] && [ -n "${SOCBAK_TEST_MAWK:-}" ] && [ -x "${SOCBAK_TEST_MAWK}" ]; then
 		MAWK="${SOCBAK_TEST_MAWK}"
-	fi
-	# 板上 mawk 是 aarch64 的；本机没有 x86 mawk 时，用 qemu 包一层去跑板上的那份，
-	# 这样"板上 awk 能不能解 GPT"就是真的验证过，而不是只靠"没用到 awk"推断。
-	if [ -z "${MAWK}" ] && command -v qemu-aarch64 >/dev/null 2>&1; then
-		for c in /home/zzt/workspace/kylin_final/rootfs/usr/bin/mawk \
-			/opt/sophgo/rootfs/usr/bin/mawk; do
-			[ -x "${c}" ] || continue
-			root="$(cd "$(dirname "${c}")/../.." && pwd)"
-			printf '#!/bin/sh\nexec qemu-aarch64 -L %s %s "$@"\n' "${root}" "${c}" \
-				> "${WORK}/mawk_qemu"
-			chmod +x "${WORK}/mawk_qemu"
-			if "${WORK}/mawk_qemu" -W version 2>/dev/null | grep -q mawk; then
-				MAWK="${WORK}/mawk_qemu"
-				break
-			fi
-		done
 	fi
 	if [ -n "${MAWK}" ]; then
 		mkdir -p "${WORK}/mawkshim"
@@ -1346,7 +1333,7 @@ echo "== M. 正常打包入口一路跑到成品（真实 socbak.sh） =="
 # 用容器模拟设备相关信号（CPU part -> cv84x6、/dev/mmcblk0 -> 夹具镜像、/socrepack），
 # socbak.sh 本身一行不改。需要 docker + 一个 aarch64 sysroot 来跑 binTools。
 E2E_RUNNER="${TESTS_SRC_DIR}/helpers/socbak_e2e_runner.sh"
-AARCH64_ROOT="${SOCBAK_TEST_AARCH64_ROOT:-/home/zzt/workspace/kylin_final/rootfs}"
+AARCH64_ROOT="${SOCBAK_TEST_AARCH64_ROOT:-}"
 if ! command -v docker >/dev/null 2>&1; then
 	echo "  skip 正常入口到成品（本机没有 docker）"
 elif [ ! -x "${E2E_RUNNER}" ]; then
@@ -1356,28 +1343,31 @@ elif [ ! -d "${AARCH64_ROOT}" ]; then
 else
 	# 容器里需要一个 CPU part=0xd05 的 /proc/cpuinfo（cv84x6 识别信号）
 	printf 'processor\t: 0\nCPU implementer\t: 0x41\nCPU part\t: 0xd05\n' > "${WORK}/fakecpuinfo"
-	# 源机镜像：BOOT/RECOVERY/MISC 用真实 SE9 数值，盘容量按夹具
+	# 源机镜像：非默认 BOOT/RECOVERY 容量，DATA 起点、盘容量取 SE9 夹具
 	# 盘容量按真机量级给：打包链会把 ROOTFS 撑到 3 GiB、DATA 撑到 4 GiB，
 	# 盘太小会在"DATA 装不下"处失败（正确行为，但不是这一节要测的东西）。
 	truncate -s $(( 61071360 * 512 )) "${WORK}/e2e.img"
 	sgdisk -a 1 \
-		-n 1:8192:270335 -t 1:0700 -c 1:BOOT \
-		-n 2:270336:532479 -t 2:0700 -c 2:RECOVERY \
-		-n 3:532480:552959 -t 3:0700 -c 3:MISC \
-		-n 4:552960:757759 -t 4:0700 -c 4:ROOTFS -A 4:set:60 \
-		-n 5:757760:28565887 -t 5:0700 -c 5:ROOTFS_RW \
-		-n 6:28565888:61071326 -t 6:0700 -c 6:DATA \
+		-n 1:8192:270337 -t 1:0700 -c 1:BOOT \
+		-n 2:270338:540673 -t 2:0700 -c 2:RECOVERY \
+		-n 3:540674:561153 -t 3:0700 -c 3:MISC \
+		-n 4:561154:8949761 -t 4:0700 -c 4:ROOTFS -A 4:set:60 \
+		-n 5:8949762:25427327 -t 5:0700 -c 5:ROOTFS_RW \
+		-n 6:25427328:61071326 -t 6:0700 -c 6:DATA \
 		"${WORK}/e2e.img" >/dev/null 2>&1
-	e2e_out="$(timeout 900 docker run --rm --privileged \
+	dd if=/dev/urandom of="${WORK}/boot0.bin" bs=1M count=1 status=none || exit 1
+	e2e_out="$(timeout 900 docker run --rm --privileged --network none \
+		-v "${WORK}/boot0.bin:/dev/mmcblk0boot0:ro" \
 		-v "${WORK}/fakecpuinfo:/fakecpuinfo:ro" \
-		-v "${WORK}/e2e.img:/src.img:ro" \
+		-v "${WORK}/e2e.img:/socrepack/source.img:ro" \
 		-v "${AARCH64_ROOT}:/socrepack/sysroot-src:ro" \
-		-v "${SOCBAK_DIR}:/socbak_src:ro" \
+		-v "${SOCBAK_DIR}:/socrepack/source:ro" \
 		-v "${E2E_RUNNER}:/runner.sh:ro" \
-		alpine:latest sh -c \
-		'mkdir -p /socrepack/sysroot-src; apk add --no-cache bash coreutils e2fsprogs dosfstools util-linux sgdisk pigz gzip tar qemu-aarch64 >/dev/null 2>&1; bash /runner.sh /src.img /socbak_src ok' 2>&1)"
+		ubuntu:22.04 bash /runner.sh /socrepack/source.img /socrepack/source ok 2>&1)"
 	e2e_rc=$?
 	check_eq "正常入口：socbak.sh 退出码 0" "0" "${e2e_rc}"
+	check_eq "正常入口：采用源盘 BOOT 和 RECOVERY 大小" "1" \
+		"$(echo "${e2e_out}" | grep -c 'frozen sizes (applied after chip defaults): BOOT=131073 KiB RECOVERY=135168 KiB')"
 	check_eq "正常入口：最终检查通过" "1" \
 		"$(echo "${e2e_out}" | grep -c 'SOC_BAK_LOCAL_UPDATE_LAYOUT verification passed')"
 	check_eq "正常入口：包内恰好一份 partition*xml" "1" \

@@ -191,8 +191,7 @@ DATA 长度。其余全部照抄源机 GPT。
   DATA 越界、非法源布局、旧包反例、冻结区镜像尺寸与"内容装不下"、缺脚本/缺数据块/越界等
   最终把关用例，以及**从正常打包入口一路跑到成品**（真实 `socbak.sh`，容器内模拟设备信号）；
   后者是唯一能发现"变量名把生成路径和包内文件名搞混"这类问题的用例。
-  需要 docker 与一个 aarch64 sysroot（`SOCBAK_TEST_AARCH64_ROOT`，缺省用本机现有的
-  aarch64 rootfs）才能跑端到端那一节，否则自动 skip。
+  正常入口测试使用 Docker 的 `ubuntu:22.04` 镜像。用 `SOCBAK_TEST_AARCH64_ROOT` 指定带 glibc 的 ARM64 sysroot；在 x86 主机上需已注册 ARM64 用户态模拟器。缺少 Docker 或未提供 sysroot 时跳过该节。
 
 ### 对ota_update工具的兼容性说明
 

@@ -13,8 +13,14 @@
 # 一路跑到成品，才会暴露这种变量命名错误。
 #
 # 环境要求（容器内）：bash coreutils e2fsprogs dosfstools util-linux sgdisk pigz qemu-aarch64
-# 以及挂在 /opt/aarch64-root 的 glibc sysroot（binTools 里四个动态链接工具需要）。
+# 以及挂在 /socrepack/sysroot-src 的 glibc sysroot（binTools 里四个动态链接工具需要）。
 set -u
+
+# 全程只读宿主准备的普通 boot0 文件。若容器映射不符，在任何写操作前退出。
+if [ ! -f /.dockerenv ] || [ ! -f /dev/mmcblk0boot0 ] || [ ! -s /dev/mmcblk0boot0 ]; then
+	echo "Expected a container with a regular boot0 fixture" >&2
+	exit 2
+fi
 
 IMG="$1"
 SOCBAK_SRC="$2"
@@ -24,10 +30,6 @@ SCENARIO="${3:-ok}"
 mkdir -p /proc && mount -t proc proc /proc 2>/dev/null
 mount --bind /fakecpuinfo /proc/cpuinfo 2>/dev/null
 mkdir -p /dev
-# socbak 在 all-in-one 前会 `dd if=/dev/mmcblk0boot0` 取 fip.bin。
-# 这里造一个真实（非符号链接）的普通文件当 boot0，并写入非零内容 ——
-# 全零时打包链会认为"没取到 fip"而跳过，包是不完整的。
-dd if=/dev/urandom of=/dev/mmcblk0boot0 bs=1024 count=1024 status=none
 # 芯片识别走 CPU part=0xd05 -> cv84x6；all-in-one 链里的 lsblk 只用于找分区名
 mkdir -p /bin
 mkdir -p /usr/local/bin
@@ -89,32 +91,11 @@ echo "rw content" > /media/root-rw/rw.txt
 # （真机上 SOCBAK_LOCAL_UPDATE_SOURCE 就是 /dev/mmcblk0，读法完全一致。）
 SOCBAK_SRC_IMG="$IMG"
 
-# /socrepack：socbak 要求工作目录在这个路径下
-# sysroot 的 bind 挂载点是 /socrepack/sysroot-src，必须先建好目录再让 docker 挂上，
-# 且必须在 `cp -a "$SOCBAK_SRC"/.` 之前 —— 否则复制会把它盖掉。
-mkdir -p /socrepack/sysroot-src
-cp -a "$SOCBAK_SRC"/. /socrepack/
+# The read-only source image and ARM64 libraries sit under /socrepack,
+# which socbak excludes when archiving the container root.
+cp -a "$SOCBAK_SRC"/. /socrepack/ || exit 2
 cd /socrepack || exit 2
-
-# binTools 里 advcp/advmv/mkfs.fat/fsck.fat 是**动态链接**的 aarch64，
-# 需要一份 glibc sysroot 才能在 qemu 下跑（qemu-aarch64-static 由 --privileged 下的 binfmt 接管）。
-# sysroot 从 /socrepack/sysroot-src（容器的 bind 挂载点）复制到 /socrepack/.sysroot：
-# 挂载点本身就在 /socrepack 下，因为 socbak 打 rootfs 时会排除 ./socrepack；
-# 放在 / 的其他位置（/opt、/aarch64-root、/sysroot-src 等）会被打进 rootfs 镜像，
-# 把 100 MiB 的 ROOTFS 分区撑爆 —— 那会让回归在本该成功的地方失败。
-if [ -d /socrepack/sysroot-src ]; then
-	rm -rf /socrepack/.sysroot
-	mkdir -p /socrepack/.sysroot
-	cp -a /socrepack/sysroot-src/. /socrepack/.sysroot/ 2>/dev/null || :
-	export QEMU_LD_PREFIX=/socrepack/.sysroot
-	for t in mkfs.fat fsck.fat; do
-		if [ -x "/socrepack/sysroot-src/usr/sbin/$t" ]; then
-			printf '#!/bin/sh\nexec qemu-aarch64-static -L /socrepack/.sysroot /socrepack/sysroot-src/usr/sbin/%s "$@"\n' "$t" > "/tmp/$t"
-			chmod +x "/tmp/$t"
-		fi
-	done
-	export PATH="/tmp:$PATH"
-fi
+export QEMU_LD_PREFIX=/socrepack/sysroot-src
 
 export SOC_BAK_LOCAL_UPDATE_LAYOUT=1
 export SOC_BAK_ALL_IN_ONE=1
@@ -124,8 +105,12 @@ echo "=== HARNESS: starting socbak.sh ($SCENARIO) ==="
 bash socbak.sh SOC_BAK_ALL_IN_ONE=1 SOC_BAK_LOCAL_UPDATE_LAYOUT=1 > /tmp/socbak_run.log 2>&1
 RC=$?
 echo "=== HARNESS: socbak.sh rc=$RC ==="
-echo "--- last 25 log lines:"
-tail -n 25 /tmp/socbak_run.log
+if [ "$RC" != 0 ]; then
+    tail -n 40 /tmp/socbak_run.log
+    exit "$RC"
+fi
+grep -E 'frozen sizes \(applied|local_update verification:|SOC_BAK_LOCAL_UPDATE_LAYOUT verification passed' /tmp/socbak_run.log
+(cd output/sdcard && md5sum --quiet -c md5.txt) || exit 1
 echo "--- output dir:"
 ls -la /socrepack/output/ 2>&1 | head -20
 echo "--- package dir:"

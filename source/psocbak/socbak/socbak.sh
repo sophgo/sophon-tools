@@ -617,19 +617,21 @@ function socbak_spool_partition_content()
 
 	case $part in
 		"rootfs")
-			pushd /
+			pushd / || return 1
 			systemctl enable resize-helper.service
 			tar --checkpoint=500 --checkpoint-action=ttyout='[%d sec]: C%u, %T%*\r' --ignore-failed-read --numeric-owner -cpSf - ${ROOTFS_EXCLUDE_FLAGS} "./" | tar -xpSf - -C "$dest"
 			# PIPESTATUS 必须紧接管道读取：任何中间语句都会把它重置
 			rc=("${PIPESTATUS[@]}")
-			if [[ "${rc[0]}" != "0" ]] || [[ "${rc[1]}" != "0" ]]; then
+			# GNU tar 创建在线备份时，源文件在读取期间变化会返回 1。
+			# 保留原先对此提示的容忍，解包端短写或源端致命错误都必须失败。
+			if (( rc[0] > 1 || rc[1] != 0 )); then
 				echo "ERROR: cp files $part error, exit."
 				ret=1
 			else
 				echo "INFO: add ext include files to rootfs..."
 				tar --ignore-failed-read --numeric-owner -cvpSf - ${ROOTFS_INCLUDE_PATHS} | tar -xpSf - -C "$dest"
 				rc=("${PIPESTATUS[@]}")
-				if [[ "${rc[0]}" != "0" ]] || [[ "${rc[1]}" != "0" ]]; then
+				if (( rc[0] > 1 || rc[1] != 0 )); then
 					echo "ERROR: cp extra files $part error, exit."
 					ret=1
 				fi
@@ -638,13 +640,13 @@ function socbak_spool_partition_content()
 			popd
 		;;
 		*)
-			pushd /$part
+			pushd "/$part" || return 1
 			set +u
 			EXT_FLAG="${PART_EXCLUDE_FLAGS["$part"]}"
 			set -u
 			tar --checkpoint=500 --checkpoint-action=ttyout='[%d sec]: C%u, %T%*\r' --ignore-failed-read --numeric-owner -cpSf - ${EXT_FLAG} "./" | tar -xpSf - -C "$dest"
 			rc=("${PIPESTATUS[@]}")
-			if [[ "${rc[0]}" != "0" ]] || [[ "${rc[1]}" != "0" ]]; then
+			if (( rc[0] > 1 || rc[1] != 0 )); then
 				echo "ERROR: cp files $part error, exit."
 				ret=1
 			fi
