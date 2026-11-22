@@ -78,6 +78,10 @@ source/pssm/ssm-arm64
 source/pssm/release/ssm
 source/psophliteos/sophliteos-arm64
 source/psophliteos/sophliteos-linux_*.tgz
+# psewriter 在 src/ 下跑 `go build ./...`（BUILD.md 的验证步骤）会就地生成这个
+# 12 MB 的 linux 可执行文件，与源码同名同目录。交付物在 output/psewriter/ 下，
+# 这个只是本机编译残留，入库只会让验证步骤把工作树弄脏并随源码漂移。
+source/psewriter/src/sewriter
 
 # sophliteos deb 构建产物
 source/psophliteos/build/tmp/
