@@ -474,3 +474,31 @@ func TestSplitVersionRef(t *testing.T) {
 		}
 	}
 }
+
+func TestQueryTargetsPreservePinsAndFollowPlaceholder(t *testing.T) {
+	reg, err := loadRegistry(loadTestRegistry(t, testRegistryDir(t)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		ids         string
+		wantVersion string
+		exclude     string
+	}{
+		{"se9", "sophonsdk-edge@v2.3", "sophonsdk-edge@v2.2"},
+		{"sm9-8", "sophonsdk-edge@v2.3", "sm9-8"},
+		{"se9,sophonsdk-edge@v2.2", "sophonsdk-edge@v2.2", "sophonsdk-edge@v2.3"},
+	} {
+		ts, err := queryTargets(reg, tc.ids, false, registry.SDKVersionRequest{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var labels []string
+		for _, target := range ts {
+			labels = append(labels, target.Label())
+		}
+		if !containsString(labels, tc.wantVersion) || containsString(labels, tc.exclude) {
+			t.Errorf("query %s selected %v", tc.ids, labels)
+		}
+	}
+}

@@ -122,7 +122,7 @@ func TestDocTypeFilterMultipleTypes(t *testing.T) {
 	}
 }
 
-// 跨实体（-with-related）时每类文档各自标注，过滤对每个索引分别生效。
+// 跨实体时每类文档各自标注，过滤对每个索引分别生效。
 func TestDocTypeFilterAcrossEntities(t *testing.T) {
 	root := docTypeFixture(t)
 	buildDocTypeFixture(t, root)
@@ -130,7 +130,7 @@ func TestDocTypeFilterAcrossEntities(t *testing.T) {
 
 	// se9 → sm7（ready module）→ bm1688
 	out := captureStdout(t, func() {
-		if rc := dispatch([]string{"query", "-registry", regPath, "-entity", "se9", "-with-related", "-doc-type", "sdk,module", "-offline", "sophon-sail"}); rc != 0 {
+		if rc := dispatch([]string{"query", "-registry", regPath, "-entity", "se9", "-doc-type", "sdk,module", "-offline", "sophon-sail"}); rc != 0 {
 			t.Fatalf("query rc=%d", rc)
 		}
 	})
@@ -152,9 +152,9 @@ func TestDocTypeFilterYieldsEmptyResult(t *testing.T) {
 	buildDocTypeFixture(t, root)
 	regPath := filepath.Join(root, "registry.json")
 
-	// 产品目录里没有 datasheet 类文档
+	// 此夹具及其关联实体没有 image 类文档
 	out := captureStdout(t, func() {
-		if rc := dispatch([]string{"query", "-registry", regPath, "-entity", "se9", "-doc-type", "datasheet", "-offline", "sophon-sail"}); rc != 0 {
+		if rc := dispatch([]string{"query", "-registry", regPath, "-entity", "se9", "-doc-type", "image", "-offline", "sophon-sail"}); rc != 0 {
 			t.Fatalf("filtering everything out should not fail, rc=%d", rc)
 		}
 	})

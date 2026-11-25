@@ -11,7 +11,7 @@ SE 系列知识库的 **Go RAG 检索核心**，替代现行 Python 栈（numpy 
   跨实体合并检索（见「注册表与多索引检索」）；旧路径模式 `--docs-dir` / `-index-dir` 保持兼容
 - **查产品自动带上随箱工具**：`-entity se9` 会把 SE9 关联的 `sophon-tools` / `sophon-demo` 一并检索，
   并按 toolkit 文档 frontmatter 的 `applies_products` 只保留适用 SE9 的工具与例程
-  （`-no-toolkits` 关闭；见「产品默认带入 toolkit」）
+
 - **A/B/C 三条路径**：
   - 路径 A（在线，主路径）：embedding 供应商向量化 → 向量 + BM25 → RRF → rerank
   - 路径 B（BM25 兜底）：无 key / 断网 / embedding 失败时自动降级为纯 BM25，保证开箱即用、离线可用
@@ -70,8 +70,8 @@ GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o bin/se-rag-arm64 ./cmd/se-rag
 ### 统一 release.sh（对齐 sophon-tools M1 规范）
 
 ```bash
-bash release.sh all 1.10.0       # 同时产出 arm64 + amd64
-bash release.sh arm64 1.10.0     # 仅 arm64
+bash release.sh all 2.0.0       # 同时产出 arm64 + amd64
+bash release.sh arm64 2.0.0     # 仅 arm64
 # 产物目录（可用 OUTPUT_DIR 覆盖，默认 <repo>/output/se-rag-core/）
 ```
 
@@ -390,12 +390,11 @@ SE9 的 16 路 / 8 路是**规格**（`product.specs`）而不是独立实体：
 ./bin/se-rag build -entity sophonsdk-edge -sdk-version all   # 全部版本
 ./bin/se-rag build -entity sophonsdk-edge@v2.2               # 指定版本
 
-# 按实体检索；-with-related 展开关联（产品 → 模组 → 芯片 → sdk 版本）
-# 产品默认带入它关联的 toolkit（见「产品默认带入 toolkit」），-no-toolkits 可关闭
-./bin/se-rag query -entity se9 -with-related "I2C 怎么接"
+# 按实体检索，默认展开关联（产品 → 模组 → 芯片 → sdk 版本）
+# 产品默认带入它关联的 toolkit（见「产品默认带入 toolkit」）
+./bin/se-rag query -entity se9 "I2C 怎么接"
 ./bin/se-rag query -entity se9 -top-n 8 "yolo26 支持 模型"
-./bin/se-rag query -entity se9 -no-toolkits "yolo26 支持 模型"
-./bin/se-rag query -entity se9 -with-related -doc-type sdk "sophon-sail 安装"
+./bin/se-rag query -entity se9 -doc-type sdk "sophon-sail 安装"
 ./bin/se-rag query -entity sophonsdk-edge -sdk-version v2.2 "sophon-sail"
 ./bin/se-rag query -all -top-n 10 "OTA 升级"
 
@@ -403,7 +402,7 @@ SE9 的 16 路 / 8 路是**规格**（`product.specs`）而不是独立实体：
 ./bin/se-rag doctor -all
 ```
 
-### 关联展开（-with-related）
+### 查询时自动展开登记关系
 
 按"产品 → 模组 → 芯片 → sdk → sdk 版本"遍历（产品最后再加 toolkits），去重保序。
 **规格不影响检索目标**：
@@ -416,8 +415,7 @@ SE9 的 16 路 / 8 路是**规格**（`product.specs`）而不是独立实体：
   `-sdk-version <slug>` 指定版本，`all` 取全部版本。
 - **`chip.sdk_since`**：所选版本早于该芯片支持的起始版本时跳过并提示
   （如 `cv84x6` 标了 `sdk_since: v2.3`，查 `all` 时只保留 v2.3 及以后）。
-- 产品按 `product.modules` 展开全部模组——SE9 的两种规格最终都落到同一对索引
-  （`se9` + `bm1688`），所以问 `SE9 8-BP1-17` 与问 `SE9` 的检索范围完全相同。
+- 产品按 `product.modules` 展开全部模组，SE9 的两种规格共用这一组关联索引，所以问 `SE9 8-BP1-17` 与问 `SE9` 的检索范围完全相同。
 - 只命中产品（只说 `SE9`）时额外列出规格对照：
   `note: se9 specs: SE9 16 (sm9-16 → bm1688) | SE9 8 (sm9-8 → cv186ah); ask which one if the answer depends on chip`
 - 命中模组（`SM9 16`）：模组 → 芯片 → sdk 版本，**不反向展开到产品**；
@@ -435,8 +433,7 @@ SE9 的 16 路 / 8 路是**规格**（`product.specs`）而不是独立实体：
 
 ```bash
 ./bin/se-rag query -entity se9 -top-n 8 "yolo26 支持 模型"
-# stderr: note: toolkits included: sophon-tools, sophon-demo (filtered by applies_products ∋ se9; -no-toolkits to disable)
-./bin/se-rag query -entity se9 -no-toolkits "yolo26 支持 模型"   # 关掉默认带入
+# stderr: note: toolkits included: sophon-tools, sophon-demo (filtered by applies_products ∋ se9)
 ```
 
 过滤依据是 toolkit 文档 frontmatter 的 `applies_products`，三态语义必须分清：
@@ -453,8 +450,6 @@ SE9 的 16 路 / 8 路是**规格**（`product.specs`）而不是独立实体：
   toolkit 当直接目标）。
 - **用户直接写 `-entity sophon-demo` 时不过滤**：同一份索引既能整体看，也能按产品看。
   同一个 toolkit 既被直接指定、又被产品带入时，按直接指定处理。
-- **`-with-related` 的其余展开不变**（产品 → 模组 → 芯片 → sdk 版本仍需显式加）；
-  它带进来的 toolkit 同样按产品过滤，`-no-toolkits` 不管这一路。
 - 过滤发生在**候选阶段**（融合前的预取），与 `-doc-type` 组合时两个条件都要满足，
   不会等 top-n 截断后再过滤。
 - 索引里没有 `applies_products`（旧版索引）时按"字段缺失"处理，不报错；`doctor` 对
@@ -521,14 +516,14 @@ SE9 的 16 路 / 8 路是**规格**（`product.specs`）而不是独立实体：
 过滤发生在融合（RRF）之前：带过滤时每个索引先放大预取深度再按类型筛，避免被排除的块
 占掉候选名额。**不带 `-doc-type` 时输出逐字节不变**——单索引结果只在 `-doc-type` 生效时才追加类型标注，
 即使文档 frontmatter 自述了 `doc_type` 也一样（1.8.1 修正）；多索引结果的 `[实体id/doc_type 版本]` 标注规则照旧。
-`-with-related`、`-sdk-version`、`-no-toolkits` 只在注册表模式（`-entity` / `-all`）下有效，
+`-sdk-version` 只在注册表模式（`-entity` / `-all`）下有效，
 路径模式下传入会直接报错。
 
-**单索引行为不变**：目标是单个实体（没带 `-with-related`，或展开后仍只有一个）时，检索流程与输出
+**单索引行为不变**：目标是单个实体（展开后只有一个）时，检索流程与输出
 格式与路径模式逐字节一致（`cmd/se-rag/testdata/golden/` 里保存了改动前的 golden 输出做回归）。
 旧命令 `build --docs-dir` / `query -index-dir` / `doctor -index-dir` 全部保留。
 
-**多索引合并**（`-with-related`、`-entity a,b`、`-all`、产品默认带入的 toolkit，
+**多索引合并**（关联展开、`-entity a,b`、`-all`、产品默认带入的 toolkit，
 或路径模式传多个 `-index-dir`）：
 
 - 在线：每个索引先做常规 hybrid（向量 top20 + BM25 top20 + 标题精确匹配 → 加权 RRF）取前 20 条，
@@ -644,7 +639,7 @@ FAQ 提升最大：旧分块把几个短问答合并进同一块，向量检索�
 `se-rag query -index-dir <dir> -top-n N "<问题>"` 输出紧凑 Markdown，
 每条结果头部标注 `源文件相对路径:行号区间`，格式与 Python 版 `query.py` 一致（来源文件:行号、相关性分数、文本摘要、耗时）。skill 层可直接用 subprocess 调用。
 
-注册表模式同一个命令换成 `-entity <id> [-with-related]`：单实体输出格式不变（逐字节一致），
+注册表模式同一个命令换成 `-entity <id>`：单实体输出格式不变（逐字节一致），
 多实体合并时结果行尾多一个 `[实体id]` 标注、路径改为相对技能根目录。
 
 `se-rag list -json` / `se-rag resolve -json "<文本>"` 输出结构化 JSON，便于 skill 层按实体路由，

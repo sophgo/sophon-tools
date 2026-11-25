@@ -66,7 +66,7 @@ func TestSingleIndexFrontmatterDocsStayUntaggedWithoutDocType(t *testing.T) {
 // #229 review P2：注册表专属参数在路径模式下显式报错，而不是被静默忽略。
 func TestPathModeRejectsRegistryOnlyFlags(t *testing.T) {
 	idx := frontmatterDocsIndex(t)
-	for _, extra := range [][]string{{"-with-related"}, {"-sdk-version", "latest"}} {
+	for _, extra := range [][]string{{"-sdk-version", "latest"}} {
 		args := append([]string{"query", "-index-dir", idx, "-offline"}, extra...)
 		args = append(args, "网络配置")
 		var rc int
