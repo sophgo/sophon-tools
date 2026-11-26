@@ -166,7 +166,7 @@ func TestHelpListsNewCommands(t *testing.T) {
 		t.Errorf("--help rc=%d, want 0", rc)
 	}
 	out := captureStdout(t, func() { dispatch([]string{"-h"}) })
-	for _, want := range []string{"list", "resolve", "build", "query", "doctor", "-registry", "-entity", "-with-related"} {
+	for _, want := range []string{"list", "resolve", "build", "query", "doctor", "-registry", "-entity", "-sdk-version"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("help output missing %q:\n%s", want, out)
 		}

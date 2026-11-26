@@ -267,7 +267,7 @@ func TestRegistryResolveNoMatchErrors(t *testing.T) {
 // 缺索引：报错并给出 build 命令（不静默只查已有的索引）。
 func TestRegistryQueryMissingIndexGivesBuildHint(t *testing.T) {
 	dir := testRegistryDir(t)
-	// 只建 se9，不建 bm1688；查询 se9 -with-related 会同时要 bm1688
+	// 只建 se9，不建 bm1688；查询 se9 会同时要 bm1688
 	captureStdout(t, func() {
 		if rc := dispatch([]string{"build", "-registry", loadTestRegistry(t, dir), "-entity", "se9", "-offline"}); rc != 0 {
 			t.Fatalf("build se9 rc=%d", rc)
@@ -276,7 +276,7 @@ func TestRegistryQueryMissingIndexGivesBuildHint(t *testing.T) {
 	var rc int
 	stderr := captureStderr(t, func() {
 		captureStdout(t, func() {
-			rc = dispatch([]string{"query", "-registry", loadTestRegistry(t, dir), "-entity", "se9", "-with-related", "-offline", "tpu-mlir"})
+			rc = dispatch([]string{"query", "-registry", loadTestRegistry(t, dir), "-entity", "se9", "-offline", "tpu-mlir"})
 		})
 	})
 	if rc == 0 {
@@ -292,7 +292,7 @@ func TestRegistryQueryWithRelatedOffline(t *testing.T) {
 	dir := testRegistryDir(t)
 	buildAllOffline(t, dir)
 	out := captureStdout(t, func() {
-		if rc := dispatch([]string{"query", "-registry", loadTestRegistry(t, dir), "-entity", "se9", "-with-related", "-offline", "tpu-mlir 编译模型"}); rc != 0 {
+		if rc := dispatch([]string{"query", "-registry", loadTestRegistry(t, dir), "-entity", "se9", "-offline", "tpu-mlir 编译模型"}); rc != 0 {
 			t.Fatalf("query rc=%d", rc)
 		}
 	})
@@ -315,15 +315,15 @@ func TestRegistryQuerySingleEntityMatchesPathMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e, _ := reg.ByID("bm1688")
+	v, _ := reg.Version("sophonsdk-edge", "v2.2")
 
 	entityOut := captureStdout(t, func() {
-		if rc := dispatch([]string{"query", "-registry", loadTestRegistry(t, dir), "-entity", "bm1688", "-offline", "tpu-mlir 编译模型"}); rc != 0 {
+		if rc := dispatch([]string{"query", "-registry", loadTestRegistry(t, dir), "-entity", "sophonsdk-edge@v2.2", "-offline", "tpu-mlir 编译模型"}); rc != 0 {
 			t.Fatalf("entity query rc=%d", rc)
 		}
 	})
 	pathOut := captureStdout(t, func() {
-		if rc := dispatch([]string{"query", "-index-dir", reg.IndexPath(e), "-offline", "tpu-mlir 编译模型"}); rc != 0 {
+		if rc := dispatch([]string{"query", "-index-dir", reg.VersionIndexPath(v), "-offline", "tpu-mlir 编译模型"}); rc != 0 {
 			t.Fatalf("path query rc=%d", rc)
 		}
 	})
@@ -408,13 +408,13 @@ func TestQueryMultiIndexDirsPathMode(t *testing.T) {
 	}
 }
 
-// 单实体 + -with-related 但展开后仍是一个索引时，输出与单索引一致。
-func TestRegistryWithRelatedSingleTarget(t *testing.T) {
+// 产品查询默认覆盖关联芯片。
+func TestRegistryQueryIncludesProductChip(t *testing.T) {
 	dir := testRegistryDir(t)
 	buildAllOffline(t, dir)
 	// se7 → bm1684x：两个 ready 实体，两个索引 → 合并
 	out := captureStdout(t, func() {
-		if rc := dispatch([]string{"query", "-registry", loadTestRegistry(t, dir), "-entity", "se7", "-with-related", "-offline", "BM1684X 算力"}); rc != 0 {
+		if rc := dispatch([]string{"query", "-registry", loadTestRegistry(t, dir), "-entity", "se7", "-offline", "BM1684X 算力"}); rc != 0 {
 			t.Fatalf("query rc=%d", rc)
 		}
 	})
@@ -463,7 +463,7 @@ func TestRegistryQueryOnlineFakeEmbed(t *testing.T) {
 	t.Setenv("SE_RAG_FAKE_EMBED", "1")
 	dir := testRegistryDir(t)
 	// 在线（fake embedding）建索引：两个实体都用 fake embedder 建。
-	// -with-related 现在会把芯片所属 sdk 的版本也纳入检索目标，所以它也要建。
+	// 现在会把芯片所属 sdk 的版本也纳入检索目标，所以它也要建。
 	for _, id := range []string{"se9", "bm1688", "sophonsdk-edge"} {
 		captureStdout(t, func() {
 			if rc := dispatch([]string{"build", "-registry", loadTestRegistry(t, dir), "-entity", id}); rc != 0 {
@@ -472,7 +472,7 @@ func TestRegistryQueryOnlineFakeEmbed(t *testing.T) {
 		})
 	}
 	out := captureStdout(t, func() {
-		if rc := dispatch([]string{"query", "-registry", loadTestRegistry(t, dir), "-entity", "se9", "-with-related", "I2C 怎么接"}); rc != 0 {
+		if rc := dispatch([]string{"query", "-registry", loadTestRegistry(t, dir), "-entity", "se9", "I2C 怎么接"}); rc != 0 {
 			t.Fatalf("online query rc=%d", rc)
 		}
 	})

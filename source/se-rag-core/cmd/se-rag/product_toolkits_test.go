@@ -19,7 +19,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"unicode/utf8"
 )
 
 const productToolkitRegistry = `{
@@ -133,27 +132,10 @@ func TestQueryProductIncludesToolkitsByDefault(t *testing.T) {
 	}
 	// stderr 说明带入了哪些 toolkit、按哪个产品过滤、怎么关掉
 	for _, want := range []string{"note: toolkits included:", "sophon-tools", "sophon-demo",
-		"applies_products ∋ se9", "-no-toolkits"} {
+		"applies_products ∋ se9"} {
 		if !strings.Contains(errOut, want) {
 			t.Errorf("stderr 提示应包含 %q：\n%s", want, errOut)
 		}
-	}
-}
-
-// -no-toolkits：关掉默认带入，检索范围回到 1.8.1（只有 se9 自己的文档）。
-func TestQueryProductNoToolkitsFlag(t *testing.T) {
-	root := productToolkitFixture(t)
-	out, errOut := queryFixture(t, root, "-entity", "se9", "-no-toolkits", "-top-n", "20", "工具资料")
-
-	if strings.Contains(out, "docs/toolkits/") || strings.Contains(out, "tools/") {
-		t.Errorf("-no-toolkits 时不得检索 toolkit 索引：\n%s", out)
-	}
-	// 单目标（只剩 se9 一个索引）走路径模式输出：路径相对 docs_dir。
-	if !strings.Contains(out, "`faq/faq.md:") {
-		t.Errorf("产品自己的文档仍应命中：\n%s", out)
-	}
-	if strings.Contains(errOut, "toolkits included") {
-		t.Errorf("-no-toolkits 时不应再提示 toolkits included：\n%s", errOut)
 	}
 }
 
@@ -389,36 +371,6 @@ func TestQueryProductMissingToolkitIndexFails(t *testing.T) {
 	}
 }
 
-// -no-toolkits 在路径模式下报错（注册表专属参数，不静默忽略）。
-func TestNoToolkitsRejectedInPathMode(t *testing.T) {
-	dir := t.TempDir()
-	docsDir := filepath.Join(dir, "docs")
-	if err := os.MkdirAll(docsDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(docsDir, "a.md"), []byte("# A\n\n## I2C\n\nI2C0 复用 GPIO3。\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	idx := filepath.Join(dir, "idx")
-	captureStdout(t, func() {
-		if rc := dispatch([]string{"build", "-offline", "--docs-dir", docsDir, "-index-dir", idx}); rc != 0 {
-			t.Fatalf("build rc=%d", rc)
-		}
-	})
-	var rc int
-	stderr := captureStderr(t, func() {
-		captureStdout(t, func() {
-			rc = dispatch([]string{"query", "-index-dir", idx, "-offline", "-no-toolkits", "I2C"})
-		})
-	})
-	if rc == 0 {
-		t.Fatal("路径模式传 -no-toolkits 应报错")
-	}
-	if !strings.Contains(stderr, "-no-toolkits only works in registry mode") {
-		t.Errorf("错误应说明该参数只在注册表模式有效：\n%s", stderr)
-	}
-}
-
 // doctor 对 toolkit 多一行：索引里带 applies_products 的块数。
 func TestDoctorReportsAppliesProductsForToolkit(t *testing.T) {
 	root := productToolkitFixture(t)
@@ -472,26 +424,6 @@ func TestQueryNonProductEntityMatchesPathMode(t *testing.T) {
 	}
 }
 
-// -with-related 带进来的 toolkit 同样按产品过滤；-no-toolkits 不管这一路。
-func TestQueryWithRelatedToolkitStillFiltered(t *testing.T) {
-	root := productToolkitFixture(t)
-
-	// 不带 -no-toolkits：toolkit 经 -with-related 带入，提示里不提 -no-toolkits（它管不着）
-	out, errOut := queryFixture(t, root, "-entity", "se9", "-with-related", "-no-toolkits", "-top-n", "30", "工具资料")
-	if !strings.Contains(out, "docs/toolkits/sophon-demo/demo/yolo26.md") {
-		t.Errorf("-with-related 仍应带入 toolkit（-no-toolkits 只关默认带入）：\n%s", out)
-	}
-	if strings.Contains(out, "tools/bmsec.md") {
-		t.Errorf("-with-related 带入的 toolkit 仍要按产品过滤：\n%s", out)
-	}
-	if !strings.Contains(errOut, "toolkits included") {
-		t.Errorf("应提示 toolkit 被带入：\n%s", errOut)
-	}
-	if strings.Contains(errOut, "-no-toolkits to disable") {
-		t.Errorf("-with-related 带入时不该提 -no-toolkits：\n%s", errOut)
-	}
-}
-
 // 产品引用了 placeholder toolkit：跳过并提示，不因此让查询失败。
 func TestQueryPlaceholderToolkitIsSkipped(t *testing.T) {
 	root := t.TempDir()
@@ -532,20 +464,5 @@ func TestQueryPlaceholderToolkitIsSkipped(t *testing.T) {
 	}
 	if !strings.Contains(errOut, "skipped placeholder: sophon-demo") {
 		t.Errorf("placeholder toolkit 应被跳过并提示：\n%s", errOut)
-	}
-}
-
-// 提示行按 UTF-8 对齐（含 `∋` 等非 ASCII 字符），避免长度计算截断字符。
-func TestToolkitsNoteIsValidUTF8(t *testing.T) {
-	note := toolkitsNote([]string{"sophon-tools", "sophon-demo"}, []string{"se9"}, true)
-	if !utf8.ValidString(note) {
-		t.Fatalf("提示行不是合法 UTF-8：%q", note)
-	}
-	if !strings.Contains(note, "-no-toolkits to disable") {
-		t.Errorf("默认带入的提示应说明怎么关闭：%q", note)
-	}
-	noDisable := toolkitsNote([]string{"sophon-tools"}, []string{"se9"}, false)
-	if strings.Contains(noDisable, "-no-toolkits") {
-		t.Errorf("-with-related 带入时不该提 -no-toolkits：%q", noDisable)
 	}
 }

@@ -211,7 +211,7 @@ func TestRegistryQueryModuleExpansion(t *testing.T) {
 	regPath := loadTestRegistry(t, dir)
 
 	out := captureStdout(t, func() {
-		if rc := dispatch([]string{"query", "-registry", regPath, "-entity", "sm7", "-with-related", "-offline", "连接器"}); rc != 0 {
+		if rc := dispatch([]string{"query", "-registry", regPath, "-entity", "sm7", "-offline", "连接器"}); rc != 0 {
 			t.Fatalf("query rc=%d", rc)
 		}
 	})
@@ -223,7 +223,7 @@ func TestRegistryQueryModuleExpansion(t *testing.T) {
 	}
 }
 
-// query -entity se9 -with-related：检索目标是 se9 与 bm1688，并提示跳过两个模组与 cv186ah。
+// query -entity se9：检索目标是 se9 与 bm1688，并提示跳过两个模组与 cv186ah。
 // 规格不影响检索目标——两种规格的模组都会被走到。
 func TestRegistryQueryProductWithRelated(t *testing.T) {
 	dir := testRegistryDir(t)
@@ -234,7 +234,7 @@ func TestRegistryQueryProductWithRelated(t *testing.T) {
 	stderr := captureStderr(t, func() {
 		out = captureStdout(t, func() {
 			if rc := dispatch([]string{"query", "-registry", regPath, "-entity", "se9",
-				"-with-related", "-offline", "I2C tpu-mlir"}); rc != 0 {
+				"-offline", "I2C tpu-mlir"}); rc != 0 {
 				t.Fatalf("query rc=%d", rc)
 			}
 		})

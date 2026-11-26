@@ -107,7 +107,7 @@ func TestResolveToolkit(t *testing.T) {
 	}
 }
 
-// 产品 --with-related 时把 toolkit 一并纳入检索目标。
+// 查询产品时把 toolkit 一并纳入检索目标。
 func TestQueryWithRelatedIncludesToolkit(t *testing.T) {
 	root := layoutFixture(t)
 	buildLayoutFixture(t, root)
@@ -129,12 +129,12 @@ func TestQueryWithRelatedIncludesToolkit(t *testing.T) {
 	}
 	out := captureStdout(t, func() {
 		if rc := dispatch([]string{"query", "-registry", regPath, "-entity", "se13",
-			"-with-related", "-offline", "socbak 备份"}); rc != 0 {
+			"-offline", "socbak 备份"}); rc != 0 {
 			t.Fatalf("query rc=%d", rc)
 		}
 	})
 	if !strings.Contains(out, "[sophon-tools/tools]") {
-		t.Errorf("-with-related 应展开到 toolkits 并标注 [sophon-tools/tools]：\n%s", out)
+		t.Errorf("默认应展开到 toolkits 并标注 [sophon-tools/tools]：\n%s", out)
 	}
 }
 

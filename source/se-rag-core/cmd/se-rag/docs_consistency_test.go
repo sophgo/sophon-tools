@@ -32,7 +32,7 @@ func readRepoFile(t *testing.T, rel string) string {
 }
 
 // 版本只有一个权威来源：release.sh 的默认 VERSION。
-// 这里校验它是 1.10.0，并确保 README 的构建示例与之一致。
+// 这里校验它是 2.0.0，并确保 README 的构建示例与之一致。
 func TestVersionSingleSource(t *testing.T) {
 	sh := readRepoFile(t, "release.sh")
 	m := regexp.MustCompile(`VERSION="\$\{2:-([0-9]+\.[0-9]+\.[0-9]+)\}"`).FindStringSubmatch(sh)
@@ -40,8 +40,8 @@ func TestVersionSingleSource(t *testing.T) {
 		t.Fatal("release.sh: VERSION 默认值无法解析（版本权威来源缺失）")
 	}
 	want := m[1]
-	if want != "1.10.0" {
-		t.Errorf("release.sh 默认版本 = %s, want 1.10.0", want)
+	if want != "2.0.0" {
+		t.Errorf("release.sh 默认版本 = %s, want 2.0.0", want)
 	}
 	// 其它地方不应再各自定义版本号：README 的示例必须用同一个值。
 	readme := readRepoFile(t, "README.md")

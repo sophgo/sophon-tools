@@ -271,42 +271,57 @@ func normalizeAlias(s string) string {
 	return sb.String()
 }
 
-// expandRelated 按 -with-related 展开关联实体（去重、保序，跳过 placeholder 并提示）。
-//
-// 起点就是目标实体 id：规格不参与展开，SE9 的两种规格都沿 product.modules 展开成全
-// 部模组，检索目标与规格无关。SDK 的版本选择由 sdkReq 决定（默认最新版）。
-func expandRelated(reg *registry.Registry, entityFlag string, ts []target, withRelated bool,
-	sdkReq registry.SDKVersionRequest) ([]target, error) {
-	if !withRelated {
-		return ts, nil
+// queryTargets expands entity relationships for queries only. SDK pins and -all
+// already select concrete version indexes and must not be expanded to latest.
+func queryTargets(reg *registry.Registry, entityFlag string, all bool, req registry.SDKVersionRequest) ([]target, error) {
+	if all || strings.TrimSpace(entityFlag) == "" {
+		return targetEntities(reg, entityFlag, all, req)
 	}
-	starts := make([]string, 0, len(ts))
-	for _, t := range ts {
-		if !containsString(starts, t.ID) {
-			starts = append(starts, t.ID)
+	var roots []string
+	var versions []target
+	explicitSDK := map[string]bool{}
+	seenVersions := map[string]bool{}
+	for _, id := range registry.SplitIDs(entityFlag) {
+		if entity, ok := reg.ByID(id); ok && entity.Type != registry.TypeSDK {
+			roots = append(roots, id)
+			continue
+		}
+		selected, err := lookupEntity(reg, id, req)
+		if err != nil {
+			return nil, err
+		}
+		for _, t := range selected {
+			explicitSDK[t.ID] = true
+			if !seenVersions[t.Label()] {
+				versions = append(versions, t)
+				seenVersions[t.Label()] = true
+			}
 		}
 	}
-	if len(starts) == 0 {
-		starts = registry.SplitIDs(entityFlag)
-	}
-	exp, err := reg.RelatedAllWith(starts, registry.RelatedOptions{SDKVersion: sdkReq})
+	expansion, err := reg.RelatedAllWith(roots, registry.RelatedOptions{SDKVersion: req})
 	if err != nil {
 		return nil, err
 	}
-	if msg := registry.FormatSkips(exp.Skipped); msg != "" {
+	if msg := registry.FormatSkips(expansion.Skipped); msg != "" {
 		fmt.Fprintf(os.Stderr, "note: %s\n", msg)
 	}
-	for _, n := range exp.Notes {
-		fmt.Fprintf(os.Stderr, "note: %s\n", n)
+	for _, note := range expansion.Notes {
+		fmt.Fprintf(os.Stderr, "note: %s\n", note)
 	}
-	out := make([]target, 0, len(exp.IDs)+len(exp.Versions))
-	for _, id := range exp.IDs {
-		out = append(out, target{ID: id})
+	targets := make([]target, 0, len(expansion.IDs)+len(expansion.Versions)+len(versions))
+	for _, id := range expansion.IDs {
+		targets = append(targets, target{ID: id})
 	}
-	for _, v := range exp.Versions {
-		out = append(out, target{ID: v.SDKID, Ver: v.Version})
+	targets = append(targets, versions...)
+	for _, v := range expansion.Versions {
+		if !explicitSDK[v.SDKID] {
+			targets = append(targets, target{ID: v.SDKID, Ver: v.Version})
+		}
 	}
-	return out, nil
+	if len(targets) == 0 {
+		return nil, fmt.Errorf("no searchable indexes for %s or its related entities", entityFlag)
+	}
+	return targets, nil
 }
 
 func containsString(xs []string, s string) bool {
@@ -390,97 +405,16 @@ func explicitProducts(reg *registry.Registry, entityFlag string) []string {
 	return out
 }
 
-// productToolkits 这些产品引用的 toolkit（保序去重），分成可检索的与被跳过的两类。
-//
-// 只有 status=ready 的 toolkit 才是检索目标：placeholder 按定义没有文档目录，把它塞进
-// 目标只会让查询报"索引缺失"。引用不存在或指向非 toolkit 的条目由注册表校验负责报错，
-// 这里按跳过处理，不让查询因坏数据崩掉（也不会空指针）。
-func productToolkits(reg *registry.Registry, products []string) (ready []string, skipped []registry.Skip) {
-	seen := map[string]bool{}
-	for _, pid := range products {
-		e, ok := reg.ByID(pid)
-		if !ok {
-			continue
-		}
-		for _, tk := range e.Toolkits {
-			if seen[tk] {
-				continue
-			}
-			seen[tk] = true
-			te, ok := reg.ByID(tk)
-			if !ok {
-				skipped = append(skipped, registry.Skip{ID: tk, Reason: "unknown entity in product.toolkits"})
-				continue
-			}
-			if te.Type != registry.TypeToolkit {
-				skipped = append(skipped, registry.Skip{ID: tk, Reason: "not a toolkit entity"})
-				continue
-			}
-			if te.Status != registry.StatusReady {
-				skipped = append(skipped, registry.Skip{ID: tk,
-					Reason: fmt.Sprintf("status=%s: no docs_dir/index_dir, nothing to search", te.Status)})
-				continue
-			}
-			ready = append(ready, tk)
-		}
-	}
-	return ready, skipped
-}
-
-// withProductToolkits 把产品带入的 toolkit 追加到检索目标末尾（去重保序），
-// 返回追加过的 toolkit id 列表（用于 stderr 提示）。
-//
-// 已经在目标里的 toolkit 不再追加：那说明用户直接写了它，或 `-with-related` 已经带进来了。
-func withProductToolkits(reg *registry.Registry, targets []target, toolkits []string) ([]target, []string) {
-	have := make(map[string]bool, len(targets))
-	for _, t := range targets {
-		have[t.Label()] = true
-	}
-	var added []string
-	for _, tk := range toolkits {
-		if have[tk] {
-			continue
-		}
-		have[tk] = true
-		targets = append(targets, target{ID: tk})
-		added = append(added, tk)
-	}
-	return targets, added
-}
-
-// productSetOf 把产品 id 列表转成检索期过滤用的集合（空列表返回 nil）。
-func productSetOf(products []string) map[string]bool {
-	if len(products) == 0 {
+// idSet builds a membership set for explicit targets or product filters.
+func idSet(ids []string) map[string]bool {
+	if len(ids) == 0 {
 		return nil
 	}
-	out := make(map[string]bool, len(products))
-	for _, p := range products {
-		out[p] = true
+	out := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		out[id] = true
 	}
 	return out
-}
-
-// directTargets 用户直接点名的目标（label → true）：toolkits 展开前后的差集就是
-// "经产品带入"的那部分，它们才按 applies_products 过滤。
-func directTargets(ts []target) map[string]bool {
-	out := make(map[string]bool, len(ts))
-	for _, t := range ts {
-		out[t.Label()] = true
-	}
-	return out
-}
-
-// toolkitsNote 经产品带入 toolkit 时打到 stderr 的一行说明。
-// 写明"按哪个产品过滤"和怎么关掉，否则用户会以为 toolkit 文档被漏掉了。
-// canDisable=false（toolkit 是 -with-related 带进来的）时不提 -no-toolkits：
-// 那个开关只管默认带入。
-func toolkitsNote(toolkits, products []string, canDisable bool) string {
-	note := fmt.Sprintf("toolkits included: %s (filtered by applies_products ∋ %s",
-		strings.Join(toolkits, ", "), strings.Join(products, ","))
-	if canDisable {
-		note += "; -no-toolkits to disable"
-	}
-	return note + ")"
 }
 
 // docTypeFilter 把 -doc-type 的取值转成检索期过滤器（路径按技能根相对路径推断）。
@@ -747,7 +681,7 @@ func runResolveWith(reg *registry.Registry, text string, asJSON bool, sdkReq reg
 			sk = append(sk, s.ID)
 		}
 		// 规格对照只在"没命中具体规格"时才有意义：已经知道是哪种规格了，
-		// 再列一遍对照只会让 Agent 多读一行。query 的 -with-related 仍保留该提示。
+		// 再列一遍对照只会让 Agent 多读一行。query 默认展开时 仍保留该提示。
 		notes := exp.Notes
 		if m.SpecName != "" {
 			notes = nil
