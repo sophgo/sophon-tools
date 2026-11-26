@@ -265,7 +265,7 @@ func (r *Registry) Validate() error {
 				v.addf("%s: chips references %q, which is not a defined chip", where, c)
 			}
 		}
-		// toolkits 只能引用 toolkit：写错成芯片或产品会让 关联 展开出
+		// toolkits 只能引用 toolkit：写错成芯片或产品会让关联展开出
 		// 一个不该被检索的实体，而错误信息必须点明"只接受 toolkit"。
 		for _, t := range e.Toolkits {
 			if !v.isToolkit(t) {

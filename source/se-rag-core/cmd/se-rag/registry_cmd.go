@@ -681,7 +681,7 @@ func runResolveWith(reg *registry.Registry, text string, asJSON bool, sdkReq reg
 			sk = append(sk, s.ID)
 		}
 		// 规格对照只在"没命中具体规格"时才有意义：已经知道是哪种规格了，
-		// 再列一遍对照只会让 Agent 多读一行。query 默认展开时 仍保留该提示。
+		// 再列一遍对照只会让 Agent 多读一行。query 默认展开时仍保留该提示。
 		notes := exp.Notes
 		if m.SpecName != "" {
 			notes = nil

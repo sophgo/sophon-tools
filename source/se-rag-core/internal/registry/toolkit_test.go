@@ -76,7 +76,7 @@ func TestOnlyProductMayHaveToolkits(t *testing.T) {
 	}
 }
 
-// 关联 展开顺序：产品 → 模组 → 芯片 → sdk 版本 → toolkits。
+// 关联展开顺序：产品 → 模组 → 芯片 → sdk 版本 → toolkits。
 func TestRelatedProductExpandsToolkitsLast(t *testing.T) {
 	reg, _ := writeRegistry(t, validRegistry(
 		se9WithToolkit+","+sm916Entity+","+bm1688Entity+","+cv186ahEntity+","+sdkEdgeEntity+","+toolkitEntity),
