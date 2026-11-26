@@ -11,7 +11,6 @@ SE 系列知识库的 **Go RAG 检索核心**，替代现行 Python 栈（numpy 
   跨实体合并检索（见「注册表与多索引检索」）；旧路径模式 `--docs-dir` / `-index-dir` 保持兼容
 - **查产品自动带上随箱工具**：`-entity se9` 会把 SE9 关联的 `sophon-tools` / `sophon-demo` 一并检索，
   并按 toolkit 文档 frontmatter 的 `applies_products` 只保留适用 SE9 的工具与例程
-
 - **A/B/C 三条路径**：
   - 路径 A（在线，主路径）：embedding 供应商向量化 → 向量 + BM25 → RRF → rerank
   - 路径 B（BM25 兜底）：无 key / 断网 / embedding 失败时自动降级为纯 BM25，保证开箱即用、离线可用
